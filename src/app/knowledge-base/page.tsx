@@ -56,11 +56,12 @@ export default function KnowledgeBasePage() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
           className="space-y-6"
         >
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-3xl font-bold text-primary">
+              <h1 className="text-2xl md:text-3xl font-bold text-primary dark:text-[#b48c3c] transition-colors duration-300">
                 Knowledge Base
               </h1>
               <p className="text-muted-foreground">
@@ -86,7 +87,8 @@ export default function KnowledgeBasePage() {
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
-              <Table>
+              <div className="overflow-x-auto">
+                <Table className="min-w-[600px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
@@ -118,8 +120,9 @@ export default function KnowledgeBasePage() {
                       </TableCell>
                     </TableRow>
                   ))}
-                </TableBody>
-              </Table>
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </motion.div>

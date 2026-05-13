@@ -28,11 +28,12 @@ export default function ReportsPage() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
           className="space-y-6"
         >
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-3xl font-bold text-primary">
+              <h1 className="text-2xl md:text-3xl font-bold text-primary dark:text-[#b48c3c] transition-colors duration-300">
                 Reports & Analytics
               </h1>
               <p className="text-muted-foreground">KPI dashboards and export</p>

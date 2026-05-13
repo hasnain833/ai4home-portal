@@ -143,10 +143,11 @@ export default function TicketsPage() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
           className="space-y-6"
         >
           <div>
-            <h1 className="text-3xl font-bold text-primary">
+            <h1 className="text-2xl md:text-3xl font-bold text-primary dark:text-[#b48c3c] transition-colors duration-300">
               Warranty Tickets
             </h1>
             <p className="text-muted-foreground">Manage and track all claims</p>
@@ -216,8 +217,8 @@ export default function TicketsPage() {
             <CardHeader>
               <CardTitle>All Tickets ({filtered.length})</CardTitle>
             </CardHeader>
-            <CardContent>
-              <Table>
+            <CardContent className="overflow-x-auto">
+              <Table className="min-w-[800px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>ID</TableHead>
