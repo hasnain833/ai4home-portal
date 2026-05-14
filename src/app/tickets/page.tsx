@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,94 +33,44 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 
-const allTickets = [
-  {
-    id: "TKT-001",
-    homeowner: "Sarah Johnson",
-    address: "123 Maple St",
-    issueType: "HVAC not cooling",
-    status: "open",
-    priority: "high",
-    createdAt: "2026-05-10",
-    warrantyYear: 1,
-  },
-  {
-    id: "TKT-002",
-    homeowner: "Michael Chen",
-    address: "456 Oak Ave",
-    issueType: "Leaking faucet",
-    status: "in_progress",
-    priority: "medium",
-    createdAt: "2026-05-09",
-    warrantyYear: 1,
-  },
-  {
-    id: "TKT-003",
-    homeowner: "Emily Davis",
-    address: "789 Pine Rd",
-    issueType: "Cabinet door loose",
-    status: "resolved",
-    priority: "low",
-    createdAt: "2026-05-08",
-    warrantyYear: 2,
-  },
-  {
-    id: "TKT-004",
-    homeowner: "Robert Wilson",
-    address: "321 Elm St",
-    issueType: "Water intrusion",
-    status: "escalated",
-    priority: "urgent",
-    createdAt: "2026-05-07",
-    warrantyYear: 1,
-  },
-  {
-    id: "TKT-005",
-    homeowner: "Jennifer Martinez",
-    address: "654 Cedar Ln",
-    issueType: "Electrical outlet not working",
-    status: "open",
-    priority: "high",
-    createdAt: "2026-05-06",
-    warrantyYear: 1,
-  },
-  {
-    id: "TKT-006",
-    homeowner: "David Kim",
-    address: "987 Birch Blvd",
-    issueType: "Drywall crack",
-    status: "in_progress",
-    priority: "medium",
-    createdAt: "2026-05-05",
-    warrantyYear: 2,
-  },
-  {
-    id: "TKT-007",
-    homeowner: "Lisa Thompson",
-    address: "147 Spruce Way",
-    issueType: "Garage door opener",
-    status: "resolved",
-    priority: "low",
-    createdAt: "2026-05-04",
-    warrantyYear: 1,
-  },
-];
-
 export default function TicketsPage() {
+  const { user } = useAuth();
+  const [tickets, setTickets] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [priority, setPriority] = useState("all");
   const [year, setYear] = useState("all");
   const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
   const itemsPerPage = 10;
 
-  const filtered = allTickets.filter((t) => {
+  useEffect(() => {
+    const fetchTickets = async () => {
+      try {
+        const url = user?.role === "homeowner"
+          ? `/api/tickets?homeownerId=${user.id}`
+          : "/api/tickets";
+        const res = await fetch(url);
+        const data = await res.json();
+        setTickets(data);
+      } catch (err) {
+        console.error("Error fetching tickets:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (user) fetchTickets();
+  }, [user]);
+
+  const filtered = tickets.filter((t) => {
     const matchSearch =
       search === "" ||
       t.id.toLowerCase().includes(search.toLowerCase()) ||
-      t.homeowner.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = status === "all" || t.status === status;
-    const matchPriority = priority === "all" || t.priority === priority;
+      t.homeowner?.name?.toLowerCase().includes(search.toLowerCase()) ||
+      t.issueType?.toLowerCase().includes(search.toLowerCase());
+    const matchStatus = status === "all" || t.status.toLowerCase() === status.toLowerCase();
+    const matchPriority = priority === "all" || t.priority.toLowerCase() === priority.toLowerCase();
     const matchYear = year === "all" || t.warrantyYear.toString() === year;
     return matchSearch && matchStatus && matchPriority && matchYear;
   });
@@ -235,7 +186,7 @@ export default function TicketsPage() {
                   {paginated.map((t) => (
                     <TableRow key={t.id}>
                       <TableCell className="font-medium">{t.id}</TableCell>
-                      <TableCell>{t.homeowner}</TableCell>
+                      <TableCell>{t.homeowner?.name || "Unknown"}</TableCell>
                       <TableCell>{t.address}</TableCell>
                       <TableCell>{t.issueType}</TableCell>
                       <TableCell>Year {t.warrantyYear}</TableCell>

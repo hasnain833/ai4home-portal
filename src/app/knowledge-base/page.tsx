@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,35 +18,39 @@ import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, Trash2, Search } from "lucide-react";
 import { motion } from "framer-motion";
 
-const mockDocs = [
-  {
-    id: "1",
-    name: "HVAC Troubleshooting Guide.pdf",
-    size: "2.4 MB",
-    uploaded: "2026-05-10",
-    indexed: true,
-  },
-  {
-    id: "2",
-    name: "Plumbing Warranty Standards.pdf",
-    size: "1.1 MB",
-    uploaded: "2026-05-09",
-    indexed: true,
-  },
-  {
-    id: "3",
-    name: "Cabinet Adjustment Manual.pdf",
-    size: "0.8 MB",
-    uploaded: "2026-05-08",
-    indexed: false,
-  },
-];
-
 export default function KnowledgeBasePage() {
+  const [docs, setDocs] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filtered = mockDocs.filter((d) =>
+  const fetchDocs = async () => {
+    try {
+      const res = await fetch("/api/knowledge-base");
+      const data = await res.json();
+      setDocs(data);
+    } catch (err) {
+      console.error("Error fetching docs:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDocs();
+  }, []);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this document?")) return;
+    try {
+      await fetch(`/api/knowledge-base?id=${id}`, { method: "DELETE" });
+      fetchDocs();
+    } catch (err) {
+      console.error("Error deleting doc:", err);
+    }
+  };
+
+  const filtered = docs.filter((d) =>
     d.name.toLowerCase().includes(search.toLowerCase()),
   );
 
@@ -101,9 +105,11 @@ export default function KnowledgeBasePage() {
                     <TableRow key={d.id}>
                       <TableCell>{d.name}</TableCell>
                       <TableCell>{d.size}</TableCell>
-                      <TableCell>{d.uploaded}</TableCell>
                       <TableCell>
-                        {d.indexed ? (
+                        {new Date(d.createdAt).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        {d.isIndexed ? (
                           <Badge className="bg-green-100 text-green-800">
                             Indexed
                           </Badge>
@@ -112,7 +118,11 @@ export default function KnowledgeBasePage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(d.id)}
+                        >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>
                       </TableCell>

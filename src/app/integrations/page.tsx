@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import {
@@ -41,55 +41,58 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 
-const initialIntegrations = [
-  {
-    id: "1",
-    platform: "Builtopia",
-    status: "connected",
-    lastSync: "2026-05-12T08:30:00",
-    authType: "OAuth",
-  },
-  {
-    id: "2",
-    platform: "Buildertrend",
-    status: "disconnected",
-    lastSync: null,
-    authType: "API Key",
-  },
-];
-
 export default function IntegrationsPage() {
-  const [integrations, setIntegrations] = useState(initialIntegrations);
+  const [integrations, setIntegrations] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleConnect = () => {
-    setIntegrations([
-      ...integrations,
-      {
-        id: Date.now().toString(),
-        platform: selected,
-        status: "connected",
-        lastSync: new Date().toISOString(),
-        authType: "API Key",
-      },
-    ]);
-    setOpen(false);
+  const fetchIntegrations = async () => {
+    try {
+      const res = await fetch("/api/integrations");
+      const data = await res.json();
+      setIntegrations(data.status ? [data] : []);
+    } catch (err) {
+      console.error("Error fetching integrations:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
-  const handleDisconnect = (id: string) =>
-    setIntegrations(
-      integrations.map((i) =>
-        i.id === id ? { ...i, status: "disconnected", lastSync: null } : i,
-      ),
-    );
-  const handleSync = (id: string) =>
-    setIntegrations(
-      integrations.map((i) =>
-        i.id === id
-          ? { ...i, status: "syncing", lastSync: new Date().toISOString() }
-          : i,
-      ),
-    );
+
+  useEffect(() => {
+    fetchIntegrations();
+  }, []);
+
+  const handleConnect = async () => {
+    try {
+      const res = await fetch("/api/integrations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: selected, apiKey }),
+      });
+      if (res.ok) {
+        fetchIntegrations();
+        setOpen(false);
+      }
+    } catch (err) {
+      console.error("Error connecting:", err);
+    }
+  };
+
+  const handleSync = async (id: string) => {
+    try {
+      // Simulate sync for the whole integration or a specific ticket
+      await fetch("/api/integrations", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ integrationId: id }),
+      });
+      fetchIntegrations();
+    } catch (err) {
+      console.error("Error syncing:", err);
+    }
+  };
 
   const getStatusBadge = (s: string) => {
     if (s === "connected")
@@ -143,7 +146,11 @@ export default function IntegrationsPage() {
                     </SelectContent>
                   </Select>
                   <Label>API Key</Label>
-                  <Input placeholder="Enter API key" />
+                  <Input
+                    placeholder="Enter API key"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                  />
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setOpen(false)}>
@@ -156,7 +163,7 @@ export default function IntegrationsPage() {
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {integrations.map((i) => (
-              <Card key={i.id}>
+              <Card key={i.platform}>
                 <CardHeader>
                   <div className="flex justify-between">
                     <div className="flex gap-3">
@@ -172,7 +179,7 @@ export default function IntegrationsPage() {
                         <CardDescription>ERP/CRM</CardDescription>
                       </div>
                     </div>
-                    {getStatusBadge(i.status)}
+                    {getStatusBadge(i.status.toLowerCase())}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -198,14 +205,6 @@ export default function IntegrationsPage() {
                     <Button variant="outline" size="sm">
                       <MapPin className="mr-2 h-3 w-3" />
                       Map Fields
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-red-600"
-                      onClick={() => handleDisconnect(i.id)}
-                    >
-                      Disconnect
                     </Button>
                   </div>
                 </CardContent>

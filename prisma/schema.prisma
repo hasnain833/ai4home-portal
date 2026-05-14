@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  STAFF
+  HOMEOWNER
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  ESCALATED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String?
+  role          Role      @default(HOMEOWNER)
+  companyId     String?
+  company       Company?  @relation(fields: [companyId], references: [id])
+  tickets       Ticket[]  @relation("HomeownerTickets")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Company {
+  id              String               @id @default(cuid())
+  name            String
+  logo            String?
+  email           String?
+  phone           String?
+  address         String?
+  warrantyPolicy  String?              @db.Text
+  users           User[]
+  agentConfigs    AgentConfig[]
+  knowledgeBase   KnowledgeBaseDocument[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+model Ticket {
+  id            String         @id @default(cuid())
+  issueType     String
+  address       String
+  status        TicketStatus   @default(OPEN)
+  priority      TicketPriority @default(MEDIUM)
+  warrantyYear  Int            @default(1)
+  erpSyncStatus String?        @default("PENDING")
+  erpReferenceId String?
+  homeownerId   String
+  homeowner     User           @relation("HomeownerTickets", fields: [homeownerId], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model AgentConfig {
+  id                String   @id @default(cuid())
+  companyId         String
+  company           Company  @relation(fields: [companyId], references: [id])
+  systemPrompt      String   @db.Text
+  greetingMessage   String   @db.Text
+  escalationMessage String   @db.Text
+  isActive          Boolean  @default(true)
+  version           String   @default("1.0.0")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model KnowledgeBaseDocument {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  name        String
+  size        String
+  url         String
+  isIndexed   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,17 +14,50 @@ import { Save, Play, History, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function AgentConfigPage() {
-  const [prompt, setPrompt] = useState(
-    `You are a warranty care agent for {{companyName}}. Greet the homeowner warmly. Never admit liability. Use survey-positive language.`,
-  );
-  const [greeting, setGreeting] = useState(
-    `Hello {{homeownerName}}! Congratulations on your new home. How can I help with your warranty today?`,
-  );
-  const [escalation, setEscalation] = useState(
-    `I'm connecting you with a warranty specialist. They'll have all your details.`,
-  );
+  const [prompt, setPrompt] = useState("");
+  const [greeting, setGreeting] = useState("");
+  const [escalation, setEscalation] = useState("");
   const [testMessage, setTestMessage] = useState("");
   const [testResponse, setTestResponse] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch("/api/agent-config");
+        const data = await res.json();
+        if (data) {
+          setPrompt(data.systemPrompt);
+          setGreeting(data.greetingMessage);
+          setEscalation(data.escalationMessage);
+        }
+      } catch (err) {
+        console.error("Error fetching agent config:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchConfig();
+  }, []);
+
+  const handleSave = async () => {
+    try {
+      const res = await fetch("/api/agent-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemPrompt: prompt,
+          greetingMessage: greeting,
+          escalationMessage: escalation,
+        }),
+      });
+      if (res.ok) {
+        alert("Agent configuration saved as new version!");
+      }
+    } catch (err) {
+      console.error("Error saving agent config:", err);
+    }
+  };
 
   const handleTest = () => {
     setTestResponse(
@@ -64,7 +97,7 @@ export default function AgentConfigPage() {
                 onChange={(e) => setPrompt(e.target.value)}
               />
               <div className="flex justify-end">
-                <Button>
+                <Button onClick={handleSave}>
                   <Save className="mr-2 h-4 w-4" />
                   Save Prompt
                 </Button>
@@ -77,7 +110,7 @@ export default function AgentConfigPage() {
                 value={greeting}
                 onChange={(e) => setGreeting(e.target.value)}
               />
-              <Button>
+              <Button onClick={handleSave}>
                 <Save className="mr-2 h-4 w-4" />
                 Save
               </Button>
@@ -89,7 +122,7 @@ export default function AgentConfigPage() {
                 value={escalation}
                 onChange={(e) => setEscalation(e.target.value)}
               />
-              <Button>
+              <Button onClick={handleSave}>
                 <Save className="mr-2 h-4 w-4" />
                 Save
               </Button>

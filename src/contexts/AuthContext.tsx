@@ -34,36 +34,6 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Mock users for demo
-const MOCK_USERS: Record<string, User> = {
-  "admin@builder.com": {
-    id: "1",
-    name: "John Builder",
-    email: "admin@builder.com",
-    role: "admin",
-    companyName: "Premier Homes",
-    online: true,
-    avatar: "",
-  },
-  "staff@builder.com": {
-    id: "2",
-    name: "Sarah Warranty",
-    email: "staff@builder.com",
-    role: "staff",
-    companyName: "Premier Homes",
-    online: true,
-    avatar: "",
-  },
-  "homeowner@example.com": {
-    id: "3",
-    name: "Mike Homeowner",
-    email: "homeowner@example.com",
-    role: "homeowner",
-    online: false,
-    avatar: "",
-  },
-};
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -81,70 +51,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string, role: UserRole) => {
     setIsLoading(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      // Check against stored users (for demo)
-      const storedUsers = JSON.parse(
-        localStorage.getItem("warranty_users") || "[]",
-      );
-      const user = storedUsers.find(
-        (u: any) => u.email === email && u.role === role,
-      );
-      if (user && user.password === password) {
-        const loggedInUser: User = {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          companyName: user.companyName,
-          online: true,
-          lastSeen: new Date(),
-          avatar: "",
-        };
-        setUser(loggedInUser);
-        localStorage.setItem("warranty_user", JSON.stringify(loggedInUser));
-        document.cookie = `warranty_user=${JSON.stringify(loggedInUser)}; path=/; max-age=604800; SameSite=Lax`;
-        router.push("/dashboard");
-      } else {
-        // Fallback to built-in demo users (for quick testing)
-        const demoUsers = {
-          "admin@builder.com": {
-            role: "admin",
-            name: "Admin User",
-            company: "Demo Builder",
-          },
-          "staff@builder.com": {
-            role: "staff",
-            name: "Staff User",
-            company: "Demo Builder",
-          },
-          "homeowner@example.com": {
-            role: "homeowner",
-            name: "Homeowner",
-            company: "",
-          },
-        };
-        if (
-          demoUsers[email as keyof typeof demoUsers] &&
-          demoUsers[email as keyof typeof demoUsers].role === role
-        ) {
-          const loggedInUser: User = {
-            id: `demo_${email}`,
-            name: demoUsers[email as keyof typeof demoUsers].name,
-            email,
-            role,
-            companyName: demoUsers[email as keyof typeof demoUsers].company,
-            online: true,
-            lastSeen: new Date(),
-            avatar: "",
-          };
-          setUser(loggedInUser);
-          localStorage.setItem("warranty_user", JSON.stringify(loggedInUser));
-          document.cookie = `warranty_user=${JSON.stringify(loggedInUser)}; path=/; max-age=604800; SameSite=Lax`;
-          router.push("/dashboard");
-        } else {
-          throw new Error("Invalid email, password, or role mismatch");
-        }
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, role }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Login failed");
       }
+
+      const loggedInUser: User = {
+        ...data,
+        lastSeen: new Date(data.lastSeen),
+      };
+
+      setUser(loggedInUser);
+      localStorage.setItem("warranty_user", JSON.stringify(loggedInUser));
+      document.cookie = `warranty_user=${JSON.stringify(loggedInUser)}; path=/; max-age=604800; SameSite=Lax`;
+      router.push("/dashboard");
     } catch (err) {
       throw err;
     } finally {

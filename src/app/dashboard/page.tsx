@@ -27,66 +27,6 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { motion } from "framer-motion";
-
-// Mock data – replace with API calls later
-const mockKPIs = {
-  totalTickets: 147,
-  openTickets: 23,
-  escalatedTickets: 5,
-  resolvedThisWeek: 42,
-  autoResolutionRate: 68,
-  avgResolutionTime: "2.4 days",
-  tokenConsumption: 12450,
-};
-
-const mockRecentTickets = [
-  {
-    id: "TKT-001",
-    homeowner: "Sarah Johnson",
-    address: "123 Maple St",
-    issueType: "HVAC not cooling",
-    status: "open",
-    priority: "high",
-    createdAt: "2026-05-10",
-  },
-  {
-    id: "TKT-002",
-    homeowner: "Michael Chen",
-    address: "456 Oak Ave",
-    issueType: "Leaking faucet",
-    status: "in_progress",
-    priority: "medium",
-    createdAt: "2026-05-09",
-  },
-  {
-    id: "TKT-003",
-    homeowner: "Emily Davis",
-    address: "789 Pine Rd",
-    issueType: "Cabinet door loose",
-    status: "resolved",
-    priority: "low",
-    createdAt: "2026-05-08",
-  },
-  {
-    id: "TKT-004",
-    homeowner: "Robert Wilson",
-    address: "321 Elm St",
-    issueType: "Water intrusion",
-    status: "escalated",
-    priority: "urgent",
-    createdAt: "2026-05-07",
-  },
-  {
-    id: "TKT-005",
-    homeowner: "Jennifer Martinez",
-    address: "654 Cedar Ln",
-    issueType: "Electrical outlet not working",
-    status: "open",
-    priority: "high",
-    createdAt: "2026-05-06",
-  },
-];
-
 const statusColors: Record<string, string> = {
   open: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
   in_progress:
@@ -135,9 +75,26 @@ const CircularProgress = ({
 };
 
 export default function DashboardPage() {
-  const [kpis, setKpis] = useState(mockKPIs);
-  const [tickets, setTickets] = useState(mockRecentTickets);
-  const [loading, setLoading] = useState(false); // set to true when using real API
+  const [kpis, setKpis] = useState<any>(null);
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const res = await fetch("/api/dashboard/stats");
+        const data = await res.json();
+        setKpis(data);
+        setTickets(data.recentTickets || []);
+      } catch (err) {
+        console.error("Error fetching dashboard stats:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);
 
   return (
     <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
@@ -260,7 +217,7 @@ export default function DashboardPage() {
                       />
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Tokens: {kpis.tokenConsumption.toLocaleString()} / 20k
+                      Tokens: {kpis?.tokenConsumption?.toLocaleString() || 0} / 20k
                     </p>
                   </CardContent>
                 </Card>
