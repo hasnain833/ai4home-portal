@@ -27,8 +27,6 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { Suspense } from "react";
-
 function LoginForm() {
   const { login } = useAuth();
   const router = useRouter();
