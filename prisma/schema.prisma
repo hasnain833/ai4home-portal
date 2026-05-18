@@ -34,7 +34,9 @@ model User {
   role          Role      @default(HOMEOWNER)
   companyId     String?
   company       Company?  @relation(fields: [companyId], references: [id])
+  properties    Property[]
   tickets       Ticket[]  @relation("HomeownerTickets")
+  conversations Conversation[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -50,23 +52,74 @@ model Company {
   users           User[]
   agentConfigs    AgentConfig[]
   knowledgeBase   KnowledgeBaseDocument[]
+  integrations    Integration[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
+}
+
+model Integration {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  platform    String   // "BUILTOPIA", "BUILDERTREND", etc.
+  apiKey      String
+  secretKey   String?
+  environment String   @default("production")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Property {
+  id            String    @id @default(cuid())
+  address       String
+  city          String?
+  state         String?
+  zipCode       String?
+  coeDate       DateTime?
+  homeownerId   String
+  homeowner     User      @relation(fields: [homeownerId], references: [id])
+  tickets       Ticket[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model Ticket {
   id            String         @id @default(cuid())
   issueType     String
-  address       String
   status        TicketStatus   @default(OPEN)
   priority      TicketPriority @default(MEDIUM)
+  isEmergency   Boolean        @default(false)
   warrantyYear  Int            @default(1)
   erpSyncStatus String?        @default("PENDING")
   erpReferenceId String?
   homeownerId   String
   homeowner     User           @relation("HomeownerTickets", fields: [homeownerId], references: [id])
+  propertyId    String?
+  property      Property?      @relation(fields: [propertyId], references: [id])
+  conversation  Conversation?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+}
+
+model Conversation {
+  id            String        @id @default(cuid())
+  ticketId      String?       @unique
+  ticket        Ticket?       @relation(fields: [ticketId], references: [id])
+  homeownerId   String
+  homeowner     User          @relation(fields: [homeownerId], references: [id])
+  messages      ChatMessage[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model ChatMessage {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  role           String       // "user", "assistant", "system"
+  content        String       @db.Text
+  timestamp      DateTime     @default(now())
 }
 
 model AgentConfig {
@@ -82,14 +135,30 @@ model AgentConfig {
   updatedAt         DateTime @updatedAt
 }
 
+enum DocumentType {
+  MANUAL
+  VIDEO
+  DIY_GUIDE
+}
+
 model KnowledgeBaseDocument {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  name        String
-  size        String
-  url         String
-  isIndexed   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String         @id @default(cuid())
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id])
+  name          String
+  size          String
+  url           String
+  content       String?        @db.Text
+  documentType  DocumentType   @default(MANUAL)
+  isIndexed     Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model OtpVerification {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  otp       String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }

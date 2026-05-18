@@ -202,8 +202,8 @@ export default function CompanyPage() {
               animate={{ opacity: 1, y: 0, x: "-50%" }}
               exit={{ opacity: 0, y: -50, x: "-50%" }}
               className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${toastMessage.type === "success"
-                  ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
-                  : "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
+                ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
+                : "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
                 }`}
             >
               {toastMessage.type === "success" ? (
@@ -224,7 +224,7 @@ export default function CompanyPage() {
         >
           {/* Header */}
           <motion.div variants={fadeInUp}>
-            <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
+            <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
               Company Settings
             </h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
@@ -253,7 +253,7 @@ export default function CompanyPage() {
                     >
                       <Avatar className="h-24 w-24 ring-2 ring-primary/20 transition-all group-hover:ring-primary/40">
                         <AvatarImage src={company.logo} />
-                        <AvatarFallback className="bg-gradient-to-br from-primary/20 to-primary/5 text-primary text-2xl font-bold">
+                        <AvatarFallback className="bg-linear-to-br from-primary/20 to-primary/5 text-primary text-2xl font-bold">
                           {company.name.charAt(0)}
                         </AvatarFallback>
                       </Avatar>
@@ -451,7 +451,7 @@ export default function CompanyPage() {
             animate="visible"
             transition={{ delay: 0.2 }}
           >
-            <Card className="border-l-4 border-l-secondary bg-gradient-to-r from-secondary/5 to-transparent dark:from-secondary/10">
+            <Card className="border-l-4 border-l-secondary bg-linear-to-r from-secondary/5 to-transparent dark:from-secondary/10">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <AlertCircle className="h-5 w-5 text-secondary" />

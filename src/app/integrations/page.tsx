@@ -11,18 +11,9 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -30,730 +21,391 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Plus,
-  Trash2,
   RefreshCw,
   Plug,
   Zap,
   Database,
-  MapPin,
   Loader2,
-  X,
   CheckCircle2,
-  Link as LinkIcon,
-  Unlink,
+  XCircle,
+  AlertCircle,
+  Wifi,
+  WifiOff,
+  Save,
+  Trash2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// Animation variants
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.1,
-      delayChildren: 0.2,
-    },
-  },
-};
-
-const cardVariants = {
-  hidden: { opacity: 0, y: 20, scale: 0.95 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: { type: "spring" as const, stiffness: 300, damping: 24 },
-  },
-  exit: {
-    opacity: 0,
-    scale: 0.9,
-    y: -20,
-    transition: { duration: 0.2 },
-  },
-  hover: {
-    y: -4,
-    transition: { type: "spring" as const, stiffness: 400, damping: 17 },
-  },
-};
-
-const buttonVariants = {
-  tap: { scale: 0.97 },
-  hover: { scale: 1.02, transition: { duration: 0.2 } },
-};
-
-const fadeInUp = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
-};
-
-export interface Integration {
-  id: string;
+interface IntegrationStatus {
   platform: string;
-  status: "connected" | "disconnected" | "syncing";
-  lastSync: string | null;
-  authType: string;
+  configured: boolean;
+  environment: string | null;
   apiKeyMasked: string | null;
+  isActive: boolean;
+  lastUpdated: string | null;
 }
 
-const initialIntegrations: Integration[] = [
-  {
-    id: "1",
-    platform: "Builtopia",
-    status: "connected",
-    lastSync: "2026-05-12T08:30:00",
-    authType: "OAuth",
-    apiKeyMasked: "••••••••",
-  },
-  {
-    id: "2",
-    platform: "Buildertrend",
-    status: "disconnected",
-    lastSync: null,
-    authType: "API Key",
-    apiKeyMasked: null,
-  },
-];
+interface TestResult {
+  ok: boolean;
+  message: string;
+}
 
-// Platform icons mapping
-const getPlatformIcon = (platform: string) => {
-  switch (platform) {
-    case "Builtopia":
-      return <Database className="h-6 w-6 text-primary" />;
-    case "Buildertrend":
-      return <Zap className="h-6 w-6 text-primary" />;
-    case "Hyphen":
-      return <Plug className="h-6 w-6 text-primary" />;
-    default:
-      return <Database className="h-6 w-6 text-primary" />;
-  }
+interface FormState {
+  apiKey: string;
+  secretKey: string;
+  environment: string;
+}
+
+const PLATFORM_META: Record<string, {
+  label: string;
+  description: string;
+  icon: React.ReactNode;
+  hasSecret: boolean;
+}> = {
+  BUILTOPIA: {
+    label: "Builtopia",
+    description: "New home construction management and warranty tracking platform.",
+    icon: <Database className="h-6 w-6 text-[#0F3B3D]" />,
+    hasSecret: true,
+  },
+  BUILDERTREND: {
+    label: "Buildertrend",
+    description: "Cloud-based construction project management for homebuilders.",
+    icon: <Zap className="h-6 w-6 text-[#0F3B3D]" />,
+    hasSecret: true,
+  },
+  HYPHEN: {
+    label: "Hyphen Solutions",
+    description: "Integrated supply chain and homebuilder operations platform.",
+    icon: <Plug className="h-6 w-6 text-[#0F3B3D]" />,
+    hasSecret: false,
+  },
 };
 
-// Mock field mapping configuration
-const getPlatformFields = (platform: string) => {
-  const commonFields = [
-    { source: "project_id", target: "project_id", required: true },
-    { source: "project_name", target: "name", required: true },
-    { source: "customer_name", target: "client_name", required: false },
-    { source: "start_date", target: "startDate", required: false },
-    { source: "end_date", target: "endDate", required: false },
-    { source: "status", target: "status", required: false },
-    { source: "budget", target: "budget_amount", required: false },
-  ];
-
-  if (platform === "Builtopia") {
-    return [
-      ...commonFields,
-      { source: "building_type", target: "type", required: false },
-      { source: "floor_area", target: "area_sqft", required: false },
-    ];
-  }
-  return commonFields;
-};
+const PLATFORMS = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
 
 export default function IntegrationsPage() {
-  const [integrations, setIntegrations] = useState(initialIntegrations);
-  const [openAddDialog, setOpenAddDialog] = useState(false);
-  const [selectedPlatform, setSelectedPlatform] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [apiKeyError, setApiKeyError] = useState("");
-  const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<{
-    type: "success" | "error" | "info";
-    text: string;
-  } | null>(null);
+  const [integrations, setIntegrations] = useState<IntegrationStatus[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+  const [forms, setForms] = useState<Record<string, FormState>>({});
+  const [showSecret, setShowSecret] = useState<Record<string, boolean>>({});
+  const [messages, setMessages] = useState<Record<string, { type: "success" | "error"; text: string }>>({});
 
-  // Mapping dialog state
-  const [mappingOpen, setMappingOpen] = useState(false);
-  const [selectedIntegrationForMapping, setSelectedIntegrationForMapping] =
-    useState<any>(null);
-  const [fieldMappings, setFieldMappings] = useState<
-    Array<{
-      source: string;
-      target: string;
-      required: boolean;
-      enabled: boolean;
-    }>
-  >([]);
-
-  // Show toast notification
-  const showToast = (type: "success" | "error" | "info", text: string) => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3000);
+  const setMsg = (platform: string, type: "success" | "error", text: string) => {
+    setMessages((prev) => ({ ...prev, [platform]: { type, text } }));
+    setTimeout(() => setMessages((prev) => { const n = { ...prev }; delete n[platform]; return n; }), 4000);
   };
 
-  // Add new integration
-  const handleConnect = () => {
-    if (!selectedPlatform) {
-      showToast("error", "Please select a platform");
+  const fetchIntegrations = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch("/api/integrations");
+      if (!res.ok) throw new Error("Failed to load");
+      const data: IntegrationStatus[] = await res.json();
+      setIntegrations(data);
+      // Pre-fill environment selector if already configured
+      const initial: Record<string, FormState> = {};
+      data.forEach((d) => {
+        initial[d.platform] = {
+          apiKey: "",
+          secretKey: "",
+          environment: d.environment ?? "sandbox",
+        };
+      });
+      setForms(initial);
+    } catch {
+      // silent
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchIntegrations(); }, []);
+
+  const updateForm = (platform: string, field: keyof FormState, value: string) => {
+    setForms((prev) => ({ ...prev, [platform]: { ...prev[platform], [field]: value } }));
+  };
+
+  const handleSave = async (platform: string) => {
+    const form = forms[platform];
+    if (!form?.apiKey.trim()) {
+      setMsg(platform, "error", "API Key is required");
       return;
     }
-    if (!apiKey.trim()) {
-      setApiKeyError("API Key is required");
-      return;
+    setSaving(platform);
+    try {
+      const res = await fetch("/api/integrations/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, ...form }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMsg(platform, "error", data.message || "Failed to save"); return; }
+      setMsg(platform, "success", "Credentials saved successfully!");
+      setForms((prev) => ({ ...prev, [platform]: { ...prev[platform], apiKey: "", secretKey: "" } }));
+      await fetchIntegrations();
+    } catch {
+      setMsg(platform, "error", "Network error. Please try again.");
+    } finally {
+      setSaving(null);
     }
-    setApiKeyError("");
-
-    const newIntegration = {
-      id: Date.now().toString(),
-      platform: selectedPlatform,
-      status: "connected" as const,
-      lastSync: new Date().toISOString(),
-      authType: "API Key",
-      apiKeyMasked: `••••${apiKey.slice(-4)}`,
-    };
-
-    setIntegrations((prev) => [...prev, newIntegration]);
-    setOpenAddDialog(false);
-    setSelectedPlatform("");
-    setApiKey("");
-    showToast("success", `${selectedPlatform} integration added successfully`);
   };
 
-  // Delete integration
-  const handleDeleteIntegration = (id: string, platform: string) => {
-    setIntegrations((prev) => prev.filter((i) => i.id !== id));
-    showToast("info", `${platform} integration removed`);
-  };
-
-  // Connect a disconnected integration
-  const handleConnectIntegration = (id: string) => {
-    setIntegrations((prev) =>
-      prev.map((i) =>
-        i.id === id
-          ? { ...i, status: "connected", lastSync: new Date().toISOString() }
-          : i,
-      ),
-    );
-    showToast("success", "Integration reconnected successfully");
-  };
-
-  // Disconnect integration
-  const handleDisconnectIntegration = (id: string, platform: string) => {
-    setIntegrations((prev) =>
-      prev.map((i) =>
-        i.id === id ? { ...i, status: "disconnected", lastSync: null } : i,
-      ),
-    );
-    showToast("info", `${platform} disconnected`);
-  };
-
-  // Sync integration with loading animation
-  const handleSync = async (id: string) => {
-    const integration = integrations.find((i) => i.id === id);
-    if (integration?.status !== "connected") {
-      showToast(
-        "error",
-        "Cannot sync a disconnected integration. Please connect first.",
-      );
-      return;
+  const handleDisconnect = async (platform: string) => {
+    if (!confirm(`Remove ${PLATFORM_META[platform]?.label} integration?`)) return;
+    setDeleting(platform);
+    try {
+      const res = await fetch("/api/integrations/credentials", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform }),
+      });
+      if (!res.ok) { setMsg(platform, "error", "Failed to remove"); return; }
+      setMsg(platform, "success", "Integration removed.");
+      setTestResults((prev) => { const n = { ...prev }; delete n[platform]; return n; });
+      await fetchIntegrations();
+    } catch {
+      setMsg(platform, "error", "Network error.");
+    } finally {
+      setDeleting(null);
     }
-
-    setSyncingId(id);
-
-    // Simulate sync process with loading
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    setIntegrations((prev) =>
-      prev.map((i) =>
-        i.id === id ? { ...i, lastSync: new Date().toISOString() } : i,
-      ),
-    );
-    setSyncingId(null);
-    showToast("success", `Sync completed for ${integration.platform}`);
   };
 
-  // Open field mapping dialog
-  const handleOpenMapping = (integration: any) => {
-    setSelectedIntegrationForMapping(integration);
-    const platformFields = getPlatformFields(integration.platform);
-    setFieldMappings(
-      platformFields.map((field) => ({
-        source: field.source,
-        target: field.target,
-        required: field.required,
-        enabled: field.required, // required fields are enabled by default
-      })),
-    );
-    setMappingOpen(true);
-  };
-
-  // Toggle field mapping
-  const toggleFieldMapping = (index: number) => {
-    setFieldMappings((prev) =>
-      prev.map((field, i) =>
-        i === index && !field.required
-          ? { ...field, enabled: !field.enabled }
-          : field,
-      ),
-    );
-  };
-
-  // Save mapping configuration
-  const handleSaveMapping = () => {
-    setMappingOpen(false);
-    showToast(
-      "success",
-      `Field mapping saved for ${selectedIntegrationForMapping?.platform}`,
-    );
-  };
-
-  // Get status badge with animation
-  const getStatusBadge = (status: string) => {
-    if (status === "connected")
-      return (
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "spring", stiffness: 500 }}
-        >
-          <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800">
-            <CheckCircle2 className="mr-1 h-3 w-3" />
-            Connected
-          </Badge>
-        </motion.div>
-      );
-    if (status === "disconnected")
-      return (
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-        >
-          <Badge className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400 border-gray-200 dark:border-gray-700">
-            <Unlink className="mr-1 h-3 w-3" />
-            Disconnected
-          </Badge>
-        </motion.div>
-      );
-    if (status === "syncing")
-      return (
-        <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800 animate-pulse">
-          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-          Syncing...
-        </Badge>
-      );
-    return <Badge variant="outline">{status}</Badge>;
+  const handleTest = async (platform: string) => {
+    setTesting(platform);
+    try {
+      const res = await fetch("/api/integrations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform }),
+      });
+      const data = await res.json();
+      setTestResults((prev) => ({ ...prev, [platform]: data }));
+    } catch {
+      setTestResults((prev) => ({ ...prev, [platform]: { ok: false, message: "Network error" } }));
+    } finally {
+      setTesting(null);
+    }
   };
 
   return (
     <ProtectedRoute allowedRoles={["admin"]}>
       <PortalLayout>
-        {/* Toast Notification */}
-        <AnimatePresence>
-          {toastMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: -50, x: "-50%" }}
-              animate={{ opacity: 1, y: 0, x: "-50%" }}
-              exit={{ opacity: 0, y: -50, x: "-50%" }}
-              className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${toastMessage.type === "success"
-                  ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-700"
-                  : toastMessage.type === "error"
-                    ? "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-700"
-                    : "bg-blue-50 dark:bg-blue-900/80 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-700"
-                }`}
-            >
-              {toastMessage.type === "success" && (
-                <CheckCircle2 className="h-5 w-5" />
-              )}
-              {toastMessage.type === "error" && <X className="h-5 w-5" />}
-              {toastMessage.type === "info" && (
-                <RefreshCw className="h-5 w-5" />
-              )}
-              <span className="text-sm font-medium">{toastMessage.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={containerVariants}
-          className="space-y-6 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto"
-        >
-          {/* Header Section */}
-          <motion.div
-            variants={fadeInUp}
-            className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-          >
+        <div className="space-y-6 max-w-6xl mx-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
+              <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+                <Plug className="h-8 w-8 text-[#0F3B3D]" />
                 Integrations
               </h1>
-              <p className="text-muted-foreground text-sm md:text-base mt-1">
-                Connect and manage your CRM/ERP systems
+              <p className="text-muted-foreground mt-1">
+                Connect your ERP &amp; CRM systems. Credentials are stored securely in the database.
               </p>
             </div>
-            <Dialog open={openAddDialog} onOpenChange={setOpenAddDialog}>
-              <DialogTrigger asChild>
-                <motion.div
-                  variants={buttonVariants}
-                  whileTap="tap"
-                  whileHover="hover"
-                >
-                  <Button className="shadow-md hover:shadow-lg transition-shadow">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add Integration
-                  </Button>
-                </motion.div>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-md mx-4 sm:mx-auto">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ type: "spring", damping: 25 }}
-                >
-                  <DialogHeader>
-                    <DialogTitle className="text-xl">
-                      Connect a System
-                    </DialogTitle>
-                    <DialogDescription>
-                      Select a platform and enter your API credentials
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-5 py-4">
-                    <div className="space-y-2">
-                      <Label className="text-sm font-semibold">Platform</Label>
-                      <Select
-                        onValueChange={setSelectedPlatform}
-                        value={selectedPlatform}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select platform" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Builtopia">Builtopia</SelectItem>
-                          <SelectItem value="Buildertrend">
-                            Buildertrend
-                          </SelectItem>
-                          <SelectItem value="Hyphen">Hyphen</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-sm font-semibold">API Key</Label>
-                      <Input
-                        placeholder="Enter your API key"
-                        value={apiKey}
-                        onChange={(e) => {
-                          setApiKey(e.target.value);
-                          if (e.target.value.trim()) setApiKeyError("");
-                        }}
-                        className={
-                          apiKeyError
-                            ? "border-red-500 focus-visible:ring-red-500"
-                            : ""
-                        }
-                      />
-                      {apiKeyError && (
-                        <motion.p
-                          initial={{ opacity: 0, y: -5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="text-xs text-red-500"
-                        >
-                          {apiKeyError}
-                        </motion.p>
-                      )}
-                    </div>
-                  </div>
-                  <DialogFooter className="flex flex-col sm:flex-row gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => setOpenAddDialog(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button onClick={handleConnect} className="sm:ml-2">
-                      Connect
-                    </Button>
-                  </DialogFooter>
-                </motion.div>
-              </DialogContent>
-            </Dialog>
-          </motion.div>
+            <Button variant="outline" onClick={fetchIntegrations} disabled={isLoading} className="gap-2">
+              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
 
-          {/* Integrations Grid */}
-          <AnimatePresence mode="popLayout">
-            <motion.div
-              variants={containerVariants}
-              initial="hidden"
-              animate="visible"
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 md:gap-6"
-            >
-              {integrations.map((integration) => (
-                <motion.div
-                  key={integration.id}
-                  variants={cardVariants}
-                  initial="hidden"
-                  animate="visible"
-                  exit="exit"
-                  whileHover="hover"
-                  layout
-                >
-                  <Card className="overflow-hidden border-border/50 shadow-sm hover:shadow-xl transition-all duration-300 dark:bg-card/50 backdrop-blur-sm">
-                    <CardHeader className="pb-3">
-                      <div className="flex justify-between items-start gap-2">
-                        <div className="flex gap-3 items-start">
-                          <motion.div
-                            whileHover={{ scale: 1.05, rotate: 5 }}
-                            className="rounded-xl bg-primary/10 p-2.5 shadow-inner"
-                          >
-                            {getPlatformIcon(integration.platform)}
-                          </motion.div>
-                          <div>
-                            <CardTitle className="text-lg md:text-xl">
-                              {integration.platform}
-                            </CardTitle>
-                            <CardDescription className="text-xs">
-                              {integration.authType}
-                            </CardDescription>
-                          </div>
-                        </div>
-                        {getStatusBadge(integration.status)}
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4 pt-2">
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between items-center border-b border-border/50 pb-1.5">
-                          <span className="text-muted-foreground">
-                            Last sync:
-                          </span>
-                          <span className="font-mono text-xs font-medium">
-                            {integration.lastSync
-                              ? new Date(integration.lastSync).toLocaleString()
-                              : "Never"}
-                          </span>
-                        </div>
-                        {integration.apiKeyMasked && (
-                          <div className="flex justify-between items-center border-b border-border/50 pb-1.5">
-                            <span className="text-muted-foreground">
-                              API Key:
-                            </span>
-                            <span className="font-mono text-xs">
-                              {integration.apiKeyMasked}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 pt-2">
-                        {integration.status === "connected" ? (
-                          <>
-                            <motion.div
-                              variants={buttonVariants}
-                              whileTap="tap"
-                              whileHover="hover"
-                            >
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleSync(integration.id)}
-                                disabled={syncingId === integration.id}
-                                className="gap-1.5"
-                              >
-                                {syncingId === integration.id ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <RefreshCw className="h-3.5 w-3.5" />
-                                )}
-                                {syncingId === integration.id
-                                  ? "Syncing..."
-                                  : "Sync"}
-                              </Button>
-                            </motion.div>
-                            <motion.div
-                              variants={buttonVariants}
-                              whileTap="tap"
-                              whileHover="hover"
-                            >
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleOpenMapping(integration)}
-                                className="gap-1.5"
-                              >
-                                <MapPin className="h-3.5 w-3.5" />
-                                Map Fields
-                              </Button>
-                            </motion.div>
-                            <motion.div
-                              variants={buttonVariants}
-                              whileTap="tap"
-                              whileHover="hover"
-                            >
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() =>
-                                  handleDisconnectIntegration(
-                                    integration.id,
-                                    integration.platform,
-                                  )
-                                }
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 gap-1.5"
-                              >
-                                <Unlink className="h-3.5 w-3.5" />
-                                Disconnect
-                              </Button>
-                            </motion.div>
-                          </>
-                        ) : (
-                          <>
-                            <motion.div
-                              variants={buttonVariants}
-                              whileTap="tap"
-                              whileHover="hover"
-                            >
-                              <Button
-                                size="sm"
-                                onClick={() =>
-                                  handleConnectIntegration(integration.id)
-                                }
-                                className="gap-1.5"
-                              >
-                                <LinkIcon className="h-3.5 w-3.5" />
-                                Connect
-                              </Button>
-                            </motion.div>
-                            <motion.div
-                              variants={buttonVariants}
-                              whileTap="tap"
-                              whileHover="hover"
-                            >
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() =>
-                                  handleDeleteIntegration(
-                                    integration.id,
-                                    integration.platform,
-                                  )
-                                }
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 gap-1.5"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Remove
-                              </Button>
-                            </motion.div>
-                          </>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
+          {/* 3 Platform Cards */}
+          {isLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-80 bg-muted animate-pulse rounded-xl" />
               ))}
-            </motion.div>
-          </AnimatePresence>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {PLATFORMS.map((platform, index) => {
+                const meta = PLATFORM_META[platform];
+                const status = integrations.find((i) => i.platform === platform);
+                const form = forms[platform] ?? { apiKey: "", secretKey: "", environment: "sandbox" };
+                const testResult = testResults[platform];
+                const isTesting = testing === platform;
+                const isSaving = saving === platform;
+                const isDeleting = deleting === platform;
+                const msg = messages[platform];
+                const isConfigured = status?.configured ?? false;
 
-          {/* Phase 2 Coming Soon Card */}
-          <motion.div
-            variants={fadeInUp}
-            initial="hidden"
-            animate="visible"
-            transition={{ delay: 0.3 }}
-          >
-            <Card className="border-l-4 border-l-secondary bg-gradient-to-r from-secondary/5 to-transparent dark:from-secondary/10 shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
+                return (
                   <motion.div
-                    animate={{ rotate: [0, 10, -10, 0] }}
-                    transition={{ duration: 0.5, delay: 0.5 }}
+                    key={platform}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.08 }}
+                    className="flex flex-col"
                   >
-                    <Zap className="h-5 w-5 text-secondary" />
-                  </motion.div>
-                  Phase 2 Coming Soon
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  Webhooks, conditional field mapping, bulk sync, real-time data
-                  streaming, and advanced analytics.
-                </p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </motion.div>
-
-        {/* Field Mapping Dialog */}
-        <Dialog open={mappingOpen} onOpenChange={setMappingOpen}>
-          <DialogContent className="sm:max-w-lg mx-4 sm:mx-auto max-h-[80vh] overflow-y-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ type: "spring", damping: 25 }}
-            >
-              <DialogHeader>
-                <DialogTitle className="text-xl flex items-center gap-2">
-                  <MapPin className="h-5 w-5 text-primary" />
-                  Field Mapping
-                </DialogTitle>
-                <DialogDescription>
-                  Map fields from {selectedIntegrationForMapping?.platform} to
-                  your system
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="bg-muted/30 rounded-lg p-3 text-sm">
-                  <p className="font-medium mb-2">Mapping Configuration</p>
-                  <p className="text-muted-foreground text-xs">
-                    Define how data fields from{" "}
-                    {selectedIntegrationForMapping?.platform} map to your
-                    internal fields. Required fields cannot be disabled.
-                  </p>
-                </div>
-                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-                  {fieldMappings.map((field, idx) => (
-                    <motion.div
-                      key={field.source}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: idx * 0.05 }}
-                      className={`flex items-center justify-between p-3 rounded-lg border ${field.enabled
-                          ? "bg-background"
-                          : "bg-muted/20 opacity-60"
-                        }`}
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                            {field.source}
-                          </code>
-                          <span className="text-muted-foreground">→</span>
-                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                            {field.target}
-                          </code>
-                          {field.required && (
-                            <Badge
-                              variant="outline"
-                              className="text-[10px] h-4"
-                            >
-                              Required
+                    <Card className={`flex-1 border-2 transition-colors ${isConfigured ? "border-green-200" : "border-gray-200"}`}>
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-xl bg-[#0F3B3D]/10">{meta.icon}</div>
+                            <div>
+                              <CardTitle className="text-base">{meta.label}</CardTitle>
+                              {isConfigured && (
+                                <CardDescription className="text-xs">
+                                  {status?.environment} · key: {status?.apiKeyMasked}
+                                </CardDescription>
+                              )}
+                            </div>
+                          </div>
+                          {isConfigured ? (
+                            <Badge className="bg-green-100 text-green-800 border-green-200 shrink-0">
+                              <Wifi className="h-3 w-3 mr-1" /> Connected
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-gray-500 shrink-0">
+                              <WifiOff className="h-3 w-3 mr-1" /> Not set
                             </Badge>
                           )}
                         </div>
-                      </div>
-                      <Button
-                        variant={field.enabled ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => toggleFieldMapping(idx)}
-                        disabled={field.required}
-                        className="h-7 px-2 text-xs"
-                      >
-                        {field.enabled ? "Enabled" : "Disabled"}
-                      </Button>
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-              <DialogFooter className="flex flex-col sm:flex-row gap-2">
-                <Button variant="outline" onClick={() => setMappingOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleSaveMapping}>Save Mapping</Button>
-              </DialogFooter>
-            </motion.div>
-          </DialogContent>
-        </Dialog>
+                        <p className="text-xs text-muted-foreground mt-1">{meta.description}</p>
+                      </CardHeader>
+
+                      <CardContent className="space-y-3">
+                        {/* Message */}
+                        <AnimatePresence>
+                          {msg && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                            >
+                              <Alert variant={msg.type === "error" ? "destructive" : undefined}
+                                className={msg.type === "success" ? "border-green-500 bg-green-50" : ""}>
+                                <AlertDescription className="text-xs">{msg.text}</AlertDescription>
+                              </Alert>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Test result */}
+                        <AnimatePresence>
+                          {testResult && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className={`rounded-md px-3 py-2 text-xs flex items-center gap-2 ${
+                                testResult.ok
+                                  ? "bg-green-50 text-green-700 border border-green-200"
+                                  : "bg-red-50 text-red-700 border border-red-200"
+                              }`}
+                            >
+                              {testResult.ok
+                                ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                : <XCircle className="h-3.5 w-3.5 shrink-0" />}
+                              <span>{testResult.message}</span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Credential form */}
+                        <div className="space-y-2 pt-1">
+                          <div>
+                            <Label className="text-xs">API Key {isConfigured && <span className="text-muted-foreground">(leave blank to keep existing)</span>}</Label>
+                            <Input
+                              type="password"
+                              placeholder={isConfigured ? "Enter new key to update" : "Enter API key"}
+                              value={form.apiKey}
+                              onChange={(e) => updateForm(platform, "apiKey", e.target.value)}
+                              className="mt-1 text-sm h-8"
+                            />
+                          </div>
+
+                          {meta.hasSecret && (
+                            <div>
+                              <Label className="text-xs">Secret Key <span className="text-muted-foreground">(optional)</span></Label>
+                              <div className="relative mt-1">
+                                <Input
+                                  type={showSecret[platform] ? "text" : "password"}
+                                  placeholder="Enter secret key"
+                                  value={form.secretKey}
+                                  onChange={(e) => updateForm(platform, "secretKey", e.target.value)}
+                                  className="text-sm h-8 pr-8"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowSecret((prev) => ({ ...prev, [platform]: !prev[platform] }))}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                                >
+                                  {showSecret[platform] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          <div>
+                            <Label className="text-xs">Environment</Label>
+                            <Select
+                              value={form.environment}
+                              onValueChange={(v) => updateForm(platform, "environment", v)}
+                            >
+                              <SelectTrigger className="mt-1 h-8 text-sm">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="sandbox">Sandbox</SelectItem>
+                                <SelectItem value="production">Production</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            className="flex-1 gap-1.5 text-xs bg-[#0F3B3D] hover:bg-[#0F3B3D]/90"
+                            onClick={() => handleSave(platform)}
+                            disabled={isSaving || !form.apiKey.trim()}
+                          >
+                            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                            {isConfigured ? "Update" : "Connect"}
+                          </Button>
+
+                          {isConfigured && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="flex-1 gap-1.5 text-xs"
+                                onClick={() => handleTest(platform)}
+                                disabled={isTesting}
+                              >
+                                {isTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertCircle className="h-3.5 w-3.5" />}
+                                Test
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50 gap-1.5 text-xs"
+                                onClick={() => handleDisconnect(platform)}
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </PortalLayout>
     </ProtectedRoute>
   );

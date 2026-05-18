@@ -140,12 +140,31 @@ export default function TicketDetail() {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex gap-2">
-                    <MessageSquare className="h-5 w-5" /> Conversation
+                    <MessageSquare className="h-5 w-5" /> Conversation Transcript
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted-foreground italic">Conversation transcript will appear here in Phase 2.</p>
+                  <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                    {ticket.conversation?.messages && ticket.conversation.messages.length > 0 ? (
+                      ticket.conversation.messages.map((msg: any) => (
+                        <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                          <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                            msg.role === 'user' 
+                              ? 'bg-primary text-primary-foreground rounded-tr-none' 
+                              : 'bg-muted rounded-tl-none'
+                          }`}>
+                            <p>{msg.content}</p>
+                            <span className="text-[10px] opacity-70 block mt-1">
+                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic text-center py-4">
+                        No transcript available for this ticket.
+                      </p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -154,21 +173,22 @@ export default function TicketDetail() {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex gap-2">
-                    <User className="h-5 w-5" /> Homeowner
+                    <User className="h-5 w-5" /> Homeowner & Property
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p>
-                    <span className="font-medium">Name:</span>{" "}
-                    {ticket.homeowner?.name || "Unknown"}
-                  </p>
-                  <p>
-                    <span className="font-medium">Email:</span> {ticket.homeowner?.email || "N/A"}
-                  </p>
-                  <p>
-                    <span className="font-medium">Address:</span>{" "}
-                    {ticket.address || "N/A"}
-                  </p>
+                <CardContent className="space-y-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Contact</p>
+                    <p className="text-sm"><span className="font-medium">Name:</span> {ticket.homeowner?.name || "Unknown"}</p>
+                    <p className="text-sm"><span className="font-medium">Email:</span> {ticket.homeowner?.email || "N/A"}</p>
+                  </div>
+                  <Separator />
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider">Property Details</p>
+                    <p className="text-sm"><span className="font-medium">Address:</span> {ticket.property?.address || "N/A"}</p>
+                    <p className="text-sm"><span className="font-medium">Location:</span> {ticket.property?.city}, {ticket.property?.state}</p>
+                    <p className="text-sm"><span className="font-medium">COE Date:</span> {ticket.property?.coeDate ? new Date(ticket.property.coeDate).toLocaleDateString() : "N/A"}</p>
+                  </div>
                 </CardContent>
               </Card>
               <Card>

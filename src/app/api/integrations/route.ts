@@ -1,42 +1,58 @@
 import { NextResponse } from "next/server";
-import { ERPIntegrationService } from "@/lib/erp-service";
+import { testERPConnection, ERPPlatform } from "@/lib/erp-service";
+import { getServerSession } from "@/lib/session";
+import prisma from "@/lib/prisma";
 
-export async function GET() {
+// GET /api/integrations — list all platforms, showing which ones have saved credentials
+export async function GET(request: Request) {
   try {
-    // Return active integrations for the company
-    const stats = await ERPIntegrationService.getActiveIntegration("demo-company");
-    return NextResponse.json(stats);
+    const session = await getServerSession(request);
+    if (!session || session.role !== "ADMIN") {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
+    }
+
+    const platforms: ERPPlatform[] = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
+    const saved = await prisma.integration.findMany({
+      where: { companyId: session.companyId },
+      select: { platform: true, environment: true, isActive: true, apiKey: true, updatedAt: true },
+    });
+
+    const result = platforms.map((p) => {
+      const record = saved.find((s) => s.platform === p);
+      return {
+        platform: p,
+        configured: !!record,
+        environment: record?.environment ?? null,
+        apiKeyMasked: record?.apiKey ? `••••${record.apiKey.slice(-4)}` : null,
+        isActive: record?.isActive ?? false,
+        lastUpdated: record?.updatedAt ?? null,
+      };
+    });
+
+    return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json({ message: "Error fetching integrations" }, { status: 500 });
+    console.error("[Integrations] GET failed:", error);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
 
+// POST /api/integrations — test the live connection for a platform
 export async function POST(request: Request) {
   try {
-    const data = await request.json();
-    const { platform, apiKey, secretKey, environment } = data;
+    const session = await getServerSession(request);
+    if (!session || session.role !== "ADMIN") {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
+    }
 
-    // Here we would securely store these in a separate Integrations table
-    // For Phase 1, we simulate the connection test
-    console.log(`[Integration] Testing connection to ${platform}...`);
-    await new Promise(r => setTimeout(r, 1500));
+    const { platform } = await request.json();
+    if (!platform) {
+      return NextResponse.json({ message: "Platform is required" }, { status: 400 });
+    }
 
-    return NextResponse.json({ 
-      success: true, 
-      message: `Successfully connected to ${platform}`,
-      status: "CONNECTED"
-    });
+    const result = await testERPConnection(session.companyId, platform.toUpperCase() as ERPPlatform);
+    return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json({ message: "Failed to connect to ERP" }, { status: 500 });
-  }
-}
-
-export async function PUT(request: Request) {
-  try {
-    const { ticketId } = await request.json();
-    const result = await ERPIntegrationService.syncTicketToERP(ticketId);
-    return NextResponse.json({ success: result });
-  } catch (error) {
-    return NextResponse.json({ message: "Sync failed" }, { status: 500 });
+    console.error("[Integrations] Test connection failed:", error);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

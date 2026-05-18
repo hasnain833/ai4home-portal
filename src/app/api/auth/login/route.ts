@@ -4,9 +4,9 @@ import bcrypt from "bcryptjs";
 
 export async function POST(request: Request) {
   try {
-    const { email, password, role } = await request.json();
+    const { email, password } = await request.json();
 
-    if (!email || !password || !role) {
+    if (!email || !password) {
       return NextResponse.json(
         { message: "Missing required fields" },
         { status: 400 }
@@ -15,20 +15,15 @@ export async function POST(request: Request) {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { company: true },
+      include: {
+        company: true,
+        properties: true,
+      },
     });
 
     if (!user) {
       return NextResponse.json(
-        { message: "Invalid credentials" },
-        { status: 401 }
-      );
-    }
-
-    // Check if role matches
-    if (user.role !== role.toUpperCase()) {
-      return NextResponse.json(
-        { message: "Role mismatch" },
+        { message: "Invalid email or password" },
         { status: 401 }
       );
     }
@@ -37,19 +32,20 @@ export async function POST(request: Request) {
 
     if (!isPasswordValid) {
       return NextResponse.json(
-        { message: "Invalid credentials" },
+        { message: "Invalid email or password" },
         { status: 401 }
       );
     }
 
-    // In a real app, we would generate a JWT here
-    // For now, we return the user data as requested
+    // Role is read from DB — the client cannot choose or override it.
     const userData = {
       id: user.id,
       name: user.name,
       email: user.email,
       role: user.role.toLowerCase(),
+      companyId: user.companyId,
       companyName: user.company?.name || null,
+      properties: user.properties,
       online: true,
       lastSeen: new Date(),
     };

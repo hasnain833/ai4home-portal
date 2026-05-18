@@ -272,11 +272,10 @@ export default function ReportsPage() {
               initial={{ opacity: 0, y: -50, x: "-50%" }}
               animate={{ opacity: 1, y: 0, x: "-50%" }}
               exit={{ opacity: 0, y: -50, x: "-50%" }}
-              className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${
-                toastMessage.type === "success"
+              className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${toastMessage.type === "success"
                   ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
                   : "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
-              }`}
+                }`}
             >
               {toastMessage.type === "success" ? (
                 <CheckCircle2 className="h-5 w-5" />
@@ -300,7 +299,7 @@ export default function ReportsPage() {
             className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
           >
             <div>
-              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
+              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
                 Reports & Analytics
               </h1>
               <p className="text-muted-foreground text-sm md:text-base mt-1">
@@ -459,7 +458,7 @@ export default function ReportsPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <AnimatePresence mode="wait">
+                  <AnimatePresence mode="popLayout">
                     {metrics.issueBreakdown.map((item, idx) => (
                       <motion.div
                         key={item.category}
@@ -497,7 +496,7 @@ export default function ReportsPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <AnimatePresence mode="wait">
+                  <AnimatePresence mode="popLayout">
                     {metrics.agentPerformance.map((item, idx) => (
                       <motion.div
                         key={item.label}
@@ -530,7 +529,7 @@ export default function ReportsPage() {
 
           {/* Phase 2 Coming Soon */}
           <motion.div variants={fadeInUp} transition={{ delay: 0.2 }}>
-            <Card className="border-l-4 border-l-secondary bg-gradient-to-r from-secondary/5 to-transparent dark:from-secondary/10">
+            <Card className="border-l-4 border-l-secondary bg-linear-to-r from-secondary/5 to-transparent dark:from-secondary/10">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <Zap className="h-5 w-5 text-secondary" />

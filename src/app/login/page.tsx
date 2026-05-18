@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth, UserRole } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,16 +16,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Building2,
-  Users,
-  Home,
   Shield,
   Mail,
   Lock,
-  UserPlus,
   Eye,
   EyeOff,
   CheckCircle,
@@ -40,14 +35,12 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("admin");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
-  // Load saved email on mount – using useEffect, not useState initializer
   useEffect(() => {
     try {
       const savedEmail = localStorage.getItem("remembered_email");
@@ -55,30 +48,25 @@ function LoginForm() {
         setEmail(savedEmail);
         setRememberMe(true);
       }
-    } catch (e) {
+    } catch {
       // localStorage not available (SSR), ignore
     }
-    // Show success message from signup
     if (searchParams.get("signup") === "success") {
       setSuccess("Account created successfully! Please sign in.");
+    } else if (searchParams.get("reset") === "success") {
+      setSuccess("Password reset successfully! You can now sign in with your new password.");
     }
   }, [searchParams]);
 
-  const validateEmail = (email: string) => {
-    const re = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/;
-    return re.test(email);
-  };
+  const validateEmail = (email: string) =>
+    /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/.test(email);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSuccess("");
 
-    if (!email.trim()) {
-      setError("Email is required");
-      return;
-    }
-    if (!validateEmail(email)) {
+    if (!email.trim() || !validateEmail(email)) {
       setError("Please enter a valid email address");
       return;
     }
@@ -95,8 +83,8 @@ function LoginForm() {
 
     setIsLoading(true);
     try {
-      await login(email, password, role);
-      // Redirect handled by AuthContext
+      await login(email, password);
+      // Redirect is handled by AuthContext after login
     } catch (err) {
       setError(
         err instanceof Error
@@ -108,29 +96,8 @@ function LoginForm() {
     }
   };
 
-  const roleOptions = [
-    {
-      value: "admin",
-      label: "Homebuilder Admin",
-      icon: Building2,
-      description: "Full portal access, configure agent, manage tickets",
-    },
-    {
-      value: "staff",
-      label: "Warranty Staff",
-      icon: Users,
-      description: "Manage tickets, view reports, cannot modify integrations",
-    },
-    {
-      value: "homeowner",
-      label: "Homeowner",
-      icon: Home,
-      description: "View your own warranty claims and communicate with agent",
-    },
-  ];
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0F3B3D]/10 to-[#E8B86B]/10 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-[#0F3B3D]/10 to-[#E8B86B]/10 p-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -158,7 +125,7 @@ function LoginForm() {
           <CardHeader className="space-y-1">
             <CardTitle className="text-2xl">Welcome back</CardTitle>
             <CardDescription>
-              Select your role and enter your credentials
+              Enter your credentials to access your account
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -170,48 +137,13 @@ function LoginForm() {
             )}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label>Select Role</Label>
-                <Tabs
-                  defaultValue="admin"
-                  onValueChange={(v) => setRole(v as UserRole)}
-                  className="w-full"
-                >
-                  <TabsList className="grid w-full grid-cols-3">
-                    {roleOptions.map((opt) => (
-                      <TabsTrigger
-                        key={opt.value}
-                        value={opt.value}
-                        className="flex items-center gap-2 data-[state=active]:bg-[#0F3B3D] data-[state=active]:text-white"
-                      >
-                        <opt.icon className="h-4 w-4" />
-                        <span className="hidden sm:inline">
-                          {opt.label.split(" ")[0]}
-                        </span>
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                  {roleOptions.map((opt) => (
-                    <TabsContent
-                      key={opt.value}
-                      value={opt.value}
-                      className="mt-2"
-                    >
-                      <p className="text-xs text-muted-foreground text-center">
-                        {opt.description}
-                      </p>
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              </div>
-
-              <div className="space-y-2">
                 <Label htmlFor="email">Email Address</Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="email"
                     type="email"
-                    placeholder="admin@builder.com"
+                    placeholder="you@example.com"
                     className="pl-9"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -297,12 +229,12 @@ function LoginForm() {
           </CardContent>
           <CardFooter className="flex justify-center border-t pt-6">
             <p className="text-sm text-muted-foreground">
-              Don't have an account?{" "}
+              New homeowner?{" "}
               <Link
                 href="/signup"
                 className="text-[#0F3B3D] font-medium hover:underline"
               >
-                Sign up
+                Create an account
               </Link>
             </p>
           </CardFooter>

@@ -224,7 +224,7 @@ export default function AgentConfigPage() {
     setPrompt(version.prompt);
     setGreeting(version.greeting);
     setEscalation(version.escalation);
-    
+
     showToast("info", "Settings loaded from history. Click Save to activate.");
   };
 
@@ -256,10 +256,10 @@ export default function AgentConfigPage() {
               animate={{ opacity: 1, y: 0, x: "-50%" }}
               exit={{ opacity: 0, y: -50, x: "-50%" }}
               className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${toastMessage.type === "success"
-                  ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
-                  : toastMessage.type === "error"
-                    ? "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
-                    : "bg-blue-50 dark:bg-blue-900/80 text-blue-800 dark:text-blue-200 border border-blue-200"
+                ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
+                : toastMessage.type === "error"
+                  ? "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
+                  : "bg-blue-50 dark:bg-blue-900/80 text-blue-800 dark:text-blue-200 border border-blue-200"
                 }`}
             >
               {toastMessage.type === "success" && (
@@ -284,7 +284,7 @@ export default function AgentConfigPage() {
         >
           {/* Header */}
           <motion.div variants={fadeInUp}>
-            <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
+            <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
               Agent Configuration
             </h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
@@ -545,8 +545,8 @@ export default function AgentConfigPage() {
                                 exit="exit"
                                 layout
                                 className={`flex justify-between items-center p-4 rounded-lg border transition-all ${version.isActive
-                                    ? "border-primary/50 bg-primary/5 shadow-sm"
-                                    : "border-border hover:bg-muted/20"
+                                  ? "border-primary/50 bg-primary/5 shadow-sm"
+                                  : "border-border hover:bg-muted/20"
                                   }`}
                               >
                                 <div className="flex-1">

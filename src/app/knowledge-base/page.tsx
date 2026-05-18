@@ -276,7 +276,7 @@ export default function KnowledgeBasePage() {
             className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
           >
             <div>
-              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
+              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
                 Knowledge Base
               </h1>
               <p className="text-muted-foreground text-sm md:text-base mt-1">
@@ -480,7 +480,7 @@ export default function KnowledgeBasePage() {
             animate="visible"
             transition={{ delay: 0.2 }}
           >
-            <Card className="border-l-4 border-l-secondary bg-gradient-to-r from-secondary/5 to-transparent dark:from-secondary/10">
+            <Card className="border-l-4 border-l-secondary bg-linear-to-r from-secondary/5 to-transparent dark:from-secondary/10">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <FileText className="h-5 w-5 text-secondary" />

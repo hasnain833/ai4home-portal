@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { calculateWarrantyYear } from "@/lib/utils";
 
 export async function GET(request: Request) {
   try {
@@ -15,6 +16,7 @@ export async function GET(request: Request) {
             email: true,
           },
         },
+        property: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -34,16 +36,32 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const data = await request.json();
-    const { issueType, address, homeownerId, priority, warrantyYear } = data;
+    const { issueType, propertyId, homeownerId, priority, isEmergency, conversationId } = data;
+
+    // Fetch property to get coeDate
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: { coeDate: true, address: true }
+    });
+
+    if (!property) {
+      return NextResponse.json({ message: "Property not found" }, { status: 404 });
+    }
+
+    const warrantyYear = calculateWarrantyYear(property.coeDate);
 
     const ticket = await prisma.ticket.create({
       data: {
         issueType,
-        address,
+        propertyId,
         homeownerId,
-        priority: priority || "MEDIUM",
-        warrantyYear: warrantyYear || 1,
-        status: "OPEN",
+        priority: isEmergency ? "URGENT" : (priority || "MEDIUM"),
+        isEmergency: !!isEmergency,
+        warrantyYear,
+        status: isEmergency ? "ESCALATED" : "OPEN",
+        conversation: conversationId ? {
+          connect: { id: conversationId }
+        } : undefined
       },
     });
 
