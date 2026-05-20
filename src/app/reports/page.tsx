@@ -13,11 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  BarChart3,
   Download,
   TrendingUp,
   Ticket,
-  Clock,
   Zap,
   Loader2,
   CheckCircle2,
@@ -36,64 +34,6 @@ interface Metrics {
   issueBreakdown: { category: string; percentage: number }[];
   agentPerformance: { label: string; value: number }[];
 }
-
-// Mock data for different periods
-const mockData: Record<Period, Metrics> = {
-  "7d": {
-    autoResolutionRate: 68,
-    avgResponseTime: 2.4,
-    tokensPerClaim: 1245,
-    customerSatisfaction: 4.8,
-    issueBreakdown: [
-      { category: "HVAC", percentage: 32 },
-      { category: "Plumbing", percentage: 24 },
-      { category: "Electrical", percentage: 18 },
-      { category: "Structural", percentage: 14 },
-      { category: "Appliances", percentage: 12 },
-    ],
-    agentPerformance: [
-      { label: "Auto‑resolved", value: 68 },
-      { label: "Escalated to staff", value: 27 },
-      { label: "DIY guidance", value: 42 },
-    ],
-  },
-  "30d": {
-    autoResolutionRate: 72,
-    avgResponseTime: 2.1,
-    tokensPerClaim: 1180,
-    customerSatisfaction: 4.9,
-    issueBreakdown: [
-      { category: "HVAC", percentage: 35 },
-      { category: "Plumbing", percentage: 22 },
-      { category: "Electrical", percentage: 19 },
-      { category: "Structural", percentage: 13 },
-      { category: "Appliances", percentage: 11 },
-    ],
-    agentPerformance: [
-      { label: "Auto‑resolved", value: 72 },
-      { label: "Escalated to staff", value: 23 },
-      { label: "DIY guidance", value: 46 },
-    ],
-  },
-  "90d": {
-    autoResolutionRate: 65,
-    avgResponseTime: 2.7,
-    tokensPerClaim: 1320,
-    customerSatisfaction: 4.7,
-    issueBreakdown: [
-      { category: "HVAC", percentage: 30 },
-      { category: "Plumbing", percentage: 26 },
-      { category: "Electrical", percentage: 17 },
-      { category: "Structural", percentage: 15 },
-      { category: "Appliances", percentage: 12 },
-    ],
-    agentPerformance: [
-      { label: "Auto‑resolved", value: 65 },
-      { label: "Escalated to staff", value: 30 },
-      { label: "DIY guidance", value: 38 },
-    ],
-  },
-};
 
 // Animation variants
 const containerVariants = {
@@ -159,8 +99,15 @@ const useCountUp = (target: number, duration = 800, delay = 0) => {
 
 export default function ReportsPage() {
   const [period, setPeriod] = useState<Period>("7d");
-  const [metrics, setMetrics] = useState<Metrics>(mockData["7d"]);
-  const [loading, setLoading] = useState(false);
+  const [metrics, setMetrics] = useState<Metrics>({
+    autoResolutionRate: 0,
+    avgResponseTime: 0,
+    tokensPerClaim: 0,
+    customerSatisfaction: 0,
+    issueBreakdown: [],
+    agentPerformance: [],
+  });
+  const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [toastMessage, setToastMessage] = useState<{
     type: "success" | "error";
@@ -175,20 +122,28 @@ export default function ReportsPage() {
   const animatedCsat =
     useCountUp(Math.floor(metrics.customerSatisfaction * 10), 600) / 10;
 
-  // Load data when period changes
-  useEffect(() => {
+  // Load live data from backend endpoint
+  const fetchReportsData = useCallback(async (p: Period) => {
     setLoading(true);
-    // Simulate API call
-    const timer = setTimeout(() => {
-      setMetrics(mockData[period]);
+    try {
+      const response = await fetch(`/api/reports/analytics?period=${p}`);
+      if (response.ok) {
+        const data = await response.json();
+        setMetrics(data);
+      } else {
+        showToast("error", "Failed to retrieve real-time analytics data.");
+      }
+    } catch (error) {
+      console.error("Error loading analytics:", error);
+      showToast("error", "Error contacting the telemetry server.");
+    } finally {
       setLoading(false);
-      showToast(
-        "success",
-        `Data updated for ${period === "7d" ? "last 7 days" : period === "30d" ? "last 30 days" : "last 90 days"}`,
-      );
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [period]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchReportsData(period);
+  }, [period, fetchReportsData]);
 
   const showToast = (type: "success" | "error", text: string) => {
     setToastMessage({ type, text });
@@ -273,8 +228,8 @@ export default function ReportsPage() {
               animate={{ opacity: 1, y: 0, x: "-50%" }}
               exit={{ opacity: 0, y: -50, x: "-50%" }}
               className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${toastMessage.type === "success"
-                  ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
-                  : "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
+                ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
+                : "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
                 }`}
             >
               {toastMessage.type === "success" ? (

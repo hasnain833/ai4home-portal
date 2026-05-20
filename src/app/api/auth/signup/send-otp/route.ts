@@ -24,27 +24,20 @@ export async function POST(request: Request) {
 
     // Generate a 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    await prisma.otpVerification.upsert({
-      where: { email },
-      update: { otp, expiresAt },
-      create: { email, otp, expiresAt },
-    });
-
-    console.log(`[OTP GENERATED] Email: ${email} | OTP: ${otp}`);
+    console.log(`[SIGNUP OTP GENERATED] Email: ${email} | OTP: ${otp}`);
     
     // Send OTP via Brevo
     const emailResult = await MailService.sendVerificationOtp(email, otp);
     
     if (!emailResult.success) {
       console.warn("Failed to send email via Brevo. Make sure BREVO_API_KEY is set in .env");
-      // We still return success:true so they can see the OTP in the console in dev mode if they don't have an API key set
     }
 
     return NextResponse.json({ 
       success: true, 
-      message: "OTP sent successfully" 
+      otp, // Return to client for Option 1 state verification
+      message: "OTP sent successfully to your email" 
     });
   } catch (error) {
     console.error("Failed to send OTP:", error);

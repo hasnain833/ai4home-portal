@@ -51,6 +51,7 @@ import { Camera, Circle } from "lucide-react";
 const navItems = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["admin", "staff", "homeowner"] },
   { name: "AI Assistant", href: "/chat", icon: Bot, roles: ["admin", "staff", "homeowner"] },
+  { name: "Properties", href: "/properties", icon: Building2, roles: ["admin", "staff", "homeowner"] },
   { name: "Tickets", href: "/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
   { name: "Team", href: "/dashboard/team", icon: Users, roles: ["admin"] },
   { name: "Integrations", href: "/integrations", icon: Plug, roles: ["admin"] },
@@ -156,7 +157,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="w-full justify-start gap-3 text-white/80 hover:bg-white/10 hover:text-white">
+                <button className="w-full flex items-center justify-start gap-3 rounded-md px-3 py-2 text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white transition-all outline-hidden cursor-pointer">
                   <div className="relative">
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={user?.avatar} />
@@ -168,11 +169,11 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
                   </div>
                   {sidebarExpanded && (
                     <div className="flex-1 text-left">
-                      <p className="text-sm font-medium">{user?.name}</p>
+                      <p className="text-sm font-medium text-white">{user?.name}</p>
                       <p className="text-xs text-white/60 capitalize">{user?.role}</p>
                     </div>
                   )}
-                </Button>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>

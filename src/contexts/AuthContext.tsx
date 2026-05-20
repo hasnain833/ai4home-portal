@@ -37,7 +37,7 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => void;
   updateAvatar: (avatarUrl: string) => void;
   setOnlineStatus: (status: boolean) => void;
@@ -81,7 +81,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setUser(loggedInUser);
       localStorage.setItem("warranty_user", JSON.stringify(loggedInUser));
-      document.cookie = `warranty_user=${JSON.stringify(loggedInUser)}; path=/; max-age=604800; SameSite=Lax`;
       router.push("/dashboard");
     } catch (err) {
       throw err;
@@ -90,11 +89,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
     if (user) {
       const updatedUser = { ...user, online: false };
       localStorage.setItem("warranty_user", JSON.stringify(updatedUser));
     }
+    
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (err) {
+      console.error("Logout API failed", err);
+    }
+
     setUser(null);
     localStorage.removeItem("warranty_user");
     router.push("/login");

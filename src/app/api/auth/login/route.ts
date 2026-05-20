@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { createSession } from "@/lib/session";
 
 export async function POST(request: Request) {
   try {
@@ -49,6 +50,8 @@ export async function POST(request: Request) {
       online: true,
       lastSeen: new Date(),
     };
+
+    await createSession(userData);
 
     return NextResponse.json(userData);
   } catch (error) {

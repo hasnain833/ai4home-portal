@@ -4,49 +4,34 @@ import bcrypt from "bcryptjs";
 
 export async function POST(request: Request) {
   try {
-    const { email, otp, password } = await request.json();
+    const { email, password } = await request.json();
 
-    if (!email || !otp || !password) {
+    if (!email || !password) {
       return NextResponse.json(
-        { message: "Email, OTP, and new password are required" },
+        { message: "Email and new password are required" },
         { status: 400 }
       );
     }
 
-    const verification = await prisma.otpVerification.findUnique({
+    // Check if user exists
+    const user = await prisma.user.findUnique({
       where: { email },
     });
 
-    if (!verification) {
+    if (!user) {
       return NextResponse.json(
-        { message: "No active password reset request found for this email" },
-        { status: 400 }
-      );
-    }
-
-    if (verification.otp !== otp) {
-      return NextResponse.json({ message: "Invalid verification code" }, { status: 400 });
-    }
-
-    if (new Date() > verification.expiresAt) {
-      return NextResponse.json(
-        { message: "Verification code has expired. Please request a new one." },
-        { status: 400 }
+        { message: "No account found with this email address" },
+        { status: 404 }
       );
     }
 
     // Hash the new password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Update user password
+    // Update user password directly
     await prisma.user.update({
       where: { email },
       data: { password: hashedPassword },
-    });
-
-    // Cleanup the OTP record
-    await prisma.otpVerification.delete({
-      where: { email },
     });
 
     return NextResponse.json({

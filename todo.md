@@ -4,8 +4,7 @@
 * **Framework:** Next.js 16+ (App Router, Turbopack) with React 19.
 * **Database:** Supabase PostgreSQL managed via Prisma 7.
 * **Authentication:** Custom JWT/Context-based role system (ADMIN, STAFF, HOMEOWNER).
-* **AI Pipeline:** Implemented using `@google/genai` (Gemini 2.5 Flash). It uses a JSON-structured response mode to dynamically detect emergencies, extract DIY steps, and trigger automatic ticket creation.
-* **RAG Pipeline:** Currently utilizing a text-based retrieval mechanism against the `KnowledgeBaseDocument` table, which is injected into the Gemini context window. (Future upgrade: switch to pgvector for cosine similarity embeddings).
+* **AI & Chat Integration:** Integrated Botpress Webchat dynamically via client-side script injection and iframe containers, replacing local LLM servers.
 * **ERP Integration:** `erp-service.ts` features a production-ready HTTP Fetch client for Builtopia with Bearer token authentication, fully replacing the mock timeout simulations.
 
 ## ✅ Phase 0: Foundation (Complete)
@@ -22,17 +21,20 @@
 ### High Priority (Mandatory)
 - [x] **Homeowner Property Support (FR-18)**: Refactored schema to support multiple properties per user.
 - [x] **Warranty Year Logic (FR-02)**: Automated Year 1/2/10 calculation based on Property COE Date.
-- [x] **RAG Implementation (FR-04)**: Real integration with `@google/genai` injecting KB context into the prompt.
+- [x] **Botpress Webchat**: Embedded Botpress chatbot and injected official JS scripts to replace local RAG/Gemini.
 - [x] **DIY Guidance Engine (FR-05)**: Extraction of step-by-step instructions via Gemini JSON output.
 - [x] **Emergency Detection (FR-03)**: Gemini AI flagged automated escalation for life-safety issues.
 - [x] **Human Escalation Handoff (FR-09)**: "Handoff Package" UI displaying full context.
-- [x] **Conversation Transcript Storage (FR-17)**: Fully connected `/api/chat` to automatically generate Tickets and link Prisma `Conversation` IDs.
+- [x] **Conversation Transcript Storage (FR-17)**: Preserved conversational data models and ticket links to support external webhook integrations.
 
 ### Medium Priority (Logic & Analytics)
 - [x] **Detailed KPI Reporting (FR-15)**: Real-time resolution time, weekly trends, and token consumption analytics.
 - [x] **Status Notifications (FR-16)**: Integrated Brevo for automated email updates on ticket status changes.
-- [x] **Secure Password Recovery**: Implemented complete OTP-based Forgot Password flow using Brevo and secure DB Verification records.
+- [x] **Secure Password Recovery**: Implemented stateless client-side OTP validation flow using Brevo to protect resources without database persistence.
+- [x] **Botpress Ticket Escalation**: Created dedicated secure webhook integration API to receive Botpress escalations and conversation transcripts.
 - [x] **Dynamic ERP Integrations**: Created a 3-card Admin management dashboard to save credentials directly to DB rather than `.env`.
+- [x] **Role-Based Access Control (RBAC)**: Enforced strict role-based scopes (Admin, Staff, Homeowner) in backend APIs (Tickets, Dashboard, Company, Config, KB) and custom homeowner-focused dashboard client UI.
+- [x] **Property Management Hub**: Implemented a comprehensive property management dashboard including a role-scoped client page (`/properties`), dynamic backend APIs (`/api/properties`), search filters, and an interactive property creation modal.
 - [ ] **Anti-Litigation Guardrails (FR-08)**: Implement explicit system prompt constraints and "Reviewer" logic to prevent liability admissions.
 
 ## 🔮 Phase 2: Future MAS (Multi-Agent System)

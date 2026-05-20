@@ -24,13 +24,6 @@ export async function POST(request: Request) {
 
     // Generate a 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-    await prisma.otpVerification.upsert({
-      where: { email },
-      update: { otp, expiresAt },
-      create: { email, otp, expiresAt },
-    });
 
     console.log(`[PASSWORD RESET OTP GENERATED] Email: ${email} | OTP: ${otp}`);
     
@@ -43,6 +36,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ 
       success: true, 
+      otp, // Return to client for Option 1 state verification
       message: "Password reset verification code sent to your email" 
     });
   } catch (error) {

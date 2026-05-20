@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -60,6 +60,8 @@ export default function ForgotPasswordPage() {
     label: string;
     color: string;
   }>({ score: 0, label: "Very Weak", color: "bg-red-500" });
+
+  const [correctOtp, setCorrectOtp] = useState("");
 
   useEffect(() => {
     const met = requirements.filter((req) => req.test(password)).length;
@@ -93,6 +95,7 @@ export default function ForgotPasswordPage() {
       if (!res.ok) {
         throw new Error(data.message || "Failed to send reset code");
       }
+      setCorrectOtp(data.otp);
       setSuccess("Reset verification code sent to your email address.");
       setStep(2);
     } catch (err: any) {
@@ -106,6 +109,10 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     if (!otp || otp.length !== 6) {
       setError("Please enter a valid 6-digit code");
+      return;
+    }
+    if (otp !== correctOtp) {
+      setError("Invalid verification code. Please try again.");
       return;
     }
     setError("");
@@ -128,13 +135,12 @@ export default function ForgotPasswordPage() {
       const res = await fetch("/api/auth/forgot-password/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, otp, password }),
+        body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.message || "Password reset failed");
       }
-      // Redirect to login page on success with query param
       router.push("/login?reset=success");
     } catch (err: any) {
       setError(err.message || "Something went wrong.");
@@ -355,7 +361,7 @@ export default function ForgotPasswordPage() {
                             return (
                               <div key={req.id} className="flex items-center gap-1.5 text-[11px]">
                                 <div className={`flex items-center justify-center h-3.5 w-3.5 rounded-full shrink-0 ${isMet ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
-                                  {isMet ? <Check className="h-2 w-2 stroke-[3]" /> : <span className="h-1 w-1 bg-current rounded-full" />}
+                                  {isMet ? <Check className="h-2 w-2 stroke-3" /> : <span className="h-1 w-1 bg-current rounded-full" />}
                                 </div>
                                 <span className={isMet ? "text-green-800 dark:text-green-400 font-medium" : "text-muted-foreground"}>
                                   {req.label}

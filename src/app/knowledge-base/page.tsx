@@ -34,8 +34,6 @@ interface Document {
   size: string;
   sizeBytes: number;
   uploaded: string;
-  indexed: boolean;
-  indexing?: boolean;
 }
 
 // Animation variants
@@ -96,10 +94,8 @@ export default function KnowledgeBasePage() {
             id: d.id,
             name: d.name,
             size: d.size,
-            sizeBytes: 0, // Not provided by API yet
-            uploaded: d.createdAt,
-            indexed: d.isIndexed,
-            indexing: false
+            sizeBytes: 0,
+            uploaded: new Date(d.createdAt).toLocaleDateString(),
           })));
         }
       } catch (error) {
@@ -122,7 +118,7 @@ export default function KnowledgeBasePage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Simulate file upload and indexing
+  // Handle file upload
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
@@ -145,18 +141,16 @@ export default function KnowledgeBasePage() {
     }
 
     setUploading(true);
-    setUploadProgress(10);
+    setUploadProgress(40);
 
     try {
-      // In a real app, you'd upload to S3/Supabase Storage first.
-      // For now, we simulate and save to DB via API.
       const response = await fetch("/api/knowledge-base", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: file.name,
           size: formatFileSize(file.size),
-          url: "https://example.com/mock-url.pdf", // Mock URL
+          url: "https://example.com/mock-url.pdf",
         }),
       });
 
@@ -167,26 +161,12 @@ export default function KnowledgeBasePage() {
           name: d.name,
           size: d.size,
           sizeBytes: file.size,
-          uploaded: d.createdAt,
-          indexed: false,
-          indexing: true,
+          uploaded: new Date(d.createdAt).toLocaleDateString(),
         };
 
         setDocuments((prev) => [newDoc, ...prev]);
         setUploadProgress(100);
-        showToast("success", `${file.name} uploaded. Indexing...`);
-
-        // Simulate indexing process
-        setTimeout(() => {
-          setDocuments((prev) =>
-            prev.map((doc) =>
-              doc.id === newDoc.id
-                ? { ...doc, indexed: true, indexing: false }
-                : doc,
-            ),
-          );
-          showToast("success", `${file.name} has been indexed successfully`);
-        }, 3000);
+        showToast("success", `${file.name} uploaded successfully!`);
       } else {
         showToast("error", "Failed to upload document");
       }
@@ -215,22 +195,6 @@ export default function KnowledgeBasePage() {
     } catch (error) {
       showToast("error", "Error connecting to server");
     }
-  };
-
-  // Retry indexing for failed documents
-  const handleRetryIndexing = async (id: string) => {
-    setDocuments((prev) =>
-      prev.map((doc) => (doc.id === id ? { ...doc, indexing: true } : doc)),
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    setDocuments((prev) =>
-      prev.map((doc) =>
-        doc.id === id ? { ...doc, indexed: true, indexing: false } : doc,
-      ),
-    );
-    showToast("success", "Document indexed successfully");
   };
 
   const triggerFileUpload = () => {
@@ -280,7 +244,7 @@ export default function KnowledgeBasePage() {
                 Knowledge Base
               </h1>
               <p className="text-muted-foreground text-sm md:text-base mt-1">
-                Upload documents to inform the AI agent
+                Upload builder documents to inform the Botpress AI assistant
               </p>
             </div>
             <motion.div
@@ -347,7 +311,6 @@ export default function KnowledgeBasePage() {
                         <TableHead className="font-semibold">
                           Uploaded
                         </TableHead>
-                        <TableHead className="font-semibold">Status</TableHead>
                         <TableHead className="text-right font-semibold">
                           Actions
                         </TableHead>
@@ -358,7 +321,7 @@ export default function KnowledgeBasePage() {
                         {filteredDocuments.length === 0 ? (
                           <TableRow>
                             <TableCell
-                              colSpan={5}
+                              colSpan={4}
                               className="text-center py-12 text-muted-foreground"
                             >
                               <File className="h-12 w-12 mx-auto mb-3 opacity-30" />
@@ -399,45 +362,8 @@ export default function KnowledgeBasePage() {
                               <TableCell className="text-muted-foreground text-sm">
                                 {doc.uploaded}
                               </TableCell>
-                              <TableCell>
-                                {doc.indexing ? (
-                                  <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 gap-1">
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                    Indexing...
-                                  </Badge>
-                                ) : doc.indexed ? (
-                                  <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 gap-1">
-                                    <CheckCircle2 className="h-3 w-3" />
-                                    Indexed
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="outline" className="gap-1">
-                                    <X className="h-3 w-3" />
-                                    Failed
-                                  </Badge>
-                                )}
-                              </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-2">
-                                  {!doc.indexed && !doc.indexing && (
-                                    <motion.div
-                                      variants={buttonVariants}
-                                      whileTap="tap"
-                                      whileHover="hover"
-                                    >
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() =>
-                                          handleRetryIndexing(doc.id)
-                                        }
-                                        className="h-8 px-2 text-xs"
-                                      >
-                                        <Loader2 className="h-3 w-3 mr-1" />
-                                        Retry
-                                      </Button>
-                                    </motion.div>
-                                  )}
                                   <motion.div
                                     variants={buttonVariants}
                                     whileTap="tap"
@@ -466,8 +392,7 @@ export default function KnowledgeBasePage() {
 
                 {/* Document Count */}
                 <div className="mt-4 text-xs text-muted-foreground text-right">
-                  Total: {documents.length} documents (
-                  {documents.filter((d) => d.indexed).length} indexed)
+                  Total: {documents.length} documents
                 </div>
               </CardContent>
             </Card>
@@ -484,14 +409,12 @@ export default function KnowledgeBasePage() {
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <FileText className="h-5 w-5 text-secondary" />
-                  Supported Formats
+                  Botpress Integration
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">
-                  Upload PDF or DOCX files up to 10MB. After upload, documents
-                  are automatically indexed and made available to the AI agent
-                  for retrieval.
+                  Upload PDF or DOCX files up to 10MB. Once uploaded, these documents are securely registered and dynamically consumed by your Botpress AI assistant to resolve homeowner warranty queries.
                 </p>
               </CardContent>
             </Card>

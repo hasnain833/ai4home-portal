@@ -5,9 +5,11 @@ import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
+import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -35,6 +37,7 @@ import {
   AlertCircle,
   Plus,
   MoreVertical,
+  RotateCcw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -55,7 +58,9 @@ interface Ticket {
     email: string;
   };
   homeownerId: string;
-  address: string;
+  property?: {
+    address: string;
+  };
   issueType: string;
   status: TicketStatus;
   priority: TicketPriority;
@@ -88,21 +93,54 @@ const fadeInUp = {
   visible: { opacity: 1, y: 0 },
 };
 
-const statusColors: Record<string, string> = {
-  OPEN: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  IN_PROGRESS:
-    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-  RESOLVED:
-    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  ESCALATED:
-    "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+const statusStyles: Record<TicketStatus, { bg: string, text: string, border: string, dot: string }> = {
+  OPEN: {
+    bg: "bg-sky-50 dark:bg-sky-950/20",
+    text: "text-sky-700 dark:text-sky-400",
+    border: "border-sky-200 dark:border-sky-900/50",
+    dot: "bg-sky-500",
+  },
+  IN_PROGRESS: {
+    bg: "bg-amber-50 dark:bg-amber-950/20",
+    text: "text-amber-700 dark:text-amber-400",
+    border: "border-amber-200 dark:border-amber-900/50",
+    dot: "bg-amber-500",
+  },
+  RESOLVED: {
+    bg: "bg-emerald-50 dark:bg-emerald-950/20",
+    text: "text-emerald-700 dark:text-emerald-400",
+    border: "border-emerald-200 dark:border-emerald-900/50",
+    dot: "bg-emerald-500",
+  },
+  ESCALATED: {
+    bg: "bg-rose-50 dark:bg-rose-950/20",
+    text: "text-rose-700 dark:text-rose-400",
+    border: "border-rose-200 dark:border-rose-900/50",
+    dot: "bg-rose-500",
+  },
 };
 
-const priorityColors: Record<string, string> = {
-  LOW: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400",
-  MEDIUM: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  HIGH: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
-  URGENT: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+const priorityStyles: Record<TicketPriority, { bg: string, text: string, border: string }> = {
+  LOW: {
+    bg: "bg-slate-50 dark:bg-slate-900/20",
+    text: "text-slate-600 dark:text-slate-400",
+    border: "border-slate-200 dark:border-slate-800/50",
+  },
+  MEDIUM: {
+    bg: "bg-indigo-50 dark:bg-indigo-950/20",
+    text: "text-indigo-600 dark:text-indigo-400",
+    border: "border-indigo-200 dark:border-indigo-900/50",
+  },
+  HIGH: {
+    bg: "bg-orange-50 dark:bg-orange-950/20",
+    text: "text-orange-700 dark:text-orange-400",
+    border: "border-orange-200 dark:border-orange-900/50",
+  },
+  URGENT: {
+    bg: "bg-rose-50 dark:bg-rose-950/20",
+    text: "text-rose-700 dark:text-rose-400",
+    border: "border-rose-200 dark:border-rose-900/50",
+  },
 };
 
 export default function TicketsPage() {
@@ -158,7 +196,9 @@ export default function TicketsPage() {
         t.issueType.toLowerCase().includes(search.toLowerCase());
       const matchStatus = status === "all" || t.status === status;
       const matchPriority = priority === "all" || t.priority === priority;
-      const matchYear = year === "all" || t.warrantyYear.toString() === year;
+      const matchYear =
+        year === "all" ||
+        (year === "1" ? t.warrantyYear === 1 : t.warrantyYear >= 2);
       return matchSearch && matchStatus && matchPriority && matchYear;
     });
   }, [tickets, search, status, priority, year]);
@@ -193,15 +233,27 @@ export default function TicketsPage() {
   };
 
   const handleStatusChange = async (ticketId: string, newStatus: TicketStatus) => {
-    // In a real app, you'd call API here
     try {
-      // For now, update locally to show it works, but in a real app call the PATCH/PUT API
-      setTickets((prev) =>
-        prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus } : t))
-      );
-      showToast("success", `Ticket status updated to ${newStatus.replace("_", " ")}`);
+      const response = await fetch(`/api/tickets/${ticketId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (response.ok) {
+        setTickets((prev) =>
+          prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus } : t))
+        );
+        showToast("success", `Ticket status successfully updated to ${newStatus.replace("_", " ")}`);
+      } else {
+        const errorData = await response.json();
+        showToast("error", errorData.message || "Failed to update status");
+      }
     } catch (error) {
-      showToast("error", "Failed to update status");
+      console.error("Error updating ticket status:", error);
+      showToast("error", "Failed to connect to the server");
     }
   };
 
@@ -298,29 +350,29 @@ export default function TicketsPage() {
 
           {/* Filters Card */}
           <motion.div variants={cardVariants}>
-            <Card className="shadow-sm">
-              <CardContent className="pt-6">
-                <div className="flex flex-wrap gap-3 items-end">
-                  <div className="flex-1 min-w-[180px]">
-                    <Label className="text-xs font-medium text-muted-foreground mb-1 block">Search</Label>
+            <Card className="border border-border/80 bg-linear-to-b from-card/85 to-card/50 backdrop-blur-md shadow-xs">
+              <CardContent className="p-5 md:p-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-end">
+                  <div className="sm:col-span-2 md:col-span-1 md:flex-1">
+                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Search</Label>
                     <div className="relative">
-                      <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground/80" />
                       <Input
                         placeholder="ID, homeowner, issue..."
-                        className="pl-8"
+                        className="pl-9 h-9 border-border/80 focus-visible:ring-1 focus-visible:ring-primary/45 rounded-lg text-sm bg-background/50"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                       />
                     </div>
                   </div>
-                  <div className="w-[140px]">
-                    <Label className="text-xs font-medium text-muted-foreground mb-1 block">Status</Label>
+                  <div>
+                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Status</Label>
                     <Select value={status} onValueChange={setStatus}>
-                      <SelectTrigger>
+                      <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
                         <SelectValue placeholder="Status" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="all">All Statuses</SelectItem>
                         <SelectItem value="OPEN">Open</SelectItem>
                         <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
                         <SelectItem value="RESOLVED">Resolved</SelectItem>
@@ -328,14 +380,14 @@ export default function TicketsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="w-[140px]">
-                    <Label className="text-xs font-medium text-muted-foreground mb-1 block">Priority</Label>
+                  <div>
+                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Priority</Label>
                     <Select value={priority} onValueChange={setPriority}>
-                      <SelectTrigger>
+                      <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
                         <SelectValue placeholder="Priority" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="all">All Priorities</SelectItem>
                         <SelectItem value="LOW">Low</SelectItem>
                         <SelectItem value="MEDIUM">Medium</SelectItem>
                         <SelectItem value="HIGH">High</SelectItem>
@@ -343,22 +395,29 @@ export default function TicketsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="w-[140px]">
-                    <Label className="text-xs font-medium text-muted-foreground mb-1 block">Warranty Year</Label>
+                  <div>
+                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Warranty Year</Label>
                     <Select value={year} onValueChange={setYear}>
-                      <SelectTrigger>
+                      <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
                         <SelectValue placeholder="Year" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="all">All Years</SelectItem>
                         <SelectItem value="1">Year 1</SelectItem>
                         <SelectItem value="2">Year 2+</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button variant="ghost" onClick={handleResetFilters} className="mb-0.5">
-                    Reset
-                  </Button>
+                  <div>
+                    <Button 
+                      variant="outline" 
+                      onClick={handleResetFilters} 
+                      className="w-full h-9 gap-2 text-xs font-medium text-muted-foreground hover:text-foreground border-border/80 hover:bg-muted/40 transition-all rounded-lg"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Reset Filters
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -366,30 +425,33 @@ export default function TicketsPage() {
 
           {/* Tickets List */}
           <motion.div variants={cardVariants}>
-            <Card className="shadow-sm">
-              <CardHeader>
-                <CardTitle className="flex justify-between items-center">
-                  <span>Tickets</span>
-                  <span className="text-sm font-normal text-muted-foreground">
+            <Card className="border border-border/70 bg-card shadow-xs rounded-xl overflow-hidden">
+              <CardHeader className="border-b border-border/50 bg-muted/15 px-6 py-4">
+                <CardTitle className="flex justify-between items-center text-lg font-semibold tracking-tight">
+                  <span className="bg-linear-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
+                    Active Claims
+                  </span>
+                  <span className="text-xs font-semibold px-2.5 py-1 bg-muted rounded-full text-muted-foreground">
                     {filteredTickets.length} ticket{filteredTickets.length !== 1 ? "s" : ""}
                   </span>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-0">
                 {filteredTickets.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <AlertCircle className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                    <p>No tickets found</p>
+                  <div className="text-center py-16 text-muted-foreground px-6">
+                    <AlertCircle className="h-10 w-10 mx-auto mb-3 text-muted-foreground/60" />
+                    <h3 className="font-semibold text-foreground text-sm">No tickets found</h3>
+                    <p className="text-xs mt-1 text-muted-foreground/80 max-w-xs mx-auto">Try adjusting your search keywords or clearing the active filters.</p>
                     {(search || status !== "all" || priority !== "all" || year !== "all") && (
-                      <Button variant="link" onClick={handleResetFilters} className="mt-2">
-                        Clear filters
+                      <Button variant="outline" size="sm" onClick={handleResetFilters} className="mt-4 text-xs h-8 border-border/80">
+                        Clear All Filters
                       </Button>
                     )}
                   </div>
                 ) : isMobile ? (
                   // Mobile card view
                   <AnimatePresence mode="popLayout">
-                    <div className="space-y-3">
+                    <div className="space-y-3 p-4">
                       {paginatedTickets.map((ticket) => (
                         <motion.div
                           key={ticket.id}
@@ -398,56 +460,69 @@ export default function TicketsPage() {
                           animate="visible"
                           exit="exit"
                           layout
-                          className="border rounded-lg p-4 space-y-2 bg-card"
+                          className="border border-border/80 rounded-xl p-4 space-y-3 bg-background/35 backdrop-blur-xs hover:border-border transition-all"
                         >
-                          <div className="flex justify-between items-start">
+                          <div className="flex justify-between items-start gap-2">
                             <div>
-                              <div className="font-mono text-sm font-medium">{ticket.id}</div>
-                              <div className="text-sm font-semibold mt-1">{ticket.homeowner?.name || "Unknown"}</div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-[10px] text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded border border-border/50" title={ticket.id}>
+                                  #{ticket.id.substring(0, 8)}
+                                </span>
+                              </div>
+                              <div className="text-sm font-semibold mt-1.5 text-foreground">{ticket.homeowner?.name || "Unknown"}</div>
                             </div>
-                            <Badge className={statusColors[ticket.status]}>
+                            <Badge variant="outline" className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-semibold border flex items-center gap-1.5 shadow-2xs", statusStyles[ticket.status].bg, statusStyles[ticket.status].text, statusStyles[ticket.status].border)}>
+                              <span className={cn("h-1 w-1 rounded-full", statusStyles[ticket.status].dot)} />
                               {ticket.status.replace("_", " ")}
                             </Badge>
                           </div>
-                          <div className="text-sm text-muted-foreground">
-                            <div>{ticket.issueType}</div>
-                            <div>{ticket.address}</div>
+                          
+                          <div className="space-y-1 text-xs">
+                            <div className="font-medium text-foreground">{ticket.issueType}</div>
+                            <div className="text-muted-foreground flex items-center gap-1.5 mt-1">
+                              <span className="inline-block w-1.5 h-1.5 rounded-full bg-border" />
+                              {ticket.property?.address || "No property address linked"}
+                            </div>
                           </div>
-                          <div className="flex justify-between items-center text-xs">
-                            <Badge variant="outline" className={priorityColors[ticket.priority]}>
-                              {ticket.priority}
-                            </Badge>
-                            <span>Year {ticket.warrantyYear}</span>
+                          
+                          <div className="flex justify-between items-center text-[11px] text-muted-foreground pt-1 border-t border-border/40">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold border shadow-2xs", priorityStyles[ticket.priority].bg, priorityStyles[ticket.priority].text, priorityStyles[ticket.priority].border)}>
+                                {ticket.priority}
+                              </Badge>
+                              <span>Year {ticket.warrantyYear}</span>
+                            </div>
                             <span>{new Date(ticket.createdAt).toLocaleDateString()}</span>
                           </div>
-                          <div className="flex justify-end gap-2 pt-2">
+                          
+                          <div className="flex justify-end gap-2 pt-2 border-t border-border/30">
                             {!isHomeowner && (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="outline" size="sm">
+                                  <Button variant="outline" size="sm" className="h-7 text-xs border-border/80">
                                     <MoreVertical className="h-3 w-3 mr-1" />
                                     Status
                                   </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent>
-                                  <DropdownMenuItem onClick={() => handleStatusChange(ticket.id, "OPEN")}>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleStatusChange(ticket.id, "OPEN")}>
                                     Open
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleStatusChange(ticket.id, "IN_PROGRESS")}>
+                                  <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleStatusChange(ticket.id, "IN_PROGRESS")}>
                                     In Progress
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleStatusChange(ticket.id, "RESOLVED")}>
+                                  <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleStatusChange(ticket.id, "RESOLVED")}>
                                     Resolved
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleStatusChange(ticket.id, "ESCALATED")}>
+                                  <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleStatusChange(ticket.id, "ESCALATED")}>
                                     Escalated
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             )}
-                            <Link href={`/tickets/${ticket.id}`}>
-                              <Button variant="ghost" size="sm">
-                                <Eye className="h-4 w-4 mr-1" />
+                            <Link href={`/tickets/${ticket.id}`} className="w-fit">
+                              <Button variant="ghost" size="sm" className="h-7 text-xs">
+                                <Eye className="h-3.5 w-3.5 mr-1" />
                                 View
                               </Button>
                             </Link>
@@ -458,19 +533,19 @@ export default function TicketsPage() {
                   </AnimatePresence>
                 ) : (
                   // Desktop table view
-                  <div className="overflow-x-auto rounded-md">
-                    <Table className="min-w-[800px]">
-                      <TableHeader>
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[900px] border-collapse">
+                      <TableHeader className="bg-muted/15 border-b border-border/50">
                         <TableRow>
-                          <TableHead>ID</TableHead>
-                          <TableHead>Homeowner</TableHead>
-                          <TableHead>Address</TableHead>
-                          <TableHead>Issue</TableHead>
-                          <TableHead>Year</TableHead>
-                          <TableHead>Priority</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Created</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 pl-6">ID</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Homeowner</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Address</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Issue</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Year</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Priority</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Status</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Created</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 pr-6 text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -483,25 +558,33 @@ export default function TicketsPage() {
                               animate="visible"
                               exit="exit"
                               layout
-                              className="border-b border-border/50 hover:bg-muted/30 transition-colors"
+                              className="border-b border-border/30 hover:bg-muted/15 transition-colors group"
                             >
-                              <TableCell className="font-mono text-sm font-medium">
-                                {ticket.id}
+                              <TableCell className="py-3.5 pl-6">
+                                <span className="font-mono text-[11px] text-muted-foreground bg-muted/65 px-2 py-0.5 rounded border border-border/55 group-hover:bg-muted transition-all" title={ticket.id}>
+                                  {ticket.id.substring(0, 8)}...
+                                </span>
                               </TableCell>
-                              <TableCell>{ticket.homeowner?.name || "Unknown"}</TableCell>
-                              <TableCell className="max-w-[180px] truncate">
-                                {ticket.address}
+                              <TableCell className="py-3.5 font-medium text-foreground text-sm">
+                                {ticket.homeowner?.name || "Unknown"}
                               </TableCell>
-                              <TableCell className="max-w-[200px] truncate">
+                              <TableCell className="py-3.5 text-muted-foreground text-xs max-w-[200px] truncate" title={ticket.property?.address}>
+                                {ticket.property?.address || <span className="text-muted-foreground/50 italic">No address linked</span>}
+                              </TableCell>
+                              <TableCell className="py-3.5 text-foreground/90 font-medium text-xs max-w-[220px] truncate" title={ticket.issueType}>
                                 {ticket.issueType}
                               </TableCell>
-                              <TableCell>Year {ticket.warrantyYear}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className={priorityColors[ticket.priority]}>
+                              <TableCell className="py-3.5 text-muted-foreground text-xs">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-[10px] font-semibold text-muted-foreground border border-border/50">
+                                  Year {ticket.warrantyYear}
+                                </span>
+                              </TableCell>
+                              <TableCell className="py-3.5">
+                                <Badge variant="outline" className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-semibold border shadow-2xs", priorityStyles[ticket.priority].bg, priorityStyles[ticket.priority].text, priorityStyles[ticket.priority].border)}>
                                   {ticket.priority}
                                 </Badge>
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="py-3.5">
                                 {!isHomeowner ? (
                                   <Select
                                     value={ticket.status}
@@ -509,29 +592,33 @@ export default function TicketsPage() {
                                       handleStatusChange(ticket.id, val as TicketStatus)
                                     }
                                   >
-                                    <SelectTrigger className="w-[120px] h-7 text-xs">
-                                      <SelectValue />
+                                    <SelectTrigger className={cn("w-[130px] h-8 text-[11px] font-semibold rounded-full border px-3 py-1 flex items-center justify-between gap-1.5 transition-all shadow-2xs cursor-pointer", statusStyles[ticket.status].bg, statusStyles[ticket.status].text, statusStyles[ticket.status].border)}>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={cn("h-1.5 w-1.5 rounded-full", statusStyles[ticket.status].dot)} />
+                                        <SelectValue />
+                                      </div>
                                     </SelectTrigger>
                                     <SelectContent>
-                                      <SelectItem value="OPEN">Open</SelectItem>
-                                      <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
-                                      <SelectItem value="RESOLVED">Resolved</SelectItem>
-                                      <SelectItem value="ESCALATED">Escalated</SelectItem>
+                                      <SelectItem value="OPEN" className="text-xs">Open</SelectItem>
+                                      <SelectItem value="IN_PROGRESS" className="text-xs">In Progress</SelectItem>
+                                      <SelectItem value="RESOLVED" className="text-xs">Resolved</SelectItem>
+                                      <SelectItem value="ESCALATED" className="text-xs">Escalated</SelectItem>
                                     </SelectContent>
                                   </Select>
                                 ) : (
-                                  <Badge className={statusColors[ticket.status]}>
+                                  <Badge variant="outline" className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-semibold border flex items-center gap-1.5 shadow-2xs w-fit", statusStyles[ticket.status].bg, statusStyles[ticket.status].text, statusStyles[ticket.status].border)}>
+                                    <span className={cn("h-1.5 w-1.5 rounded-full", statusStyles[ticket.status].dot)} />
                                     {ticket.status.replace("_", " ")}
                                   </Badge>
                                 )}
                               </TableCell>
-                              <TableCell>
+                              <TableCell className="py-3.5 text-muted-foreground text-xs">
                                 {new Date(ticket.createdAt).toLocaleDateString()}
                               </TableCell>
-                              <TableCell className="text-right">
+                              <TableCell className="py-3.5 pr-6 text-right">
                                 <Link href={`/tickets/${ticket.id}`}>
-                                  <Button variant="ghost" size="sm">
-                                    <Eye className="h-4 w-4 mr-1" />
+                                  <Button variant="ghost" size="sm" className="h-8 text-xs hover:bg-muted/50 group-hover:text-primary transition-all rounded-lg">
+                                    <Eye className="h-3.5 w-3.5 mr-1" />
                                     View
                                   </Button>
                                 </Link>
@@ -546,26 +633,30 @@ export default function TicketsPage() {
 
                 {/* Pagination */}
                 {totalPages > 1 && (
-                  <div className="flex justify-between items-center mt-6 pt-2 border-t">
-                    <p className="text-sm text-muted-foreground">
-                      Page {page} of {totalPages}
+                  <div className="flex justify-between items-center p-4 md:px-6 md:py-4 border-t border-border/40 bg-muted/5">
+                    <p className="text-xs text-muted-foreground">
+                      Showing page <span className="font-semibold text-foreground">{page}</span> of <span className="font-semibold text-foreground">{totalPages}</span>
                     </p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-1.5">
                       <Button
                         variant="outline"
                         size="sm"
+                        className="h-8 px-2.5 border-border/80 rounded-lg text-xs"
                         onClick={() => setPage((p) => Math.max(1, p - 1))}
                         disabled={page === 1}
                       >
-                        <ChevronLeft className="h-4 w-4" />
+                        <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+                        Previous
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
+                        className="h-8 px-2.5 border-border/80 rounded-lg text-xs"
                         onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                         disabled={page === totalPages}
                       >
-                        <ChevronRight className="h-4 w-4" />
+                        Next
+                        <ChevronRight className="h-3.5 w-3.5 ml-1" />
                       </Button>
                     </div>
                   </div>
@@ -578,6 +669,3 @@ export default function TicketsPage() {
     </ProtectedRoute>
   );
 }
-
-// Missing Label component import - add at top
-import { Label } from "@/components/ui/label";

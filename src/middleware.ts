@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { decrypt } from "@/lib/session";
 
 // Define protected routes and their allowed roles
 const routeAccess: Record<string, string[]> = {
@@ -16,7 +17,7 @@ const routeAccess: Record<string, string[]> = {
 // Public routes (no auth required)
 const publicRoutes = ["/login", "/signup", "/"];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow public routes
@@ -37,8 +38,14 @@ export function middleware(request: NextRequest) {
   }
 
   try {
-    const user = JSON.parse(userCookie.value);
-    const userRole = user.role;
+    const session = await decrypt(userCookie.value);
+    if (!session || !session.user) {
+      throw new Error("Invalid session");
+    }
+
+    const userRole = typeof session.user.role === 'string' 
+      ? session.user.role.toLowerCase() 
+      : session.user.role;
 
     // Find matching route pattern and check role access
     let allowedRoles: string[] | undefined;

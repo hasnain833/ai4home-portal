@@ -1,244 +1,99 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { 
-  Send, 
-  Bot, 
-  User as UserIcon, 
-  Loader2, 
-  Paperclip, 
-  RefreshCw,
-  AlertTriangle
-} from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useAuth } from "@/contexts/AuthContext";
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-  diySteps?: string[];
-}
+import { Bot, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function AIChatPage() {
-  const { user } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [botId, setBotId] = useState<string>("");
 
-  // Auto-scroll to bottom
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages]);
+    // Load Bot ID from environment or system setting
+    const id = process.env.NEXT_PUBLIC_BOTPRESS_BOT_ID || "3c8bb03b-e01e-450a-bc95-8d591ff1b5e3";
+    setBotId(id);
 
-  // Initial greeting
-  useEffect(() => {
-    const fetchGreeting = async () => {
-      try {
-        const response = await fetch("/api/agent-config");
-        if (response.ok) {
-          const configs = await response.json();
-          const active = configs.find((c: any) => c.isActive);
-          if (active) {
-            setMessages([{
-              id: "0",
-              role: "assistant",
-              content: active.greetingMessage || "Hello! I'm your AI warranty assistant. How can I help you today?",
-              timestamp: new Date()
-            }]);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to load greeting:", error);
+    // Dynamic injection of Botpress floating Webchat scripts so the webchat works natively!
+    const injectScript = document.createElement("script");
+    injectScript.src = "https://cdn.botpress.cloud/webchat/v2.2/inject.js";
+    injectScript.async = true;
+    document.body.appendChild(injectScript);
+
+    const configScript = document.createElement("script");
+    configScript.src = `https://mediafiles.botpress.cloud/${id}/webchat/v2.2/config.js`;
+    configScript.async = true;
+    configScript.defer = true;
+    document.body.appendChild(configScript);
+
+    return () => {
+      // Cleanup scripts on unmount
+      if (document.body.contains(injectScript)) {
+        document.body.removeChild(injectScript);
+      }
+      if (document.body.contains(configScript)) {
+        document.body.removeChild(configScript);
+      }
+      // Also clean up any DOM components the Botpress script might have created
+      const webchatIframe = document.getElementById("bp-webchat-container") || document.querySelector("iframe[src*='botpress']");
+      if (webchatIframe) {
+        webchatIframe.remove();
       }
     };
-    fetchGreeting();
   }, []);
-
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInput("");
-    setIsLoading(true);
-
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: messages.concat(userMessage).map(m => ({ role: m.role, content: m.content })),
-          companyId: user?.companyId,
-          homeownerId: user?.id,
-          conversationId: conversationId
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.conversationId) setConversationId(data.conversationId);
-
-        const aiMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: data.content,
-          diySteps: data.diySteps,
-          timestamp: new Date()
-        };
-        setMessages(prev => [...prev, aiMessage]);
-      }
-    } catch (error) {
-      console.error("Chat error:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   return (
     <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout>
-        <div className="flex flex-col h-[calc(100vh-120px)] max-w-4xl mx-auto">
-          <Card className="flex-1 flex flex-col overflow-hidden shadow-xl border-t-4 border-t-primary">
-            <CardHeader className="border-b bg-muted/30 py-4 flex flex-row items-center justify-between">
+        <div className="flex flex-col h-[calc(100vh-120px)] max-w-5xl mx-auto px-4">
+          <Card className="flex-1 flex flex-col overflow-hidden shadow-2xl border border-gray-100 rounded-3xl bg-white/85 backdrop-blur-md">
+            <CardHeader className="border-b bg-[#0F3B3D]/5 py-4 px-6 flex flex-row items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="bg-primary/10 p-2 rounded-full">
-                  <Bot className="h-6 w-6 text-primary" />
+                <div className="bg-[#0F3B3D]/10 p-2.5 rounded-2xl">
+                  <Bot className="h-6 w-6 text-[#0F3B3D]" />
                 </div>
                 <div>
-                  <CardTitle className="text-lg">AI Warranty Assistant</CardTitle>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
-                    Online | Powered by Ai.Lumen
+                  <CardTitle className="text-xl font-bold text-[#0F3B3D]">Warranty Support AI</CardTitle>
+                  <p className="text-xs text-[#0F3B3D]/70 flex items-center gap-1.5 mt-0.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse border-2 border-white shadow-sm"></span>
+                    Botpress Agent Active
                   </p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => setMessages([])}>
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={() => window.location.reload()} 
+                className="h-9 w-9 rounded-xl border-gray-200 hover:bg-[#0F3B3D]/10 text-gray-700 transition-colors"
+                title="Restart Chat"
+              >
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </CardHeader>
             
-            <CardContent className="flex-1 overflow-hidden p-0 relative">
-              <ScrollArea className="h-full p-4 md:p-6">
-                <div className="space-y-6">
-                  <AnimatePresence initial={false}>
-                    {messages.map((m) => (
-                      <motion.div
-                        key={m.id}
-                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-                      >
-                        <div className={`flex gap-3 max-w-[85%] md:max-w-[75%] ${m.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
-                          <Avatar className="h-8 w-8 mt-1 border shadow-sm">
-                            <AvatarFallback className={m.role === "assistant" ? "bg-primary text-white" : "bg-muted"}>
-                              {m.role === "assistant" ? <Bot className="h-4 w-4" /> : <UserIcon className="h-4 w-4" />}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
-                            <div className={`rounded-2xl px-4 py-3 shadow-sm ${
-                              m.role === "user" 
-                                ? "bg-primary text-primary-foreground rounded-tr-none" 
-                                : "bg-muted border rounded-tl-none"
-                            }`}>
-                              <p className="text-sm md:text-base whitespace-pre-wrap leading-relaxed">
-                                {m.content}
-                              </p>
-                              {m.diySteps && m.diySteps.length > 0 && (
-                                <div className="mt-4 p-3 bg-background/50 rounded-lg border border-primary/20">
-                                  <p className="text-xs font-bold uppercase tracking-wider text-primary mb-2">Self-Fix Instructions:</p>
-                                  <ul className="space-y-1">
-                                    {m.diySteps.map((step, i) => (
-                                      <li key={i} className="text-sm flex gap-2">
-                                        <span className="text-primary font-bold">{i+1}.</span>
-                                        <span>{step.replace(/^\d\./, "").trim()}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                            </div>
-                            <span className="text-[10px] text-muted-foreground mt-1 px-1">
-                              {m.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                  
-                  {isLoading && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex justify-start"
-                    >
-                      <div className="flex gap-3 max-w-[75%]">
-                        <Avatar className="h-8 w-8 border shadow-sm">
-                          <AvatarFallback className="bg-primary text-white">
-                            <Bot className="h-4 w-4" />
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="bg-muted border rounded-2xl rounded-tl-none px-4 py-3 shadow-sm flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                          <span className="text-sm text-muted-foreground italic">Thinking...</span>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                  <div ref={scrollRef} />
+            <CardContent className="flex-1 p-0 overflow-hidden relative min-h-[500px]">
+              {botId ? (
+                <iframe
+                  src={`https://cdn.botpress.cloud/webchat/v2.2/shareable.html?botId=${botId}`}
+                  className="w-full h-full border-0 bg-gray-50"
+                  title="Botpress Webchat"
+                  allow="microphone; camera"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center text-gray-500">
+                  <div className="bg-gray-100 p-4 rounded-full mb-3 animate-pulse">
+                    <Bot className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <p className="text-sm font-semibold">Initializing Botpress...</p>
+                  <p className="text-xs text-gray-400 mt-1">Please ensure NEXT_PUBLIC_BOTPRESS_BOT_ID is set in your .env</p>
                 </div>
-              </ScrollArea>
+              )}
             </CardContent>
-
-            <div className="p-4 border-t bg-background">
-              <div className="flex gap-2 items-end">
-                <Button variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-primary">
-                  <Paperclip className="h-5 w-5" />
-                </Button>
-                <div className="flex-1 relative">
-                  <Input
-                    placeholder="Type your warranty question here..."
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                    className="pr-12 min-h-[44px] rounded-xl focus-visible:ring-primary shadow-inner"
-                  />
-                  <Button 
-                    size="icon" 
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg"
-                    onClick={handleSend}
-                    disabled={isLoading || !input.trim()}
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-              <div className="mt-2 flex items-center justify-center gap-4 text-[10px] text-muted-foreground uppercase tracking-widest font-bold">
-                <span className="flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Life Safety Issues? Call 911</span>
-              </div>
-            </div>
           </Card>
         </div>
       </PortalLayout>
     </ProtectedRoute>
   );
 }
+

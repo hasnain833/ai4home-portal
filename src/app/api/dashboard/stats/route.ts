@@ -1,10 +1,19 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { getServerSession } from "@/lib/session";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const session = await getServerSession(request);
+    if (!session || (session.role !== "ADMIN" && session.role !== "STAFF")) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
+    }
+
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    // Scope all queries to the admin/staff's companyId
+    const companyScope = { homeowner: { companyId: session.companyId } };
 
     // Fetch stats in parallel
     const [
@@ -17,24 +26,26 @@ export async function GET() {
       resolvedTicketsData,
       recentTickets
     ] = await Promise.all([
-      prisma.ticket.count(),
-      prisma.ticket.count({ where: { status: "OPEN" } }),
-      prisma.ticket.count({ where: { status: "IN_PROGRESS" } }),
-      prisma.ticket.count({ where: { status: "RESOLVED" } }),
-      prisma.ticket.count({ where: { status: "ESCALATED" } }),
+      prisma.ticket.count({ where: companyScope }),
+      prisma.ticket.count({ where: { status: "OPEN", ...companyScope } }),
+      prisma.ticket.count({ where: { status: "IN_PROGRESS", ...companyScope } }),
+      prisma.ticket.count({ where: { status: "RESOLVED", ...companyScope } }),
+      prisma.ticket.count({ where: { status: "ESCALATED", ...companyScope } }),
       prisma.ticket.count({
         where: {
           status: "RESOLVED",
-          updatedAt: { gte: oneWeekAgo }
+          updatedAt: { gte: oneWeekAgo },
+          ...companyScope
         }
       }),
       prisma.ticket.findMany({
-        where: { status: "RESOLVED" },
+        where: { status: "RESOLVED", ...companyScope },
         select: { createdAt: true, updatedAt: true }
       }),
       prisma.ticket.findMany({
         take: 5,
         orderBy: { createdAt: "desc" },
+        where: companyScope,
         include: { homeowner: { select: { name: true } } }
       })
     ]);
@@ -72,3 +83,4 @@ export async function GET() {
     return NextResponse.json({ message: "Error fetching stats" }, { status: 500 });
   }
 }
+

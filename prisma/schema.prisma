@@ -27,18 +27,18 @@ enum TicketPriority {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  password      String
-  name          String?
-  role          Role      @default(HOMEOWNER)
-  companyId     String?
-  company       Company?  @relation(fields: [companyId], references: [id])
-  properties    Property[]
-  tickets       Ticket[]  @relation("HomeownerTickets")
-  conversations Conversation[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  email           String    @unique
+  password        String
+  name            String?
+  role            Role      @default(HOMEOWNER)
+  companyId       String?
+  company         Company?  @relation(fields: [companyId], references: [id])
+  properties      Property[]
+  tickets         Ticket[]  @relation("HomeownerTickets")
+  conversations   Conversation[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 model Company {
@@ -148,17 +148,7 @@ model KnowledgeBaseDocument {
   name          String
   size          String
   url           String
-  content       String?        @db.Text
   documentType  DocumentType   @default(MANUAL)
-  isIndexed     Boolean        @default(false)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
-}
-
-model OtpVerification {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  otp       String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
 }

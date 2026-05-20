@@ -9,46 +9,77 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
   Shield,
   Mail,
   Lock,
   Eye,
   EyeOff,
   CheckCircle,
+  Sparkles,
+  CheckCircle2,
+  Wrench,
+  User,
+  Home,
+  ArrowRight,
+  KeyRound,
+  Activity,
+  TrendingUp,
+  UserCheck,
+  Building,
+  Clock
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
-function LoginForm() {
+const getPasswordStrength = (password: string) => {
+  let score = 0;
+  if (password.length >= 8) score++;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
+  if (/\d/.test(password)) score++;
+  if (/[^a-zA-Z\d]/.test(password)) score++;
+  const levels = ["", "Weak", "Fair", "Good", "Strong"];
+  return { score, label: levels[score] || "Very Weak" };
+};
+
+function AuthContainer() {
   const { login } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+
+  // Mode: login, signup, verify
+  const [mode, setMode] = useState<"login" | "signup" | "verify">("login");
+
+  // Login states
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
+
+  // Signup states
+  const [fullName, setFullName] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [agreeTerms, setAgreeTerms] = useState(false);
+  const [passwordStrength, setPasswordStrength] = useState({ score: 0, label: "" });
+
+  // OTP Verification states
+  const [otp, setOtp] = useState("");
+  const [correctOtp, setCorrectOtp] = useState("");
+
+  // Shared UX states
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
 
   useEffect(() => {
-    try {
-      const savedEmail = localStorage.getItem("remembered_email");
-      if (savedEmail) {
-        setEmail(savedEmail);
-        setRememberMe(true);
-      }
-    } catch {
-      // localStorage not available (SSR), ignore
+    const initialMode = searchParams.get("mode");
+    if (initialMode === "signup") {
+      setMode("signup");
+    } else {
+      setMode("login");
     }
+
     if (searchParams.get("signup") === "success") {
       setSuccess("Account created successfully! Please sign in.");
     } else if (searchParams.get("reset") === "success") {
@@ -56,33 +87,46 @@ function LoginForm() {
     }
   }, [searchParams]);
 
-  const validateEmail = (email: string) =>
-    /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/.test(email);
+  useEffect(() => {
+    try {
+      const savedEmail = localStorage.getItem("remembered_email");
+      if (savedEmail) {
+        setLoginEmail(savedEmail);
+        setRememberMe(true);
+      }
+    } catch {
+      // localStorage not available (SSR), ignore
+    }
+  }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const updatePassword = (pwd: string) => {
+    setSignupPassword(pwd);
+    setPasswordStrength(getPasswordStrength(pwd));
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSuccess("");
 
-    if (!email.trim() || !validateEmail(email)) {
+    if (!loginEmail.trim() || !/^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/.test(loginEmail)) {
       setError("Please enter a valid email address");
       return;
     }
-    if (!password) {
+    if (!loginPassword) {
       setError("Password is required");
       return;
     }
 
     if (rememberMe) {
-      localStorage.setItem("remembered_email", email);
+      localStorage.setItem("remembered_email", loginEmail);
     } else {
       localStorage.removeItem("remembered_email");
     }
 
     setIsLoading(true);
     try {
-      await login(email, password);
-      // Redirect is handled by AuthContext after login
+      await login(loginEmail, loginPassword);
     } catch (err) {
       setError(
         err instanceof Error
@@ -94,150 +138,540 @@ function LoginForm() {
     }
   };
 
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (!fullName.trim()) { setError("Full name is required"); return; }
+    if (!/^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/.test(signupEmail)) { setError("Please enter a valid email address"); return; }
+    if (signupPassword.length < 8) { setError("Password must be at least 8 characters"); return; }
+    if (signupPassword !== confirmPassword) { setError("Passwords do not match"); return; }
+    if (!agreeTerms) { setError("You must agree to the Terms of Service"); return; }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/auth/signup/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: signupEmail }),
+      });
+      const data = await response.json();
+      if (!response.ok) { setError(data.message || "Failed to send OTP"); return; }
+
+      setCorrectOtp(data.otp);
+      setSuccess("Verification code sent to your email!");
+      setMode("verify");
+    } catch {
+      setError("An unexpected error occurred while sending OTP.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (!otp || otp.length !== 6) { setError("Please enter a valid 6-digit code"); return; }
+    if (otp !== correctOtp) {
+      setError("Invalid verification code. Please try again.");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName,
+          email: signupEmail,
+          password: signupPassword,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) { setError(data.message || "Failed to create account"); return; }
+
+      setSuccess("Account created successfully! Auto-signing in...");
+
+      try {
+        await login(signupEmail, signupPassword);
+      } catch {
+        setMode("login");
+        setSuccess("Account created! Please sign in with your new credentials.");
+      }
+    } catch {
+      setError("An unexpected error occurred during account creation.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-[#0F3B3D]/10 to-[#E8B86B]/10 p-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-md"
-      >
-        <div className="text-center mb-8">
-          <motion.div
-            initial={{ scale: 0.8 }}
-            animate={{ scale: 1 }}
-            transition={{ duration: 0.3 }}
-            className="inline-flex items-center justify-center p-3 bg-[#0F3B3D] rounded-2xl shadow-lg mb-4"
-          >
-            <Shield className="h-8 w-8 text-[#E8B86B]" />
-          </motion.div>
-          <h1 className="text-2xl font-bold text-gray-900">
+    <div className="min-h-screen flex flex-col md:flex-row bg-background">
+      {/* Left Side: Clean, High-Contrast Minimalist Landing Experience */}
+      <div className="hidden md:flex md:w-[48%] lg:w-[55%] relative overflow-hidden bg-[#04060a] flex-col justify-between p-8 lg:p-12 text-white border-r border-white/5">
+        {/* Subtle radial-gradient glow */}
+        <div className="absolute top-[30%] left-[-10%] w-[400px] h-[400px] bg-[#c59b4c]/[0.03] rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-[20%] right-[-10%] w-[450px] h-[450px] bg-emerald-500/[0.02] rounded-full blur-[140px] pointer-events-none" />
+
+        {/* Branding header */}
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.02] border border-white/10 text-[#c59b4c] shadow-md">
+            <Shield className="h-5 w-5" />
+          </div>
+          <span className="text-lg font-bold tracking-tight text-zinc-100 font-serif">
             Ai.Lumen Warranty Care
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Secure access to warranty management
-          </p>
+          </span>
         </div>
 
-        <Card className="border-0 shadow-xl">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl">Welcome back</CardTitle>
-            <CardDescription>
-              Enter your credentials to access your account
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {success && (
-              <Alert className="mb-4 border-green-500 bg-green-50 text-green-800">
-                <CheckCircle className="h-4 w-4 mr-2" />
-                <AlertDescription>{success}</AlertDescription>
-              </Alert>
-            )}
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email Address</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="you@example.com"
-                    className="pl-9"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    disabled={isLoading}
-                    required
-                  />
-                </div>
-              </div>
+        {/* Core Deck - Clean & Minimalist */}
+        <div className="relative z-10 my-auto max-w-lg space-y-10">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[#c59b4c]/10 border border-[#c59b4c]/20 px-3 py-0.5 text-[10px] font-bold tracking-wider text-[#c59b4c] uppercase">
+              <Sparkles className="h-3 w-3" /> Homeowner & Builder Portal
+            </div>
+            <h2 className="text-4xl lg:text-5xl font-bold tracking-tight leading-[1.15] text-zinc-100 font-serif">
+              Your home system health, <span className="text-[#c59b4c]">digitally secured.</span>
+            </h2>
+            <p className="text-zinc-400 text-sm leading-relaxed max-w-md">
+              Ai.Lumen coordinates real-time diagnostics, homeowner claims, and builder maintenance workflows. Track system faults, access step-by-step DIY guidance, or trigger direct developer support instantly.
+            </p>
+          </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="••••••••"
-                    className="pl-9 pr-10"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={isLoading}
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
+          {/* Key Portal Features - Spacious & Clean */}
+          <div className="space-y-6 pt-2">
+            {/* Feature 1 */}
+            <div className="flex gap-4 items-start">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.02] border border-white/10 text-[#c59b4c] shadow-sm">
+                <Activity className="h-5 w-5" />
               </div>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="remember"
-                    checked={rememberMe}
-                    onCheckedChange={(checked) =>
-                      setRememberMe(checked === true)
-                    }
-                  />
-                  <Label htmlFor="remember" className="text-sm cursor-pointer">
-                    Remember me
-                  </Label>
-                </div>
-                <Link
-                  href="/forgot-password"
-                  className="text-sm text-[#0F3B3D] hover:underline"
-                >
-                  Forgot password?
-                </Link>
+              <div>
+                <h4 className="text-sm font-semibold text-zinc-200">Real-Time Diagnostics</h4>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  Monitor utility health and identify anomalies before they escalate.
+                </p>
               </div>
+            </div>
 
+            {/* Feature 2 */}
+            <div className="flex gap-4 items-start">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.02] border border-white/10 text-emerald-400 shadow-sm">
+                <Wrench className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-zinc-200">Intelligent DIY Support</h4>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  Access step-by-step automated guidance to resolve minor claims fast.
+                </p>
+              </div>
+            </div>
+
+            {/* Feature 3 */}
+            <div className="flex gap-4 items-start">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.02] border border-white/10 text-sky-400 shadow-sm">
+                <UserCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-zinc-200">Synchronized CRM Integration</h4>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  Seamlessly push unresolved issues to Builtopia CRM for automated builder dispatch.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer info */}
+        <div className="relative z-10 flex items-center justify-between text-xs text-zinc-500 pt-4 border-t border-white/5">
+          <span>© 2026 Ai.Lumen Technologies Inc.</span>
+          <span className="flex items-center gap-1.5 text-zinc-400">
+            <Building className="h-3.5 w-3.5 text-zinc-500" /> Core Warranty System Active
+          </span>
+        </div>
+      </div>
+
+      {/* Right Side: Dynamic Glowing Auth Center */}
+      <div className="flex-1 flex items-center justify-center p-6 md:p-12 lg:p-16 bg-[#06080d] relative overflow-hidden">
+        {/* Soft, beautiful ambient glowing radial blurs */}
+        <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-[#c59b4c]/10 rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-emerald-500/5 rounded-full blur-[140px] pointer-events-none" />
+
+        <motion.div
+          layout
+          transition={{ type: "spring", stiffness: 320, damping: 28 }}
+          className="w-full max-w-lg relative z-10"
+        >
+          {/* Mobile-only branding */}
+          <div className="text-center mb-8 md:hidden">
+            <div className="inline-flex items-center justify-center p-4 bg-zinc-900 border border-white/10 text-[#c59b4c] rounded-2xl shadow-xl mb-4">
+              <Shield className="h-6 w-6" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-zinc-50 font-serif">
+              Ai.Lumen Warranty Care
+            </h1>
+            <p className="text-zinc-400 text-xs mt-1">
+              Secure home systems management portal
+            </p>
+          </div>
+
+          <div className="border border-white/10 shadow-[0_0_80px_rgba(0,0,0,0.85)] bg-[#0c101b]/70 backdrop-blur-3xl rounded-[32px] overflow-hidden transition-all duration-300">
+            <div className="space-y-2.5 p-8 lg:p-10 pb-6 border-b border-white/[0.04]">
+              <h3 className="text-3xl font-extrabold tracking-tight text-zinc-100 font-serif leading-none">
+                {mode === "login" && "Welcome back"}
+                {mode === "signup" && "Create Account"}
+                {mode === "verify" && "Verify Your Email"}
+              </h3>
+              <p className="text-[13px] text-zinc-400 leading-relaxed font-sans mt-2">
+                {mode === "login" && "Enter your credentials to access your homeowner or staff account"}
+                {mode === "signup" && "Register your profile to connect with your home warranty plan"}
+                {mode === "verify" && `Enter the 6-digit validation code dispatched to ${signupEmail}`}
+              </p>
+            </div>
+
+            <div className="p-8 lg:p-10 pt-6 pb-6">
               {error && (
-                <Alert
-                  variant="destructive"
-                  className="animate-in fade-in duration-200"
-                >
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
+                <div className="mb-5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl p-3 text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" />
+                  {error}
+                </div>
+              )}
+              {success && (
+                <div className="mb-5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl p-3 text-xs font-semibold flex items-center gap-2 animate-in fade-in duration-200">
+                  <CheckCircle className="h-4 w-4 shrink-0 text-emerald-400" />
+                  {success}
+                </div>
               )}
 
-              <Button
-                type="submit"
-                className="w-full bg-[#0F3B3D] hover:bg-[#0F3B3D]/90"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Signing in...
-                  </div>
+              {/* Dynamic form content transitions */}
+              <div className="overflow-hidden">
+                <AnimatePresence mode="wait">
+                  {mode === "login" && (
+                    <motion.form
+                      key="login-form"
+                      initial={{ opacity: 0, x: -15 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 15 }}
+                      transition={{ duration: 0.2 }}
+                      onSubmit={handleLogin}
+                      className="space-y-5"
+                    >
+                      <div className="space-y-2">
+                        <Label htmlFor="email" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Email Address</Label>
+                        <div className="relative group">
+                          <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Input
+                            id="email"
+                            type="email"
+                            placeholder="you@example.com"
+                            className="pl-12 pr-4 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            value={loginEmail}
+                            onChange={(e) => setLoginEmail(e.target.value)}
+                            disabled={isLoading}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="password" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Password</Label>
+                        <div className="relative group">
+                          <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Input
+                            id="password"
+                            type={showPassword ? "text" : "password"}
+                            placeholder="••••••••"
+                            className="pl-12 pr-12 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            value={loginPassword}
+                            onChange={(e) => setLoginPassword(e.target.value)}
+                            disabled={isLoading}
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors focus:outline-none"
+                          >
+                            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="remember"
+                            checked={rememberMe}
+                            onCheckedChange={(checked) => setRememberMe(checked === true)}
+                            className="border-white/20 data-[state=checked]:bg-[#c59b4c] data-[state=checked]:text-zinc-950 data-[state=checked]:border-[#c59b4c] bg-white/[0.02]"
+                          />
+                          <Label htmlFor="remember" className="text-xs font-semibold leading-none cursor-pointer text-zinc-400 hover:text-zinc-300 transition-colors">
+                            Remember email
+                          </Label>
+                        </div>
+                        <Link
+                          href="/forgot-password"
+                          className="text-xs font-bold text-[#c59b4c] hover:text-[#d4ae62] hover:underline transition-all"
+                        >
+                          Forgot password?
+                        </Link>
+                      </div>
+
+                      <Button
+                        type="submit"
+                        className="w-full h-12 text-sm font-bold tracking-wide rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 mt-2 bg-[#c59b4c] hover:bg-[#d4ae62] text-zinc-950 hover:scale-[1.01] active:scale-[0.99] border-0 cursor-pointer flex items-center justify-center"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <span className="flex items-center gap-2 justify-center">
+                            <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-950 border-t-transparent" />
+                            Logging in...
+                          </span>
+                        ) : (
+                          "Sign In"
+                        )}
+                      </Button>
+                    </motion.form>
+                  )}
+
+                  {mode === "signup" && (
+                    <motion.form
+                      key="signup-form"
+                      initial={{ opacity: 0, x: 15 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -15 }}
+                      transition={{ duration: 0.2 }}
+                      onSubmit={handleSendOtp}
+                      className="space-y-4"
+                    >
+                      <div className="space-y-1.5">
+                        <Label htmlFor="fullName" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Full Name *</Label>
+                        <div className="relative group">
+                          <User className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Input
+                            id="fullName"
+                            type="text"
+                            placeholder="Jane Smith"
+                            className="pl-12 pr-4 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            value={fullName}
+                            onChange={(e) => setFullName(e.target.value)}
+                            disabled={isLoading}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="signup-email" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Email Address *</Label>
+                        <div className="relative group">
+                          <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Input
+                            id="signup-email"
+                            type="email"
+                            placeholder="jane@example.com"
+                            className="pl-12 pr-4 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            value={signupEmail}
+                            onChange={(e) => setSignupEmail(e.target.value)}
+                            disabled={isLoading}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="signup-password" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Password *</Label>
+                        <div className="relative group">
+                          <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Input
+                            id="signup-password"
+                            type={showPassword ? "text" : "password"}
+                            placeholder="At least 8 characters"
+                            className="pl-12 pr-12 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            value={signupPassword}
+                            onChange={(e) => updatePassword(e.target.value)}
+                            disabled={isLoading}
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors focus:outline-none"
+                          >
+                            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        {signupPassword && (
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <div className="h-1 flex-1 bg-zinc-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full transition-all duration-500 ${passwordStrength.label === "Strong" ? "w-full bg-emerald-500" :
+                                    passwordStrength.label === "Good" ? "w-3/4 bg-blue-500" :
+                                      passwordStrength.label === "Fair" ? "w-1/2 bg-amber-500" : "w-1/4 bg-red-500"
+                                  }`}
+                              />
+                            </div>
+                            <span className="text-[10px] font-bold text-zinc-500 shrink-0">{passwordStrength.label || "Very Weak"}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="confirm-password" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Confirm Password *</Label>
+                        <div className="relative group">
+                          <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Input
+                            id="confirm-password"
+                            type={showConfirmPassword ? "text" : "password"}
+                            placeholder="Confirm your password"
+                            className="pl-12 pr-12 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            disabled={isLoading}
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors focus:outline-none"
+                          >
+                            {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start space-x-2 pt-1">
+                        <Checkbox
+                          id="terms"
+                          checked={agreeTerms}
+                          onCheckedChange={(c) => setAgreeTerms(c === true)}
+                          className="border-white/20 data-[state=checked]:bg-[#c59b4c] data-[state=checked]:text-zinc-950 data-[state=checked]:border-[#c59b4c] bg-white/[0.02] mt-0.5"
+                        />
+                        <Label htmlFor="terms" className="text-xs text-zinc-400 cursor-pointer leading-normal">
+                          I consent to the{" "}
+                          <Link href="/terms" className="text-[#c59b4c] font-bold hover:underline">Terms</Link>
+                          {" "}and{" "}
+                          <Link href="/privacy" className="text-[#c59b4c] font-bold hover:underline">Privacy Policy</Link>
+                        </Label>
+                      </div>
+
+                      <Button
+                        type="submit"
+                        className="w-full h-12 text-sm font-bold tracking-wide rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 mt-2 bg-[#c59b4c] hover:bg-[#d4ae62] text-zinc-950 hover:scale-[1.01] active:scale-[0.99] border-0 cursor-pointer flex items-center justify-center gap-2"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <span className="flex items-center gap-2 justify-center">
+                            <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-950 border-t-transparent" />
+                            Sending verification...
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center gap-2">
+                            Continue to Verification <ArrowRight className="h-4 w-4" />
+                          </span>
+                        )}
+                      </Button>
+                    </motion.form>
+                  )}
+
+                  {mode === "verify" && (
+                    <motion.form
+                      key="verify-form"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.25 }}
+                      onSubmit={handleVerifyOtp}
+                      className="space-y-6"
+                    >
+                      <div className="space-y-3">
+                        <Label htmlFor="otp" className="text-xs font-semibold text-zinc-300 block text-center uppercase tracking-widest">6-Digit Verification Code</Label>
+                        <div className="relative group">
+                          <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Input
+                            id="otp"
+                            type="text"
+                            maxLength={6}
+                            placeholder="123456"
+                            className="pl-12 text-center tracking-[0.4em] text-lg font-bold h-12 bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none"
+                            value={otp}
+                            onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                            disabled={isLoading}
+                          />
+                        </div>
+                        <p className="text-xs text-zinc-500 text-center leading-normal mt-1">
+                          Check your email inbox (and spam folder) for the system validation token.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 pt-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => { setMode("signup"); setError(""); setSuccess(""); }}
+                          disabled={isLoading}
+                          className="h-12 text-xs font-bold rounded-xl border-white/10 hover:bg-white/[0.05] text-zinc-300 hover:text-zinc-100 cursor-pointer transition-all focus:outline-none"
+                        >
+                          Back
+                        </Button>
+                        <Button
+                          type="submit"
+                          className="h-12 text-xs font-bold rounded-xl tracking-wide bg-[#c59b4c] hover:bg-[#d4ae62] text-zinc-950 hover:scale-[1.01] active:scale-[0.99] border-0 cursor-pointer flex items-center justify-center transition-all focus:outline-none"
+                          disabled={isLoading || otp.length !== 6}
+                        >
+                          {isLoading ? (
+                            <span className="flex items-center gap-2 justify-center">
+                              <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-950 border-t-transparent" />
+                              Verifying...
+                            </span>
+                          ) : (
+                            "Verify Code"
+                          )}
+                        </Button>
+                      </div>
+                    </motion.form>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+
+            <div className="flex justify-center border-t border-white/[0.04] bg-white/[0.01] pt-6 pb-6 rounded-b-3xl">
+              <p className="text-xs text-zinc-400">
+                {mode === "login" ? (
+                  <>
+                    New homeowner?{" "}
+                    <button
+                      onClick={() => {
+                        setMode("signup");
+                        setError("");
+                        setSuccess("");
+                      }}
+                      className="font-bold text-[#c59b4c] hover:text-[#d4ae62] hover:underline ml-1.5 cursor-pointer bg-transparent border-none p-0 inline-flex items-center transition-colors focus:outline-none"
+                    >
+                      Create account
+                    </button>
+                  </>
                 ) : (
-                  "Sign In"
+                  <>
+                    Already registered?{" "}
+                    <button
+                      onClick={() => {
+                        setMode("login");
+                        setError("");
+                        setSuccess("");
+                      }}
+                      className="font-bold text-[#c59b4c] hover:text-[#d4ae62] hover:underline ml-1.5 cursor-pointer bg-transparent border-none p-0 inline-flex items-center transition-colors focus:outline-none"
+                    >
+                      Sign In
+                    </button>
+                  </>
                 )}
-              </Button>
-            </form>
-          </CardContent>
-          <CardFooter className="flex justify-center border-t pt-6">
-            <p className="text-sm text-muted-foreground">
-              New homeowner?{" "}
-              <Link
-                href="/signup"
-                className="text-[#0F3B3D] font-medium hover:underline"
-              >
-                Create an account
-              </Link>
-            </p>
-          </CardFooter>
-        </Card>
-      </motion.div>
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
 }
