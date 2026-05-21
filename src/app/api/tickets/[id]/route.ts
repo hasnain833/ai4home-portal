@@ -68,12 +68,15 @@ export async function PATCH(
 
     const { id } = await params;
     const data = await request.json();
-    const { status, priority } = data;
+    const { status, priority, draftResponse, action } = data;
 
     // Get old ticket to check if status changed and verify company
     const oldTicket = await prisma.ticket.findUnique({
       where: { id },
-      include: { homeowner: true }
+      include: { 
+        homeowner: true,
+        conversation: true
+      }
     });
 
     if (!oldTicket) {
@@ -85,12 +88,50 @@ export async function PATCH(
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
 
+    const updatedData: any = {};
+    if (status) updatedData.status = status;
+    if (priority) updatedData.priority = priority;
+
+    if (action === "approve") {
+      const approvedText = draftResponse !== undefined ? draftResponse : oldTicket.draftResponse;
+      if (!approvedText || !approvedText.trim()) {
+        return NextResponse.json({ message: "Cannot approve an empty draft response" }, { status: 400 });
+      }
+
+      // Resolve or create conversation
+      let conversation = oldTicket.conversation;
+      if (!conversation) {
+        conversation = await prisma.conversation.create({
+          data: {
+            ticketId: oldTicket.id,
+            homeownerId: oldTicket.homeownerId
+          }
+        });
+      }
+
+      // Add as assistant chat message
+      await prisma.chatMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: "assistant",
+          content: approvedText.trim(),
+          timestamp: new Date()
+        }
+      });
+
+      // Clear the draft from ticket
+      updatedData.draftResponse = null;
+    } else if (action === "reject") {
+      // Clear the draft from ticket
+      updatedData.draftResponse = null;
+    } else if (draftResponse !== undefined) {
+      // Standard draft update (e.g. auto-save or manual edit)
+      updatedData.draftResponse = draftResponse;
+    }
+
     const ticket = await prisma.ticket.update({
       where: { id },
-      data: {
-        status: status || undefined,
-        priority: priority || undefined,
-      },
+      data: updatedData,
     });
 
     // If status changed, send email

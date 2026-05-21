@@ -35,13 +35,17 @@
 - [x] **Dynamic ERP Integrations**: Created a 3-card Admin management dashboard to save credentials directly to DB rather than `.env`.
 - [x] **Role-Based Access Control (RBAC)**: Enforced strict role-based scopes (Admin, Staff, Homeowner) in backend APIs (Tickets, Dashboard, Company, Config, KB) and custom homeowner-focused dashboard client UI.
 - [x] **Property Management Hub**: Implemented a comprehensive property management dashboard including a role-scoped client page (`/properties`), dynamic backend APIs (`/api/properties`), search filters, and an interactive property creation modal.
-- [ ] **Anti-Litigation Guardrails (FR-08)**: Implement explicit system prompt constraints and "Reviewer" logic to prevent liability admissions.
+- [x] **Anti-Litigation Guardrails (FR-08)**: Handled via Botpress system prompt constraints and portal-synced Agent Configurations.
+- [ ] **Issue Diagnosis Repair Groups (FR-04)**: Classify diagnosed issues into 1-month (urgent), 6-month (standard), or 12-month (deferred) repair windows based on David Dell IP logic.
 
-## 🔮 Phase 2: Future MAS (Multi-Agent System)
-- [ ] **Orchestrator Agent**: High-level routing agent for complex multi-part claims.
-- [ ] **Specialized Agent Roster**: Build specialized agents for Diagnostics, Research, and ERP operations.
-- [ ] **Quality Control**: Implement a "Reviewer Agent" workflow for human-in-the-loop verification (ties into Anti-Litigation).
-- [ ] **Cost Breakdown**: Per-agent token consumption and cost tracking in the portal.
+## 🔮 Phase 2: Botpress-Driven Multi-Agent System (Integration & APIs)
+- [x] **Agent Action Webhooks**: Expose secure Next.js API endpoints (Diagnostics, ERP/Builtopia lookup, Policy validation) for Botpress-native agents to query.
+- [x] **Botpress Orchestration Sync**: Support multi-turn routing and handoffs driven entirely within the Botpress agent workflows.
+- [x] **Human-in-the-Loop Approval**: Create a dashboard interface for staff to approve/edit draft responses compiled by Botpress agents before sending.
+- [ ] **Token & Cost Monitoring**: Integrate with Botpress analytics APIs to monitor and display agent-specific token/cost consumption in the portal dashboard.
+- [ ] **Agent Traceability**: Display which agent handled each claim step (Intake, Diagnostic, Resolution, ERP) inside the staff ticket detail panel.
+- [ ] **MAS Trigger Routing Configuration**: Allow builders/admins to configure which claim types trigger MAS reasoning vs. standard pre-mapped workflows.
+- [ ] **Reviewer Agent Toggle**: Implement a portal switch to enable/disable quality review flows prior to delivering AI responses to homeowners.
 
 ## 🛠️ Testing & Workflow
 ### Current Workflow
