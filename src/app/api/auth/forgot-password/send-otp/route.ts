@@ -27,11 +27,11 @@ export async function POST(request: Request) {
 
     console.log(`[PASSWORD RESET OTP GENERATED] Email: ${email} | OTP: ${otp}`);
     
-    // Send OTP via Brevo
+    // Send OTP via SMTP
     const emailResult = await MailService.sendPasswordResetOtp(email, otp);
     
     if (!emailResult.success) {
-      console.warn("Failed to send email via Brevo. Make sure BREVO_API_KEY is set in .env");
+      console.warn("Failed to send email via SMTP. Make sure SMTP_USER and SMTP_PASS are set in .env");
     }
 
     return NextResponse.json({ 

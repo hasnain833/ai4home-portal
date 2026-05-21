@@ -1,3 +1,5 @@
+import nodemailer from "nodemailer";
+
 export interface MailOptions {
   to: string;
   subject: string;
@@ -5,49 +7,45 @@ export interface MailOptions {
 }
 
 export class MailService {
-  private static BREVO_API_KEY = process.env.BREVO_API_KEY;
+  private static SMTP_HOST = process.env.SMTP_HOST || "smtp-relay.brevo.com";
+  private static SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
+  private static SMTP_USER = process.env.SMTP_USER || "";
+  private static SMTP_PASS = process.env.SMTP_PASS || process.env.BREVO_API_KEY || "";
   private static SENDER_EMAIL = process.env.SENDER_EMAIL || "noreply@bitzsol.com";
   private static SENDER_NAME = "Ai.Lumen Warranty Care";
 
+  private static transporter = nodemailer.createTransport({
+    host: this.SMTP_HOST,
+    port: this.SMTP_PORT,
+    secure: this.SMTP_PORT === 465,
+    auth: {
+      user: this.SMTP_USER,
+      pass: this.SMTP_PASS,
+    },
+  });
+
   static async sendEmail({ to, subject, html }: MailOptions) {
-    if (!this.BREVO_API_KEY) {
-      console.warn("[Mail Service] BREVO_API_KEY is not set. Email will not be sent.");
-      return { success: false, error: "API Key missing" };
+    if (!this.SMTP_USER || !this.SMTP_PASS) {
+      console.warn("[Mail Service] SMTP credentials (SMTP_USER/SMTP_PASS) are not set. Email will not be sent.");
+      return { success: false, error: "SMTP credentials missing" };
     }
 
     try {
-      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-        method: "POST",
-        headers: {
-          "accept": "application/json",
-          "api-key": this.BREVO_API_KEY,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          sender: {
-            name: this.SENDER_NAME,
-            email: this.SENDER_EMAIL,
-          },
-          to: [{ email: to }],
-          subject: subject,
-          htmlContent: html,
-        }),
+      const info = await this.transporter.sendMail({
+        from: `"${this.SENDER_NAME}" <${this.SENDER_EMAIL}>`,
+        to,
+        subject,
+        html,
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        console.error("[Mail Service] Brevo API Error:", data);
-        return { success: false, error: data.message };
-      }
-
-      console.log(`[Mail Service] Email sent successfully to ${to}. Message ID: ${data.messageId}`);
-      return { success: true, messageId: data.messageId };
-    } catch (error) {
+      console.log(`[Mail Service] Email sent successfully to ${to}. Message ID: ${info.messageId}`);
+      return { success: true, messageId: info.messageId };
+    } catch (error: any) {
       console.error("[Mail Service] Failed to send email:", error);
-      return { success: false, error: "Internal error" };
+      return { success: false, error: error?.message || "Internal error" };
     }
   }
+
 
   static async sendTicketStatusUpdate(to: string, homeownerName: string, ticketId: string, status: string) {
     const statusLabel = status.replace("_", " ").toLowerCase();
