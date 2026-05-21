@@ -93,6 +93,7 @@ model Ticket {
   warrantyYear  Int            @default(1)
   erpSyncStatus String?        @default("PENDING")
   erpReferenceId String?
+  draftResponse String?        @db.Text
   homeownerId   String
   homeowner     User           @relation("HomeownerTickets", fields: [homeownerId], references: [id])
   propertyId    String?

@@ -26,6 +26,9 @@ import {
   Send,
   CheckCircle,
   Loader2,
+  Sparkles,
+  ThumbsUp,
+  Trash2,
 } from "lucide-react";
 
 export default function TicketDetail() {
@@ -35,6 +38,9 @@ export default function TicketDetail() {
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [draftResponse, setDraftResponse] = useState<string | null>(null);
+  const [draftText, setDraftText] = useState("");
+  const [isProcessingDraft, setIsProcessingDraft] = useState(false);
 
   useEffect(() => {
     const fetchTicket = async () => {
@@ -44,6 +50,8 @@ export default function TicketDetail() {
           const data = await response.json();
           setTicket(data);
           setStatus(data.status);
+          setDraftResponse(data.draftResponse);
+          setDraftText(data.draftResponse || "");
         }
       } catch (error) {
         console.error("Error fetching ticket:", error);
@@ -80,6 +88,75 @@ export default function TicketDetail() {
       setNote("");
       setUpdating(false);
     }, 500);
+  };
+
+  const handleApproveDraft = async () => {
+    if (!draftText.trim()) return;
+    setIsProcessingDraft(true);
+    try {
+      const response = await fetch(`/api/tickets/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve", draftResponse: draftText }),
+      });
+      if (response.ok) {
+        setDraftResponse(null);
+        setDraftText("");
+        
+        // Append approved draft locally to conversation messages
+        if (ticket) {
+          const newMsg = {
+            id: `approved-${Date.now()}`,
+            role: "assistant",
+            content: draftText,
+            timestamp: new Date().toISOString()
+          };
+          const messages = ticket.conversation?.messages || [];
+          setTicket({
+            ...ticket,
+            draftResponse: null,
+            conversation: {
+              ...(ticket.conversation || {}),
+              messages: [...messages, newMsg]
+            }
+          });
+        }
+      } else {
+        const errorData = await response.json();
+        alert(errorData.message || "Failed to approve draft.");
+      }
+    } catch (error) {
+      console.error("Error approving draft:", error);
+    } finally {
+      setIsProcessingDraft(false);
+    }
+  };
+
+  const handleRejectDraft = async () => {
+    setIsProcessingDraft(true);
+    try {
+      const response = await fetch(`/api/tickets/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reject" }),
+      });
+      if (response.ok) {
+        setDraftResponse(null);
+        setDraftText("");
+        if (ticket) {
+          setTicket({
+            ...ticket,
+            draftResponse: null
+          });
+        }
+      } else {
+        alert("Failed to reject draft.");
+      }
+    } catch (error) {
+      console.error("Error rejecting draft:", error);
+    } finally {
+      setIsProcessingDraft(false);
+    }
   };
 
   const statusColor: Record<string, string> = {
@@ -122,6 +199,68 @@ export default function TicketDetail() {
           </div>
           <div className="grid lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
+              {draftResponse && (
+                <Card className="border-cyan-500/30 bg-gradient-to-br from-slate-900 to-slate-950 text-slate-100 shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
+                  <div className="bg-gradient-to-r from-cyan-600/20 to-blue-600/20 px-6 py-4 flex items-center justify-between border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-cyan-500/20 rounded-lg">
+                        <Sparkles className="h-5 w-5 text-cyan-400 animate-pulse" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-base font-bold tracking-tight">Botpress Agent Reviewer</CardTitle>
+                        <p className="text-[11px] text-cyan-300/80 font-medium">Pending Human-in-the-Loop Review</p>
+                      </div>
+                    </div>
+                    <Badge className="bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 border-cyan-500/30 font-semibold tracking-wide">
+                      AI DRAFT
+                    </Badge>
+                  </div>
+                  <CardContent className="p-6 space-y-4">
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      The Botpress AI assistant drafted the following response based on active warranty policies and DIY diagnostics. You can edit the text inline before delivering it to the homeowner.
+                    </p>
+                    
+                    <div className="relative">
+                      <Textarea
+                        value={draftText}
+                        onChange={(e) => setDraftText(e.target.value)}
+                        rows={6}
+                        className="w-full bg-slate-950 border-slate-800 focus:border-cyan-500 focus:ring-cyan-500/20 text-slate-100 placeholder-slate-600 text-sm leading-relaxed rounded-lg resize-y p-3 transition duration-200"
+                        placeholder="Type or edit the response here..."
+                      />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                      <Button
+                        onClick={handleApproveDraft}
+                        disabled={isProcessingDraft || !draftText.trim()}
+                        className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold transition duration-200 border-none shadow-md shadow-emerald-950/20 py-2.5"
+                      >
+                        {isProcessingDraft ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <ThumbsUp className="mr-2 h-4 w-4" />
+                        )}
+                        Approve & Send Response
+                      </Button>
+                      <Button
+                        onClick={handleRejectDraft}
+                        disabled={isProcessingDraft}
+                        variant="outline"
+                        className="border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white transition duration-200 py-2.5"
+                      >
+                        {isProcessingDraft ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="mr-2 h-4 w-4 text-red-400" />
+                        )}
+                        Reject
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               <Card>
                 <CardHeader>
                   <CardTitle>Issue Details</CardTitle>
