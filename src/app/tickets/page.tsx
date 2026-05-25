@@ -151,6 +151,8 @@ export default function TicketsPage() {
   const [status, setStatus] = useState<string>("all");
   const [priority, setPriority] = useState<string>("all");
   const [year, setYear] = useState<string>("all");
+  const [dateRange, setDateRange] = useState<string>("all");
+  const [property, setProperty] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const itemsPerPage = 10;
@@ -185,6 +187,17 @@ export default function TicketsPage() {
     fetchTickets();
   }, [fetchTickets]);
 
+  // Extract unique properties for the filter dropdown
+  const uniqueProperties = useMemo(() => {
+    const props = new Set<string>();
+    tickets.forEach(t => {
+      if (t.property?.address) {
+        props.add(t.property.address);
+      }
+    });
+    return Array.from(props).sort();
+  }, [tickets]);
+
   // Filter tickets based on search and filters
   const filteredTickets = useMemo(() => {
     return tickets.filter((t) => {
@@ -199,9 +212,23 @@ export default function TicketsPage() {
       const matchYear =
         year === "all" ||
         (year === "1" ? t.warrantyYear === 1 : t.warrantyYear >= 2);
-      return matchSearch && matchStatus && matchPriority && matchYear;
+      
+      const matchProperty = property === "all" || t.property?.address === property;
+      
+      let matchDate = true;
+      if (dateRange !== "all") {
+        const ticketDate = new Date(t.createdAt);
+        const now = new Date();
+        const diffDays = (now.getTime() - ticketDate.getTime()) / (1000 * 3600 * 24);
+        
+        if (dateRange === "7d") matchDate = diffDays <= 7;
+        else if (dateRange === "30d") matchDate = diffDays <= 30;
+        else if (dateRange === "90d") matchDate = diffDays <= 90;
+      }
+      
+      return matchSearch && matchStatus && matchPriority && matchYear && matchProperty && matchDate;
     });
-  }, [tickets, search, status, priority, year]);
+  }, [tickets, search, status, priority, year, property, dateRange]);
 
   const totalPages = Math.ceil(filteredTickets.length / itemsPerPage);
   const paginatedTickets = filteredTickets.slice(
@@ -212,7 +239,7 @@ export default function TicketsPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [search, status, priority, year]);
+  }, [search, status, priority, year, property, dateRange]);
 
   const showToast = (type: "success" | "error", text: string) => {
     setToastMessage({ type, text });
@@ -224,6 +251,8 @@ export default function TicketsPage() {
     setStatus("all");
     setPriority("all");
     setYear("all");
+    setDateRange("all");
+    setProperty("all");
     showToast("success", "Filters reset");
   };
 
@@ -352,8 +381,8 @@ export default function TicketsPage() {
           <motion.div variants={cardVariants}>
             <Card className="border border-border/80 bg-linear-to-b from-card/85 to-card/50 backdrop-blur-md shadow-xs">
               <CardContent className="p-5 md:p-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-end">
-                  <div className="sm:col-span-2 md:col-span-1 md:flex-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4 items-end">
+                  <div className="sm:col-span-2 md:col-span-3 lg:col-span-4 xl:col-span-1 xl:flex-1">
                     <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Search</Label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground/80" />
@@ -409,6 +438,34 @@ export default function TicketsPage() {
                     </Select>
                   </div>
                   <div>
+                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Date</Label>
+                    <Select value={dateRange} onValueChange={setDateRange}>
+                      <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
+                        <SelectValue placeholder="All Time" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Time</SelectItem>
+                        <SelectItem value="7d">Last 7 Days</SelectItem>
+                        <SelectItem value="30d">Last 30 Days</SelectItem>
+                        <SelectItem value="90d">Last 90 Days</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Property</Label>
+                    <Select value={property} onValueChange={setProperty}>
+                      <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
+                        <SelectValue placeholder="All Properties" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Properties</SelectItem>
+                        {uniqueProperties.map(p => (
+                          <SelectItem key={p} value={p}>{p}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
                     <Button 
                       variant="outline" 
                       onClick={handleResetFilters} 
@@ -442,7 +499,7 @@ export default function TicketsPage() {
                     <AlertCircle className="h-10 w-10 mx-auto mb-3 text-muted-foreground/60" />
                     <h3 className="font-semibold text-foreground text-sm">No tickets found</h3>
                     <p className="text-xs mt-1 text-muted-foreground/80 max-w-xs mx-auto">Try adjusting your search keywords or clearing the active filters.</p>
-                    {(search || status !== "all" || priority !== "all" || year !== "all") && (
+                    {(search || status !== "all" || priority !== "all" || year !== "all" || property !== "all" || dateRange !== "all") && (
                       <Button variant="outline" size="sm" onClick={handleResetFilters} className="mt-4 text-xs h-8 border-border/80">
                         Clear All Filters
                       </Button>
@@ -466,7 +523,7 @@ export default function TicketsPage() {
                             <div>
                               <div className="flex items-center gap-1.5">
                                 <span className="font-mono text-[10px] text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded border border-border/50" title={ticket.id}>
-                                  #{ticket.id.substring(0, 8)}
+                                  {ticket.id.startsWith("T-") ? ticket.id : `#${ticket.id.substring(0, 8)}`}
                                 </span>
                               </div>
                               <div className="text-sm font-semibold mt-1.5 text-foreground">{ticket.homeowner?.name || "Unknown"}</div>
@@ -561,8 +618,8 @@ export default function TicketsPage() {
                               className="border-b border-border/30 hover:bg-muted/15 transition-colors group"
                             >
                               <TableCell className="py-3.5 pl-6">
-                                <span className="font-mono text-[11px] text-muted-foreground bg-muted/65 px-2 py-0.5 rounded border border-border/55 group-hover:bg-muted transition-all" title={ticket.id}>
-                                  {ticket.id.substring(0, 8)}...
+                                <span className="font-mono text-[11px] font-semibold text-foreground bg-primary/10 px-2 py-1 rounded border border-primary/20 group-hover:bg-primary/15 transition-all" title={ticket.id}>
+                                  {ticket.id.startsWith("T-") ? ticket.id : `${ticket.id.substring(0, 8)}...`}
                                 </span>
                               </TableCell>
                               <TableCell className="py-3.5 font-medium text-foreground text-sm">

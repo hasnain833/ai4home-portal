@@ -18,6 +18,7 @@
 - [x] **Agent Configuration (FR-12)**: Deprecated/removed local `/agent-config` admin panels and API endpoints. AI prompts, greeting parameters, and escalation flows are now fully offloaded to **Botpress Studio** in the cloud.
 - [x] **Knowledge Base Management (FR-13)**: Document tracking system.
 - [x] **ERP/CRM Connectors (FR-06/FR-11)**: Implemented robust REST `fetch` client in `erp-service.ts` for Builtopia integration.
+- [x] **Advanced Ticket Filters (SRS 4.3.1)**: Add date range and specific property filters to the Warranty Ticket Dashboard.
 
 ---
 
@@ -51,6 +52,7 @@
 - [x] **Agent Traceability**: Tracked and logged directly in Botpress backend conversation logs.
 - [x] **MAS Trigger Routing Configuration**: Configured and executed directly within Botpress workflow orchestrator.
 - [x] **Reviewer Agent Toggle**: Orchestrated directly inside Botpress workspace settings.
+- [ ] **Agent Step Tracking (SRS 5.8)**: Update the portal to display which specific agent handled each claim step (Intake, Diagnostic, Resolution, ERP) on the ticket detail view.
 
 ---
 

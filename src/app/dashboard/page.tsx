@@ -481,8 +481,8 @@ export default function DashboardPage() {
                 ))
               ) : (
                 <>
-                  <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
-                    <Card className="hover:shadow-lg transition-all">
+                  <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }} className="h-full">
+                    <Card className="hover:shadow-lg transition-all h-full">
                       <CardHeader className="flex flex-row items-center justify-between pb-2">
                         <CardTitle className="text-sm font-medium">Total Tickets</CardTitle>
                         <TicketCheck className="h-4 w-4 text-muted-foreground" />
@@ -495,8 +495,8 @@ export default function DashboardPage() {
                       </CardContent>
                     </Card>
                   </motion.div>
-                  <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
-                    <Card className="hover:shadow-lg transition-all">
+                  <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }} className="h-full">
+                    <Card className="hover:shadow-lg transition-all h-full">
                       <CardHeader className="flex flex-row items-center justify-between pb-2">
                         <CardTitle className="text-sm font-medium">Open Tickets</CardTitle>
                         <AlertCircle className="h-4 w-4 text-yellow-500" />
@@ -509,23 +509,22 @@ export default function DashboardPage() {
                       </CardContent>
                     </Card>
                   </motion.div>
-                  <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
-                    <Card className="hover:shadow-lg transition-all">
+                  <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }} className="h-full">
+                    <Card className="hover:shadow-lg transition-all h-full">
                       <CardHeader className="flex flex-row items-center justify-between pb-2">
                         <CardTitle className="text-sm font-medium">Auto-Resolution Rate</CardTitle>
                         <TrendingUp className="h-4 w-4 text-green-500" />
                       </CardHeader>
-                      <CardContent className="flex items-center justify-between">
+                      <CardContent>
                         <div className="text-2xl font-bold">
                           <CountUp key={`rate-${period}`} end={kpis.autoResolutionRate} duration={1.5} suffix="%" />
                         </div>
-                        <CircularProgress key={`progress-${period}`} value={kpis.autoResolutionRate} />
+                        <p className="text-xs text-muted-foreground mt-1">Target: 60% (Phase 1)</p>
                       </CardContent>
-                      <p className="text-xs text-muted-foreground px-6 pb-4">Target: 60% (Phase 1)</p>
                     </Card>
                   </motion.div>
-                  <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
-                    <Card className="hover:shadow-lg transition-all">
+                  <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }} className="h-full">
+                    <Card className="hover:shadow-lg transition-all h-full">
                       <CardHeader className="flex flex-row items-center justify-between pb-2">
                         <CardTitle className="text-sm font-medium">Avg Resolution Time</CardTitle>
                         <Activity className="h-4 w-4 text-muted-foreground" />
@@ -533,15 +532,6 @@ export default function DashboardPage() {
                       <CardContent>
                         <div className="text-2xl font-bold">
                           <CountUp key={`time-${period}`} end={parseFloat(kpis.avgResolutionTime)} duration={1.5} decimals={1} suffix=" days" />
-                        </div>
-                        <div className="mt-2 h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
-                          <motion.div
-                            key={`token-bar-${period}`}
-                            className="h-full bg-secondary rounded-full"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${Math.min(100, (kpis.tokenConsumption / kpis.tokenLimit) * 100)}%` }}
-                            transition={{ duration: 1 }}
-                          />
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                           Tokens: {kpis.tokenConsumption.toLocaleString()} / {kpis.tokenLimit.toLocaleString()}

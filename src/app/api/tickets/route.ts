@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { calculateWarrantyYear } from "@/lib/utils";
 import { getServerSession } from "@/lib/session";
+import { generateTicketId } from "@/lib/ticket-utils";
 
 export async function GET(request: Request) {
   try {
@@ -94,8 +95,11 @@ export async function POST(request: Request) {
 
     const warrantyYear = calculateWarrantyYear(property.coeDate);
 
+    const ticketId = await generateTicketId();
+
     const ticket = await prisma.ticket.create({
       data: {
+        id: ticketId,
         issueType,
         propertyId,
         homeownerId,

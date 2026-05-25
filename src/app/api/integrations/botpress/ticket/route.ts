@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { calculateWarrantyYear } from "@/lib/utils";
+import { generateTicketId } from "@/lib/ticket-utils";
 
 export async function POST(request: Request) {
   try {
@@ -60,8 +61,10 @@ export async function POST(request: Request) {
     }
 
     // 4. Create the Ticket
+    const ticketId = await generateTicketId();
     const ticket = await prisma.ticket.create({
       data: {
+        id: ticketId,
         issueType,
         description,
         chatSummary: data.chatSummary || data.summary || null,
