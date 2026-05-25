@@ -13,7 +13,8 @@ export async function POST(request: Request) {
       description, 
       isEmergency = false, 
       priority, 
-      messages = [] 
+      messages = [],
+      kbReferences = []
     } = data;
 
     if (!email || !issueType || !description) {
@@ -71,6 +72,7 @@ export async function POST(request: Request) {
         extractedInfo: data.extractedInfo 
           ? (typeof data.extractedInfo === "object" ? JSON.stringify(data.extractedInfo) : String(data.extractedInfo))
           : (data.specificInfo ? (typeof data.specificInfo === "object" ? JSON.stringify(data.specificInfo) : String(data.specificInfo)) : null),
+        kbReferences: kbReferences && Array.isArray(kbReferences) && kbReferences.length > 0 ? JSON.stringify(kbReferences) : null,
         propertyId: selectedPropertyId || null,
         homeownerId: homeowner.id,
         isEmergency,

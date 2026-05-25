@@ -30,6 +30,7 @@ import {
   ThumbsUp,
   Trash2,
   Bot,
+  FileText,
 } from "lucide-react";
 
 export default function TicketDetail() {
@@ -344,6 +345,42 @@ export default function TicketDetail() {
                           {ticket.extractedInfo}
                         </p>
                       )}
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+
+              {ticket.kbReferences && (() => {
+                let parsedRefs: string[] = [];
+                try {
+                  const parsed = JSON.parse(ticket.kbReferences);
+                  if (Array.isArray(parsed)) {
+                    parsedRefs = parsed;
+                  }
+                } catch (e) {}
+
+                if (parsedRefs.length === 0) return null;
+
+                return (
+                  <Card className="border-cyan-500/20 bg-gradient-to-br from-slate-900 to-slate-950 text-slate-100 shadow-lg overflow-hidden">
+                    <div className="bg-gradient-to-r from-cyan-600/10 to-teal-600/10 px-6 py-4 flex items-center gap-2 border-b border-slate-800">
+                      <div className="p-1.5 bg-cyan-500/20 rounded-lg">
+                        <FileText className="h-5 w-5 text-cyan-400" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-sm font-bold tracking-tight">Referenced KB Documents</CardTitle>
+                        <p className="text-[10px] text-cyan-300/80 font-medium">Knowledge Base files used by AI</p>
+                      </div>
+                    </div>
+                    <CardContent className="p-6">
+                      <div className="flex flex-col gap-2">
+                        {parsedRefs.map((ref, idx) => (
+                          <div key={idx} className="flex items-center gap-2 bg-slate-950/60 p-3 rounded-lg border border-slate-800/40">
+                            <FileText className="h-4 w-4 text-cyan-500/70" />
+                            <span className="text-sm font-medium text-slate-200">{ref}</span>
+                          </div>
+                        ))}
+                      </div>
                     </CardContent>
                   </Card>
                 );

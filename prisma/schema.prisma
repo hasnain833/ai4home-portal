@@ -97,6 +97,7 @@ model Ticket {
   draftResponse String?        @db.Text
   chatSummary   String?        @db.Text
   extractedInfo String?        @db.Text
+  kbReferences  String?        @db.Text
   homeownerId   String
   homeowner     User           @relation("HomeownerTickets", fields: [homeownerId], references: [id])
   propertyId    String?

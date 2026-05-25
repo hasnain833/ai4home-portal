@@ -39,6 +39,10 @@
 - [x] **Property Management Hub**: Implemented a comprehensive property management dashboard including a role-scoped client page (`/properties`), dynamic backend APIs (`/api/properties`), search filters, and an interactive property creation modal.
 - [x] **Anti-Litigation Guardrails (FR-08)**: Handled via Botpress system prompt constraints and portal-synced Agent Configurations.
 - [x] **Issue Diagnosis Repair Groups (FR-04)**: Handled natively within the Botpress agent workflows based on David Dell IP logic.
+- [ ] **ERP Sync Status Display (SRS 4.3.1)**: Update the ticket detail page to visually display the `erpSyncStatus` and `erpReferenceId`.
+- [ ] **Staff Property Assignment RBAC (SRS 6.3)**: Create database relation mapping Staff to specific Properties, and enforce that Staff only see tickets for their assigned properties.
+- [ ] **API Credential Encryption (SRS 6.3)**: Implement encryption/decryption (AES-256) for CRM/ERP API credentials before saving them to the database (currently stored in plaintext).
+- [x] **KB Document Utilization Display (SRS 4.3.4)**: Update the ticket or conversation view to show which knowledge base documents were referenced by the agent.
 
 ---
 
