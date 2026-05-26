@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,6 +63,9 @@ const buttonVariants = {
 };
 
 export default function CompanyPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  
   const [company, setCompany] = useState<CompanyData & { id?: string }>({
     name: "",
     logo: "",
@@ -133,6 +137,7 @@ export default function CompanyPage() {
 
   // Save company information
   const handleSaveInfo = async () => {
+    if (isAdmin) return;
     if (!validateCompanyInfo()) return;
     setSavingInfo(true);
     try {
@@ -162,6 +167,7 @@ export default function CompanyPage() {
 
   // Save warranty policy
   const handleSavePolicy = async () => {
+    if (isAdmin) return;
     setSavingPolicy(true);
     try {
       const response = await fetch("/api/company", {
@@ -187,12 +193,13 @@ export default function CompanyPage() {
 
   // Simulate avatar upload
   const handleAvatarUpload = () => {
+    if (isAdmin) return;
     // In a real app, you'd open a file picker and upload to server
     showToast("error", "Logo upload will be available in Phase 2");
   };
 
   return (
-    <ProtectedRoute allowedRoles={["admin"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff"]}>
       <PortalLayout>
         {/* Toast Notification */}
         <AnimatePresence>
@@ -228,7 +235,7 @@ export default function CompanyPage() {
               Company Settings
             </h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
-              Manage your profile, contact details, and warranty policy
+              {isAdmin ? "View company profile, contact details, and warranty policy" : "Manage your profile, contact details, and warranty policy"}
             </p>
           </motion.div>
 
@@ -246,33 +253,38 @@ export default function CompanyPage() {
                   {/* Avatar Section */}
                   <div className="flex flex-col items-center gap-3 mb-2">
                     <motion.div
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="relative group cursor-pointer"
+                      whileHover={!isAdmin ? { scale: 1.05 } : {}}
+                      whileTap={!isAdmin ? { scale: 0.95 } : {}}
+                      className={`relative group ${!isAdmin ? 'cursor-pointer' : ''}`}
                       onClick={handleAvatarUpload}
                     >
                       <Avatar className="h-24 w-24 ring-2 ring-primary/20 transition-all group-hover:ring-primary/40">
                         <AvatarImage src={company.logo} />
                         <AvatarFallback className="bg-linear-to-br from-primary/20 to-primary/5 text-primary text-2xl font-bold">
-                          {company.name.charAt(0)}
+                          {company.name.charAt(0) || "C"}
                         </AvatarFallback>
                       </Avatar>
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Upload className="h-6 w-6 text-white" />
-                      </div>
+                      {!isAdmin && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Upload className="h-6 w-6 text-white" />
+                        </div>
+                      )}
                     </motion.div>
-                    <p className="text-xs text-muted-foreground">
-                      Click to upload logo (coming soon)
-                    </p>
+                    {!isAdmin && (
+                      <p className="text-xs text-muted-foreground">
+                        Click to upload logo (coming soon)
+                      </p>
+                    )}
                   </div>
 
                   {/* Form Fields */}
                   <div className="space-y-4">
                     <div>
                       <Label className="text-sm font-semibold">
-                        Company Name *
+                        Company Name {isAdmin ? "" : "*"}
                       </Label>
                       <Input
+                        disabled={isAdmin}
                         value={company.name}
                         onChange={(e) => {
                           setCompany({ ...company, name: e.target.value });
@@ -297,10 +309,11 @@ export default function CompanyPage() {
                     </div>
 
                     <div>
-                      <Label className="text-sm font-semibold">Email *</Label>
+                      <Label className="text-sm font-semibold">Email {isAdmin ? "" : "*"}</Label>
                       <div className="relative">
                         <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
+                          disabled={isAdmin}
                           type="email"
                           className="pl-9"
                           value={company.email}
@@ -323,10 +336,11 @@ export default function CompanyPage() {
                     </div>
 
                     <div>
-                      <Label className="text-sm font-semibold">Phone *</Label>
+                      <Label className="text-sm font-semibold">Phone {isAdmin ? "" : "*"}</Label>
                       <div className="relative">
                         <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
+                          disabled={isAdmin}
                           className="pl-9"
                           value={company.phone}
                           onChange={(e) => {
@@ -352,6 +366,7 @@ export default function CompanyPage() {
                       <div className="relative">
                         <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                         <Textarea
+                          disabled={isAdmin}
                           rows={2}
                           className="pl-9"
                           value={company.address}
@@ -363,24 +378,26 @@ export default function CompanyPage() {
                     </div>
                   </div>
 
-                  <motion.div
-                    variants={buttonVariants}
-                    whileTap="tap"
-                    whileHover="hover"
-                  >
-                    <Button
-                      onClick={handleSaveInfo}
-                      disabled={savingInfo}
-                      className="w-full gap-2"
+                  {!isAdmin && (
+                    <motion.div
+                      variants={buttonVariants}
+                      whileTap="tap"
+                      whileHover="hover"
                     >
-                      {savingInfo ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4" />
-                      )}
-                      {savingInfo ? "Saving..." : "Save Changes"}
-                    </Button>
-                  </motion.div>
+                      <Button
+                        onClick={handleSaveInfo}
+                        disabled={savingInfo}
+                        className="w-full gap-2"
+                      >
+                        {savingInfo ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                        {savingInfo ? "Saving..." : "Save Changes"}
+                      </Button>
+                    </motion.div>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>
@@ -400,6 +417,7 @@ export default function CompanyPage() {
                       Policy Text (used by agent)
                     </Label>
                     <Textarea
+                      disabled={isAdmin}
                       rows={12}
                       value={company.warrantyPolicy}
                       onChange={(e) =>
@@ -420,25 +438,28 @@ export default function CompanyPage() {
                       limitations.
                     </p>
                   </div>
-                  <motion.div
-                    variants={buttonVariants}
-                    whileTap="tap"
-                    whileHover="hover"
-                  >
-                    <Button
-                      onClick={handleSavePolicy}
-                      disabled={savingPolicy}
-                      className="w-full gap-2"
-                      variant="outline"
+                  
+                  {!isAdmin && (
+                    <motion.div
+                      variants={buttonVariants}
+                      whileTap="tap"
+                      whileHover="hover"
                     >
-                      {savingPolicy ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4" />
-                      )}
-                      {savingPolicy ? "Saving..." : "Save Policy"}
-                    </Button>
-                  </motion.div>
+                      <Button
+                        onClick={handleSavePolicy}
+                        disabled={savingPolicy}
+                        className="w-full gap-2"
+                        variant="outline"
+                      >
+                        {savingPolicy ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                        {savingPolicy ? "Saving..." : "Save Policy"}
+                      </Button>
+                    </motion.div>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>
@@ -455,14 +476,12 @@ export default function CompanyPage() {
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <AlertCircle className="h-5 w-5 text-secondary" />
-                  Changes take effect immediately
+                  {isAdmin ? "Admin Read-Only Access" : "Changes take effect immediately"}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">
-                  All changes are saved locally and will be used by the AI agent
-                  in real-time. Your warranty policy is automatically referenced
-                  in conversations.
+                  {isAdmin ? "You are viewing this company's profile and warranty policy. Only company staff can modify these settings." : "All changes are saved locally and will be used by the AI agent in real-time. Your warranty policy is automatically referenced in conversations."}
                 </p>
               </CardContent>
             </Card>

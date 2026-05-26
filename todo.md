@@ -72,3 +72,38 @@
 - [ ] **Multi-Property**: Verify tickets link to correct property when homeowner has multiple.
 - [ ] **Integration**: Test full loop of Builtopia sync status via external webhook.
 - [ ] **Notifications**: Verify Brevo email delivery on status change.
+
+---
+
+## 📅 Upcoming Features (Backlog)
+
+- [ ] **AI Assistant Embed**
+  - Create an iframe and script embed option so users can integrate the AI assistant into their own websites.
+  - Ensure the chat interface uses the company's logo.
+
+- [x] **Knowledge Base & Community Management**
+  - Add `Community` model to database. Each Knowledge Base can contain around 50 communities.
+  - Add drag-and-drop support for Knowledge Base file uploads.
+  - While uploading KB files, users must be able to select a community.
+  - Assign a unique color to each community for identification.
+  - Support bulk import via ZIP upload (e.g., upload a ZIP containing folders for 50 different communities, automatically extract, create communities, and import corresponding KB documents).
+
+- [x] **Property & Ticket Enhancements**
+  - Add a new Property field: “Area of Home”. Explore Buildertrend or similar CRMs for reference when designing property and ticket fields.
+  - Add a new Ticket field: “Type of Ticket” (e.g., Plumbing, Electrical, HVAC, etc.).
+
+- [ ] **Dashboard Branding & Homeowners Module**
+  - Use the company logo as the bot logo as well as in the dashboard header.
+  - Display the company name in the dashboard header alongside the logo.
+  - Create a new CRUD module for Homeowners in the admin dashboard.
+
+- [ ] **Simple AI Agent Implementation**
+  - Skip Orchestrator Multi-Agent system for now.
+  - Create a simple agent similar to the Warranty Care demo that can:
+    - Handle warranty care requests for multiple clients.
+    - Use client-specific Knowledge Bases based on the incoming request.
+    - Create support tickets.
+    - Access homeowners and property data to verify whether a warranty claim is genuine.
+
+- [ ] **Client Demo Preparation**
+  - Prepare the dashboard for the client demo by populating it with realistic mock data (seed script).

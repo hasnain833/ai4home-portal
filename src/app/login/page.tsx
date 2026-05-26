@@ -61,10 +61,6 @@ function AuthContainer() {
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState({ score: 0, label: "" });
 
-  // OTP Verification states
-  const [otp, setOtp] = useState("");
-  const [correctOtp, setCorrectOtp] = useState("");
-
   // Shared UX states
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -138,7 +134,7 @@ function AuthContainer() {
     }
   };
 
-  const handleSendOtp = async (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSuccess("");
@@ -148,37 +144,6 @@ function AuthContainer() {
     if (signupPassword.length < 8) { setError("Password must be at least 8 characters"); return; }
     if (signupPassword !== confirmPassword) { setError("Passwords do not match"); return; }
     if (!agreeTerms) { setError("You must agree to the Terms of Service"); return; }
-
-    setIsLoading(true);
-    try {
-      const response = await fetch("/api/auth/signup/send-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: signupEmail }),
-      });
-      const data = await response.json();
-      if (!response.ok) { setError(data.message || "Failed to send OTP"); return; }
-
-      setCorrectOtp(data.otp);
-      setSuccess("Verification code sent to your email!");
-      setMode("verify");
-    } catch {
-      setError("An unexpected error occurred while sending OTP.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setSuccess("");
-
-    if (!otp || otp.length !== 6) { setError("Please enter a valid 6-digit code"); return; }
-    if (otp !== correctOtp) {
-      setError("Invalid verification code. Please try again.");
-      return;
-    }
 
     setIsLoading(true);
     try {
@@ -192,16 +157,17 @@ function AuthContainer() {
         }),
       });
       const data = await response.json();
-      if (!response.ok) { setError(data.message || "Failed to create account"); return; }
-
-      setSuccess("Account created successfully! Auto-signing in...");
-
-      try {
-        await login(signupEmail, signupPassword);
-      } catch {
-        setMode("login");
-        setSuccess("Account created! Please sign in with your new credentials.");
+      
+      if (!response.ok) { 
+        setError(data.message || "Failed to create account"); 
+        return; 
       }
+
+      setSuccess("Account created! We've sent a verification link to your email. Please check your inbox (and spam folder) to activate your account.");
+      
+      // Optionally switch to login mode so they can login after clicking the link
+      setTimeout(() => setMode("login"), 5000);
+      
     } catch {
       setError("An unexpected error occurred during account creation.");
     } finally {
@@ -437,13 +403,13 @@ function AuthContainer() {
                   )}
 
                   {mode === "signup" && (
-                    <motion.form
+                      <motion.form
                       key="signup-form"
                       initial={{ opacity: 0, x: 15 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -15 }}
                       transition={{ duration: 0.2 }}
-                      onSubmit={handleSendOtp}
+                      onSubmit={handleSignup}
                       className="space-y-4"
                     >
                       <div className="space-y-1.5">
@@ -564,74 +530,17 @@ function AuthContainer() {
                         {isLoading ? (
                           <span className="flex items-center gap-2 justify-center">
                             <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-950 border-t-transparent" />
-                            Sending verification...
+                            Creating Account...
                           </span>
                         ) : (
                           <span className="flex items-center justify-center gap-2">
-                            Continue to Verification <ArrowRight className="h-4 w-4" />
+                            Create Account <ArrowRight className="h-4 w-4" />
                           </span>
                         )}
                       </Button>
                     </motion.form>
                   )}
 
-                  {mode === "verify" && (
-                    <motion.form
-                      key="verify-form"
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      transition={{ duration: 0.25 }}
-                      onSubmit={handleVerifyOtp}
-                      className="space-y-6"
-                    >
-                      <div className="space-y-3">
-                        <Label htmlFor="otp" className="text-xs font-semibold text-zinc-300 block text-center uppercase tracking-widest">6-Digit Verification Code</Label>
-                        <div className="relative group">
-                          <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
-                          <Input
-                            id="otp"
-                            type="text"
-                            maxLength={6}
-                            placeholder="123456"
-                            className="pl-12 text-center tracking-[0.4em] text-lg font-bold h-12 bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none"
-                            value={otp}
-                            onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                            disabled={isLoading}
-                          />
-                        </div>
-                        <p className="text-xs text-zinc-500 text-center leading-normal mt-1">
-                          Check your email inbox (and spam folder) for the system validation token.
-                        </p>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 pt-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => { setMode("signup"); setError(""); setSuccess(""); }}
-                          disabled={isLoading}
-                          className="h-12 text-xs font-bold rounded-xl border-white/10 hover:bg-white/[0.05] text-zinc-300 hover:text-zinc-100 cursor-pointer transition-all focus:outline-none"
-                        >
-                          Back
-                        </Button>
-                        <Button
-                          type="submit"
-                          className="h-12 text-xs font-bold rounded-xl tracking-wide bg-[#c59b4c] hover:bg-[#d4ae62] text-zinc-950 hover:scale-[1.01] active:scale-[0.99] border-0 cursor-pointer flex items-center justify-center transition-all focus:outline-none"
-                          disabled={isLoading || otp.length !== 6}
-                        >
-                          {isLoading ? (
-                            <span className="flex items-center gap-2 justify-center">
-                              <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-950 border-t-transparent" />
-                              Verifying...
-                            </span>
-                          ) : (
-                            "Verify Code"
-                          )}
-                        </Button>
-                      </div>
-                    </motion.form>
-                  )}
                 </AnimatePresence>
               </div>
             </div>

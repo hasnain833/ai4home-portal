@@ -48,32 +48,17 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(request);
-    if (!session || (session.role !== "ADMIN" && session.role !== "STAFF")) {
+    // Only HOMEOWNER can add properties
+    if (!session || session.role !== "HOMEOWNER") {
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
 
-    const { address, city, state, zipCode, coeDate, homeownerId } = await request.json();
+    const { address, city, state, zipCode, coeDate, areaOfHome } = await request.json();
 
-    if (!address || !homeownerId) {
+    if (!address) {
       return NextResponse.json(
-        { message: "Address and Homeowner are required" },
+        { message: "Address is required" },
         { status: 400 }
-      );
-    }
-
-    // Verify homeowner exists and is in the same company
-    const homeowner = await prisma.user.findFirst({
-      where: {
-        id: homeownerId,
-        role: "HOMEOWNER",
-        companyId: session.companyId || "demo-company",
-      },
-    });
-
-    if (!homeowner) {
-      return NextResponse.json(
-        { message: "Selected homeowner not found or is in another company" },
-        { status: 404 }
       );
     }
 
@@ -83,8 +68,9 @@ export async function POST(request: Request) {
         city,
         state,
         zipCode,
+        areaOfHome,
         coeDate: coeDate ? new Date(coeDate) : null,
-        homeownerId,
+        homeownerId: session.id, // Assign directly to the current user
       },
       include: {
         homeowner: {

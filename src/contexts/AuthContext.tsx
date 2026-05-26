@@ -6,8 +6,10 @@ import {
   useState,
   useEffect,
   ReactNode,
+  useRef,
 } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 export type UserRole = "admin" | "staff" | "homeowner";
 
@@ -38,7 +40,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  updateProfile: (data: Partial<User>) => void;
+  updateProfile: (data: Partial<User>) => Promise<void>;
   updateAvatar: (avatarUrl: string) => void;
   setOnlineStatus: (status: boolean) => void;
 }
@@ -49,68 +51,113 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const supabase = createClient();
+
+  // Stable ref — createClient() returns a singleton so this is safe
+  const supabaseRef = useRef(createClient());
 
   useEffect(() => {
-    // Check localStorage for saved session
-    const savedUser = localStorage.getItem("warranty_user");
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
+    const supabase = supabaseRef.current;
+    let mounted = true;
+    let initialFetchDone = false;
+
+    async function fetchUser() {
+      if (!mounted) return;
+      setIsLoading(true);
+      try {
+        const response = await fetch("/api/auth/me");
+        if (response.ok) {
+          const userData = await response.json();
+          if (mounted) setUser(userData);
+        } else {
+          if (mounted) setUser(null);
+        }
+      } catch {
+        if (mounted) setUser(null);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
     }
-    setIsLoading(false);
-  }, []);
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event) => {
+        if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+          // Avoid double-fetch: INITIAL_SESSION fires on mount, skip the manual call below
+          if (event === "INITIAL_SESSION") initialFetchDone = true;
+          fetchUser();
+        } else if (event === "SIGNED_OUT") {
+          if (mounted) {
+            setUser(null);
+            setIsLoading(false);
+          }
+          router.push("/login");
+        }
+      }
+    );
+
+    // Fallback: if onAuthStateChange didn't fire INITIAL_SESSION (older SDK), fetch manually
+    setTimeout(() => {
+      if (!initialFetchDone && mounted) {
+        fetchUser();
+      }
+    }, 100);
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [router]); // router is stable
+
 
   const login = async (email: string, password: string) => {
     setIsLoading(true);
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      const { error } = await supabaseRef.current.auth.signInWithPassword({
+        email,
+        password,
       });
 
-      const data = await response.json();
+      if (error) throw error;
 
-      if (!response.ok) {
-        throw new Error(data.message || "Login failed");
-      }
-
-      const loggedInUser: User = {
-        ...data,
-        lastSeen: new Date(data.lastSeen),
-      };
-
-      setUser(loggedInUser);
-      localStorage.setItem("warranty_user", JSON.stringify(loggedInUser));
       router.push("/dashboard");
     } catch (err) {
-      throw err;
-    } finally {
       setIsLoading(false);
+      throw err;
     }
   };
 
   const logout = async () => {
-    if (user) {
-      const updatedUser = { ...user, online: false };
-      localStorage.setItem("warranty_user", JSON.stringify(updatedUser));
-    }
-    
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await supabaseRef.current.auth.signOut();
     } catch (err) {
       console.error("Logout API failed", err);
     }
-
     setUser(null);
-    localStorage.removeItem("warranty_user");
     router.push("/login");
   };
 
-  const updateProfile = (data: Partial<User>) => {
+  const updateProfile = async (data: Partial<User>) => {
     if (user) {
       const updated = { ...user, ...data };
       setUser(updated);
-      localStorage.setItem("warranty_user", JSON.stringify(updated));
+
+      try {
+        const response = await fetch("/api/auth/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to update profile on server");
+        }
+
+        const serverData = await response.json();
+        const finalUser = { ...updated, ...serverData };
+        setUser(finalUser);
+      } catch (err) {
+        console.error("Profile update API failed", err);
+      }
     }
   };
 
@@ -120,13 +167,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setOnlineStatus = (status: boolean) => {
     if (user) {
-      const updated = {
+      setUser({
         ...user,
         online: status,
         lastSeen: status ? user.lastSeen : new Date(),
-      };
-      setUser(updated);
-      localStorage.setItem("warranty_user", JSON.stringify(updated));
+      });
     }
   };
 

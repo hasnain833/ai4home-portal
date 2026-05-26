@@ -23,7 +23,8 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     const session = await getServerSession(request);
-    if (!session || session.role !== "ADMIN") {
+    // Only STAFF can update company settings, Admin cannot
+    if (!session || session.role !== "STAFF") {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
 

@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     }
 
     const data = await request.json();
-    const { issueType, propertyId, priority, isEmergency, conversationId } = data;
+    const { issueType, ticketType, propertyId, priority, isEmergency, conversationId } = data;
     let { homeownerId } = data;
 
     // Enforce homeownerId for homeowners
@@ -101,6 +101,7 @@ export async function POST(request: Request) {
       data: {
         id: ticketId,
         issueType,
+        ticketType,
         propertyId,
         homeownerId,
         priority: isEmergency ? "URGENT" : (priority || "MEDIUM"),

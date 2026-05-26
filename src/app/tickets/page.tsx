@@ -62,6 +62,7 @@ interface Ticket {
     address: string;
   };
   issueType: string;
+  ticketType?: string;
   status: TicketStatus;
   priority: TicketPriority;
   createdAt: string;
@@ -536,6 +537,7 @@ export default function TicketsPage() {
                           
                           <div className="space-y-1 text-xs">
                             <div className="font-medium text-foreground">{ticket.issueType}</div>
+                            {ticket.ticketType && <div className="text-[10px] text-muted-foreground uppercase">{ticket.ticketType}</div>}
                             <div className="text-muted-foreground flex items-center gap-1.5 mt-1">
                               <span className="inline-block w-1.5 h-1.5 rounded-full bg-border" />
                               {ticket.property?.address || "No property address linked"}
@@ -598,6 +600,7 @@ export default function TicketsPage() {
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Homeowner</TableHead>
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Address</TableHead>
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Issue</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Type</TableHead>
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Year</TableHead>
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Priority</TableHead>
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Status</TableHead>
@@ -630,6 +633,9 @@ export default function TicketsPage() {
                               </TableCell>
                               <TableCell className="py-3.5 text-foreground/90 font-medium text-xs max-w-[220px] truncate" title={ticket.issueType}>
                                 {ticket.issueType}
+                              </TableCell>
+                              <TableCell className="py-3.5 text-muted-foreground text-xs uppercase">
+                                {ticket.ticketType || "-"}
                               </TableCell>
                               <TableCell className="py-3.5 text-muted-foreground text-xs">
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-[10px] font-semibold text-muted-foreground border border-border/50">

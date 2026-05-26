@@ -52,6 +52,7 @@ interface Property {
   city: string | null;
   state: string | null;
   zipCode: string | null;
+  areaOfHome?: string | null;
   coeDate: string | null;
   homeownerId: string;
   homeowner?: HomeownerInfo;
@@ -94,8 +95,8 @@ export default function PropertiesPage() {
   const [city, setCity] = useState("");
   const [stateVal, setStateVal] = useState("");
   const [zipCode, setZipCode] = useState("");
+  const [areaOfHome, setAreaOfHome] = useState("");
   const [coeDate, setCoeDate] = useState("");
-  const [homeownerId, setHomeownerId] = useState("");
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState<string | null>(null);
 
@@ -138,8 +139,8 @@ export default function PropertiesPage() {
     setFormError("");
     setSubmitting(true);
 
-    if (!address || !homeownerId) {
-      setFormError("Property Address and Homeowner are required.");
+    if (!address) {
+      setFormError("Property Address is required.");
       setSubmitting(false);
       return;
     }
@@ -153,8 +154,8 @@ export default function PropertiesPage() {
           city,
           state: stateVal,
           zipCode,
+          areaOfHome,
           coeDate: coeDate || null,
-          homeownerId,
         }),
       });
 
@@ -166,8 +167,8 @@ export default function PropertiesPage() {
         setCity("");
         setStateVal("");
         setZipCode("");
+        setAreaOfHome("");
         setCoeDate("");
-        setHomeownerId("");
         setToast("Property registered successfully!");
         setTimeout(() => setToast(null), 3000);
       } else {
@@ -235,10 +236,10 @@ export default function PropertiesPage() {
               <p className="text-muted-foreground mt-1">
                 {isHomeowner
                   ? "Track active warranty coverages, COE milestones, and property specifications."
-                  : "Register, assign, and manage multi-property warranty records under builder coverage."}
+                  : "View multi-property warranty records under builder coverage."}
               </p>
             </div>
-            {!isHomeowner && (
+            {isHomeowner && (
               <Button
                 onClick={() => setIsModalOpen(true)}
                 className="bg-primary hover:bg-primary/90 text-white gap-2 font-semibold self-start sm:self-auto"
@@ -303,7 +304,7 @@ export default function PropertiesPage() {
                           </div>
                           <div className="flex items-center justify-between pt-1">
                             <span className="text-xs text-gray-500 font-medium">Have an issue with this property?</span>
-                            <Link href="/chat">
+                            <Link href="/tickets">
                               <Button size="sm" variant="outline" className="text-[#0F3B3D] border-[#0F3B3D] hover:bg-[#0F3B3D] hover:text-white gap-1 text-xs">
                                 Ask AI <ChevronRight className="h-3 w-3" />
                               </Button>
@@ -319,7 +320,7 @@ export default function PropertiesPage() {
                   <Building2 className="h-14 w-14 mx-auto opacity-30 text-[#0F3B3D] mb-3" />
                   <h3 className="font-bold text-gray-700 text-lg">No properties found</h3>
                   <p className="text-sm text-gray-400 max-w-sm mx-auto mt-1">
-                    Please contact your homebuilder if your property does not appear automatically under your account.
+                    Click "Add Property" to register a new property under your account.
                   </p>
                 </div>
               )}
@@ -348,6 +349,7 @@ export default function PropertiesPage() {
                         <TableRow>
                           <TableHead>Property Address</TableHead>
                           <TableHead>City & Zip</TableHead>
+                          <TableHead>Area</TableHead>
                           <TableHead>Homeowner</TableHead>
                           <TableHead>COE Date</TableHead>
                           <TableHead>Coverage Term</TableHead>
@@ -365,6 +367,9 @@ export default function PropertiesPage() {
                               </TableCell>
                               <TableCell className="text-gray-500">
                                 {p.city || "N/A"} {p.zipCode ? `, ${p.zipCode}` : ""}
+                              </TableCell>
+                              <TableCell className="text-gray-500 whitespace-nowrap">
+                                {p.areaOfHome || "N/A"}
                               </TableCell>
                               <TableCell>
                                 <div className="flex flex-col">
@@ -425,8 +430,8 @@ export default function PropertiesPage() {
                       <Building2 className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-bold text-[#0F3B3D] dark:text-[#E8B86B]">Register Builder Property</h3>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Add a new property to homeowner warranty coverage.</p>
+                      <h3 className="text-lg font-bold text-[#0F3B3D] dark:text-[#E8B86B]">Register Property</h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Add a new property to your warranty coverage.</p>
                     </div>
                   </div>
 
@@ -464,6 +469,8 @@ export default function PropertiesPage() {
                           onChange={(e) => setStateVal(e.target.value)}
                         />
                       </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5 col-span-1">
                         <Label htmlFor="zipCode" className="text-gray-700 dark:text-gray-200 font-semibold">Zip Code</Label>
                         <Input
@@ -474,22 +481,16 @@ export default function PropertiesPage() {
                           onChange={(e) => setZipCode(e.target.value)}
                         />
                       </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label htmlFor="homeowner" className="text-gray-700 dark:text-gray-200 font-semibold">Select Homeowner</Label>
-                      <Select value={homeownerId} onValueChange={setHomeownerId}>
-                        <SelectTrigger id="homeowner" className="bg-white border border-gray-300 text-gray-900 focus:border-[#0F3B3D] focus:ring-[#0F3B3D] dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100">
-                          <SelectValue placeholder="Assign Homeowner Account" className="text-gray-500" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100">
-                          {homeowners.map((ho) => (
-                            <SelectItem key={ho.id} value={ho.id} className="hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
-                              {ho.name || "Unnamed"} ({ho.email})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="space-y-1.5 col-span-1">
+                        <Label htmlFor="areaOfHome" className="text-gray-700 dark:text-gray-200 font-semibold">Area of Home</Label>
+                        <Input
+                          id="areaOfHome"
+                          placeholder="e.g. 2,500 sq ft"
+                          className="bg-white border border-gray-300 text-gray-900 focus:border-[#0F3B3D] focus:ring-[#0F3B3D] dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
+                          value={areaOfHome}
+                          onChange={(e) => setAreaOfHome(e.target.value)}
+                        />
+                      </div>
                     </div>
 
                     <div className="space-y-1.5">

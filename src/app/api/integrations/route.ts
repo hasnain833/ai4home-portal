@@ -13,7 +13,7 @@ export async function GET(request: Request) {
 
     const platforms: ERPPlatform[] = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
     const saved = await prisma.integration.findMany({
-      where: { companyId: session.companyId },
+      where: { companyId: session.companyId || "demo-company" },
       select: { platform: true, environment: true, isActive: true, apiKey: true, updatedAt: true },
     });
 
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Platform is required" }, { status: 400 });
     }
 
-    const result = await testERPConnection(session.companyId, platform.toUpperCase() as ERPPlatform);
+    const result = await testERPConnection(session.companyId || "demo-company", platform.toUpperCase() as ERPPlatform);
     return NextResponse.json(result);
   } catch (error) {
     console.error("[Integrations] Test connection failed:", error);

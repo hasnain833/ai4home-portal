@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import bcrypt from "bcryptjs";
 import { getServerSession } from "@/lib/session";
+import { createClient } from "@supabase/supabase-js";
+
+// Initialize Supabase Admin client for auth management
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 // GET — list all staff members for the admin's company
 export async function GET(request: Request) {
@@ -55,13 +61,28 @@ export async function POST(request: Request) {
       );
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // 1. Create user in Supabase Auth
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name },
+    });
 
+    if (authError) {
+      console.error("Supabase auth creation error:", authError);
+      return NextResponse.json(
+        { message: authError.message || "Failed to create authentication account" },
+        { status: 400 }
+      );
+    }
+
+    // 2. Create user in Prisma DB
     const newStaff = await prisma.user.create({
       data: {
         name,
         email,
-        password: hashedPassword,
+        password: "supabase-managed", // Password managed by Supabase now
         role: "STAFF",
         companyId: session.companyId,
       },
@@ -103,6 +124,15 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ message: "Staff member not found" }, { status: 404 });
     }
 
+    // 1. Delete from Supabase Auth
+    const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
+    const supabaseUser = usersData.users.find(u => u.email === staff.email);
+    
+    if (supabaseUser) {
+      await supabaseAdmin.auth.admin.deleteUser(supabaseUser.id);
+    }
+
+    // 2. Delete from Prisma DB
     await prisma.user.delete({ where: { id: staffId } });
 
     return NextResponse.json({ success: true });

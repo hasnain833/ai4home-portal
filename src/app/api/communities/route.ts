@@ -9,60 +9,52 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
 
-    const docs = await prisma.knowledgeBaseDocument.findMany({
+    const communities = await prisma.community.findMany({
       where: { companyId: session.companyId || "demo-company" },
-      include: {
-        community: {
-          select: { id: true, name: true, color: true }
-        }
-      },
       orderBy: { createdAt: "desc" },
     });
-    return NextResponse.json(docs);
+    
+    return NextResponse.json(communities);
   } catch (error) {
-    console.error("Error fetching knowledge-base docs:", error);
-    return NextResponse.json({ message: "Error fetching documents" }, { status: 500 });
+    console.error("Error fetching communities:", error);
+    return NextResponse.json({ message: "Error fetching communities" }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(request);
-    // Only STAFF can upload, Admin cannot
+    // Only STAFF can create a community
     if (!session || session.role !== "STAFF") {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
 
-    const data = await request.json();
-    const { name, size, url, communityId } = data;
+    const { name, color } = await request.json();
+    if (!name) {
+      return NextResponse.json({ message: "Name is required" }, { status: 400 });
+    }
+
     const companyId = session.companyId || "demo-company";
 
-    const doc = await prisma.knowledgeBaseDocument.create({
+    const community = await prisma.community.create({
       data: {
         name,
-        size,
-        url,
+        color: color || "#0F3B3D",
         companyId,
-        communityId: communityId || null,
       },
-      include: {
-        community: {
-          select: { id: true, name: true, color: true }
-        }
-      }
     });
 
-    return NextResponse.json(doc);
+    return NextResponse.json(community);
   } catch (error) {
-    console.error("Error creating knowledge-base doc:", error);
-    return NextResponse.json({ message: "Error creating document" }, { status: 500 });
+    console.error("Error creating community:", error);
+    return NextResponse.json({ message: "Error creating community" }, { status: 500 });
   }
 }
 
 export async function DELETE(request: Request) {
   try {
     const session = await getServerSession(request);
-    // Only STAFF can delete, Admin cannot
+    // Only STAFF can delete
     if (!session || session.role !== "STAFF") {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
@@ -72,23 +64,21 @@ export async function DELETE(request: Request) {
 
     if (!id) return NextResponse.json({ message: "ID required" }, { status: 400 });
 
-    // Verify document belongs to company
-    const doc = await prisma.knowledgeBaseDocument.findFirst({
+    const community = await prisma.community.findFirst({
       where: { id, companyId: session.companyId || "demo-company" }
     });
 
-    if (!doc) {
-      return NextResponse.json({ message: "Document not found" }, { status: 404 });
+    if (!community) {
+      return NextResponse.json({ message: "Community not found" }, { status: 404 });
     }
 
-    await prisma.knowledgeBaseDocument.delete({
+    await prisma.community.delete({
       where: { id },
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Error deleting knowledge-base doc:", error);
-    return NextResponse.json({ message: "Error deleting document" }, { status: 500 });
+    console.error("Error deleting community:", error);
+    return NextResponse.json({ message: "Error deleting community" }, { status: 500 });
   }
 }
-

@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     }
 
     const integrations = await prisma.integration.findMany({
-      where: { companyId: session.companyId },
+      where: { companyId: session.companyId || "demo-company" },
       select: {
         id: true,
         platform: true,
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
 
     // Upsert: if a record already exists for this company+platform, update it
     const existing = await prisma.integration.findFirst({
-      where: { companyId: session.companyId, platform: platform.toUpperCase() },
+      where: { companyId: session.companyId || "demo-company", platform: platform.toUpperCase() },
     });
 
     let integration;
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     } else {
       integration = await prisma.integration.create({
         data: {
-          companyId: session.companyId,
+          companyId: session.companyId || "demo-company",
           platform: platform.toUpperCase(),
           apiKey,
           secretKey: secretKey || null,
@@ -103,7 +103,7 @@ export async function DELETE(request: Request) {
     }
 
     await prisma.integration.deleteMany({
-      where: { companyId: session.companyId, platform: platform.toUpperCase() },
+      where: { companyId: session.companyId || "demo-company", platform: platform.toUpperCase() },
     });
 
     return NextResponse.json({ success: true });
