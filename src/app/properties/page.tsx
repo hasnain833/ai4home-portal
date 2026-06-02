@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,13 +31,13 @@ import {
   Plus,
   Search,
   Calendar,
-  User as UserIcon,
-  MapPin,
+  ChevronRight,
   CheckCircle2,
   X,
   Loader2,
-  Sparkles,
-  ChevronRight
+  Pencil,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -65,13 +65,9 @@ interface HomeownerSelect {
   email: string;
 }
 
-// Animation variants
 const staggerContainer = {
   hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.05, delayChildren: 0.1 },
-  },
+  visible: { opacity: 1, transition: { staggerChildren: 0.05, delayChildren: 0.1 } },
 };
 
 const fadeInUp = {
@@ -79,37 +75,50 @@ const fadeInUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
 };
 
+const EMPTY_FORM = {
+  address: "",
+  city: "",
+  stateVal: "",
+  zipCode: "",
+  areaOfHome: "",
+  coeDate: "",
+  homeownerId: "",
+};
+
 export default function PropertiesPage() {
   const { user } = useAuth();
   const isHomeowner = user?.role === "homeowner";
+  const canManage = user?.role === "admin" || user?.role === "staff";
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [homeowners, setHomeowners] = useState<HomeownerSelect[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
 
-  // Form State
-  const [address, setAddress] = useState("");
-  const [city, setCity] = useState("");
-  const [stateVal, setStateVal] = useState("");
-  const [zipCode, setZipCode] = useState("");
-  const [areaOfHome, setAreaOfHome] = useState("");
-  const [coeDate, setCoeDate] = useState("");
+  // Modal state
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Property | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Form state
+  const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const fetchProperties = async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/properties");
-      if (res.ok) {
-        const data = await res.json();
-        setProperties(data);
-      }
-    } catch (error) {
-      console.error("Error fetching properties:", error);
+      if (res.ok) setProperties(await res.json());
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoading(false);
     }
@@ -118,88 +127,142 @@ export default function PropertiesPage() {
   const fetchHomeowners = async () => {
     try {
       const res = await fetch("/api/users?role=homeowner");
-      if (res.ok) {
-        const data = await res.json();
-        setHomeowners(data);
-      }
-    } catch (error) {
-      console.error("Error fetching homeowners:", error);
+      if (res.ok) setHomeowners(await res.json());
+    } catch (e) {
+      console.error(e);
     }
   };
 
   useEffect(() => {
     fetchProperties();
-    if (!isHomeowner) {
-      fetchHomeowners();
-    }
-  }, [isHomeowner]);
+    if (canManage) fetchHomeowners();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage]);
 
-  const handleCreateProperty = async (e: React.FormEvent) => {
+  const openAddModal = () => {
+    setEditingProperty(null);
+    setForm(EMPTY_FORM);
+    setFormError("");
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (p: Property) => {
+    setEditingProperty(p);
+    setForm({
+      address: p.address,
+      city: p.city || "",
+      stateVal: p.state || "",
+      zipCode: p.zipCode || "",
+      areaOfHome: p.areaOfHome || "",
+      coeDate: p.coeDate ? new Date(p.coeDate).toISOString().split("T")[0] : "",
+      homeownerId: p.homeownerId,
+    });
+    setFormError("");
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingProperty(null);
+    setForm(EMPTY_FORM);
+    setFormError("");
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError("");
     setSubmitting(true);
 
-    if (!address) {
+    if (!form.address) {
       setFormError("Property Address is required.");
       setSubmitting(false);
       return;
     }
 
+    if (canManage && !form.homeownerId) {
+      setFormError("Please select a homeowner.");
+      setSubmitting(false);
+      return;
+    }
+
+    const body = {
+      address: form.address,
+      city: form.city || null,
+      state: form.stateVal || null,
+      zipCode: form.zipCode || null,
+      areaOfHome: form.areaOfHome || null,
+      coeDate: form.coeDate || null,
+      homeownerId: form.homeownerId || undefined,
+    };
+
     try {
-      const res = await fetch("/api/properties", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          address,
-          city,
-          state: stateVal,
-          zipCode,
-          areaOfHome,
-          coeDate: coeDate || null,
-        }),
-      });
+      let res: Response;
+      if (editingProperty) {
+        res = await fetch(`/api/properties/${editingProperty.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } else {
+        res = await fetch("/api/properties", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
 
       if (res.ok) {
-        const newProperty = await res.json();
-        setProperties([newProperty, ...properties]);
-        setIsModalOpen(false);
-        setAddress("");
-        setCity("");
-        setStateVal("");
-        setZipCode("");
-        setAreaOfHome("");
-        setCoeDate("");
-        setToast("Property registered successfully!");
-        setTimeout(() => setToast(null), 3000);
+        const saved: Property = await res.json();
+        if (editingProperty) {
+          setProperties((prev) => prev.map((p) => (p.id === saved.id ? saved : p)));
+          showToast("Property updated successfully!");
+        } else {
+          setProperties((prev) => [saved, ...prev]);
+          showToast("Property registered successfully!");
+        }
+        closeModal();
       } else {
-        const errorData = await res.json();
-        setFormError(errorData.message || "Failed to register property.");
+        const err = await res.json();
+        setFormError(err.message || "Failed to save property.");
       }
-    } catch (error) {
+    } catch {
       setFormError("Server error. Please try again.");
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/properties/${deleteTarget.id}`, { method: "DELETE" });
+      if (res.ok) {
+        setProperties((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+        showToast("Property deleted.");
+        setDeleteTarget(null);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const getWarrantyYear = (coeDate: string | null) => {
     if (!coeDate) return 1;
-    const coe = new Date(coeDate);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - coe.getTime());
-    const diffYears = diffTime / (1000 * 60 * 60 * 24 * 365.25);
-    if (diffYears <= 1) return 1;
-    if (diffYears <= 2) return 2;
+    const diff = (Date.now() - new Date(coeDate).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+    if (diff <= 1) return 1;
+    if (diff <= 2) return 2;
     return 10;
   };
 
-  // Scoped property search filter
   const filteredProperties = properties.filter((p) => {
-    const query = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase();
     return (
-      p.address.toLowerCase().includes(query) ||
-      (p.city && p.city.toLowerCase().includes(query)) ||
-      (p.homeowner?.name && p.homeowner.name.toLowerCase().includes(query))
+      p.address.toLowerCase().includes(q) ||
+      (p.city && p.city.toLowerCase().includes(q)) ||
+      (p.homeowner?.name && p.homeowner.name.toLowerCase().includes(q))
     );
   });
 
@@ -236,12 +299,12 @@ export default function PropertiesPage() {
               <p className="text-muted-foreground mt-1">
                 {isHomeowner
                   ? "Track active warranty coverages, COE milestones, and property specifications."
-                  : "View multi-property warranty records under builder coverage."}
+                  : "Manage all properties under builder warranty coverage."}
               </p>
             </div>
-            {isHomeowner && (
+            {(isHomeowner || canManage) && (
               <Button
-                onClick={() => setIsModalOpen(true)}
+                onClick={openAddModal}
                 className="bg-primary hover:bg-primary/90 text-white gap-2 font-semibold self-start sm:self-auto"
               >
                 <Plus className="h-4 w-4" /> Add Property
@@ -256,9 +319,7 @@ export default function PropertiesPage() {
               <Skeleton className="h-40 w-full" />
             </div>
           ) : isHomeowner ? (
-            // ==========================================
-            // HOMEOWNER PROPERTIES GRID
-            // ==========================================
+            // HOMEOWNER CARD GRID
             <motion.div variants={fadeInUp} className="grid gap-6 grid-cols-1 md:grid-cols-2">
               {properties.length > 0 ? (
                 properties.map((p) => {
@@ -266,7 +327,7 @@ export default function PropertiesPage() {
                   return (
                     <motion.div key={p.id} whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
                       <Card className="overflow-hidden hover:shadow-lg transition-all border-l-4 border-l-[#0F3B3D]">
-                        <CardHeader className="bg-gray-50/50 pb-4">
+                        <div className="bg-gray-50/50 px-5 pt-5 pb-4">
                           <div className="flex justify-between items-start gap-4">
                             <div className="flex items-center gap-3">
                               <div className="bg-[#0F3B3D]/10 p-2.5 rounded-xl text-[#0F3B3D]">
@@ -281,7 +342,7 @@ export default function PropertiesPage() {
                             </div>
                             <Badge className="bg-[#0F3B3D] text-white shrink-0">Year {coverageYear} Coverage</Badge>
                           </div>
-                        </CardHeader>
+                        </div>
                         <CardContent className="pt-5 space-y-4">
                           <div className="grid grid-cols-2 gap-4 text-sm border-b pb-4">
                             <div>
@@ -294,11 +355,7 @@ export default function PropertiesPage() {
                             <div>
                               <span className="text-gray-400 block text-xs uppercase font-medium">Warranty Term</span>
                               <span className="font-semibold text-[#b48c3c] mt-1 block">
-                                {coverageYear === 1
-                                  ? "1-Year Workmanship"
-                                  : coverageYear === 2
-                                    ? "2-Year Distribution Systems"
-                                    : "10-Year Structural"}
+                                {coverageYear === 1 ? "1-Year Workmanship" : coverageYear === 2 ? "2-Year Distribution" : "10-Year Structural"}
                               </span>
                             </div>
                           </div>
@@ -320,17 +377,14 @@ export default function PropertiesPage() {
                   <Building2 className="h-14 w-14 mx-auto opacity-30 text-[#0F3B3D] mb-3" />
                   <h3 className="font-bold text-gray-700 text-lg">No properties found</h3>
                   <p className="text-sm text-gray-400 max-w-sm mx-auto mt-1">
-                    Click "Add Property" to register a new property under your account.
+                    Click &quot;Add Property&quot; to register a new property under your account.
                   </p>
                 </div>
               )}
             </motion.div>
           ) : (
-            // ==========================================
-            // ADMIN / STAFF PROPERTIES TABLE
-            // ==========================================
+            // ADMIN / STAFF TABLE WITH CRUD
             <motion.div variants={fadeInUp} className="space-y-4">
-              {/* Search bar */}
               <div className="relative">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
@@ -344,11 +398,11 @@ export default function PropertiesPage() {
               <Card className="overflow-hidden">
                 <CardContent className="p-0 overflow-x-auto">
                   {filteredProperties.length > 0 ? (
-                    <Table className="min-w-[800px] md:min-w-full">
+                    <Table className="min-w-[900px] md:min-w-full">
                       <TableHeader>
                         <TableRow>
                           <TableHead>Property Address</TableHead>
-                          <TableHead>City & Zip</TableHead>
+                          <TableHead>City &amp; Zip</TableHead>
                           <TableHead>Area</TableHead>
                           <TableHead>Homeowner</TableHead>
                           <TableHead>COE Date</TableHead>
@@ -361,12 +415,14 @@ export default function PropertiesPage() {
                           const year = getWarrantyYear(p.coeDate);
                           return (
                             <TableRow key={p.id}>
-                              <TableCell className="font-semibold text-gray-800 flex items-center gap-2">
-                                <Building2 className="h-4 w-4 text-[#0F3B3D] shrink-0" />
-                                {p.address}
+                              <TableCell className="font-semibold text-gray-800">
+                                <div className="flex items-center gap-2">
+                                  <Building2 className="h-4 w-4 text-[#0F3B3D] shrink-0" />
+                                  {p.address}
+                                </div>
                               </TableCell>
                               <TableCell className="text-gray-500">
-                                {p.city || "N/A"} {p.zipCode ? `, ${p.zipCode}` : ""}
+                                {p.city || "N/A"}{p.zipCode ? `, ${p.zipCode}` : ""}
                               </TableCell>
                               <TableCell className="text-gray-500 whitespace-nowrap">
                                 {p.areaOfHome || "N/A"}
@@ -386,11 +442,26 @@ export default function PropertiesPage() {
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-right">
-                                <Link href="/tickets">
-                                  <Button variant="ghost" size="sm" className="text-[#0F3B3D] hover:bg-[#0F3B3D]/10">
-                                    Tickets
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-gray-500 hover:text-[#0F3B3D] hover:bg-[#0F3B3D]/10"
+                                    onClick={() => openEditModal(p)}
+                                    title="Edit property"
+                                  >
+                                    <Pencil className="h-4 w-4" />
                                   </Button>
-                                </Link>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-gray-500 hover:text-red-600 hover:bg-red-50"
+                                    onClick={() => setDeleteTarget(p)}
+                                    title="Delete property"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
                           );
@@ -408,10 +479,10 @@ export default function PropertiesPage() {
             </motion.div>
           )}
 
-          {/* Add Property Modal */}
+          {/* Add / Edit Property Modal */}
           <AnimatePresence>
             {isModalOpen && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-200">
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
                 <motion.div
                   initial={{ scale: 0.95, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
@@ -419,7 +490,7 @@ export default function PropertiesPage() {
                   className="bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-lg shadow-2xl relative border dark:border-gray-800"
                 >
                   <button
-                    onClick={() => setIsModalOpen(false)}
+                    onClick={closeModal}
                     className="absolute right-4 top-4 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-400 hover:text-gray-600 transition"
                   >
                     <X className="h-5 w-5" />
@@ -430,79 +501,101 @@ export default function PropertiesPage() {
                       <Building2 className="h-5 w-5" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-bold text-[#0F3B3D] dark:text-[#E8B86B]">Register Property</h3>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Add a new property to your warranty coverage.</p>
+                      <h3 className="text-lg font-bold text-[#0F3B3D] dark:text-[#E8B86B]">
+                        {editingProperty ? "Edit Property" : "Register Property"}
+                      </h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {editingProperty ? "Update the property details below." : "Add a new property to warranty coverage."}
+                      </p>
                     </div>
                   </div>
 
-                  <form onSubmit={handleCreateProperty} className="space-y-4">
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    {/* Homeowner selector — admin/staff only */}
+                    {canManage && (
+                      <div className="space-y-1.5">
+                        <Label className="font-semibold">Homeowner</Label>
+                        <Select
+                          value={form.homeownerId}
+                          onValueChange={(val) => setForm((f) => ({ ...f, homeownerId: val }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select homeowner..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {homeowners.map((h) => (
+                              <SelectItem key={h.id} value={h.id}>
+                                {h.name || h.email} — {h.email}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
                     <div className="space-y-1.5">
-                      <Label htmlFor="address" className="text-gray-700 dark:text-gray-200 font-semibold">Street Address</Label>
+                      <Label htmlFor="address" className="font-semibold">Street Address</Label>
                       <Input
                         id="address"
                         placeholder="e.g. 123 Main St"
-                        className="bg-white border border-gray-300 text-gray-900 focus:border-[#0F3B3D] focus:ring-[#0F3B3D] dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
+                        value={form.address}
+                        onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
                         required
                       />
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="space-y-1.5 col-span-1">
-                        <Label htmlFor="city" className="text-gray-700 dark:text-gray-200 font-semibold">City</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="city" className="font-semibold">City</Label>
                         <Input
                           id="city"
                           placeholder="Dallas"
-                          className="bg-white border border-gray-300 text-gray-900 focus:border-[#0F3B3D] focus:ring-[#0F3B3D] dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
-                          value={city}
-                          onChange={(e) => setCity(e.target.value)}
+                          value={form.city}
+                          onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
                         />
                       </div>
-                      <div className="space-y-1.5 col-span-1">
-                        <Label htmlFor="state" className="text-gray-700 dark:text-gray-200 font-semibold">State</Label>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="state" className="font-semibold">State</Label>
                         <Input
                           id="state"
                           placeholder="TX"
-                          className="bg-white border border-gray-300 text-gray-900 focus:border-[#0F3B3D] focus:ring-[#0F3B3D] dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
-                          value={stateVal}
-                          onChange={(e) => setStateVal(e.target.value)}
+                          value={form.stateVal}
+                          onChange={(e) => setForm((f) => ({ ...f, stateVal: e.target.value }))}
                         />
                       </div>
                     </div>
+
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5 col-span-1">
-                        <Label htmlFor="zipCode" className="text-gray-700 dark:text-gray-200 font-semibold">Zip Code</Label>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="zipCode" className="font-semibold">Zip Code</Label>
                         <Input
                           id="zipCode"
                           placeholder="75001"
-                          className="bg-white border border-gray-300 text-gray-900 focus:border-[#0F3B3D] focus:ring-[#0F3B3D] dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
-                          value={zipCode}
-                          onChange={(e) => setZipCode(e.target.value)}
+                          value={form.zipCode}
+                          onChange={(e) => setForm((f) => ({ ...f, zipCode: e.target.value }))}
                         />
                       </div>
-                      <div className="space-y-1.5 col-span-1">
-                        <Label htmlFor="areaOfHome" className="text-gray-700 dark:text-gray-200 font-semibold">Area of Home</Label>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="areaOfHome" className="font-semibold">Area of Home</Label>
                         <Input
                           id="areaOfHome"
                           placeholder="e.g. 2,500 sq ft"
-                          className="bg-white border border-gray-300 text-gray-900 focus:border-[#0F3B3D] focus:ring-[#0F3B3D] dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
-                          value={areaOfHome}
-                          onChange={(e) => setAreaOfHome(e.target.value)}
+                          value={form.areaOfHome}
+                          onChange={(e) => setForm((f) => ({ ...f, areaOfHome: e.target.value }))}
                         />
                       </div>
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label htmlFor="coeDate" className="text-gray-700 dark:text-gray-200 font-semibold">COE Date (Warranty Activation)</Label>
+                      <Label htmlFor="coeDate" className="font-semibold">COE Date (Warranty Activation)</Label>
                       <div className="relative">
                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                         <Input
                           id="coeDate"
                           type="date"
-                          className="pl-9 bg-white border border-gray-300 text-gray-900 focus:border-[#0F3B3D] focus:ring-[#0F3B3D] dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100"
-                          value={coeDate}
-                          onChange={(e) => setCoeDate(e.target.value)}
+                          className="pl-9"
+                          value={form.coeDate}
+                          onChange={(e) => setForm((f) => ({ ...f, coeDate: e.target.value }))}
                         />
                       </div>
                     </div>
@@ -514,12 +607,7 @@ export default function PropertiesPage() {
                     )}
 
                     <div className="flex gap-3 justify-end pt-3 border-t dark:border-gray-800">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() => setIsModalOpen(false)}
-                        className="text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-                      >
+                      <Button type="button" variant="ghost" onClick={closeModal} className="text-gray-600">
                         Cancel
                       </Button>
                       <Button
@@ -528,15 +616,51 @@ export default function PropertiesPage() {
                         className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-semibold gap-2"
                       >
                         {submitting ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" /> Saving...
-                          </>
-                        ) : (
-                          "Register Property"
-                        )}
+                          <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</>
+                        ) : editingProperty ? "Update Property" : "Register Property"}
                       </Button>
                     </div>
                   </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Delete Confirmation Modal */}
+          <AnimatePresence>
+            {deleteTarget && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-sm shadow-2xl border dark:border-gray-800"
+                >
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="bg-red-100 p-2.5 rounded-xl text-red-600">
+                      <AlertTriangle className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-gray-900 dark:text-gray-100">Delete Property</h3>
+                      <p className="text-xs text-gray-500">This action cannot be undone.</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">
+                    Are you sure you want to delete <span className="font-semibold">{deleteTarget.address}</span>?
+                  </p>
+                  <div className="flex gap-3 justify-end">
+                    <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className="gap-2"
+                    >
+                      {deleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</> : "Delete Property"}
+                    </Button>
+                  </div>
                 </motion.div>
               </div>
             )}

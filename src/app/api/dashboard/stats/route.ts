@@ -25,7 +25,7 @@ export async function GET(request: Request) {
       resolvedThisWeek,
       resolvedTicketsData,
       recentTickets
-    ] = await Promise.all([
+    ] = await prisma.$transaction([
       prisma.ticket.count({ where: companyScope }),
       prisma.ticket.count({ where: { status: "OPEN", ...companyScope } }),
       prisma.ticket.count({ where: { status: "IN_PROGRESS", ...companyScope } }),

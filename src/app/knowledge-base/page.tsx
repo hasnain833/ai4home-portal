@@ -56,7 +56,7 @@ const formatFileSize = (bytes: number): string => {
 
 export default function KnowledgeBasePage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const isAdmin = false; // Changed to false to allow Admin full CRUD access like staff
   const [documents, setDocuments] = useState<Document[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loading, setLoading] = useState(true);

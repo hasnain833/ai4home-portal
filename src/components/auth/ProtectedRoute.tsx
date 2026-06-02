@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect, ReactNode } from "react";
+import { useEffect, useRef, ReactNode } from "react";
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -16,24 +16,28 @@ export function ProtectedRoute({
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const routerRef = useRef(router);
+  const pathnameRef = useRef(pathname);
+  routerRef.current = router;
+  pathnameRef.current = pathname;
+
+  const allowedKey = allowedRoles ? allowedRoles.join(",") : "";
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      router.push(`/login?redirect=${encodeURIComponent(pathname)}`);
+    if (isLoading) return;
+
+    if (!user) {
+      routerRef.current.push(`/login?redirect=${encodeURIComponent(pathnameRef.current)}`);
+      return;
     }
-    if (
-      !isLoading &&
-      user &&
-      allowedRoles &&
-      !allowedRoles.includes(user.role)
-    ) {
-      router.push("/dashboard");
+
+    if (allowedKey && !allowedKey.split(",").includes(user.role)) {
+      routerRef.current.push("/dashboard");
     }
-  }, [user, isLoading, router, pathname, allowedRoles]);
+  }, [user, isLoading, allowedKey]);
 
   if (!isLoading && !user) return null;
-  if (!isLoading && user && allowedRoles && !allowedRoles.includes(user.role)) return null;
+  if (!isLoading && user && allowedKey && !allowedKey.split(",").includes(user.role)) return null;
 
   return <>{children}</>;
 }
-

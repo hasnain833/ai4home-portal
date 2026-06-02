@@ -23,8 +23,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     const session = await getServerSession(request);
-    // Only STAFF can update company settings, Admin cannot
-    if (!session || session.role !== "STAFF") {
+    if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
 
@@ -36,6 +35,13 @@ export async function PUT(request: Request) {
       where: { id: companyId },
       data: updateData,
     });
+
+    if (session.role === "ADMIN" && updateData.name) {
+      await prisma.user.updateMany({
+        where: { email: session.email },
+        data: { name: updateData.name }
+      });
+    }
 
     return NextResponse.json(company);
   } catch (error) {

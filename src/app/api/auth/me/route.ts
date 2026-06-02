@@ -19,23 +19,25 @@ export async function GET() {
     // Find the user in Prisma by email
     let dbUser = await prisma.user.findUnique({
       where: { email },
+      include: { company: true },
     });
 
     if (!dbUser) {
-      // If user doesn't exist in Prisma but logged in via Supabase, create them
-      dbUser = await prisma.user.create({
-        data: {
-          email,
-          password: "supabase-auth", // Managed by supabase
-          name: user.user_metadata?.name || email.split("@")[0],
-          role: "HOMEOWNER", // Default role
-        },
-      });
+      return NextResponse.json({ message: "User profile not found in local database." }, { status: 404 });
     }
+
+    // Admin → company logo as avatar; Staff/Homeowner → their own personal avatar
+    const isAdmin = dbUser.role === "ADMIN";
+    const avatarUrl = isAdmin
+      ? (dbUser.company?.logo || null)
+      : (dbUser.avatar || null);
 
     return NextResponse.json({
       ...dbUser,
-      role: dbUser.role.toLowerCase(), // Normalize ADMIN→admin, HOMEOWNER→homeowner etc.
+      avatar: avatarUrl,
+      companyLogo: dbUser.company?.logo || null, // Always the company logo, for the header
+      companyName: dbUser.company?.name || null,
+      role: dbUser.role.toLowerCase(),
       online: true,
     });
   } catch (error) {

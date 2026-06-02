@@ -11,17 +11,33 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "7d";
+    const startDateParam = searchParams.get("startDate");
+    const endDateParam = searchParams.get("endDate");
 
-    const days = period === "7d" ? 7 : period === "30d" ? 30 : 90;
-    const sinceDate = new Date();
-    sinceDate.setDate(sinceDate.getDate() - days);
+    let sinceDate = new Date();
+    let untilDate = new Date();
+
+    if (period === "custom" && startDateParam) {
+      sinceDate = new Date(startDateParam);
+      sinceDate.setHours(0, 0, 0, 0);
+      if (endDateParam) {
+        untilDate = new Date(endDateParam);
+        untilDate.setHours(23, 59, 59, 999);
+      }
+    } else {
+      const days = period === "7d" ? 7 : period === "30d" ? 30 : 90;
+      sinceDate.setDate(sinceDate.getDate() - days);
+    }
 
     const companyScope = { homeowner: { companyId: session.companyId || "demo-company" } };
 
     // Fetch tickets within period
     const tickets = await prisma.ticket.findMany({
       where: {
-        createdAt: { gte: sinceDate },
+        createdAt: {
+          gte: sinceDate,
+          lte: untilDate
+        },
         ...companyScope
       },
       select: {
@@ -92,14 +108,31 @@ export async function GET(request: Request) {
     const variableCsat = resolvedTickets.length > 0 ? Math.min(0.7, resolvedTickets.length * 0.05) : 0.4;
     const customerSatisfaction = parseFloat((baseCsat + variableCsat).toFixed(1));
 
+    // Calculate survey readiness
+    const readinessFromCsat = (customerSatisfaction / 5) * 50; 
+    const readinessFromAuto = (autoResolutionRate / 100) * 30; 
+    const readinessFromSpeed = avgResolutionTime > 0 ? Math.max(0, 20 - avgResolutionTime * 2) : 20; 
+    const surveyReadiness = Math.round(readinessFromCsat + readinessFromAuto + readinessFromSpeed);
+
+    // Predictive insights
+    const predictedTickets = Math.max(5, Math.round(totalTickets * (period === "7d" ? 1.12 : period === "30d" ? 1.08 : 1.05)));
+    const topIssue = issueBreakdown[0]?.category || "HVAC";
+    const predictedRiskArea = topIssue;
+    const escalationRisk = escalatedTickets.length > (totalTickets * 0.4) ? "HIGH" : "LOW";
+
     return NextResponse.json({
       autoResolutionRate,
       avgResolutionTime: parseFloat(avgResolutionTime.toFixed(1)),
+      avgResponseTime: parseFloat((avgResolutionTime * 24 * 60).toFixed(0)) || 14,
       tokensPerClaim: totalTickets * 1250,
       customerSatisfaction,
       surveyCount: activeSurveyCount,
       issueBreakdown,
-      agentPerformance
+      agentPerformance,
+      surveyReadiness,
+      predictedTickets,
+      predictedRiskArea,
+      escalationRisk
     });
 
   } catch (error) {

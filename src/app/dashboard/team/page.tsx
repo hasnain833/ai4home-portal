@@ -66,9 +66,9 @@ export default function TeamManagementPage() {
     password: "",
   });
 
-  // Redirect if not admin
+  // Redirect if not admin or staff
   useEffect(() => {
-    if (user && user.role !== "admin") {
+    if (user && user.role !== "admin" && user.role !== "staff") {
       router.push("/dashboard");
     }
   }, [user, router]);
@@ -88,7 +88,7 @@ export default function TeamManagementPage() {
   };
 
   useEffect(() => {
-    if (user?.role === "admin") {
+    if (user?.role === "admin" || user?.role === "staff") {
       fetchStaff();
     }
   }, [user]);
@@ -149,7 +149,7 @@ export default function TeamManagementPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  if (!user || user.role !== "admin") return null;
+  if (!user || (user.role !== "admin" && user.role !== "staff")) return null;
 
   return (
     <PortalLayout>
@@ -169,92 +169,96 @@ export default function TeamManagementPage() {
               </span>
             </h1>
             <p className="text-muted-foreground mt-1">
-              Manage warranty staff members. Only you can create or remove staff accounts.
+              {user.role === "admin"
+                ? "Manage warranty staff members. Only you can create or remove staff accounts."
+                : "View warranty staff members in your company."}
             </p>
           </div>
 
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 gap-2">
-                <UserPlus className="h-4 w-4" />
-                Add Staff Member
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add Staff Member</DialogTitle>
-                <DialogDescription>
-                  Create login credentials for a new warranty staff member. Share these details with them securely.
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleCreateStaff} className="space-y-4 mt-2">
-                {formError && (
-                  <Alert variant="destructive">
-                    <AlertDescription>{formError}</AlertDescription>
-                  </Alert>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="staff-name">Full Name</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="staff-name"
-                      placeholder="Sarah Johnson"
-                      className="pl-9"
-                      value={newStaff.name}
-                      onChange={(e) => setNewStaff({ ...newStaff, name: e.target.value })}
-                    />
+          {user.role === "admin" && (
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 gap-2">
+                  <UserPlus className="h-4 w-4" />
+                  Add Staff Member
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add Staff Member</DialogTitle>
+                  <DialogDescription>
+                    Create login credentials for a new warranty staff member. Share these details with them securely.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleCreateStaff} className="space-y-4 mt-2">
+                  {formError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{formError}</AlertDescription>
+                    </Alert>
+                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="staff-name">Full Name</Label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="staff-name"
+                        placeholder="Sarah Johnson"
+                        className="pl-9"
+                        value={newStaff.name}
+                        onChange={(e) => setNewStaff({ ...newStaff, name: e.target.value })}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="staff-email">Email Address</Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="staff-email"
-                      type="email"
-                      placeholder="sarah@yourcompany.com"
-                      className="pl-9"
-                      value={newStaff.email}
-                      onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
-                    />
+                  <div className="space-y-2">
+                    <Label htmlFor="staff-email">Email Address</Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="staff-email"
+                        type="email"
+                        placeholder="sarah@yourcompany.com"
+                        className="pl-9"
+                        value={newStaff.email}
+                        onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="staff-password">Temporary Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="staff-password"
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Min. 8 characters"
-                      className="pl-9 pr-10"
-                      value={newStaff.password}
-                      onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
+                  <div className="space-y-2">
+                    <Label htmlFor="staff-password">Temporary Password</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="staff-password"
+                        type={showPassword ? "text" : "password"}
+                        placeholder="Min. 8 characters"
+                        className="pl-9 pr-10"
+                        value={newStaff.password}
+                        onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Share this password securely. The staff member should change it after first login.
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Share this password securely. The staff member should change it after first login.
-                  </p>
-                </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
-                    Create Account
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
+                      Create Account
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
 
         {/* Success / Error messages */}
@@ -347,14 +351,16 @@ export default function TeamManagementPage() {
                       <p className="text-xs text-muted-foreground hidden sm:block">
                         Added {new Date(staff.createdAt).toLocaleDateString()}
                       </p>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteStaff(staff.id, staff.name)}
-                        className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {user.role === "admin" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteStaff(staff.id, staff.name)}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </motion.div>
                 ))}

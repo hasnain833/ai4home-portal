@@ -22,7 +22,6 @@ import {
   Upload,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import AdminCompanyList from "@/components/admin/AdminCompanyList";
 
 // Types
 interface CompanyData {
@@ -64,8 +63,7 @@ const buttonVariants = {
 };
 
 export default function CompanyPage() {
-  const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const { user, updateProfile } = useAuth();
   
   const [company, setCompany] = useState<CompanyData & { id?: string }>({
     name: "",
@@ -79,6 +77,7 @@ export default function CompanyPage() {
   const [loading, setLoading] = useState(true);
   const [savingInfo, setSavingInfo] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [toastMessage, setToastMessage] = useState<{
     type: "success" | "error";
     text: string;
@@ -101,7 +100,7 @@ export default function CompanyPage() {
             setCompany({
               id: data.id,
               name: data.name || "",
-              logo: data.logoUrl || "",
+              logo: data.logo || "",
               email: data.email || "",
               phone: data.phone || "",
               address: data.address || "",
@@ -138,7 +137,6 @@ export default function CompanyPage() {
 
   // Save company information
   const handleSaveInfo = async () => {
-    if (isAdmin) return;
     if (!validateCompanyInfo()) return;
     setSavingInfo(true);
     try {
@@ -155,6 +153,11 @@ export default function CompanyPage() {
       });
 
       if (response.ok) {
+        if (user?.role === "admin") {
+          updateProfile({ name: company.name, companyName: company.name });
+        } else {
+          updateProfile({ companyName: company.name });
+        }
         showToast("success", "Company information saved successfully");
       } else {
         showToast("error", "Failed to save information");
@@ -168,7 +171,6 @@ export default function CompanyPage() {
 
   // Save warranty policy
   const handleSavePolicy = async () => {
-    if (isAdmin) return;
     setSavingPolicy(true);
     try {
       const response = await fetch("/api/company", {
@@ -192,11 +194,40 @@ export default function CompanyPage() {
     }
   };
 
-  // Simulate avatar upload
-  const handleAvatarUpload = () => {
-    if (isAdmin) return;
-    // In a real app, you'd open a file picker and upload to server
-    showToast("error", "Logo upload will be available in Phase 2");
+  // Handle logo upload
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("error", "Logo file size must be less than 5MB");
+      return;
+    }
+
+    setUploadingLogo(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("/api/company/logo", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCompany({ ...company, logo: data.url });
+        showToast("success", "Logo uploaded successfully");
+      } else {
+        const err = await response.json();
+        showToast("error", err.message || "Failed to upload logo");
+      }
+    } catch (error) {
+      showToast("error", "Error connecting to server during upload");
+    } finally {
+      setUploadingLogo(false);
+    }
   };
 
   return (
@@ -235,19 +266,15 @@ export default function CompanyPage() {
             <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold flex items-center gap-3">
               <Building2 className="h-8 w-8 text-[#0F3B3D] dark:text-[#b48c3c]" />
               <span className="bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
-                {isAdmin ? "Registered Companies" : "Company Settings"}
+                Company Settings
               </span>
             </h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
-              {isAdmin ? "View company profile, contact details, and warranty policy" : "Manage your profile, contact details, and warranty policy"}
+              Manage your profile, contact details, and warranty policy
             </p>
           </motion.div>
 
-          {isAdmin ? (
-            <AdminCompanyList />
-          ) : (
-            <>
-              <div className="grid md:grid-cols-2 gap-6">
+          <div className="grid md:grid-cols-2 gap-6">
                 {/* Company Information Card */}
                 <motion.div variants={cardVariants} whileHover="hover">
                   <Card className="shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden">
@@ -258,41 +285,47 @@ export default function CompanyPage() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-5 pt-6">
-                      {/* Avatar Section */}
                       <div className="flex flex-col items-center gap-3 mb-2">
                         <motion.div
-                          whileHover={!isAdmin ? { scale: 1.05 } : {}}
-                          whileTap={!isAdmin ? { scale: 0.95 } : {}}
-                          className={`relative group ${!isAdmin ? 'cursor-pointer' : ''}`}
-                          onClick={handleAvatarUpload}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="relative group cursor-pointer"
+                          onClick={() => document.getElementById("logo-upload")?.click()}
                         >
-                          <Avatar className="h-24 w-24 ring-2 ring-primary/20 transition-all group-hover:ring-primary/40">
+                          <Avatar className={`h-24 w-24 ring-2 ring-primary/20 transition-all group-hover:ring-primary/40 ${uploadingLogo ? "opacity-50" : ""}`}>
                             <AvatarImage src={company.logo} />
                             <AvatarFallback className="bg-linear-to-br from-primary/20 to-primary/5 text-primary text-2xl font-bold">
                               {company.name.charAt(0) || "C"}
                             </AvatarFallback>
                           </Avatar>
-                          {!isAdmin && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                            {uploadingLogo ? (
+                              <Loader2 className="h-6 w-6 text-white animate-spin" />
+                            ) : (
                               <Upload className="h-6 w-6 text-white" />
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </motion.div>
-                        {!isAdmin && (
-                          <p className="text-xs text-muted-foreground">
-                            Click to upload logo (coming soon)
-                          </p>
-                        )}
+                        <input
+                          id="logo-upload"
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleAvatarUpload}
+                          disabled={uploadingLogo}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {uploadingLogo ? "Uploading..." : "Click to upload logo"}
+                        </p>
                       </div>
 
                       {/* Form Fields */}
                       <div className="space-y-4">
                         <div>
                           <Label className="text-sm font-semibold">
-                            Company Name {isAdmin ? "" : "*"}
+                            Company Name *
                           </Label>
                           <Input
-                            disabled={isAdmin}
                             value={company.name}
                             onChange={(e) => {
                               setCompany({ ...company, name: e.target.value });
@@ -317,19 +350,15 @@ export default function CompanyPage() {
                         </div>
 
                         <div>
-                          <Label className="text-sm font-semibold">Email {isAdmin ? "" : "*"}</Label>
+                          <Label className="text-sm font-semibold">Email *</Label>
                           <div className="relative">
                             <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input
-                              disabled={isAdmin}
                               type="email"
-                              className="pl-9"
+                              className="pl-9 bg-muted/50 text-muted-foreground cursor-not-allowed"
                               value={company.email}
-                              onChange={(e) => {
-                                setCompany({ ...company, email: e.target.value });
-                                if (errors.email)
-                                  setErrors({ ...errors, email: undefined });
-                              }}
+                              disabled
+                              readOnly
                             />
                           </div>
                           {errors.email && (
@@ -344,11 +373,10 @@ export default function CompanyPage() {
                         </div>
 
                         <div>
-                          <Label className="text-sm font-semibold">Phone {isAdmin ? "" : "*"}</Label>
+                          <Label className="text-sm font-semibold">Phone *</Label>
                           <div className="relative">
                             <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input
-                              disabled={isAdmin}
                               className="pl-9"
                               value={company.phone}
                               onChange={(e) => {
@@ -374,7 +402,6 @@ export default function CompanyPage() {
                           <div className="relative">
                             <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                             <Textarea
-                              disabled={isAdmin}
                               rows={2}
                               className="pl-9"
                               value={company.address}
@@ -386,26 +413,24 @@ export default function CompanyPage() {
                         </div>
                       </div>
 
-                      {!isAdmin && (
-                        <motion.div
-                          variants={buttonVariants}
-                          whileTap="tap"
-                          whileHover="hover"
+                      <motion.div
+                        variants={buttonVariants}
+                        whileTap="tap"
+                        whileHover="hover"
+                      >
+                        <Button
+                          onClick={handleSaveInfo}
+                          disabled={savingInfo}
+                          className="w-full gap-2"
                         >
-                          <Button
-                            onClick={handleSaveInfo}
-                            disabled={savingInfo}
-                            className="w-full gap-2"
-                          >
-                            {savingInfo ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Save className="h-4 w-4" />
-                            )}
-                            {savingInfo ? "Saving..." : "Save Changes"}
-                          </Button>
-                        </motion.div>
-                      )}
+                          {savingInfo ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Save className="h-4 w-4" />
+                          )}
+                          {savingInfo ? "Saving..." : "Save Changes"}
+                        </Button>
+                      </motion.div>
                     </CardContent>
                   </Card>
                 </motion.div>
@@ -425,7 +450,6 @@ export default function CompanyPage() {
                           Policy Text (used by agent)
                         </Label>
                         <Textarea
-                          disabled={isAdmin}
                           rows={12}
                           value={company.warrantyPolicy}
                           onChange={(e) =>
@@ -447,27 +471,25 @@ export default function CompanyPage() {
                         </p>
                       </div>
                       
-                      {!isAdmin && (
-                        <motion.div
-                          variants={buttonVariants}
-                          whileTap="tap"
-                          whileHover="hover"
+                      <motion.div
+                        variants={buttonVariants}
+                        whileTap="tap"
+                        whileHover="hover"
+                      >
+                        <Button
+                          onClick={handleSavePolicy}
+                          disabled={savingPolicy}
+                          className="w-full gap-2"
+                          variant="outline"
                         >
-                          <Button
-                            onClick={handleSavePolicy}
-                            disabled={savingPolicy}
-                            className="w-full gap-2"
-                            variant="outline"
-                          >
-                            {savingPolicy ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Save className="h-4 w-4" />
-                            )}
-                            {savingPolicy ? "Saving..." : "Save Policy"}
-                          </Button>
-                        </motion.div>
-                      )}
+                          {savingPolicy ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Save className="h-4 w-4" />
+                          )}
+                          {savingPolicy ? "Saving..." : "Save Policy"}
+                        </Button>
+                      </motion.div>
                     </CardContent>
                   </Card>
                 </motion.div>
@@ -489,15 +511,13 @@ export default function CompanyPage() {
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm text-muted-foreground">
-                      All changes are saved locally and will be used by the AI agent in real-time. Your warranty policy is automatically referenced in conversations.
+                      All changes are saved securely and will be used by the AI agent in real-time. Your warranty policy is automatically referenced in conversations.
                     </p>
                   </CardContent>
                 </Card>
               </motion.div>
-            </>
-          )}
-        </motion.div>
-      </PortalLayout>
+          </motion.div>
+        </PortalLayout>
     </ProtectedRoute>
   );
 }

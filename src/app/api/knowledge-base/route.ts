@@ -37,8 +37,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(request);
-    // Only STAFF can upload, Admin cannot
-    if (!session || session.role !== "STAFF") {
+    if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
 
@@ -117,8 +116,7 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const session = await getServerSession(request);
-    // Only STAFF can delete, Admin cannot
-    if (!session || session.role !== "STAFF") {
+    if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
 

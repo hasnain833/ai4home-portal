@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -146,6 +147,7 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
 
 export default function TicketsPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -518,7 +520,8 @@ export default function TicketsPage() {
                           animate="visible"
                           exit="exit"
                           layout
-                          className="border border-border/80 rounded-xl p-4 space-y-3 bg-background/35 backdrop-blur-xs hover:border-border transition-all"
+                          onClick={() => router.push(`/tickets/${ticket.id}`)}
+                          className="border border-border/80 rounded-xl p-4 space-y-3 bg-background/35 backdrop-blur-xs hover:border-border transition-all cursor-pointer"
                         >
                           <div className="flex justify-between items-start gap-2">
                             <div>
@@ -554,7 +557,7 @@ export default function TicketsPage() {
                             <span>{new Date(ticket.createdAt).toLocaleDateString()}</span>
                           </div>
                           
-                          <div className="flex justify-end gap-2 pt-2 border-t border-border/30">
+                          <div className="flex justify-end gap-2 pt-2 border-t border-border/30" onClick={(e) => e.stopPropagation()}>
                             {!isHomeowner && (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -604,8 +607,7 @@ export default function TicketsPage() {
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Year</TableHead>
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Priority</TableHead>
                           <TableHead className="font-semibold text-xs text-muted-foreground py-3">Status</TableHead>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Created</TableHead>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 pr-6 text-right">Actions</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 pr-6">Created</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -618,7 +620,8 @@ export default function TicketsPage() {
                               animate="visible"
                               exit="exit"
                               layout
-                              className="border-b border-border/30 hover:bg-muted/15 transition-colors group"
+                              onClick={() => router.push(`/tickets/${ticket.id}`)}
+                              className="border-b border-border/30 hover:bg-muted/15 transition-colors group cursor-pointer"
                             >
                               <TableCell className="py-3.5 pl-6">
                                 <span className="font-mono text-[11px] font-semibold text-foreground bg-primary/10 px-2 py-1 rounded border border-primary/20 group-hover:bg-primary/15 transition-all" title={ticket.id}>
@@ -647,7 +650,7 @@ export default function TicketsPage() {
                                   {ticket.priority}
                                 </Badge>
                               </TableCell>
-                              <TableCell className="py-3.5">
+                              <TableCell className="py-3.5" onClick={(e) => !isHomeowner && e.stopPropagation()}>
                                 {!isHomeowner ? (
                                   <Select
                                     value={ticket.status}
@@ -675,16 +678,8 @@ export default function TicketsPage() {
                                   </Badge>
                                 )}
                               </TableCell>
-                              <TableCell className="py-3.5 text-muted-foreground text-xs">
+                              <TableCell className="py-3.5 text-muted-foreground text-xs pr-6">
                                 {new Date(ticket.createdAt).toLocaleDateString()}
-                              </TableCell>
-                              <TableCell className="py-3.5 pr-6 text-right">
-                                <Link href={`/tickets/${ticket.id}`}>
-                                  <Button variant="ghost" size="sm" className="h-8 text-xs hover:bg-muted/50 group-hover:text-primary transition-all rounded-lg">
-                                    <Eye className="h-3.5 w-3.5 mr-1" />
-                                    View
-                                  </Button>
-                                </Link>
                               </TableCell>
                             </motion.tr>
                           ))}

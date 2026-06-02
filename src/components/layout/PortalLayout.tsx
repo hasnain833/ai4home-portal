@@ -53,11 +53,11 @@ const navItems = [
   { name: "AI Assistant", href: "/chat", icon: Bot, roles: ["admin", "staff", "homeowner"] },
   { name: "Properties", href: "/properties", icon: Building2, roles: ["admin", "staff", "homeowner"] },
   { name: "Tickets", href: "/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
-  { name: "Team", href: "/dashboard/team", icon: Users, roles: ["admin"] },
+  { name: "Team", href: "/dashboard/team", icon: Users, roles: ["admin", "staff"] },
   { name: "Homeowners", href: "/dashboard/homeowners", icon: User, roles: ["admin", "staff"] },
   { name: "Integrations", href: "/integrations", icon: Plug, roles: ["admin"] },
   { name: "Knowledge Base", href: "/knowledge-base", icon: Database, roles: ["admin", "staff"] },
-  { name: "Company", href: "/company", icon: Building2, roles: ["admin"] },
+  { name: "Company", href: "/company", icon: Building2, roles: ["admin", "staff"] },
   { name: "Reports", href: "/reports", icon: BarChart3, roles: ["admin", "staff"] },
 ];
 
@@ -108,8 +108,8 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
         <div className="flex h-full flex-col">
           {/* Header with logo and toggle */}
           <div className="flex h-16 items-center justify-between px-4">
-            <button onClick={() => router.push("/dashboard")} className="flex items-center gap-2 hover:opacity-80 transition">
-              <img src="/logo.png" alt="Logo" className="h-8 w-auto rounded-md" />
+            <button onClick={() => router.push("/dashboard")} className="flex items-center gap-3.5 hover:opacity-80 transition">
+              <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-9 w-auto object-contain rounded-md" />
               {sidebarExpanded && (
                 <span className="text-xl font-bold tracking-tight">{user?.companyName || "Ai.Lumen Care"}</span>
               )}
@@ -154,54 +154,85 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
               {sidebarExpanded && (theme === "dark" ? "Light Mode" : "Dark Mode")}
             </Button>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="w-full flex items-center justify-start gap-3 rounded-md px-3 py-2 text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white transition-all outline-hidden cursor-pointer">
+            {user?.role === "admin" ? (
+              // ADMIN: show company logo + company name + logout icon
+              <div className="w-full flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm font-medium text-white/80 transition-all">
+                <div className="flex items-center gap-3">
                   <div className="relative">
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={user?.avatar} />
                       <AvatarFallback className="bg-secondary text-primary text-xs">
-                        {user ? getInitials(user.name) : "U"}
+                        {user ? getInitials(user.companyName || user.name) : "C"}
                       </AvatarFallback>
                     </Avatar>
                     <Circle className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ${user?.online ? "bg-green-500 ring-1 ring-white" : "bg-gray-400"}`} />
                   </div>
                   {sidebarExpanded && (
-                    <div className="flex-1 text-left">
-                      <p className="text-sm font-medium text-white">{user?.name}</p>
+                    <div className="flex-1 text-left overflow-hidden">
+                      <p className="text-sm font-medium text-white truncate">
+                        {user?.companyName || user?.name}
+                      </p>
                       <p className="text-xs text-white/60 capitalize">{user?.role}</p>
                     </div>
                   )}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>My Account</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setProfileOpen(true)}>
-                  <User className="mr-2 h-4 w-4" /> Profile Settings
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={logout}>
-                  <LogOut className="mr-2 h-4 w-4" /> Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </div>
+                {sidebarExpanded && (
+                  <Button variant="ghost" size="icon" onClick={logout} className="h-8 w-8 text-white/80 hover:text-white hover:bg-white/10 shrink-0" title="Logout">
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="w-full flex items-center justify-start gap-3 rounded-md px-3 py-2 text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white transition-all outline-hidden cursor-pointer">
+                    <div className="relative">
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={user?.avatar} />
+                        <AvatarFallback className="bg-secondary text-primary text-xs">
+                          {user ? getInitials(user.name) : "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                      <Circle className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ${user?.online ? "bg-green-500 ring-1 ring-white" : "bg-gray-400"}`} />
+                    </div>
+                    {sidebarExpanded && (
+                      <div className="flex-1 text-left overflow-hidden">
+                        <p className="text-sm font-medium text-white truncate">
+                          {user?.name}
+                        </p>
+                        <p className="text-xs text-white/60 capitalize">{user?.role}</p>
+                      </div>
+                    )}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>My Account</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setProfileOpen(true)}>
+                    <User className="mr-2 h-4 w-4" /> Profile Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={logout}>
+                    <LogOut className="mr-2 h-4 w-4" /> Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </motion.aside>
 
       {/* Main content area - margin-left adjusts based on sidebar state */}
       <main
-        className={`flex-1 flex flex-col transition-all duration-200 ease-in-out overflow-auto ${
-          sidebarExpanded ? "md:ml-64" : "md:ml-20"
-        }`}
+        className={`flex-1 flex flex-col transition-all duration-200 ease-in-out overflow-auto ${sidebarExpanded ? "md:ml-64" : "md:ml-20"
+          }`}
       >
         {/* Mobile header (visible only on < md) */}
         <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b bg-background px-4 shadow-sm md:hidden">
           <Button variant="ghost" size="icon" onClick={() => setMobileSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
-          <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="Logo" className="h-6 w-auto rounded-sm" />
+          <div className="flex items-center gap-3">
+            <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-7 w-auto object-contain rounded-sm" />
             <span className="font-bold">{user?.companyName || "Ai.Lumen Care"}</span>
           </div>
           <Button variant="ghost" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
@@ -229,8 +260,8 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
               >
                 <div className="flex h-full flex-col">
                   <div className="flex h-16 items-center justify-between px-4">
-                    <div className="flex items-center gap-2">
-                      <img src="/logo.png" alt="Logo" className="h-8 w-auto rounded-md" />
+                    <div className="flex items-center gap-3.5">
+                      <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-9 w-auto object-contain rounded-md" />
                       <span className="text-xl font-bold">{user?.companyName || "Ai.Lumen Care"}</span>
                     </div>
                     <Button variant="ghost" size="icon" onClick={closeMobileSidebar} className="text-white hover:bg-white/10">
@@ -364,12 +395,11 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
               />
             </div>
 
-            {/* Company */}
+            {/* Company — read-only info, shown as info text not a field */}
             {user?.companyName && (
-              <div>
-                <Label>Company</Label>
-                <Input value={user.companyName} disabled className="bg-muted mt-1" />
-              </div>
+              <p className="text-xs text-muted-foreground text-center">
+                Member of <span className="font-medium">{user.companyName}</span>
+              </p>
             )}
           </div>
         </DialogContent>

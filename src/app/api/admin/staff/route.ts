@@ -13,7 +13,7 @@ const supabaseAdmin = createClient(
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(request);
-    if (!session || session.role !== "ADMIN") {
+    if (!session || (session.role !== "ADMIN" && session.role !== "STAFF")) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
 

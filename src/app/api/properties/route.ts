@@ -10,26 +10,22 @@ export async function GET(request: Request) {
     }
 
     if (session.role === "HOMEOWNER") {
-      // Homeowners can only fetch their own properties
       const properties = await prisma.property.findMany({
         where: { homeownerId: session.id },
         orderBy: { createdAt: "desc" },
       });
       return NextResponse.json(properties);
     } else {
-      // Admins and Staff can fetch all properties belonging to their company's homeowners
+      // Admins and Staff: fetch all properties under their company
       const properties = await prisma.property.findMany({
         where: {
           homeowner: {
-            companyId: session.companyId || "demo-company",
+            companyId: session.companyId || undefined,
           },
         },
         include: {
           homeowner: {
-            select: {
-              name: true,
-              email: true,
-            },
+            select: { name: true, email: true },
           },
         },
         orderBy: { createdAt: "desc" },
@@ -38,46 +34,49 @@ export async function GET(request: Request) {
     }
   } catch (error) {
     console.error("Fetch properties error:", error);
-    return NextResponse.json(
-      { message: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(request);
-    // Only HOMEOWNER can add properties
-    if (!session || session.role !== "HOMEOWNER") {
-      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    if (!session) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const { address, city, state, zipCode, coeDate, areaOfHome } = await request.json();
+    const { address, city, state, zipCode, coeDate, areaOfHome, homeownerId } = await request.json();
 
     if (!address) {
-      return NextResponse.json(
-        { message: "Address is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ message: "Address is required" }, { status: 400 });
+    }
+
+    let assignedHomeownerId: string;
+
+    if (session.role === "HOMEOWNER") {
+      assignedHomeownerId = session.id;
+    } else if (session.role === "ADMIN" || session.role === "STAFF") {
+      if (!homeownerId) {
+        return NextResponse.json({ message: "Homeowner is required" }, { status: 400 });
+      }
+      assignedHomeownerId = homeownerId;
+    } else {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
 
     const property = await prisma.property.create({
       data: {
         address,
-        city,
-        state,
-        zipCode,
-        areaOfHome,
+        city: city || null,
+        state: state || null,
+        zipCode: zipCode || null,
+        areaOfHome: areaOfHome || null,
         coeDate: coeDate ? new Date(coeDate) : null,
-        homeownerId: session.id, // Assign directly to the current user
+        homeownerId: assignedHomeownerId,
       },
       include: {
         homeowner: {
-          select: {
-            name: true,
-            email: true,
-          },
+          select: { name: true, email: true },
         },
       },
     });
@@ -85,9 +84,6 @@ export async function POST(request: Request) {
     return NextResponse.json(property);
   } catch (error) {
     console.error("Create property error:", error);
-    return NextResponse.json(
-      { message: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

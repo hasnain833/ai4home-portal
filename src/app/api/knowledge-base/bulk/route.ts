@@ -6,7 +6,7 @@ import AdmZip from "adm-zip";
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(request);
-    if (!session || session.role !== "STAFF") {
+    if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
     }
 

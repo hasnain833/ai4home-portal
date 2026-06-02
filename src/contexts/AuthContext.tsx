@@ -30,6 +30,7 @@ export interface User {
   avatar?: string;
   companyId?: string;
   companyName?: string;
+  companyLogo?: string;
   properties?: Property[];
   online: boolean;
   lastSeen?: Date;
@@ -161,8 +162,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateAvatar = (avatarUrl: string) => {
-    updateProfile({ avatar: avatarUrl });
+  const updateAvatar = async (avatarUrl: string) => {
+    if (!user) return;
+    // Optimistically update UI immediately
+    setUser({ ...user, avatar: avatarUrl });
+    // Persist to DB (staff/homeowner only — admin avatar = company logo, managed separately)
+    if (user.role !== "admin") {
+      try {
+        await fetch("/api/auth/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ avatar: avatarUrl }),
+        });
+      } catch (err) {
+        console.error("Avatar update failed", err);
+      }
+    }
   };
 
   const setOnlineStatus = (status: boolean) => {

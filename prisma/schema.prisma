@@ -31,6 +31,7 @@ model User {
   email           String    @unique
   password        String
   name            String?
+  avatar          String?   // Personal avatar for staff members
   role            Role      @default(HOMEOWNER)
   companyId       String?
   company         Company?  @relation(fields: [companyId], references: [id])

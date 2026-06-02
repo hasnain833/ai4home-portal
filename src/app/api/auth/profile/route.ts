@@ -12,10 +12,11 @@ export async function PATCH(request: Request) {
     }
 
     const body = await request.json();
-    const { name } = body;
+    const { name, avatar } = body;
 
-    const updateData: any = {};
+    const updateData: Record<string, string> = {};
     if (name) updateData.name = name;
+    if (avatar !== undefined) updateData.avatar = avatar;
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ message: "No db fields updated" }, { status: 200 });

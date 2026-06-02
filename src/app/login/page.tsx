@@ -54,8 +54,11 @@ function AuthContainer() {
   const [rememberMe, setRememberMe] = useState(false);
 
   // Signup states
-  const [fullName, setFullName] = useState("");
-  const [signupEmail, setSignupEmail] = useState("");
+  // Signup states
+  const [companyName, setCompanyName] = useState("");
+  const [companyEmail, setCompanyEmail] = useState("");
+  const [companyPhone, setCompanyPhone] = useState("");
+  const [companyAddress, setCompanyAddress] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [agreeTerms, setAgreeTerms] = useState(false);
@@ -139,8 +142,8 @@ function AuthContainer() {
     setError("");
     setSuccess("");
 
-    if (!fullName.trim()) { setError("Full name is required"); return; }
-    if (!/^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/.test(signupEmail)) { setError("Please enter a valid email address"); return; }
+    if (!companyName.trim()) { setError("Company name is required"); return; }
+    if (!/^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/.test(companyEmail)) { setError("Please enter a valid company email address"); return; }
     if (signupPassword.length < 8) { setError("Password must be at least 8 characters"); return; }
     if (signupPassword !== confirmPassword) { setError("Passwords do not match"); return; }
     if (!agreeTerms) { setError("You must agree to the Terms of Service"); return; }
@@ -151,23 +154,25 @@ function AuthContainer() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          fullName,
-          email: signupEmail,
+          companyName,
+          companyEmail,
           password: signupPassword,
+          companyPhone,
+          companyAddress,
         }),
       });
       const data = await response.json();
-      
-      if (!response.ok) { 
-        setError(data.message || "Failed to create account"); 
-        return; 
+
+      if (!response.ok) {
+        setError(data.message || "Failed to create account");
+        return;
       }
 
       setSuccess("Account created! We've sent a verification link to your email. Please check your inbox (and spam folder) to activate your account.");
-      
+
       // Optionally switch to login mode so they can login after clicking the link
       setTimeout(() => setMode("login"), 5000);
-      
+
     } catch {
       setError("An unexpected error occurred during account creation.");
     } finally {
@@ -180,12 +185,12 @@ function AuthContainer() {
       {/* Left Side: Clean, High-Contrast Minimalist Landing Experience */}
       <div className="hidden md:flex md:w-[48%] lg:w-[55%] relative overflow-hidden bg-[#04060a] flex-col justify-between p-8 lg:p-12 text-white border-r border-white/5">
         {/* Subtle radial-gradient glow */}
-        <div className="absolute top-[30%] left-[-10%] w-[400px] h-[400px] bg-[#c59b4c]/[0.03] rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-[20%] right-[-10%] w-[450px] h-[450px] bg-emerald-500/[0.02] rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute top-[30%] left-[-10%] w-[400px] h-[400px] bg-[#c59b4c]/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-[20%] right-[-10%] w-[450px] h-[450px] bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
 
         {/* Branding header */}
         <div className="relative z-10 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.02] border border-white/10 text-[#c59b4c] shadow-md">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/2 border border-white/10 text-[#c59b4c] shadow-md">
             <Shield className="h-5 w-5" />
           </div>
           <span className="text-lg font-bold tracking-tight text-zinc-100 font-serif">
@@ -211,7 +216,7 @@ function AuthContainer() {
           <div className="space-y-6 pt-2">
             {/* Feature 1 */}
             <div className="flex gap-4 items-start">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.02] border border-white/10 text-[#c59b4c] shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/2 border border-white/10 text-[#c59b4c] shadow-sm">
                 <Activity className="h-5 w-5" />
               </div>
               <div>
@@ -224,7 +229,7 @@ function AuthContainer() {
 
             {/* Feature 2 */}
             <div className="flex gap-4 items-start">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.02] border border-white/10 text-emerald-400 shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/2 border border-white/10 text-emerald-400 shadow-sm">
                 <Wrench className="h-5 w-5" />
               </div>
               <div>
@@ -237,7 +242,7 @@ function AuthContainer() {
 
             {/* Feature 3 */}
             <div className="flex gap-4 items-start">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.02] border border-white/10 text-sky-400 shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/2 border border-white/10 text-sky-400 shadow-sm">
                 <UserCheck className="h-5 w-5" />
               </div>
               <div>
@@ -284,16 +289,16 @@ function AuthContainer() {
           </div>
 
           <div className="border border-white/10 shadow-[0_0_80px_rgba(0,0,0,0.85)] bg-[#0c101b]/70 backdrop-blur-3xl rounded-[32px] overflow-hidden transition-all duration-300">
-            <div className="space-y-2.5 p-8 lg:p-10 pb-6 border-b border-white/[0.04]">
+            <div className="space-y-2.5 p-8 lg:p-10 pb-6 border-b border-white/10">
               <h3 className="text-3xl font-extrabold tracking-tight text-zinc-100 font-serif leading-none">
                 {mode === "login" && "Welcome back"}
                 {mode === "signup" && "Create Account"}
                 {mode === "verify" && "Verify Your Email"}
               </h3>
               <p className="text-[13px] text-zinc-400 leading-relaxed font-sans mt-2">
-                {mode === "login" && "Enter your credentials to access your homeowner or staff account"}
-                {mode === "signup" && "Register your profile to connect with your home warranty plan"}
-                {mode === "verify" && `Enter the 6-digit validation code dispatched to ${signupEmail}`}
+                {mode === "login" && "Enter your credentials to access your account"}
+                {mode === "signup" && "Register your company profile to access the admin portal"}
+                {mode === "verify" && `Enter the 6-digit validation code dispatched to ${companyEmail}`}
               </p>
             </div>
 
@@ -332,7 +337,7 @@ function AuthContainer() {
                             id="email"
                             type="email"
                             placeholder="you@example.com"
-                            className="pl-12 pr-4 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            className="pl-12 pr-4 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
                             value={loginEmail}
                             onChange={(e) => setLoginEmail(e.target.value)}
                             disabled={isLoading}
@@ -349,7 +354,7 @@ function AuthContainer() {
                             id="password"
                             type={showPassword ? "text" : "password"}
                             placeholder="••••••••"
-                            className="pl-12 pr-12 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            className="pl-12 pr-12 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
                             value={loginPassword}
                             onChange={(e) => setLoginPassword(e.target.value)}
                             disabled={isLoading}
@@ -371,7 +376,7 @@ function AuthContainer() {
                             id="remember"
                             checked={rememberMe}
                             onCheckedChange={(checked) => setRememberMe(checked === true)}
-                            className="border-white/20 data-[state=checked]:bg-[#c59b4c] data-[state=checked]:text-zinc-950 data-[state=checked]:border-[#c59b4c] bg-white/[0.02]"
+                            className="border-white/20 data-[state=checked]:bg-[#c59b4c] data-[state=checked]:text-zinc-950 data-[state=checked]:border-[#c59b4c] bg-white/2"
                           />
                           <Label htmlFor="remember" className="text-xs font-semibold leading-none cursor-pointer text-zinc-400 hover:text-zinc-300 transition-colors">
                             Remember email
@@ -403,7 +408,7 @@ function AuthContainer() {
                   )}
 
                   {mode === "signup" && (
-                      <motion.form
+                    <motion.form
                       key="signup-form"
                       initial={{ opacity: 0, x: 15 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -413,35 +418,69 @@ function AuthContainer() {
                       className="space-y-4"
                     >
                       <div className="space-y-1.5">
-                        <Label htmlFor="fullName" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Full Name *</Label>
+                        <Label htmlFor="companyName" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Company Name *</Label>
                         <div className="relative group">
-                          <User className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Building className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
                           <Input
-                            id="fullName"
+                            id="companyName"
                             type="text"
-                            placeholder="Jane Smith"
-                            className="pl-12 pr-4 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
-                            value={fullName}
-                            onChange={(e) => setFullName(e.target.value)}
+                            placeholder="Acme Construction"
+                            className="pl-12 pr-4 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
+                            value={companyName}
+                            onChange={(e) => setCompanyName(e.target.value)}
                             disabled={isLoading}
                             required
                           />
                         </div>
                       </div>
 
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="companyEmail" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Company Email *</Label>
+                          <div className="relative group">
+                            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                            <Input
+                              id="companyEmail"
+                              type="email"
+                              placeholder="info@acme.com"
+                              className="pl-12 pr-4 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
+                              value={companyEmail}
+                              onChange={(e) => setCompanyEmail(e.target.value)}
+                              disabled={isLoading}
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="companyPhone" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Company Phone</Label>
+                          <div className="relative group">
+                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                            <Input
+                              id="companyPhone"
+                              type="text"
+                              placeholder="(555) 123-4567"
+                              className="pl-12 pr-4 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
+                              value={companyPhone}
+                              onChange={(e) => setCompanyPhone(e.target.value)}
+                              disabled={isLoading}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="space-y-1.5">
-                        <Label htmlFor="signup-email" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Email Address *</Label>
+                        <Label htmlFor="companyAddress" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Company Address</Label>
                         <div className="relative group">
-                          <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Home className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
                           <Input
-                            id="signup-email"
-                            type="email"
-                            placeholder="jane@example.com"
-                            className="pl-12 pr-4 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
-                            value={signupEmail}
-                            onChange={(e) => setSignupEmail(e.target.value)}
+                            id="companyAddress"
+                            type="text"
+                            placeholder="123 Main St, City, State"
+                            className="pl-12 pr-4 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
+                            value={companyAddress}
+                            onChange={(e) => setCompanyAddress(e.target.value)}
                             disabled={isLoading}
-                            required
                           />
                         </div>
                       </div>
@@ -454,7 +493,7 @@ function AuthContainer() {
                             id="signup-password"
                             type={showPassword ? "text" : "password"}
                             placeholder="At least 8 characters"
-                            className="pl-12 pr-12 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            className="pl-12 pr-12 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
                             value={signupPassword}
                             onChange={(e) => updatePassword(e.target.value)}
                             disabled={isLoading}
@@ -473,8 +512,8 @@ function AuthContainer() {
                             <div className="h-1 flex-1 bg-zinc-800 rounded-full overflow-hidden">
                               <div
                                 className={`h-full transition-all duration-500 ${passwordStrength.label === "Strong" ? "w-full bg-emerald-500" :
-                                    passwordStrength.label === "Good" ? "w-3/4 bg-blue-500" :
-                                      passwordStrength.label === "Fair" ? "w-1/2 bg-amber-500" : "w-1/4 bg-red-500"
+                                  passwordStrength.label === "Good" ? "w-3/4 bg-blue-500" :
+                                    passwordStrength.label === "Fair" ? "w-1/2 bg-amber-500" : "w-1/4 bg-red-500"
                                   }`}
                               />
                             </div>
@@ -491,7 +530,7 @@ function AuthContainer() {
                             id="confirm-password"
                             type={showConfirmPassword ? "text" : "password"}
                             placeholder="Confirm your password"
-                            className="pl-12 pr-12 h-12 w-full bg-white/[0.02] border border-white/10 hover:bg-white/[0.04] text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/[0.05] transition-all duration-200 focus:outline-none text-sm"
+                            className="pl-12 pr-12 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
                             value={confirmPassword}
                             onChange={(e) => setConfirmPassword(e.target.value)}
                             disabled={isLoading}
@@ -512,7 +551,7 @@ function AuthContainer() {
                           id="terms"
                           checked={agreeTerms}
                           onCheckedChange={(c) => setAgreeTerms(c === true)}
-                          className="border-white/20 data-[state=checked]:bg-[#c59b4c] data-[state=checked]:text-zinc-950 data-[state=checked]:border-[#c59b4c] bg-white/[0.02] mt-0.5"
+                          className="border-white/20 data-[state=checked]:bg-[#c59b4c] data-[state=checked]:text-zinc-950 data-[state=checked]:border-[#c59b4c] bg-white/2 mt-0.5"
                         />
                         <Label htmlFor="terms" className="text-xs text-zinc-400 cursor-pointer leading-normal">
                           I consent to the{" "}
@@ -545,11 +584,11 @@ function AuthContainer() {
               </div>
             </div>
 
-            <div className="flex justify-center border-t border-white/[0.04] bg-white/[0.01] pt-6 pb-6 rounded-b-3xl">
+            <div className="flex justify-center border-t border-white/10 bg-white/2 pt-6 pb-6 rounded-b-3xl">
               <p className="text-xs text-zinc-400">
                 {mode === "login" ? (
                   <>
-                    New homeowner?{" "}
+                    New company?{" "}
                     <button
                       onClick={() => {
                         setMode("signup");
