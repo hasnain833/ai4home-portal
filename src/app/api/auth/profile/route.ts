@@ -35,7 +35,10 @@ export async function PATCH(request: Request) {
       }
     });
 
-    return NextResponse.json(updatedDbUser);
+    return NextResponse.json({
+      ...updatedDbUser,
+      role: updatedDbUser.role.toLowerCase(), // Convert role to lowercase for frontend RBAC consistency
+    });
   } catch (error) {
     console.error("Profile update error:", error);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });

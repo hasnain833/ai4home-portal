@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getServerSession } from "@/lib/session";
 import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
 
 // Initialize Supabase Admin client for auth management
 const supabaseAdmin = createClient(
@@ -78,11 +79,12 @@ export async function POST(request: Request) {
     }
 
     // 2. Create user in Prisma DB
+    const hashedPassword = await bcrypt.hash(password, 10);
     const newStaff = await prisma.user.create({
       data: {
         name,
         email,
-        password: "supabase-managed", // Password managed by Supabase now
+        password: hashedPassword, // Hash using bcrypt
         role: "STAFF",
         companyId: session.companyId,
       },

@@ -11,7 +11,12 @@ const prismaClientSingleton = () => {
     return new PrismaClient();
   }
 
-  const pool = new Pool({ connectionString });
+  const pool = new Pool({ 
+    connectionString,
+    max: 2, // Limit database connection pool size per server instance to avoid exhaustion
+    connectionTimeoutMillis: 5000, // Timeout after 5 seconds instead of hanging
+    idleTimeoutMillis: 30000, // Close idle connections after 30 seconds
+  });
   const adapter = new PrismaPg(pool);
   
   return new PrismaClient({ adapter });

@@ -31,7 +31,7 @@ export function ProtectedRoute({
       return;
     }
 
-    if (allowedKey && !allowedKey.split(",").includes(user.role)) {
+    if (allowedKey && !allowedKey.split(",").includes(user.role.toLowerCase())) {
       routerRef.current.push("/dashboard");
     }
   }, [user, isLoading, allowedKey]);
