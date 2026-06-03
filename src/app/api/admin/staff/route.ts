@@ -29,9 +29,11 @@ export async function GET(request: Request) {
         email: true,
         role: true,
         createdAt: true,
+        avatar: true,
       },
       orderBy: { createdAt: "desc" },
     });
+
 
     return NextResponse.json(staff);
   } catch (error) {
@@ -94,6 +96,7 @@ export async function POST(request: Request) {
         email: true,
         role: true,
         createdAt: true,
+        avatar: true,
       },
     });
 
@@ -129,7 +132,7 @@ export async function DELETE(request: Request) {
     // 1. Delete from Supabase Auth
     const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
     const supabaseUser = usersData.users.find(u => u.email === staff.email);
-    
+
     if (supabaseUser) {
       await supabaseAdmin.auth.admin.deleteUser(supabaseUser.id);
     }
@@ -140,6 +143,105 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Failed to delete staff member:", error);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
+  }
+}
+
+// PUT — update an existing staff member's details (Admin only)
+export async function PUT(request: Request) {
+  try {
+    const session = await getServerSession(request);
+    if (!session || session.role !== "ADMIN") {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
+    }
+
+    const { staffId, name, email, password } = await request.json();
+
+    if (!staffId || !name || !email) {
+      return NextResponse.json({ message: "Staff ID, name, and email are required" }, { status: 400 });
+    }
+
+    // Verify the staff belongs to the admin's company and has role STAFF
+    const staff = await prisma.user.findFirst({
+      where: { id: staffId, companyId: session.companyId, role: "STAFF" },
+    });
+
+    if (!staff) {
+      return NextResponse.json({ message: "Staff member not found" }, { status: 404 });
+    }
+
+    // If email is changing, make sure it is not taken by anyone else
+    if (email !== staff.email) {
+      const existingUser = await prisma.user.findUnique({ where: { email } });
+      if (existingUser) {
+        return NextResponse.json(
+          { message: "An account with this email already exists" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 1. Find corresponding Supabase Auth user
+    const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
+    const supabaseUser = usersData.users.find(u => u.email === staff.email);
+
+    if (!supabaseUser) {
+      return NextResponse.json({ message: "Supabase user not found for this staff email" }, { status: 404 });
+    }
+
+    // 2. Update Supabase Auth user
+    const updateData: any = {
+      email,
+      user_metadata: { name },
+      email_confirm: true
+    };
+
+    if (password) {
+      if (password.length < 8) {
+        return NextResponse.json({ message: "Password must be at least 8 characters" }, { status: 400 });
+      }
+      updateData.password = password;
+    }
+
+    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+      supabaseUser.id,
+      updateData
+    );
+
+    if (authError) {
+      console.error("Supabase auth update error:", authError);
+      return NextResponse.json(
+        { message: authError.message || "Failed to update authentication account" },
+        { status: 400 }
+      );
+    }
+
+    // 3. Update Prisma DB user
+    const dbUpdateData: any = {
+      name,
+      email,
+    };
+
+    if (password) {
+      dbUpdateData.password = await bcrypt.hash(password, 10);
+    }
+
+    const updatedStaff = await prisma.user.update({
+      where: { id: staffId },
+      data: dbUpdateData,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        avatar: true,
+      },
+    });
+
+    return NextResponse.json(updatedStaff);
+  } catch (error) {
+    console.error("Failed to update staff member:", error);
     return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

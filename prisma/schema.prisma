@@ -49,6 +49,7 @@ model Company {
   phone           String?
   address         String?
   warrantyPolicy  String?              @db.Text
+  botColor        String?              @default("#0F3B3D")
   users           User[]
   knowledgeBase   KnowledgeBaseDocument[]
   integrations    Integration[]

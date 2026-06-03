@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
+import prisma from "@/lib/prisma";
 
 export async function POST(request: Request) {
   try {
@@ -10,19 +11,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Email is required" }, { status: 400 });
     }
 
-    // Use the Service Role Key to bypass RLS and generate a recovery link
+    // Verify user role is ADMIN
+    const user = await prisma.user.findUnique({
+      where: { email }
+    });
+
+    if (!user) {
+      return NextResponse.json({ message: "No account found with this email address." }, { status: 404 });
+    }
+
+    if (user.role !== "ADMIN") {
+      return NextResponse.json({ message: "Only administrators are allowed to reset passwords." }, { status: 403 });
+    }
+
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Generate the recovery link
-    // It will redirect the user to the update password page on the frontend
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type: "recovery",
       email,
       options: {
-        redirectTo: "http://localhost:3000/forgot-password/update"
+        redirectTo: `${process.env.NEXT_PUBLIC_URL}/forgot-password/update`
       }
     });
 
@@ -35,11 +46,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Failed to generate action link" }, { status: 500 });
     }
 
-    // Send the custom email with Nodemailer
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT) || 587,
-      secure: false, // true for 465, false for other ports
+      secure: false,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,

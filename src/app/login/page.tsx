@@ -45,8 +45,11 @@ function AuthContainer() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Mode: login, signup, verify
-  const [mode, setMode] = useState<"login" | "signup" | "verify">("login");
+  // Mode: login, signup, verify, forgot
+  const [mode, setMode] = useState<"login" | "signup" | "verify" | "forgot">("login");
+
+  // Forgot password state
+  const [forgotEmail, setForgotEmail] = useState("");
 
   // Login states
   const [loginEmail, setLoginEmail] = useState("");
@@ -132,6 +135,39 @@ function AuthContainer() {
           ? err.message
           : "Login failed. Please check your credentials.",
       );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+
+    if (!forgotEmail.trim() || !/^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/.test(forgotEmail)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.message || "Failed to request password reset");
+        return;
+      }
+
+      setSuccess("A recovery link has been dispatched to your email inbox.");
+      setForgotEmail("");
+    } catch {
+      setError("An unexpected error occurred. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -294,11 +330,13 @@ function AuthContainer() {
                 {mode === "login" && "Welcome back"}
                 {mode === "signup" && "Create Account"}
                 {mode === "verify" && "Verify Your Email"}
+                {mode === "forgot" && "Forgot Password"}
               </h3>
               <p className="text-[13px] text-zinc-400 leading-relaxed font-sans mt-2">
                 {mode === "login" && "Enter your credentials to access your account"}
                 {mode === "signup" && "Register your company profile to access the admin portal"}
                 {mode === "verify" && `Enter the 6-digit validation code dispatched to ${companyEmail}`}
+                {mode === "forgot" && "Enter your email address to receive a secure password reset link"}
               </p>
             </div>
 
@@ -382,12 +420,17 @@ function AuthContainer() {
                             Remember email
                           </Label>
                         </div>
-                        <Link
-                          href="/forgot-password"
-                          className="text-xs font-bold text-[#c59b4c] hover:text-[#d4ae62] hover:underline transition-all"
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMode("forgot");
+                            setError("");
+                            setSuccess("");
+                          }}
+                          className="text-xs font-bold text-[#c59b4c] hover:text-[#d4ae62] hover:underline transition-all bg-transparent border-none p-0 cursor-pointer focus:outline-none"
                         >
                           Forgot password?
-                        </Link>
+                        </button>
                       </div>
 
                       <Button
@@ -580,6 +623,50 @@ function AuthContainer() {
                     </motion.form>
                   )}
 
+                  {mode === "forgot" && (
+                    <motion.form
+                      key="forgot-form"
+                      initial={{ opacity: 0, x: 15 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -15 }}
+                      transition={{ duration: 0.2 }}
+                      onSubmit={handleForgotPassword}
+                      className="space-y-5"
+                    >
+                      <div className="space-y-2">
+                        <Label htmlFor="forgot-email" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Email Address</Label>
+                        <div className="relative group">
+                          <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500 transition-colors group-focus-within:text-[#c59b4c]" />
+                          <Input
+                            id="forgot-email"
+                            type="email"
+                            placeholder="you@example.com"
+                            className="pl-12 pr-4 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm"
+                            value={forgotEmail}
+                            onChange={(e) => setForgotEmail(e.target.value)}
+                            disabled={isLoading}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <Button
+                        type="submit"
+                        className="w-full h-12 text-sm font-bold tracking-wide rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 mt-2 bg-[#c59b4c] hover:bg-[#d4ae62] text-zinc-950 hover:scale-[1.01] active:scale-[0.99] border-0 cursor-pointer flex items-center justify-center"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? (
+                          <span className="flex items-center gap-2 justify-center">
+                            <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-950 border-t-transparent" />
+                            Sending link...
+                          </span>
+                        ) : (
+                          "Send Reset Link"
+                        )}
+                      </Button>
+                    </motion.form>
+                  )}
+
                 </AnimatePresence>
               </div>
             </div>
@@ -600,6 +687,17 @@ function AuthContainer() {
                       Create account
                     </button>
                   </>
+                ) : mode === "forgot" ? (
+                  <button
+                    onClick={() => {
+                      setMode("login");
+                      setError("");
+                      setSuccess("");
+                    }}
+                    className="font-bold text-[#c59b4c] hover:text-[#d4ae62] hover:underline cursor-pointer bg-transparent border-none p-0 inline-flex items-center transition-colors focus:outline-none"
+                  >
+                    Back to Sign In
+                  </button>
                 ) : (
                   <>
                     Already registered?{" "}

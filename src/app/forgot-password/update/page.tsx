@@ -47,6 +47,7 @@ export default function UpdatePasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -72,6 +73,68 @@ export default function UpdatePasswordPage() {
     }
     setPasswordStrength({ score: met, label, color });
   }, [password]);
+
+  useEffect(() => {
+    async function checkSession() {
+      try {
+        let errorMsg = "";
+
+        if (typeof window !== "undefined") {
+          // 1. Check query parameters for error redirections
+          const queryParams = new URLSearchParams(window.location.search);
+          const queryError = queryParams.get("error_description") || queryParams.get("error");
+          if (queryError) {
+            errorMsg = queryError;
+          }
+
+          // 2. Check hash parameters
+          if (window.location.hash) {
+            const hash = window.location.hash.substring(1);
+            const hashParams = new URLSearchParams(hash);
+
+            const hashError = hashParams.get("error_description") || hashParams.get("error");
+            if (hashError) {
+              errorMsg = hashError;
+            }
+
+            const accessToken = hashParams.get("access_token");
+            const refreshToken = hashParams.get("refresh_token");
+            const type = hashParams.get("type");
+
+            if (accessToken && refreshToken && type === "recovery") {
+              const { error: sessionError } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken
+              });
+              if (sessionError) {
+                console.error("Error setting session from hash:", sessionError.message);
+                errorMsg = "Session error: " + sessionError.message;
+              }
+            }
+          }
+        }
+
+        if (!errorMsg) {
+          // Wait slightly for session to propagate
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+            errorMsg = "Auth session is missing or your recovery link has expired. Please request a new password reset link.";
+          }
+        }
+
+        if (errorMsg) {
+          setError(decodeURIComponent(errorMsg.replace(/\+/g, " ")));
+        }
+      } catch (err) {
+        setError("Failed to verify authentication session.");
+      } finally {
+        setCheckingSession(false);
+      }
+    }
+    checkSession();
+  }, [supabase]);
+
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,7 +174,7 @@ export default function UpdatePasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0F3B3D]/10 to-[#E8B86B]/10 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-[#0F3B3D]/10 to-[#E8B86B]/10 p-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -157,102 +220,121 @@ export default function UpdatePasswordPage() {
               </Alert>
             )}
 
-            {!success && (
-              <motion.form
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                onSubmit={handleResetPassword}
-                className="space-y-4"
-              >
-                {/* Password Strength Indicator */}
-                <div className="space-y-2">
-                  <Label htmlFor="password">New Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      placeholder="••••••••"
-                      className="pl-9 pr-10"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      disabled={isLoading}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-
-                  {password && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Strength:</span>
-                        <span className="font-semibold">{passwordStrength.label}</span>
-                      </div>
-                      <div className="h-1 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className={`h-full transition-all duration-300 ${passwordStrength.color}`}
-                          style={{ width: `${(passwordStrength.score / requirements.length) * 100}%` }}
-                        />
-                      </div>
-                      {/* Requirements List */}
-                      <div className="grid grid-cols-1 gap-1 pt-1 bg-muted/20 p-2.5 rounded-lg border border-border/40">
-                        {requirements.map((req) => {
-                          const isMet = req.test(password);
-                          return (
-                            <div key={req.id} className="flex items-center gap-1.5 text-[11px]">
-                              <div className={`flex items-center justify-center h-3.5 w-3.5 rounded-full shrink-0 ${isMet ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
-                                {isMet ? <Check className="h-2 w-2" /> : <span className="h-1 w-1 bg-current rounded-full" />}
-                              </div>
-                              <span className={isMet ? "text-green-800 dark:text-green-400 font-medium" : "text-muted-foreground"}>
-                                {req.label}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="confirmPassword">Confirm Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="confirmPassword"
-                      type="password"
-                      placeholder="••••••••"
-                      className="pl-9"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      required
-                      disabled={isLoading}
-                    />
-                  </div>
-                </div>
-
-                <Button
-                  type="submit"
-                  className="w-full bg-[#0F3B3D] hover:bg-[#0F3B3D]/90"
-                  disabled={isLoading}
+            {checkingSession ? (
+              <div className="flex flex-col items-center justify-center py-6 gap-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#0F3B3D] border-t-transparent" />
+                <p className="text-xs text-muted-foreground">Verifying secure recovery session...</p>
+              </div>
+            ) : (
+              !success && !error && (
+                <motion.form
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  onSubmit={handleResetPassword}
+                  className="space-y-4"
                 >
-                  {isLoading ? (
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      Updating...
+                  {/* Password Strength Indicator */}
+                  <div className="space-y-2">
+                    <Label htmlFor="password">New Password</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        placeholder="••••••••"
+                        className="pl-9 pr-10"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        disabled={isLoading}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
                     </div>
-                  ) : (
-                    "Update Password"
-                  )}
+
+                    {password && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">Strength:</span>
+                          <span className="font-semibold">{passwordStrength.label}</span>
+                        </div>
+                        <div className="h-1 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-300 ${passwordStrength.color}`}
+                            style={{ width: `${(passwordStrength.score / requirements.length) * 100}%` }}
+                          />
+                        </div>
+                        {/* Requirements List */}
+                        <div className="grid grid-cols-1 gap-1 pt-1 bg-muted/20 p-2.5 rounded-lg border border-border/40">
+                          {requirements.map((req) => {
+                            const isMet = req.test(password);
+                            return (
+                              <div key={req.id} className="flex items-center gap-1.5 text-[11px]">
+                                <div className={`flex items-center justify-center h-3.5 w-3.5 rounded-full shrink-0 ${isMet ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                                  {isMet ? <Check className="h-2 w-2" /> : <span className="h-1 w-1 bg-current rounded-full" />}
+                                </div>
+                                <span className={isMet ? "text-green-800 dark:text-green-400 font-medium" : "text-muted-foreground"}>
+                                  {req.label}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword">Confirm Password</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="confirmPassword"
+                        type="password"
+                        placeholder="••••••••"
+                        className="pl-9"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
+                        disabled={isLoading}
+                      />
+                    </div>
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="w-full bg-[#0F3B3D] hover:bg-[#0F3B3D]/90"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                        Updating...
+                      </div>
+                    ) : (
+                      "Update Password"
+                    )}
+                  </Button>
+                </motion.form>
+              )
+            )}
+
+            {(error || success) && (
+              <div className="text-center pt-4">
+                <Button
+                  variant="link"
+                  onClick={() => router.push("/login")}
+                  className="text-xs text-[#0F3B3D] hover:underline"
+                >
+                  Back to Sign In
                 </Button>
-              </motion.form>
+              </div>
             )}
           </CardContent>
         </Card>

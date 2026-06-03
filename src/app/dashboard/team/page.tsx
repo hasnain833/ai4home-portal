@@ -37,6 +37,7 @@ import {
   Copy,
   CheckCircle,
   Shield,
+  Pencil,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -46,6 +47,7 @@ interface StaffMember {
   email: string;
   role: string;
   createdAt: string;
+  avatar?: string | null;
 }
 
 export default function TeamManagementPage() {
@@ -65,6 +67,19 @@ export default function TeamManagementPage() {
     email: "",
     password: "",
   });
+
+  // Edit staff state variables
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+  });
+  const [editFormError, setEditFormError] = useState("");
+  const [showEditPassword, setShowEditPassword] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+
 
   // Redirect if not admin or staff
   useEffect(() => {
@@ -143,6 +158,65 @@ export default function TeamManagementPage() {
     }
   };
 
+  const handleStartEdit = (staff: StaffMember) => {
+    setEditingStaff(staff);
+    setEditForm({
+      name: staff.name || "",
+      email: staff.email || "",
+      password: "", // empty by default
+    });
+    setEditFormError("");
+    setShowEditPassword(false);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditFormError("");
+
+    if (!editingStaff) return;
+    if (!editForm.name.trim() || !editForm.email.trim()) {
+      setEditFormError("Name and email are required");
+      return;
+    }
+
+    if (editForm.password && editForm.password.length < 8) {
+      setEditFormError("Password must be at least 8 characters");
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      const res = await fetch("/api/admin/staff", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          staffId: editingStaff.id,
+          name: editForm.name,
+          email: editForm.email,
+          password: editForm.password || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setEditFormError(data.message || "Failed to update staff member");
+        return;
+      }
+
+      setSuccess(`Staff account for ${editForm.name} updated successfully!`);
+      setIsEditDialogOpen(false);
+      setEditingStaff(null);
+      fetchStaff();
+      setTimeout(() => setSuccess(""), 4000);
+    } catch {
+      setEditFormError("An unexpected error occurred.");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -153,223 +227,337 @@ export default function TeamManagementPage() {
 
   return (
     <PortalLayout>
-    <div className="container mx-auto py-8 px-4 max-w-4xl">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center gap-3">
-              <Users className="h-8 w-8 text-[#0F3B3D] dark:text-[#b48c3c]" />
-              <span className="bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
-                Team Management
-              </span>
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              {user.role === "admin"
-                ? "Manage warranty staff members. Only you can create or remove staff accounts."
-                : "View warranty staff members in your company."}
-            </p>
+      <div className="container mx-auto py-8 px-4 max-w-4xl">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h1 className="text-3xl font-bold flex items-center gap-3">
+                <Users className="h-8 w-8 text-[#0F3B3D] dark:text-[#b48c3c]" />
+                <span className="bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
+                  Team Management
+                </span>
+              </h1>
+              <p className="text-muted-foreground mt-1">
+                {user.role === "admin"
+                  ? "Manage warranty staff members. Only you can create or remove staff accounts."
+                  : "View warranty staff members in your company."}
+              </p>
+            </div>
+
+            {user.role === "admin" && (
+              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 gap-2">
+                    <UserPlus className="h-4 w-4" />
+                    Add Staff Member
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Add Staff Member</DialogTitle>
+                    <DialogDescription>
+                      Create login credentials for a new warranty staff member. Share these details with them securely.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleCreateStaff} className="space-y-4 mt-2">
+                    {formError && (
+                      <Alert variant="destructive">
+                        <AlertDescription>{formError}</AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="staff-name">Full Name</Label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          id="staff-name"
+                          placeholder="Sarah Johnson"
+                          className="pl-9"
+                          value={newStaff.name}
+                          onChange={(e) => setNewStaff({ ...newStaff, name: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="staff-email">Email Address</Label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          id="staff-email"
+                          type="email"
+                          placeholder="sarah@yourcompany.com"
+                          className="pl-9"
+                          value={newStaff.email}
+                          onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="staff-password">Temporary Password</Label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          id="staff-password"
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Min. 8 characters"
+                          className="pl-9 pr-10"
+                          value={newStaff.password}
+                          onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Share this password securely. The staff member should change it after first login.
+                      </p>
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
+                        Create Account
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            )}
           </div>
 
+          {/* Success / Error messages */}
+          {success && (
+            <Alert className="mb-6 border-green-500 bg-green-50">
+              <CheckCircle className="h-4 w-4 text-green-600 mr-2" />
+              <AlertDescription>{success}</AlertDescription>
+            </Alert>
+          )}
+          {error && (
+            <Alert variant="destructive" className="mb-6">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* Security notice */}
+          <Card className="mb-6 border-[#E8B86B]/40 bg-[#E8B86B]/5">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-start gap-3">
+                <Shield className="h-5 w-5 text-[#E8B86B] mt-0.5 shrink-0" />
+                <div className="text-sm">
+                  <p className="font-medium text-gray-900">Controlled Access Policy</p>
+                  <p className="text-muted-foreground mt-0.5">
+                    {user.role === "admin" ? (
+                      <>
+                        Staff accounts can only be created by you (the Admin). Public signup is only for administrators. Staff log in via the same{" "}
+                        <span className="font-medium text-[#0F3B3D] dark:text-[#b48c3c]">/login</span> page using the credentials you provide.
+                      </>
+                    ) : (
+                      <>
+                        Staff accounts can only be created by the Company Administrator. Public signup is only for administrators. Staff log in via the same{" "}
+                        <span className="font-medium text-[#0F3B3D] dark:text-[#b48c3c]">/login</span> page using the credentials provided by the Admin.
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+
+          {/* Staff list */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Current Staff Members</CardTitle>
+              <CardDescription>
+                {staffList.length} staff member{staffList.length !== 1 ? "s" : ""} in your company
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />
+                  ))}
+                </div>
+              ) : staffList.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                  <p className="font-medium">No staff members yet</p>
+                  <p className="text-sm mt-1">
+                    {user.role === "admin"
+                      ? "Click \"Add Staff Member\" to create the first account."
+                      : "An administrator will add staff members here."}
+                  </p>
+                </div>
+              ) : (
+
+                <div className="space-y-3">
+                  {staffList.map((staff, index) => (
+                    <motion.div
+                      key={staff.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="flex items-center justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        {staff.avatar ? (
+                          <img
+                            src={staff.avatar}
+                            alt={staff.name}
+                            className="h-10 w-10 rounded-full object-cover shrink-0"
+                          />
+                        ) : (
+                          <div className="h-10 w-10 rounded-full bg-[#0F3B3D]/10 dark:bg-[#b48c3c]/10 flex items-center justify-center shrink-0">
+                            <span className="text-[#0F3B3D] dark:text-[#b48c3c] font-semibold text-sm">
+                              {staff.name?.charAt(0).toUpperCase() ?? "S"}
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-medium text-foreground">{staff.name}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-sm text-muted-foreground">{staff.email}</p>
+                            <button
+                              onClick={() => copyToClipboard(staff.email, staff.id)}
+                              className="text-muted-foreground hover:text-[#0F3B3D] transition-colors"
+                            >
+                              {copiedId === staff.id ? (
+                                <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                          Staff
+                        </Badge>
+                        <p className="text-xs text-muted-foreground hidden sm:block">
+                          Added {new Date(staff.createdAt).toLocaleDateString()}
+                        </p>
+                        {user.role === "admin" && (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleStartEdit(staff)}
+                              className="text-gray-500 hover:text-[#0F3B3D] dark:hover:text-[#b48c3c] hover:bg-gray-50"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteStaff(staff.id, staff.name)}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          {/* Edit Staff Dialog */}
           {user.role === "admin" && (
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 gap-2">
-                  <UserPlus className="h-4 w-4" />
-                  Add Staff Member
-                </Button>
-              </DialogTrigger>
+            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Add Staff Member</DialogTitle>
+                  <DialogTitle>Edit Staff Member</DialogTitle>
                   <DialogDescription>
-                    Create login credentials for a new warranty staff member. Share these details with them securely.
+                    Update the details of the staff member. Leave the password field blank to keep the current password.
                   </DialogDescription>
                 </DialogHeader>
-                <form onSubmit={handleCreateStaff} className="space-y-4 mt-2">
-                  {formError && (
+                <form onSubmit={handleUpdateStaff} className="space-y-4 mt-2">
+                  {editFormError && (
                     <Alert variant="destructive">
-                      <AlertDescription>{formError}</AlertDescription>
+                      <AlertDescription>{editFormError}</AlertDescription>
                     </Alert>
                   )}
                   <div className="space-y-2">
-                    <Label htmlFor="staff-name">Full Name</Label>
+                    <Label htmlFor="edit-staff-name">Full Name</Label>
                     <div className="relative">
                       <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
-                        id="staff-name"
+                        id="edit-staff-name"
                         placeholder="Sarah Johnson"
                         className="pl-9"
-                        value={newStaff.name}
-                        onChange={(e) => setNewStaff({ ...newStaff, name: e.target.value })}
+                        value={editForm.name}
+                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="staff-email">Email Address</Label>
+                    <Label htmlFor="edit-staff-email">Email Address</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
-                        id="staff-email"
+                        id="edit-staff-email"
                         type="email"
                         placeholder="sarah@yourcompany.com"
                         className="pl-9"
-                        value={newStaff.email}
-                        onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
+                        value={editForm.email}
+                        onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
                       />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="staff-password">Temporary Password</Label>
+                    <Label htmlFor="edit-staff-password">New Password (Optional)</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
-                        id="staff-password"
-                        type={showPassword ? "text" : "password"}
-                        placeholder="Min. 8 characters"
+                        id="edit-staff-password"
+                        type={showEditPassword ? "text" : "password"}
+                        placeholder="Leave blank to keep current password"
                         className="pl-9 pr-10"
-                        value={newStaff.password}
-                        onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
+                        value={editForm.password}
+                        onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
                       />
                       <button
                         type="button"
-                        onClick={() => setShowPassword(!showPassword)}
+                        onClick={() => setShowEditPassword(!showEditPassword)}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                       >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Share this password securely. The staff member should change it after first login.
+                      Only enter a password if you want to reset it for them.
                     </p>
                   </div>
                   <DialogFooter>
-                    <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                    <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
-                      Create Account
+                    <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90" disabled={isUpdating}>
+                      {isUpdating ? "Saving Changes..." : "Save Changes"}
                     </Button>
                   </DialogFooter>
                 </form>
               </DialogContent>
             </Dialog>
           )}
-        </div>
-
-        {/* Success / Error messages */}
-        {success && (
-          <Alert className="mb-6 border-green-500 bg-green-50">
-            <CheckCircle className="h-4 w-4 text-green-600 mr-2" />
-            <AlertDescription>{success}</AlertDescription>
-          </Alert>
-        )}
-        {error && (
-          <Alert variant="destructive" className="mb-6">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {/* Security notice */}
-        <Card className="mb-6 border-[#E8B86B]/40 bg-[#E8B86B]/5">
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-start gap-3">
-              <Shield className="h-5 w-5 text-[#E8B86B] mt-0.5 shrink-0" />
-              <div className="text-sm">
-                <p className="font-medium text-gray-900">Controlled Access Policy</p>
-                <p className="text-muted-foreground mt-0.5">
-                  Staff accounts can only be created by you (the Admin). Public signup is restricted to homeowners only. Staff log in via the same{" "}
-                  <span className="font-medium text-[#0F3B3D]">/login</span> page using the credentials you provide.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Staff list */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Current Staff Members</CardTitle>
-            <CardDescription>
-              {staffList.length} staff member{staffList.length !== 1 ? "s" : ""} in your company
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />
-                ))}
-              </div>
-            ) : staffList.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Users className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p className="font-medium">No staff members yet</p>
-                <p className="text-sm mt-1">Click "Add Staff Member" to create the first account.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {staffList.map((staff, index) => (
-                  <motion.div
-                    key={staff.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="flex items-center justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-[#0F3B3D]/10 dark:bg-[#b48c3c]/10 flex items-center justify-center">
-                        <span className="text-[#0F3B3D] dark:text-[#b48c3c] font-semibold text-sm">
-                          {staff.name?.charAt(0).toUpperCase() ?? "S"}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="font-medium text-foreground">{staff.name}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <p className="text-sm text-muted-foreground">{staff.email}</p>
-                          <button
-                            onClick={() => copyToClipboard(staff.email, staff.id)}
-                            className="text-muted-foreground hover:text-[#0F3B3D] transition-colors"
-                          >
-                            {copiedId === staff.id ? (
-                              <CheckCircle className="h-3.5 w-3.5 text-green-500" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Badge variant="secondary" className="bg-blue-100 text-blue-700">
-                        Staff
-                      </Badge>
-                      <p className="text-xs text-muted-foreground hidden sm:block">
-                        Added {new Date(staff.createdAt).toLocaleDateString()}
-                      </p>
-                      {user.role === "admin" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteStaff(staff.id, staff.name)}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </motion.div>
-    </div>
+        </motion.div>
+      </div>
     </PortalLayout>
   );
 }
+

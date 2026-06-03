@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       email: companyEmail,
       password,
       options: {
+        redirectTo: `${process.env.NEXT_PUBLIC_URL}/login?signup=success`,
         data: {
           name: companyName,
           role: "ADMIN",
@@ -113,13 +114,13 @@ export async function POST(request: Request) {
       // Rollback database records and Supabase user
       await prisma.user.delete({ where: { email: companyEmail } });
       await prisma.company.delete({ where: { id: newCompany.id } });
-      
+
       const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
       const supabaseUser = usersData.users.find(u => u.email === companyEmail);
       if (supabaseUser) {
         await supabaseAdmin.auth.admin.deleteUser(supabaseUser.id);
       }
-      
+
       return NextResponse.json({ message: "Failed to send verification email. Account creation rolled back." }, { status: 500 });
     }
 

@@ -39,9 +39,6 @@
 - [x] **Property Management Hub**: Implemented a comprehensive property management dashboard including a role-scoped client page (`/properties`), dynamic backend APIs (`/api/properties`), search filters, and an interactive property creation modal.
 - [x] **Anti-Litigation Guardrails (FR-08)**: Handled via Botpress system prompt constraints and portal-synced Agent Configurations.
 - [x] **Issue Diagnosis Repair Groups (FR-04)**: Handled natively within the Botpress agent workflows based on David Dell IP logic.
-- [ ] **ERP Sync Status Display (SRS 4.3.1)**: Update the ticket detail page to visually display the `erpSyncStatus` and `erpReferenceId`.
-- [ ] **Staff Property Assignment RBAC (SRS 6.3)**: Create database relation mapping Staff to specific Properties, and enforce that Staff only see tickets for their assigned properties.
-- [ ] **API Credential Encryption (SRS 6.3)**: Implement encryption/decryption (AES-256) for CRM/ERP API credentials before saving them to the database (currently stored in plaintext).
 - [x] **KB Document Utilization Display (SRS 4.3.4)**: Update the ticket or conversation view to show which knowledge base documents were referenced by the agent.
 
 ---
@@ -56,7 +53,6 @@
 - [x] **Agent Traceability**: Tracked and logged directly in Botpress backend conversation logs.
 - [x] **MAS Trigger Routing Configuration**: Configured and executed directly within Botpress workflow orchestrator.
 - [x] **Reviewer Agent Toggle**: Orchestrated directly inside Botpress workspace settings.
-- [ ] **Agent Step Tracking (SRS 5.8)**: Update the portal to display which specific agent handled each claim step (Intake, Diagnostic, Resolution, ERP) on the ticket detail view.
 
 ---
 
@@ -77,8 +73,8 @@
 
 ## 📅 Upcoming Features (Backlog)
 
-- [ ] **AI Assistant Embed & Multi-Tenancy Architecture**
-  - Create an iframe and script embed option so users can integrate the AI assistant into their own websites.
-  - **Dynamic Widget Generation**: Modify embed script to automatically inject the specific builder's `companyId` into the Botpress `userData` payload.
-  - **User Identity Verification API**: Create an endpoint (`/api/bot/verify-user`) for Botpress to look up or create "Guest" homeowner accounts by email when chatting from external websites.
-  - **Multi-Tenant Knowledge Base API**: Build a custom search endpoint (`/api/bot/search-kb`) that Botpress calls to perform vector searches on PDFs, strictly filtered by the injected `companyId` to prevent cross-company data leakage.
+- [x] **AI Assistant Embed & Multi-Tenancy Architecture**
+  - [x] Create script embed option so users can integrate the AI assistant into their own websites.
+  - [x] **Dynamic Widget Generation**: Modify embed script to automatically inject the specific builder's `companyId` into the Botpress `userData` payload.
+
+
