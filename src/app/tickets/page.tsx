@@ -558,30 +558,6 @@ export default function TicketsPage() {
                           </div>
                           
                           <div className="flex justify-end gap-2 pt-2 border-t border-border/30" onClick={(e) => e.stopPropagation()}>
-                            {!isHomeowner && (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="outline" size="sm" className="h-7 text-xs border-border/80">
-                                    <MoreVertical className="h-3 w-3 mr-1" />
-                                    Status
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleStatusChange(ticket.id, "OPEN")}>
-                                    Open
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleStatusChange(ticket.id, "IN_PROGRESS")}>
-                                    In Progress
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleStatusChange(ticket.id, "RESOLVED")}>
-                                    Resolved
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => handleStatusChange(ticket.id, "ESCALATED")}>
-                                    Escalated
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            )}
                             <Link href={`/tickets/${ticket.id}`} className="w-fit">
                               <Button variant="ghost" size="sm" className="h-7 text-xs">
                                 <Eye className="h-3.5 w-3.5 mr-1" />
@@ -650,33 +626,11 @@ export default function TicketsPage() {
                                   {ticket.priority}
                                 </Badge>
                               </TableCell>
-                              <TableCell className="py-3.5" onClick={(e) => !isHomeowner && e.stopPropagation()}>
-                                {!isHomeowner ? (
-                                  <Select
-                                    value={ticket.status}
-                                    onValueChange={(val) =>
-                                      handleStatusChange(ticket.id, val as TicketStatus)
-                                    }
-                                  >
-                                    <SelectTrigger className={cn("w-[130px] h-8 text-[11px] font-semibold rounded-full border px-3 py-1 flex items-center justify-between gap-1.5 transition-all shadow-2xs cursor-pointer", statusStyles[ticket.status].bg, statusStyles[ticket.status].text, statusStyles[ticket.status].border)}>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className={cn("h-1.5 w-1.5 rounded-full", statusStyles[ticket.status].dot)} />
-                                        <SelectValue />
-                                      </div>
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="OPEN" className="text-xs">Open</SelectItem>
-                                      <SelectItem value="IN_PROGRESS" className="text-xs">In Progress</SelectItem>
-                                      <SelectItem value="RESOLVED" className="text-xs">Resolved</SelectItem>
-                                      <SelectItem value="ESCALATED" className="text-xs">Escalated</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                ) : (
-                                  <Badge variant="outline" className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-semibold border flex items-center gap-1.5 shadow-2xs w-fit", statusStyles[ticket.status].bg, statusStyles[ticket.status].text, statusStyles[ticket.status].border)}>
-                                    <span className={cn("h-1.5 w-1.5 rounded-full", statusStyles[ticket.status].dot)} />
-                                    {ticket.status.replace("_", " ")}
-                                  </Badge>
-                                )}
+                              <TableCell className="py-3.5">
+                                <Badge variant="outline" className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-semibold border flex items-center gap-1.5 shadow-2xs w-fit", statusStyles[ticket.status].bg, statusStyles[ticket.status].text, statusStyles[ticket.status].border)}>
+                                  <span className={cn("h-1.5 w-1.5 rounded-full", statusStyles[ticket.status].dot)} />
+                                  {ticket.status.replace("_", " ")}
+                                </Badge>
                               </TableCell>
                               <TableCell className="py-3.5 text-muted-foreground text-xs pr-6">
                                 {new Date(ticket.createdAt).toLocaleDateString()}

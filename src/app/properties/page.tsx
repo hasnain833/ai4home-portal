@@ -52,8 +52,9 @@ interface Property {
   city: string | null;
   state: string | null;
   zipCode: string | null;
-  areaOfHome?: string | null;
+  areaOfHome: string | null;
   coeDate: string | null;
+  coverageTerm: string | null;
   homeownerId: string;
   homeowner?: HomeownerInfo;
   createdAt: string;
@@ -82,6 +83,7 @@ const EMPTY_FORM = {
   zipCode: "",
   areaOfHome: "",
   coeDate: "",
+  coverageTermYears: "1",
   homeownerId: "",
 };
 
@@ -155,6 +157,9 @@ export default function PropertiesPage() {
       zipCode: p.zipCode || "",
       areaOfHome: p.areaOfHome || "",
       coeDate: p.coeDate ? new Date(p.coeDate).toISOString().split("T")[0] : "",
+      coverageTermYears: (p.coeDate && p.coverageTerm) 
+        ? Math.max(1, new Date(p.coverageTerm).getFullYear() - new Date(p.coeDate).getFullYear()).toString()
+        : "1",
       homeownerId: p.homeownerId,
     });
     setFormError("");
@@ -185,6 +190,13 @@ export default function PropertiesPage() {
       return;
     }
 
+    let computedCoverageTerm = null;
+    if (form.coeDate && form.coverageTermYears) {
+      const d = new Date(form.coeDate);
+      d.setFullYear(d.getFullYear() + parseInt(form.coverageTermYears, 10));
+      computedCoverageTerm = d.toISOString().split("T")[0];
+    }
+
     const body = {
       address: form.address,
       city: form.city || null,
@@ -192,6 +204,7 @@ export default function PropertiesPage() {
       zipCode: form.zipCode || null,
       areaOfHome: form.areaOfHome || null,
       coeDate: form.coeDate || null,
+      coverageTerm: computedCoverageTerm,
       homeownerId: form.homeownerId || undefined,
     };
 
@@ -438,7 +451,7 @@ export default function PropertiesPage() {
                               </TableCell>
                               <TableCell>
                                 <Badge className="bg-[#0F3B3D]/10 text-[#0F3B3D] hover:bg-[#0F3B3D]/15 font-semibold">
-                                  Year {year}
+                                  {p.coverageTerm ? new Date(p.coverageTerm).toLocaleDateString() : `Year ${year}`}
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-right">
@@ -586,16 +599,29 @@ export default function PropertiesPage() {
                       </div>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <Label htmlFor="coeDate" className="font-semibold">COE Date (Warranty Activation)</Label>
-                      <div className="relative">
-                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="coeDate" className="font-semibold">COE Date (Warranty Activation)</Label>
+                        <div className="relative">
+                          <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                          <Input
+                            id="coeDate"
+                            type="date"
+                            className="pl-9"
+                            value={form.coeDate}
+                            onChange={(e) => setForm((f) => ({ ...f, coeDate: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="coverageTermYears" className="font-semibold">Coverage Term (Years)</Label>
                         <Input
-                          id="coeDate"
-                          type="date"
-                          className="pl-9"
-                          value={form.coeDate}
-                          onChange={(e) => setForm((f) => ({ ...f, coeDate: e.target.value }))}
+                          id="coverageTermYears"
+                          type="number"
+                          min="1"
+                          placeholder="e.g. 1"
+                          value={form.coverageTermYears}
+                          onChange={(e) => setForm((f) => ({ ...f, coverageTermYears: e.target.value }))}
                         />
                       </div>
                     </div>

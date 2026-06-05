@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const { address, city, state, zipCode, coeDate, areaOfHome, homeownerId } = await request.json();
+    const { address, city, state, zipCode, coeDate, areaOfHome, homeownerId, coverageTerm } = await request.json();
 
     if (!address) {
       return NextResponse.json({ message: "Address is required" }, { status: 400 });
@@ -72,6 +72,7 @@ export async function POST(request: Request) {
         zipCode: zipCode || null,
         areaOfHome: areaOfHome || null,
         coeDate: coeDate ? new Date(coeDate) : null,
+        coverageTerm: coverageTerm ? new Date(coverageTerm) : null,
         homeownerId: assignedHomeownerId,
       },
       include: {

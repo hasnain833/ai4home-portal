@@ -10,7 +10,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ message: "Forbidden" }, { status: 403 });
     }
 
-    const { address, city, state, zipCode, coeDate, areaOfHome, homeownerId } = await request.json();
+    const { address, city, state, zipCode, coeDate, areaOfHome, homeownerId, coverageTerm } = await request.json();
 
     const property = await prisma.property.update({
       where: { id },
@@ -21,6 +21,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         zipCode: zipCode || null,
         areaOfHome: areaOfHome || null,
         coeDate: coeDate ? new Date(coeDate) : null,
+        coverageTerm: coverageTerm ? new Date(coverageTerm) : null,
         ...(homeownerId && { homeownerId }),
       },
       include: {

@@ -79,6 +79,7 @@ model Property {
   zipCode       String?
   areaOfHome    String?
   coeDate       DateTime?
+  coverageTerm  DateTime?
   homeownerId   String
   homeowner     User      @relation(fields: [homeownerId], references: [id])
   tickets       Ticket[]
