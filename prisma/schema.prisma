@@ -68,6 +68,10 @@ model Company {
   maxSmsPerHour         Int                     @default(60)
   complianceOptInRequired Boolean               @default(true)
   suppressionList       SuppressionList[]
+  sequences             Sequence[]
+  emailTemplates        EmailTemplate[]
+  calendarEvents        ContentCalendar[]
+  salesKB               SalesKB[]
   createdAt             DateTime                @default(now())
   updatedAt             DateTime             @updatedAt
 }
@@ -180,6 +184,7 @@ model Lead {
   customFields      Json?              // Custom metadata (key-value)
   timeline          LeadTimeline[]
   appointments      SalesAppointment[]
+  sequenceEnrollments SequenceEnrollment[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 }
@@ -275,5 +280,99 @@ model SuppressionList {
   createdAt DateTime @default(now())
 
   @@unique([companyId, value])
+}
+
+enum StepType {
+  EMAIL
+  SMS
+  DELAY
+}
+
+model Sequence {
+  id              String               @id @default(cuid())
+  companyId       String
+  company         Company              @relation(fields: [companyId], references: [id])
+  name            String
+  description     String?
+  status          String               @default("Draft") // "Active" | "Draft" | "Archived"
+  channel         String               @default("Email & SMS")
+  steps           SequenceStep[]
+  enrollments     SequenceEnrollment[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+model SequenceStep {
+  id              String               @id @default(cuid())
+  sequenceId      String
+  sequence        Sequence             @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  type            StepType
+  position        Int                  // 1-indexed order of the step
+  delayValue      Int?                 // e.g. 2
+  delayUnit       String?              // "MINUTES" | "HOURS" | "DAYS"
+  subject         String?              // For email
+  body            String?              // For email or SMS
+  templateId      String?              // Reference to EmailTemplate
+  template        EmailTemplate?       @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+model SequenceEnrollment {
+  id                  String             @id @default(cuid())
+  leadId              String
+  lead                Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sequenceId          String
+  sequence            Sequence           @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  status              String             @default("ACTIVE") // ACTIVE, COMPLETED, PAUSED, EXITED
+  exitedReason        String?            // "REPLY", "APPOINTMENT", "UNSUBSCRIBE", "MANUAL", "STATUS_CHANGE"
+  currentStepPosition Int                @default(0)        // Last executed step position
+  nextRunAt           DateTime?          // Scheduled time for the next step execution
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@unique([leadId, sequenceId])
+}
+
+model EmailTemplate {
+  id          String         @id @default(cuid())
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id])
+  name        String
+  subject     String
+  body        String         @db.Text
+  variables   String[]       @default([]) // e.g. ["firstName", "lastName", "bookingLink"]
+  steps       SequenceStep[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model ContentCalendar {
+  id          String         @id @default(cuid())
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id])
+  title       String
+  channel     String         // "Email" | "SMS" | "Blog" | "Announcement"
+  scheduledAt DateTime
+  status      String         @default("Draft") // "Draft" | "Approved" | "Scheduled" | "Published"
+  content     String         @db.Text
+  subject     String?
+  reason      String?        // AI suggestion context
+  outline     String?        // AI suggestion outline
+  isAiSuggested Boolean      @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model SalesKB {
+  id          String         @id @default(cuid())
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id])
+  name        String
+  size        String
+  url         String
+  category    String         @default("General") // "Community", "Pricing", "FAQ", etc.
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 }
 

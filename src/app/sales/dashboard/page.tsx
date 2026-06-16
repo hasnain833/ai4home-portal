@@ -96,13 +96,13 @@ export default function SalesDashboardPage() {
   const handleExportCSV = () => {
     const headers = ["Lead ID", "Name", "Email", "Phone", "Status", "Source", "Owner", "Ingested Date"];
     const rows = leads.map(l => [l.id, l.name, l.email, l.phone, l.status, l.source, l.owner, l.date]);
-    const csvContent = "data:text/csv;charset=utf-8," 
+    const csvContent = "data:text/csv;charset=utf-8,"
       + [headers.join(","), ...rows.map(e => e.map(val => `"${val}"`).join(","))].join("\n");
-    
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `sales_leads_export_${new Date().toISOString().slice(0,10)}.csv`);
+    link.setAttribute("download", `sales_leads_export_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -208,28 +208,6 @@ export default function SalesDashboardPage() {
             )}
           </motion.div>
 
-          {/* CRM Connector Health & Sync Info */}
-          <motion.div variants={fadeInUp}>
-            <Card className="bg-[#0F3B3D]/5 border-l-4 border-l-[#b48c3c]">
-              <CardContent className="py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-[#b48c3c]/10 text-[#b48c3c] p-2 rounded-lg">
-                    <Activity className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-[#0F3B3D] dark:text-[#a0c5c7] text-sm">CRM Integration: Salesforce v1</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Status: <span className="text-green-600 font-medium">Connected</span> | Ingestion objects: <span className="font-medium text-foreground">Leads & Contacts</span> | Frequency: <span className="font-medium text-foreground">15m cron</span>
-                    </p>
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground self-start md:self-center">
-                  Last Sync: <span className="font-semibold text-foreground">{lastSync}</span>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
           {/* Main Dashboard Grid */}
           <motion.div variants={fadeInUp} className="grid gap-6 grid-cols-1 lg:grid-cols-3">
             {/* Ingested Leads Table */}
@@ -239,9 +217,6 @@ export default function SalesDashboardPage() {
                   <CardTitle className="text-md font-bold text-slate-800 dark:text-slate-100">Recently Ingested Leads</CardTitle>
                   <CardDescription>Live prospects synchronized from Salesforce or uploaded via CSV.</CardDescription>
                 </div>
-                <Button variant="ghost" size="sm" className="text-xs text-[#b48c3c] hover:bg-[#b48c3c]/10">
-                  Manage Leads
-                </Button>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
                 <table className="w-full text-left text-sm border-collapse">

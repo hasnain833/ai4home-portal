@@ -148,6 +148,11 @@ export default function LeadsPage() {
   const [timelineEvents, setTimelineEvents] = useState<any[]>([]);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
+
+  const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
@@ -160,6 +165,7 @@ export default function LeadsPage() {
       const res = await fetch(url);
       if (res.ok) {
         setLeads(await res.json());
+        setCurrentPage(1); // Reset to page 1 on new fetch
       }
     } catch (error) {
       console.error("Error loading leads:", error);
@@ -178,6 +184,25 @@ export default function LeadsPage() {
     leads.forEach(l => l.tags?.forEach(t => tagsSet.add(t)));
     return Array.from(tagsSet).sort();
   }, [leads]);
+
+  // Handle Delete Lead
+  const confirmDeleteLead = async () => {
+    if (!leadToDelete) return;
+    try {
+      const res = await fetch(`/api/sales/leads/${leadToDelete}`, { method: "DELETE" });
+      if (res.ok) {
+        showToast("Lead deleted successfully.");
+        fetchLeads();
+      } else {
+        const err = await res.json();
+        alert(err.message || "Failed to delete lead.");
+      }
+    } catch (error) {
+      alert("Error deleting lead.");
+    } finally {
+      setLeadToDelete(null);
+    }
+  };
 
   // Handle Manual Lead Submit
   const handleManualSubmit = async (e: React.FormEvent) => {
@@ -353,7 +378,7 @@ export default function LeadsPage() {
       setTimeout(() => {
         setTimelineEvents([
           { type: "IMPORT", description: `Lead synchronized from ${lead.source} source`, createdAt: lead.createdAt },
-          lead.emailOptIn || lead.smsOptIn 
+          lead.emailOptIn || lead.smsOptIn
             ? { type: "CONSENT_CHANGE", description: `Subscribed with consent logged via ${lead.consentSource || "System"}`, createdAt: lead.createdAt }
             : null
         ].filter(Boolean));
@@ -452,68 +477,101 @@ export default function LeadsPage() {
               {loading ? (
                 <div className="p-6 space-y-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-40 w-full" /></div>
               ) : leads.length > 0 ? (
-                <Table className="min-w-[1000px]">
-                  <TableHeader className="bg-muted/15 border-b border-border/50">
-                    <TableRow>
-                      <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground pl-6">ID</th>
-                      <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Prospect Name</th>
-                      <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Contact details</th>
-                      <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Status</th>
-                      <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Opt-in Consent</th>
-                      <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Ingested from</th>
-                      <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Assigned agent</th>
-                      <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground text-right pr-6">Timeline</th>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {leads.map((lead) => (
-                      <TableRow key={lead.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition border-b border-border/30">
-                        <TableCell className="py-3 pl-6 font-mono text-xs font-semibold text-[#b48c3c]">{lead.id.substring(0, 8)}...</TableCell>
-                        <TableCell className="py-3 font-semibold text-slate-800 dark:text-slate-200">
-                          <div>
-                            <p className="text-sm font-semibold">{lead.firstName} {lead.lastName}</p>
-                            <div className="flex gap-1 mt-1 flex-wrap">
-                              {lead.tags.map((t, idx) => (
-                                <Badge key={idx} variant="secondary" className="text-[9px] font-mono tracking-tight px-1.5 py-0">
-                                  {t}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-3 text-xs">
-                          <div>
-                            <p className="font-semibold">{lead.email || "—"}</p>
-                            <p className="text-slate-400 mt-0.5">{lead.phone || "—"}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-3">
-                          <Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold border ${statusColors[lead.status]}`}>
-                            {lead.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="py-3 text-xs font-semibold">
-                          <div className="space-y-0.5">
-                            {lead.emailOptIn ? <span className="text-green-600 block">✓ Email Opt-in</span> : <span className="text-slate-400 block">✗ Email Opt-out</span>}
-                            {lead.smsOptIn ? <span className="text-green-600 block">✓ SMS Opt-in</span> : <span className="text-slate-400 block">✗ SMS Opt-out</span>}
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-3 text-xs">
-                          <div>
-                            <p className="font-bold">{lead.source}</p>
-                            {lead.externalId && <p className="text-[10px] text-slate-400 font-mono mt-0.5">CRM: {lead.externalId.substring(0,8)}</p>}
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-3 text-xs text-slate-600 dark:text-slate-300 font-medium">{lead.owner?.name || "Unassigned"}</TableCell>
-                        <TableCell className="py-3 text-right pr-6">
-                          <Button variant="ghost" size="sm" onClick={() => openTimeline(lead)} className="text-[#b48c3c] hover:bg-[#b48c3c]/10 text-xs">
-                            <Clock className="h-3.5 w-3.5 mr-1" /> View Logs
-                          </Button>
-                        </TableCell>
+                <>
+                  <Table className="min-w-[1000px]">
+                    <TableHeader className="bg-muted/15 border-b border-border/50">
+                      <TableRow>
+                        <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground pl-6">ID</th>
+                        <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Prospect Name</th>
+                        <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Contact details</th>
+                        <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Status</th>
+                        <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Opt-in Consent</th>
+                        <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Ingested from</th>
+                        <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground">Assigned agent</th>
+                        <th className="py-3.5 px-4 font-semibold text-xs text-muted-foreground text-right pr-6">Timeline</th>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {leads.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE).map((lead) => (
+                        <TableRow key={lead.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition border-b border-border/30">
+                          <TableCell className="py-3 pl-6 font-mono text-xs font-semibold text-[#b48c3c]">{lead.id.substring(0, 8)}...</TableCell>
+                          <TableCell className="py-3 font-semibold text-slate-800 dark:text-slate-200">
+                            <div>
+                              <p className="text-sm font-semibold">{lead.firstName} {lead.lastName}</p>
+                              <div className="flex gap-1 mt-1 flex-wrap">
+                                {lead.tags.map((t, idx) => (
+                                  <Badge key={idx} variant="secondary" className="text-[9px] font-mono tracking-tight px-1.5 py-0">
+                                    {t}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-3 text-xs">
+                            <div>
+                              <p className="font-semibold">{lead.email || "—"}</p>
+                              <p className="text-slate-400 mt-0.5">{lead.phone || "—"}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-3">
+                            <Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold border ${statusColors[lead.status]}`}>
+                              {lead.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="py-3 text-xs font-semibold">
+                            <div className="space-y-0.5">
+                              {lead.emailOptIn ? <span className="text-green-600 block">✓ Email Opt-in</span> : <span className="text-slate-400 block">✗ Email Opt-out</span>}
+                              {lead.smsOptIn ? <span className="text-green-600 block">✓ SMS Opt-in</span> : <span className="text-slate-400 block">✗ SMS Opt-out</span>}
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-3 text-xs">
+                            <div>
+                              <p className="font-bold">{lead.source}</p>
+                              {lead.externalId && <p className="text-[10px] text-slate-400 font-mono mt-0.5">CRM: {lead.externalId.substring(0, 8)}</p>}
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-3 text-xs text-slate-600 dark:text-slate-300 font-medium">{lead.owner?.name || "Unassigned"}</TableCell>
+                          <TableCell className="py-3 text-right pr-6 space-x-1">
+                            <Button variant="ghost" size="sm" onClick={() => openTimeline(lead)} className="text-[#b48c3c] hover:bg-[#b48c3c]/10 text-xs">
+                              <Clock className="h-3.5 w-3.5 mr-1" /> View Logs
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setLeadToDelete(lead.id)} className="text-red-500 hover:bg-red-500/10 text-xs px-2">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  {leads.length > ITEMS_PER_PAGE && (
+                    <div className="flex items-center justify-between px-6 py-4 border-t border-border/50 bg-slate-50/30 dark:bg-slate-900/10">
+                      <div className="text-xs text-muted-foreground">
+                        Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, leads.length)} of {leads.length} prospects
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                          disabled={currentPage === 1}
+                          className="h-8 text-xs"
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(p => Math.min(Math.ceil(leads.length / ITEMS_PER_PAGE), p + 1))}
+                          disabled={currentPage >= Math.ceil(leads.length / ITEMS_PER_PAGE)}
+                          className="h-8 text-xs"
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="text-center py-20 text-muted-foreground">
                   <Users className="h-16 w-16 mx-auto opacity-20 text-[#b48c3c] mb-3" />
@@ -884,7 +942,7 @@ export default function LeadsPage() {
                   {timelineEvents.map((evt, idx) => (
                     <div key={idx} className="relative">
                       {/* Timeline Dot */}
-                      <span className="absolute -left-[31px] top-1 h-3.5 w-3.5 rounded-full bg-white dark:bg-slate-950 border-2 border-[#b48c3c] flex items-center justify-center">
+                      <span className="absolute left-[-31px] top-1 h-3.5 w-3.5 rounded-full bg-white dark:bg-slate-950 border-2 border-[#b48c3c] flex items-center justify-center">
                         <span className="h-1.5 w-1.5 rounded-full bg-[#b48c3c]" />
                       </span>
                       <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">{evt.description}</p>
@@ -901,6 +959,27 @@ export default function LeadsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={!!leadToDelete} onOpenChange={(open) => !open && setLeadToDelete(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete Lead</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete this lead? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="sm:justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setLeadToDelete(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" className="bg-red-500 hover:bg-red-600 text-white" onClick={confirmDeleteLead}>
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </PortalLayout>
     </ProtectedRoute>
   );
