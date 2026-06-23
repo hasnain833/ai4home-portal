@@ -6,7 +6,7 @@ export class MailService {
   static SMTP_USER = process.env.SMTP_USER || "";
   static SMTP_PASS = process.env.SMTP_PASS || "";
   static SENDER_EMAIL = process.env.SENDER_EMAIL || "noreply@bitzsol.com";
-  static SENDER_NAME = "Ai.Lumen Warranty Care";
+  static SENDER_NAME = "Aiforhomebuilder";
 
   static transporter = nodemailer.createTransport({
     host: this.SMTP_HOST,
@@ -47,8 +47,8 @@ export class MailService {
   static async sendTicketStatusUpdate(to, homeownerName, ticketId, status, company = null) {
     const statusLabel = status.replace("_", " ").toLowerCase();
     const subject = `Ticket Update: ${ticketId} is now ${statusLabel}`;
-    
-    const companyName = company?.name || "Ai.Lumen Warranty Care";
+
+    const companyName = company?.name || "Aiforhomebuilder";
     const companyEmail = company?.email || this.SENDER_EMAIL;
     const portalUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
 
@@ -98,7 +98,7 @@ export class MailService {
           <p>If you did not request this, please ignore this email.</p>
         </div>
         <div style="background: #f4f4f4; padding: 20px; text-align: center; color: #666; font-size: 12px;">
-          <p>&copy; 2026 Ai.Lumen Warranty Care. All rights reserved.</p>
+          <p>&copy; 2026 Aiforhomebuilder. All rights reserved.</p>
         </div>
       </div>
     `;
@@ -124,7 +124,7 @@ export class MailService {
           <p>If you did not request a password reset, please ignore this email; your password will remain unchanged.</p>
         </div>
         <div style="background: #f4f4f4; padding: 20px; text-align: center; color: #666; font-size: 12px;">
-          <p>&copy; 2026 Ai.Lumen Warranty Care. All rights reserved.</p>
+          <p>&copy; 2026 Aiforhomebuilder. All rights reserved.</p>
         </div>
       </div>
     `;

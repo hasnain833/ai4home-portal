@@ -141,7 +141,7 @@ export default function PortalLayout({
             <button onClick={() => router.push(workspace === "warranty" ? "/warranty/dashboard" : "/sales/dashboard")} className="flex items-center gap-3.5 hover:opacity-80 transition">
               <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-9 w-auto object-contain rounded-md" />
               {sidebarExpanded && (
-                <span className="text-xl font-bold tracking-tight">{user?.companyName || "Ai.Lumen Care"}</span>
+                <span className="text-xl font-bold tracking-tight">{user?.companyName || "Aiforhomebuilder"}</span>
               )}
             </button>
             <Button variant="ghost" size="icon" onClick={toggleSidebar} className="text-white hover:bg-white/10">
@@ -298,7 +298,7 @@ export default function PortalLayout({
           </Button>
           <div className="flex items-center gap-3">
             <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-7 w-auto object-contain rounded-sm" />
-            <span className="font-bold">{user?.companyName || "Ai.Lumen Care"}</span>
+            <span className="font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
           </div>
           <Button variant="ghost" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -327,7 +327,7 @@ export default function PortalLayout({
                   <div className="flex h-16 items-center justify-between px-4">
                     <div className="flex items-center gap-3.5">
                       <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-9 w-auto object-contain rounded-md" />
-                      <span className="text-xl font-bold">{user?.companyName || "Ai.Lumen Care"}</span>
+                      <span className="text-xl font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
                     </div>
                     <Button variant="ghost" size="icon" onClick={closeMobileSidebar} className="text-white hover:bg-white/10">
                       <X className="h-5 w-5" />

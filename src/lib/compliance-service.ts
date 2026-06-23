@@ -5,26 +5,26 @@ const STATE_TIMEZONE_MAP: Record<string, string> = {
   // Pacific
   "CA": "America/Los_Angeles", "NV": "America/Los_Angeles", "OR": "America/Los_Angeles", "WA": "America/Los_Angeles",
   "CALIFORNIA": "America/Los_Angeles", "NEVADA": "America/Los_Angeles", "OREGON": "America/Los_Angeles", "WASHINGTON": "America/Los_Angeles",
-  
+
   // Mountain
   "CO": "America/Denver", "ID": "America/Denver", "MT": "America/Denver", "UT": "America/Denver", "WY": "America/Denver", "NM": "America/Denver",
   "COLORADO": "America/Denver", "IDAHO": "America/Denver", "MONTANA": "America/Denver", "UTAH": "America/Denver", "WYOMING": "America/Denver", "NEW MEXICO": "America/Denver",
-  
+
   // Arizona (no DST)
   "AZ": "America/Phoenix", "ARIZONA": "America/Phoenix",
 
   // Central
-  "AL": "America/Chicago", "AR": "America/Chicago", "IL": "America/Chicago", "IA": "America/Chicago", "KS": "America/Chicago", 
-  "LA": "America/Chicago", "MN": "America/Chicago", "MS": "America/Chicago", "MO": "America/Chicago", "NE": "America/Chicago", 
+  "AL": "America/Chicago", "AR": "America/Chicago", "IL": "America/Chicago", "IA": "America/Chicago", "KS": "America/Chicago",
+  "LA": "America/Chicago", "MN": "America/Chicago", "MS": "America/Chicago", "MO": "America/Chicago", "NE": "America/Chicago",
   "ND": "America/Chicago", "OK": "America/Chicago", "SD": "America/Chicago", "TN": "America/Chicago", "TX": "America/Chicago", "WI": "America/Chicago",
   "ALABAMA": "America/Chicago", "ARKANSAS": "America/Chicago", "ILLINOIS": "America/Chicago", "IOWA": "America/Chicago", "KANSAS": "America/Chicago",
   "LOUISIANA": "America/Chicago", "MINNESOTA": "America/Chicago", "MISSISSIPPI": "America/Chicago", "MISSOURI": "America/Chicago", "NEBRASKA": "America/Chicago",
   "NORTH DAKOTA": "America/Chicago", "OKLAHOMA": "America/Chicago", "SOUTH DAKOTA": "America/Chicago", "TENNESSEE": "America/Chicago", "TEXAS": "America/Chicago", "WISCONSIN": "America/Chicago",
 
   // Eastern
-  "CT": "America/New_York", "DE": "America/New_York", "FL": "America/New_York", "GA": "America/New_York", "IN": "America/New_York", 
-  "KY": "America/New_York", "ME": "America/New_York", "MD": "America/New_York", "MA": "America/New_York", "MI": "America/New_York", 
-  "NH": "America/New_York", "NJ": "America/New_York", "NY": "America/New_York", "NC": "America/New_York", "OH": "America/New_York", 
+  "CT": "America/New_York", "DE": "America/New_York", "FL": "America/New_York", "GA": "America/New_York", "IN": "America/New_York",
+  "KY": "America/New_York", "ME": "America/New_York", "MD": "America/New_York", "MA": "America/New_York", "MI": "America/New_York",
+  "NH": "America/New_York", "NJ": "America/New_York", "NY": "America/New_York", "NC": "America/New_York", "OH": "America/New_York",
   "PA": "America/New_York", "RI": "America/New_York", "SC": "America/New_York", "VT": "America/New_York", "VA": "America/New_York", "WV": "America/New_York",
   "CONNECTICUT": "America/New_York", "DELAWARE": "America/New_York", "FLORIDA": "America/New_York", "GEORGIA": "America/New_York", "INDIANA": "America/New_York",
   "KENTUCKY": "America/New_York", "MAINE": "America/New_York", "MARYLAND": "America/New_York", "MASSACHUSETTS": "America/New_York", "MICHIGAN": "America/New_York",
@@ -320,7 +320,7 @@ export class ComplianceService {
     if (helpKeywords.includes(text) && isSms) {
       return {
         isComplianceAction: true,
-        replyText: "Ai.Lumen Marketing Hub: For client assistance, reply to this thread. Msg & data rates may apply. Reply STOP to cancel.",
+        replyText: "Aiforhomebuilder Marketing Hub: For client assistance, reply to this thread. Msg & data rates may apply. Reply STOP to cancel.",
       };
     }
 

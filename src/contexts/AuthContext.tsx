@@ -42,7 +42,7 @@ export interface User {
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, redirectPath?: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
   updateAvatar: (avatarUrl: string) => void;
@@ -113,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]); // router is stable
 
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, redirectPath?: string) => {
     setIsLoading(true);
     try {
       const { error } = await supabaseRef.current.auth.signInWithPassword({
@@ -123,7 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) throw error;
 
-      router.push("/");
+      router.push(redirectPath || "/");
     } catch (err) {
       setIsLoading(false);
       throw err;

@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 // Public routes (no auth required)
-const publicRoutes = ["/login", "/signup", "/", "/forgot-password"];
+const publicRoutes = ["/login", "/signup", "/", "/forgot-password", "/widget", "/widget.js"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -29,10 +29,6 @@ export async function middleware(request: NextRequest) {
       },
     }
   );
-
-  // Use getSession() — reads JWT from cookie locally, NO network call to Supabase.
-  // This is safe for route-guarding purposes. Individual API routes use getUser()
-  // for security-critical operations.
   const {
     data: { session },
   } = await supabase.auth.getSession();

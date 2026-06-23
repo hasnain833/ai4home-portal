@@ -22,7 +22,7 @@ export default function AIChatPage() {
   const [copied, setCopied] = useState(false);
   const [themeColor, setThemeColor] = useState("#0F3B3D");
 
-  const botName = user?.companyName ? `${user.companyName} Assistant` : "Ai.Lumen Assistant";
+  const botName = user?.companyName ? `${user.companyName} Assistant` : "Aiforhomebuilder Assistant";
   const botLogoUrl = user?.companyLogo || (typeof window !== "undefined" ? window.location.origin + "/logo.png" : "");
 
   useEffect(() => {
@@ -170,90 +170,8 @@ export default function AIChatPage() {
     };
   }, [user, isLoading, themeColor, botName, botLogoUrl]);
 
-  const portalUrl = process.env.NEXT_PUBLIC_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
-
-  const embedScriptCode = `<div id="bp-embedded-webchat" style="width: 100%; height: 600px; border-radius: 12px; overflow: hidden; border: 1px solid #1e293b;"></div>
-<script>
-  (function() {
-    var realBotpress = null;
-    Object.defineProperty(window, 'botpress', {
-      get: function() {
-        return realBotpress;
-      },
-      set: function(val) {
-        if (val && val.init) {
-          realBotpress = Object.create(val);
-          Object.defineProperty(realBotpress, 'init', {
-            value: function(options) {
-              fetch("${portalUrl}/api/company/branding?id=${user?.companyId || "demo-company"}")
-                .then(function(res) { return res.json(); })
-                .then(function(data) {
-                  if (options && options.configuration) {
-                    options.configuration.color = data.botColor || "${themeColor}";
-                    options.configuration.botName = data.name ? (data.name + " Assistant") : "${botName}";
-                    var logo = data.logo || "${botLogoUrl}";
-                    options.configuration.avatarUrl = logo;
-                    options.configuration.botAvatar = logo;
-                    options.configuration.botAvatarUrl = logo;
-                  }
-                  val.init.call(val, options);
-                })
-                .catch(function(err) {
-                  if (options && options.configuration) {
-                    options.configuration.color = "${themeColor}";
-                    options.configuration.botName = "${botName}";
-                    options.configuration.avatarUrl = "${botLogoUrl}";
-                    options.configuration.botAvatar = "${botLogoUrl}";
-                    options.configuration.botAvatarUrl = "${botLogoUrl}";
-                  }
-                  val.init.call(val, options);
-                });
-            },
-            writable: true,
-            configurable: true,
-            enumerable: true
-          });
-        } else {
-          realBotpress = val;
-        }
-      },
-      configurable: true,
-      enumerable: true
-    });
-  })();
-</script>
-<script src="${INJECT_URL}"></script>
-<script src="${CONFIG_URL}" defer></script>
-<script>
-  window.addEventListener('load', function() {
-    var checkBotpress = setInterval(function() {
-      var bp = window.botpressWebChat || window.botpressWebchat || window.botpress;
-      if (bp) {
-
-        clearInterval(checkBotpress);
-        bp.on("webchat:initialized", function() {
-          if (bp.open) bp.open();
-          if (bp.updateUser) {
-            try {
-              bp.updateUser({
-                data: {
-                  companyId: "${user?.companyId || ""}",
-                  role: "homeowner"
-                },
-                tags: {
-                  companyId: "${user?.companyId || ""}",
-                  role: "homeowner"
-                }
-              });
-            } catch (err) {
-              console.error("Failed to update user in Botpress:", err);
-            }
-          }
-        });
-      }
-    }, 300);
-  });
-</script>`;
+  const portalUrl = process.env.NEXT_PUBLIC_URL;
+  const embedScriptCode = `<script src="${portalUrl}/widget.js?company=${user?.companyId || "demo-company"}"></script>`;
 
 
   const copyToClipboard = () => {
@@ -360,7 +278,8 @@ export default function AIChatPage() {
                         <p className="font-semibold text-foreground">💡 How to use this script:</p>
                         <p>1. Copy the script code block above.</p>
                         <p>2. Paste the snippet into the HTML of your external website (preferably right before the closing <code className="px-1 py-0.5 rounded bg-muted font-mono">&lt;/body&gt;</code> tag).</p>
-                        <p>3. The script dynamically binds the assistant to a container element with ID <code className="px-1 py-0.5 rounded bg-muted font-mono">bp-embedded-webchat</code> and passes your builder's unique ID (<code className="px-1 py-0.5 rounded bg-muted font-mono">{user?.companyId || "demo-company"}</code>) to ensure proper scoping.</p>
+                        <p>3. The floating chat bubble (💬) will automatically appear in the bottom-right corner of your website.</p>
+                        <p>4. Your company's custom theme color, logo, and name are loaded automatically from the database—no manual configuration is needed on your website!</p>
                       </div>
                     </div>
                   </div>

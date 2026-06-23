@@ -499,7 +499,7 @@ export class ComplianceService {
       return {
         isComplianceAction: true,
         replyText:
-          "Ai.Lumen Marketing Hub: For client assistance, reply to this thread. Msg & data rates may apply. Reply STOP to cancel.",
+          "Aiforhomebuilder Marketing Hub: For client assistance, reply to this thread. Msg & data rates may apply. Reply STOP to cancel.",
       };
     }
 

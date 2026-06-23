@@ -12,7 +12,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ai.Lumen Warranty Care",
+  title: "Aiforhomebuilder - CRM",
   description: "AI-powered warranty management for homebuilders",
 };
 

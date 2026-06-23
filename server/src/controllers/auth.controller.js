@@ -175,13 +175,13 @@ export const signup = async (req, res) => {
       });
 
       await transporter.sendMail({
-        from: `"Ai.Lumen Warranty Care" <${process.env.SENDER_EMAIL}>`,
+        from: `"Aiforhomebuilder" <${process.env.SENDER_EMAIL}>`,
         to: companyEmail,
         subject: "Verify Your Account",
         text: `Please verify your account by clicking this link: ${actionLink}`,
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-            <h2 style="color: #c59b4c;">Welcome to Ai.Lumen Warranty Care!</h2>
+            <h2 style="color: #c59b4c;">Welcome to Aiforhomebuilder!</h2>
             <p>Hi ${companyName},</p>
             <p>Thank you for signing up. Please click the button below to verify your email address and activate your account:</p>
             <div style="text-align: center; margin: 30px 0;">
@@ -281,13 +281,13 @@ export const forgotPassword = async (req, res) => {
     });
 
     await transporter.sendMail({
-      from: `"Ai.Lumen Warranty Care" <${process.env.SENDER_EMAIL}>`,
+      from: `"Aiforhomebuilder" <${process.env.SENDER_EMAIL}>`,
       to: email,
       subject: "Password Reset Request",
       text: `Please reset your password by clicking this link: ${actionLink}`,
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-          <h2 style="color: #c59b4c;">Ai.Lumen Warranty Care</h2>
+          <h2 style="color: #c59b4c;">Aiforhomebuilder</h2>
           <p>Hi,</p>
           <p>We received a request to reset your password. Click the button below to choose a new password:</p>
           <div style="text-align: center; margin: 30px 0;">

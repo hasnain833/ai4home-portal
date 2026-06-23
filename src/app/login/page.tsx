@@ -114,9 +114,11 @@ function AuthContainer() {
       localStorage.removeItem("remembered_email");
     }
 
+    const redirectPath = searchParams.get("redirect") || undefined;
+
     setIsLoading(true);
     try {
-      await login(loginEmail, loginPassword);
+      await login(loginEmail, loginPassword, redirectPath);
     } catch (err) {
       setError(
         err instanceof Error
@@ -218,7 +220,7 @@ function AuthContainer() {
             <Shield className="h-5 w-5" />
           </div>
           <span className="text-lg font-bold tracking-tight text-zinc-100 font-serif">
-            Ai.Lumen Warranty Care
+            Aiforhomebuilder
           </span>
         </div>
 
@@ -232,7 +234,7 @@ function AuthContainer() {
               Your home system health, <span className="text-[#c59b4c]">digitally secured.</span>
             </h2>
             <p className="text-zinc-400 text-sm leading-relaxed max-w-md">
-              Ai.Lumen coordinates real-time diagnostics, homeowner claims, and builder maintenance workflows. Track system faults, access step-by-step DIY guidance, or trigger direct developer support instantly.
+              Aiforhomebuilder coordinates real-time diagnostics, homeowner claims, and builder maintenance workflows. Track system faults, access step-by-step DIY guidance, or trigger direct developer support instantly.
             </p>
           </div>
 
@@ -281,7 +283,7 @@ function AuthContainer() {
 
         {/* Footer info */}
         <div className="relative z-10 flex items-center justify-between text-xs text-zinc-500 pt-4 border-t border-white/5">
-          <span>© 2026 Ai.Lumen Technologies Inc.</span>
+          <span>© 2026 Aiforhomebuilder Technologies Inc.</span>
           <span className="flex items-center gap-1.5 text-zinc-400">
             <Building className="h-3.5 w-3.5 text-zinc-500" /> Core Warranty System Active
           </span>
@@ -305,7 +307,7 @@ function AuthContainer() {
               <Shield className="h-6 w-6" />
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-zinc-50 font-serif">
-              Ai.Lumen Warranty Care
+              Aiforhomebuilder
             </h1>
             <p className="text-zinc-400 text-xs mt-1">
               Secure home systems management portal

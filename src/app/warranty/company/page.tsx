@@ -507,12 +507,12 @@ export default function CompanyPage() {
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <AlertCircle className="h-5 w-5 text-secondary" />
-                  Information about Ai.Lumen
+                  Information about Aiforhomebuilder
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">
-                  Ai.Lumen is a platform that provides AI-powered solutions for home builders. Our platform helps home builders to automate their warranty management process and provides a seamless experience for homeowners.
+                  Aiforhomebuilder is a platform that provides AI-powered solutions for home builders. Our platform helps home builders to automate their warranty management process and provides a seamless experience for homeowners.
                 </p>
               </CardContent>
             </Card>

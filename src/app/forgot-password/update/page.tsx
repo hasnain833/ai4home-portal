@@ -191,7 +191,7 @@ export default function UpdatePasswordPage() {
             <Shield className="h-8 w-8 text-[#E8B86B]" />
           </motion.div>
           <h1 className="text-2xl font-bold text-gray-900">
-            Ai.Lumen Warranty Care
+            Aiforhomebuilder
           </h1>
           <p className="text-muted-foreground mt-1">
             Secure Account Recovery

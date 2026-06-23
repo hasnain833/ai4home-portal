@@ -38,7 +38,7 @@ export default function HubPage() {
     // Save selection in memory (both localStorage and cookies for middleware accessibility)
     localStorage.setItem("last-workspace", workspace);
     document.cookie = `last-workspace=${workspace}; path=/; max-age=31536000; SameSite=Lax`;
-    
+
     // Redirect to the workspace dashboard
     router.push(`/${workspace}/dashboard`);
   };
@@ -48,13 +48,13 @@ export default function HubPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-300">
-      
+
       {/* Top Header */}
       <header className="max-w-5xl mx-auto w-full flex justify-between items-center">
         <div className="flex items-center gap-3">
           <img src={user.companyLogo || "/logo.png"} alt="Logo" className="h-9 w-auto object-contain rounded-md" />
           <span className="text-xl font-bold tracking-tight text-[#0F3B3D] dark:text-[#a0c5c7]">
-            {user.companyName || "Ai.Lumen Care"}
+            {user.companyName || "Aiforhomebuilder"}
           </span>
         </div>
         <div className="flex items-center gap-3">
@@ -104,11 +104,10 @@ export default function HubPage() {
           {/* Warranty Workspace Card */}
           <Card
             onClick={() => user.hasWarrantyAccess && handleSelectWorkspace("warranty")}
-            className={`group text-left border relative overflow-hidden transition-all duration-300 cursor-pointer flex flex-col justify-between ${
-              user.hasWarrantyAccess
+            className={`group text-left border relative overflow-hidden transition-all duration-300 cursor-pointer flex flex-col justify-between ${user.hasWarrantyAccess
                 ? "hover:shadow-xl hover:border-[#0F3B3D]/50 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50"
                 : "opacity-60 bg-slate-100/50 dark:bg-slate-950/20 border-dashed cursor-not-allowed"
-            }`}
+              }`}
           >
             <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 opacity-5 group-hover:opacity-10 transition pointer-events-none">
               <Bot className="h-32 w-32" />
@@ -148,11 +147,10 @@ export default function HubPage() {
           {/* Sales Workspace Card */}
           <Card
             onClick={() => user.hasSalesAccess && handleSelectWorkspace("sales")}
-            className={`group text-left border relative overflow-hidden transition-all duration-300 cursor-pointer flex flex-col justify-between ${
-              user.hasSalesAccess
+            className={`group text-left border relative overflow-hidden transition-all duration-300 cursor-pointer flex flex-col justify-between ${user.hasSalesAccess
                 ? "hover:shadow-xl hover:border-[#b48c3c]/50 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50"
                 : "opacity-60 bg-slate-100/50 dark:bg-slate-950/20 border-dashed cursor-not-allowed"
-            }`}
+              }`}
           >
             <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 opacity-5 group-hover:opacity-10 transition pointer-events-none">
               <Layers className="h-32 w-32" />
@@ -193,7 +191,7 @@ export default function HubPage() {
 
       {/* Footer */}
       <footer className="max-w-5xl mx-auto w-full text-center text-xs text-slate-400 dark:text-slate-600 border-t border-slate-200/50 dark:border-slate-800/50 pt-6">
-        © {new Date().getFullYear()} Ai.Lumen. All rights reserved. Confidential Portal.
+        © {new Date().getFullYear()} Aiforhomebuilder. All rights reserved. Confidential Portal.
       </footer>
     </div>
   );
