@@ -281,12 +281,16 @@ export const botpressTicket = async (req, res) => {
       }
     });
 
+    const portalUrl = process.env.NEXT_PUBLIC_URL || "https://warranty-care-portal.vercel.app";
+    const ticketUrl = `${portalUrl}/warranty/tickets/${ticket.id}`;
+
     console.log(`[BOTPRESS INTEGRATION] Ticket #${ticket.id} generated successfully for ${email}`);
 
     return res.json({
       success: true,
       message: "Ticket created successfully",
       ticketId: ticket.id,
+      ticketUrl,
       warrantyYear
     });
 

@@ -239,11 +239,12 @@ export const forgotPassword = async (req, res) => {
         .json({ message: "No account found with this email address." });
     }
 
-    if (user.role !== "ADMIN") {
-      return res
-        .status(403)
-        .json({ message: "Only administrators are allowed to reset passwords." });
-    }
+    // All roles are allowed to reset their password
+    // if (user.role !== "ADMIN") {
+    //   return res
+    //     .status(403)
+    //     .json({ message: "Only administrators are allowed to reset passwords." });
+    // }
 
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,

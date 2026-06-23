@@ -47,10 +47,13 @@ function AuthContainer() {
   // Forgot password state
   const [forgotEmail, setForgotEmail] = useState("");
 
-  // Login states
-  const [loginEmail, setLoginEmail] = useState("");
+  const [loginEmail, setLoginEmail] = useState(() => {
+    try { return localStorage.getItem("remembered_email") ?? ""; } catch { return ""; }
+  });
   const [loginPassword, setLoginPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState(() => {
+    try { return !!localStorage.getItem("remembered_email"); } catch { return false; }
+  });
 
   // Signup states
   // Signup states
@@ -85,17 +88,6 @@ function AuthContainer() {
     }
   }, [searchParams]);
 
-  useEffect(() => {
-    try {
-      const savedEmail = localStorage.getItem("remembered_email");
-      if (savedEmail) {
-        setLoginEmail(savedEmail);
-        setRememberMe(true);
-      }
-    } catch {
-      // localStorage not available (SSR), ignore
-    }
-  }, []);
 
   const updatePassword = (pwd: string) => {
     setSignupPassword(pwd);

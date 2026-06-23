@@ -59,7 +59,7 @@ const warrantyNavItems = [
   { name: "Tickets", href: "/warranty/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
   { name: "Team", href: "/warranty/dashboard/team", icon: Users, roles: ["admin", "staff"] },
   { name: "Homeowners", href: "/warranty/dashboard/homeowners", icon: User, roles: ["admin", "staff"] },
-  { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
+  // { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
   { name: "Knowledge Base", href: "/warranty/knowledge-base", icon: Database, roles: ["admin", "staff"] },
   { name: "Company", href: "/warranty/company", icon: Building2, roles: ["admin", "staff"] },
   { name: "Reports", href: "/warranty/reports", icon: BarChart3, roles: ["admin", "staff"] },
@@ -150,8 +150,8 @@ export default function PortalLayout({
           </div>
           <Separator className="bg-white/10" />
 
-          {/* Workspace Switcher */}
-          {user && (user.hasWarrantyAccess || user.hasSalesAccess) && (
+          {/* Workspace Switcher — hidden until multi-workspace is enabled; restore by replacing `false` with the real condition */}
+          {false && user && (user?.hasWarrantyAccess || user?.hasSalesAccess) && (
             <div className="px-3 py-2">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -168,13 +168,13 @@ export default function PortalLayout({
                 <DropdownMenuContent align="start" className="w-48">
                   <DropdownMenuLabel className="text-xs">Switch Workspace</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {user.hasWarrantyAccess && (
+                  {user?.hasWarrantyAccess && (
                     <DropdownMenuItem onClick={() => handleWorkspaceSwitch("warranty")} className="flex items-center justify-between text-xs cursor-pointer">
                       <span>Warranty Care</span>
                       {workspace === "warranty" && <Check className="h-3.5 w-3.5" />}
                     </DropdownMenuItem>
                   )}
-                  {user.hasSalesAccess && (
+                  {user?.hasSalesAccess && (
                     <DropdownMenuItem onClick={() => handleWorkspaceSwitch("sales")} className="flex items-center justify-between text-xs cursor-pointer">
                       <span>Sales Hub</span>
                       {workspace === "sales" && <Check className="h-3.5 w-3.5" />}
@@ -335,8 +335,8 @@ export default function PortalLayout({
                   </div>
                   <Separator className="bg-white/10" />
 
-                  {/* Mobile Workspace Switcher */}
-                  {user && (user.hasWarrantyAccess || user.hasSalesAccess) && (
+                  {/* Mobile Workspace Switcher — hidden until multi-workspace is enabled; restore by replacing `false` with the real condition */}
+                  {false && user && (user?.hasWarrantyAccess || user?.hasSalesAccess) && (
                     <div className="px-3 py-2">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -353,13 +353,13 @@ export default function PortalLayout({
                         <DropdownMenuContent align="start" className="w-48">
                           <DropdownMenuLabel className="text-xs">Switch Workspace</DropdownMenuLabel>
                           <DropdownMenuSeparator />
-                          {user.hasWarrantyAccess && (
+                          {user?.hasWarrantyAccess && (
                             <DropdownMenuItem onClick={() => handleWorkspaceSwitch("warranty")} className="flex items-center justify-between text-xs cursor-pointer">
                               <span>Warranty Care</span>
                               {workspace === "warranty" && <Check className="h-3.5 w-3.5" />}
                             </DropdownMenuItem>
                           )}
-                          {user.hasSalesAccess && (
+                          {user?.hasSalesAccess && (
                             <DropdownMenuItem onClick={() => handleWorkspaceSwitch("sales")} className="flex items-center justify-between text-xs cursor-pointer">
                               <span>Sales Hub</span>
                               {workspace === "sales" && <Check className="h-3.5 w-3.5" />}
