@@ -199,7 +199,7 @@ export const updateTicket = async (req, res) => {
     } else if (action === "reject") {
       // Clear the draft from ticket
       updatedData.draftResponse = null;
-    } else if (draftResponse !== undefined) {
+    } else if (draftResponse !== undefined && draftResponse !== null) {
       // Standard draft update (e.g. auto-save or manual edit)
       updatedData.draftResponse = draftResponse;
     }

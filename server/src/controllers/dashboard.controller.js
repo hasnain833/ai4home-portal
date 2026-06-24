@@ -110,7 +110,7 @@ export const getDashboardStats = async (req, res) => {
       resolvedThisWeek,
       resolutionRate: totalTickets > 0 ? Math.round((resolvedTickets / totalTickets) * 100) : 0,
       avgResolutionTime: avgResolutionTimeStr,
-      tokenConsumption: totalTickets * 1250, // Simulated: avg 1250 tokens per ticket lifecycle
+      tokenConsumption: 0, // Not tracked in DB directly yet
       recentTickets: recentTickets.map(t => ({
         id: t.id,
         homeowner: { name: t.homeowner?.name || "Unknown", email: t.homeowner?.email || "" },
@@ -123,7 +123,7 @@ export const getDashboardStats = async (req, res) => {
         createdAt: t.createdAt
       })),
       systemHealth: {
-        agentStatus: kbDocsCount > 0 ? "Operational" : "Operational", // Keep Phase 1 title as requested but dynamically managed if needed
+        agentStatus: kbDocsCount > 0 ? "Operational" : "Inactive",
         erpSync: activeIntegration
           ? `Connected to ${activeIntegration.platform === "BUILTOPIA" ? "Builtopia" : activeIntegration.platform === "BUILDERTREND" ? "Buildertrend" : "Hyphen"}`
           : "Not Connected",

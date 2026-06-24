@@ -295,133 +295,69 @@ export default function DashboardPage() {
             animate="visible"
             className="space-y-6 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto"
           >
-            {/* Welcome banner */}
-            <motion.div
-              variants={fadeInUp}
-              className="relative overflow-hidden bg-linear-to-br from-[#0F3B3D] to-[#1d5b5e] text-white rounded-3xl p-6 md:p-8 shadow-xl"
-            >
-              <div className="absolute right-0 bottom-0 translate-x-12 translate-y-12 opacity-10 blur-sm pointer-events-none">
-                <Sparkles className="h-64 w-64 text-white" />
-              </div>
-              <div className="relative z-10 max-w-2xl">
-                <Badge className="bg-[#b48c3c] text-white mb-3 hover:bg-[#b48c3c]">Active Warranty Portal</Badge>
-                <h1 className="text-2xl md:text-4xl font-bold tracking-tight">Welcome home, {user?.name}!</h1>
-                <p className="text-white/80 mt-2 text-sm md:text-base leading-relaxed">
-                  Easily view your warranty properties, check outstanding service claims, or instantly chat with our AI Support Assistant for professional help.
-                </p>
-                <div className="mt-5 flex flex-wrap gap-3">
-                  <Link href="/warranty/chat">
-                    <Button className="bg-[#b48c3c] hover:bg-[#b48c3c]/90 text-white gap-2 font-semibold">
-                      <Bot className="h-4 w-4" /> Speak with AI
-                    </Button>
-                  </Link>
-                  <Link href="/warranty/tickets">
-                    <Button variant="outline" className="border-white/30 text-white hover:bg-white/10 gap-2">
-                      <Plus className="h-4 w-4" /> File a Claim
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            </motion.div>
+            {/* Header */}
+            <div className="pb-2">
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-[#0F3B3D] dark:text-slate-100">
+                Welcome, {user?.name}!
+              </h1>
+              <p className="text-muted-foreground mt-1 text-sm">
+                Manage your registered properties and track warranty claims.
+              </p>
+            </div>
 
-            {/* Quick Metrics */}
-            <motion.div variants={fadeInUp} className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+            {/* KPI Cards Grid */}
+            <motion.div variants={fadeInUp} className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
               <Card className="hover:shadow-md transition-all">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">My Properties</CardTitle>
+                  <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">Registered Properties</CardTitle>
                   <Building2 className="h-4 w-4 text-[#0F3B3D] dark:text-[#a0c5c7]" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">{homeownerStats.totalProperties}</div>
-                  <p className="text-xs text-muted-foreground mt-1">Properties registered to you</p>
+                  <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
+                    <CountUp end={homeownerStats.totalProperties} duration={1.5} />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Properties registered to your account</p>
                 </CardContent>
               </Card>
+
+              <Card className="hover:shadow-md transition-all">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">Total Claims</CardTitle>
+                  <TicketCheck className="h-4 w-4 text-blue-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
+                    <CountUp end={tickets.length} duration={1.5} />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Claims submitted to builders</p>
+                </CardContent>
+              </Card>
+
               <Card className="hover:shadow-md transition-all">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">Active Claims</CardTitle>
                   <AlertCircle className="h-4 w-4 text-yellow-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">{homeownerStats.activeClaims}</div>
+                  <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
+                    <CountUp end={homeownerStats.activeClaims} duration={1.5} />
+                  </div>
                   <p className="text-xs text-muted-foreground mt-1">Pending maintenance issues</p>
                 </CardContent>
               </Card>
+
               <Card className="hover:shadow-md transition-all">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">Resolved Claims</CardTitle>
                   <CheckCircle2 className="h-4 w-4 text-green-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">{homeownerStats.resolvedClaims}</div>
+                  <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
+                    <CountUp end={homeownerStats.resolvedClaims} duration={1.5} />
+                  </div>
                   <p className="text-xs text-muted-foreground mt-1">Fully resolved issues</p>
                 </CardContent>
               </Card>
-            </motion.div>
-
-            {/* Main Content Grid */}
-            <motion.div variants={fadeInUp} className="grid gap-6 grid-cols-1 lg:grid-cols-3">
-              {/* Properties Section (2/3 width) */}
-              <div className="lg:col-span-2 space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg font-bold text-[#0F3B3D] dark:text-slate-100">My Registered Properties</CardTitle>
-                    <CardDescription>Your registered properties under builder warranty coverage.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {user?.properties && user.properties.length > 0 ? (
-                      user.properties.map((prop) => {
-                        const year = getWarrantyYear(prop.coeDate);
-                        return (
-                          <div key={prop.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/40 hover:bg-gray-50 dark:hover:bg-slate-900/60 transition gap-4">
-                            <div className="flex items-start gap-3.5">
-                              <div className="bg-[#0F3B3D]/10 dark:bg-[#0f3b3d]/30 p-2.5 rounded-xl text-[#0F3B3D] dark:text-[#a0c5c7] mt-0.5">
-                                <Building2 className="h-5 w-5" />
-                              </div>
-                              <div>
-                                <p className="font-semibold text-gray-800 dark:text-slate-100">{prop.address}</p>
-                                <p className="text-sm text-gray-500 dark:text-slate-400">{prop.city || ""}, {prop.state || ""} {prop.zipCode || ""}</p>
-                                {prop.coeDate && (
-                                  <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
-                                    Closing Date: {new Date(prop.coeDate).toLocaleDateString()}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 self-start sm:self-center">
-                              <Badge className="bg-[#0F3B3D] dark:bg-[#b48c3c] text-white">Year {year} Coverage</Badge>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <Building2 className="h-12 w-12 mx-auto mb-2 opacity-30 text-[#0F3B3D] dark:text-[#a0c5c7]" />
-                        <p className="text-sm">No properties registered under your account yet.</p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Quick Actions (1/3 width) */}
-              <div className="space-y-6">
-                <Card className="bg-[#0F3B3D]/5 dark:bg-[#0F3B3D]/10 border-t-4 border-t-[#0F3B3D] dark:border-t-[#a0c5c7]">
-                  <CardHeader>
-                    <CardTitle className="text-md font-bold text-[#0F3B3D] dark:text-slate-100">Instant AI Handoff</CardTitle>
-                    <CardDescription>Get diagnostic self-fixes or escalate instantly to our builders.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="text-sm text-gray-600 dark:text-slate-300 bg-white dark:bg-slate-950 p-4 rounded-xl border border-gray-100 dark:border-slate-800/80 shadow-xs leading-relaxed">
-                      "I can help you troubleshoot plumbing, electrical, or structural issues. If an issue is covered, I will automatically file a ticket for you!"
-                    </div>
-                    <Link href="/warranty/chat" className="block w-full">
-                      <Button className="w-full bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 dark:bg-[#b48c3c] dark:hover:bg-[#b48c3c]/90 text-white font-semibold border-none cursor-pointer">
-                        Launch AI Assistant
-                      </Button>
-                    </Link>
-                  </CardContent>
-                </Card>
-              </div>
             </motion.div>
 
             {/* Recent Claims (Homeowner specific) */}
@@ -432,11 +368,6 @@ export default function DashboardPage() {
                     <CardTitle className="text-lg font-bold text-[#0F3B3D] dark:text-slate-100">My Recent Claims</CardTitle>
                     <p className="text-sm text-muted-foreground">Detailed status of your submitted warranty requests</p>
                   </div>
-                  <Link href="/warranty/tickets">
-                    <Button variant="ghost" size="sm" className="text-[#0F3B3D] dark:text-[#a0c5c7] hover:bg-[#0F3B3D]/10 dark:hover:bg-[#0F3B3D]/20">
-                      View All
-                    </Button>
-                  </Link>
                 </CardHeader>
                 <CardContent className="p-0 overflow-x-auto">
                   {loading ? (
@@ -445,23 +376,21 @@ export default function DashboardPage() {
                     <Table className="min-w-[600px] md:min-w-full">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Claim ID</TableHead>
+                          <TableHead className="pl-4">Property Address</TableHead>
                           <TableHead>Issue Type</TableHead>
-                          <TableHead>Property Address</TableHead>
                           <TableHead>Priority</TableHead>
                           <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
+                          <TableHead className="text-right pr-4">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {tickets.slice(0, 5).map((ticket) => (
                           <TableRow key={ticket.id}>
-                            <TableCell className="font-semibold text-xs text-gray-500 dark:text-slate-400">{ticket.id}</TableCell>
+                            <TableCell className="text-gray-500 dark:text-slate-400 pl-4">{ticket.property?.address}</TableCell>
                             <TableCell className="font-medium text-gray-700 dark:text-slate-200">{ticket.issueType}</TableCell>
-                            <TableCell className="text-gray-500 dark:text-slate-400">{ticket.property?.address}</TableCell>
                             <TableCell><Badge variant="outline" className="capitalize text-xs">{ticket.priority.toLowerCase()}</Badge></TableCell>
                             <TableCell><Badge className={statusColors[ticket.status]}>{ticket.status.replace("_", " ")}</Badge></TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right pr-4">
                               <Link href={`/warranty/tickets/${ticket.id}`}>
                                 <Button variant="ghost" size="sm" className="text-[#0F3B3D] dark:text-[#a0c5c7] hover:bg-[#0F3B3D]/10 dark:hover:bg-[#0F3B3D]/20">
                                   View
@@ -706,6 +635,6 @@ export default function DashboardPage() {
           </motion.div>
         )}
       </PortalLayout>
-    </ProtectedRoute>
+    </ProtectedRoute >
   );
 }

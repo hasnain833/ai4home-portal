@@ -33,20 +33,12 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
-  Loader2,
   CheckCircle2,
   AlertCircle,
   Plus,
-  MoreVertical,
   RotateCcw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
 // Types
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "ESCALATED";
@@ -150,12 +142,12 @@ export default function TicketsPage() {
   const router = useRouter();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
   const [priority, setPriority] = useState<string>("all");
   const [year, setYear] = useState<string>("all");
   const [dateRange, setDateRange] = useState<string>("all");
-  const [property, setProperty] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const itemsPerPage = 10;
@@ -163,8 +155,8 @@ export default function TicketsPage() {
   // Role-based filtering
   const isHomeowner = user?.role === "homeowner";
 
-  const fetchTickets = useCallback(async () => {
-    setLoading(true);
+  const fetchTickets = useCallback(async (isRefresh = false) => {
+    if (!isRefresh) setLoading(true);
     try {
       let url = "/api/tickets";
       if (isHomeowner && user?.id) {
@@ -190,17 +182,6 @@ export default function TicketsPage() {
     fetchTickets();
   }, [fetchTickets]);
 
-  // Extract unique properties for the filter dropdown
-  const uniqueProperties = useMemo(() => {
-    const props = new Set<string>();
-    tickets.forEach(t => {
-      if (t.property?.address) {
-        props.add(t.property.address);
-      }
-    });
-    return Array.from(props).sort();
-  }, [tickets]);
-
   // Filter tickets based on search and filters
   const filteredTickets = useMemo(() => {
     return tickets.filter((t) => {
@@ -212,11 +193,7 @@ export default function TicketsPage() {
         t.issueType.toLowerCase().includes(search.toLowerCase());
       const matchStatus = status === "all" || t.status === status;
       const matchPriority = priority === "all" || t.priority === priority;
-      const matchYear =
-        year === "all" ||
-        (year === "1" ? t.warrantyYear === 1 : t.warrantyYear >= 2);
-
-      const matchProperty = property === "all" || t.property?.address === property;
+      const matchYear = year === "all" || t.warrantyYear.toString() === year || (year === "2" && t.warrantyYear >= 2);
 
       let matchDate = true;
       if (dateRange !== "all") {
@@ -229,9 +206,9 @@ export default function TicketsPage() {
         else if (dateRange === "90d") matchDate = diffDays <= 90;
       }
 
-      return matchSearch && matchStatus && matchPriority && matchYear && matchProperty && matchDate;
+      return matchSearch && matchStatus && matchPriority && matchYear && matchDate;
     });
-  }, [tickets, search, status, priority, year, property, dateRange]);
+  }, [tickets, search, status, priority, year, dateRange]);
 
   const totalPages = Math.ceil(filteredTickets.length / itemsPerPage);
   const paginatedTickets = filteredTickets.slice(
@@ -242,7 +219,7 @@ export default function TicketsPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [search, status, priority, year, property, dateRange]);
+  }, [search, status, priority, year, dateRange]);
 
   const showToast = (type: "success" | "error", text: string) => {
     setToastMessage({ type, text });
@@ -255,41 +232,16 @@ export default function TicketsPage() {
     setPriority("all");
     setYear("all");
     setDateRange("all");
-    setProperty("all");
     showToast("success", "Filters reset");
   };
 
   const handleRefresh = async () => {
-    await fetchTickets();
+    setIsRefreshing(true);
+    await fetchTickets(true);
+    setIsRefreshing(false);
     showToast("success", "Tickets refreshed");
   };
 
-  const handleStatusChange = async (ticketId: string, newStatus: TicketStatus) => {
-    try {
-      const response = await fetch(`/api/tickets/${ticketId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: newStatus }),
-      });
-
-      if (response.ok) {
-        setTickets((prev) =>
-          prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus } : t))
-        );
-        showToast("success", `Ticket status successfully updated to ${newStatus.replace("_", " ")}`);
-      } else {
-        const errorData = await response.json();
-        showToast("error", errorData.message || "Failed to update status");
-      }
-    } catch (error) {
-      console.error("Error updating ticket status:", error);
-      showToast("error", "Failed to connect to the server");
-    }
-  };
-
-  // Helper for responsive: show card view on mobile
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -365,16 +317,8 @@ export default function TicketsPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              {isHomeowner && (
-                <Button asChild>
-                  <Link href="/warranty/tickets/new">
-                    <Plus className="mr-2 h-4 w-4" />
-                    New Ticket
-                  </Link>
-                </Button>
-              )}
-              <Button variant="outline" onClick={handleRefresh} className="gap-2">
-                <RefreshCw className="h-4 w-4" />
+              <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing} className="gap-2">
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
             </div>
@@ -384,8 +328,8 @@ export default function TicketsPage() {
           <motion.div variants={cardVariants}>
             <Card className="border border-border/80 bg-linear-to-b from-card/85 to-card/50 backdrop-blur-md shadow-xs">
               <CardContent className="p-5 md:p-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4 items-end">
-                  <div className="sm:col-span-2 md:col-span-3 lg:col-span-4 xl:col-span-1 xl:flex-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 items-end">
+                  <div className="sm:col-span-2 md:col-span-1 lg:col-span-1">
                     <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Search</Label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground/80" />
@@ -454,21 +398,8 @@ export default function TicketsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Property</Label>
-                    <Select value={property} onValueChange={setProperty}>
-                      <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
-                        <SelectValue placeholder="All Properties" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Properties</SelectItem>
-                        {uniqueProperties.map(p => (
-                          <SelectItem key={p} value={p}>{p}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
+
+                  <div className="sm:col-span-2 md:col-span-1 lg:col-span-1">
                     <Button
                       variant="outline"
                       onClick={handleResetFilters}
@@ -502,7 +433,7 @@ export default function TicketsPage() {
                     <AlertCircle className="h-10 w-10 mx-auto mb-3 text-muted-foreground/60" />
                     <h3 className="font-semibold text-foreground text-sm">No tickets found</h3>
                     <p className="text-xs mt-1 text-muted-foreground/80 max-w-xs mx-auto">Try adjusting your search keywords or clearing the active filters.</p>
-                    {(search || status !== "all" || priority !== "all" || year !== "all" || property !== "all" || dateRange !== "all") && (
+                    {(search || status !== "all" || priority !== "all" || year !== "all" || dateRange !== "all") && (
                       <Button variant="outline" size="sm" onClick={handleResetFilters} className="mt-4 text-xs h-8 border-border/80">
                         Clear All Filters
                       </Button>

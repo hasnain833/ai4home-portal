@@ -203,16 +203,18 @@ export const importLeads = async (req, res) => {
         continue;
       }
 
-      // Check duplicates
+      // Check duplicates safely by trimming and guarding against empty OR lists
       let duplicateLead = null;
-      if (email || phone) {
+      const orConditions = [
+        email && email.trim() ? { email: email.trim() } : null,
+        phone && phone.trim() ? { phone: phone.trim() } : null,
+      ].filter(Boolean);
+
+      if (orConditions.length > 0) {
         duplicateLead = await prisma.lead.findFirst({
           where: {
             companyId: req.user.companyId,
-            OR: [
-              email ? { email } : undefined,
-              phone ? { phone } : undefined,
-            ].filter(Boolean),
+            OR: orConditions,
           },
         });
       }
@@ -339,6 +341,144 @@ export const deleteLead = async (req, res) => {
     return res.json({ message: "Lead deleted successfully." });
   } catch (error) {
     console.error("Delete lead error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const updateLead = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.user || !req.user.companyId) {
+      return res
+        .status(403)
+        .json({ message: "User is not associated with a company." });
+    }
+
+    const lead = await prisma.lead.findUnique({
+      where: { id },
+    });
+
+    if (!lead || lead.companyId !== req.user.companyId) {
+      return res.status(404).json({ message: "Lead not found." });
+    }
+
+    if (
+      req.user.role.toUpperCase() === "HOMEOWNER" &&
+      lead.ownerId !== req.user.id
+    ) {
+      return res
+        .status(403)
+        .json({ message: "You do not have permission to update this lead." });
+    }
+
+    const {
+      firstName,
+      lastName,
+      email,
+      phone,
+      street,
+      city,
+      state,
+      zipCode,
+      status,
+      tags,
+      emailOptIn,
+      smsOptIn,
+      consentSource,
+      customFields,
+    } = req.body;
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (email && !emailRegex.test(email)) {
+      return res.status(400).json({ message: "Invalid email format." });
+    }
+
+    const updateData = {};
+    if (firstName !== undefined) updateData.firstName = firstName;
+    if (lastName !== undefined) updateData.lastName = lastName;
+    if (email !== undefined) updateData.email = email || null;
+    if (phone !== undefined) updateData.phone = phone || null;
+    if (street !== undefined) updateData.street = street || null;
+    if (city !== undefined) updateData.city = city || null;
+    if (state !== undefined) updateData.state = state || null;
+    if (zipCode !== undefined) updateData.zipCode = zipCode || null;
+    if (status !== undefined) updateData.status = status;
+    if (tags !== undefined) updateData.tags = tags;
+    if (emailOptIn !== undefined) updateData.emailOptIn = !!emailOptIn;
+    if (smsOptIn !== undefined) updateData.smsOptIn = !!smsOptIn;
+    if (consentSource !== undefined) updateData.consentSource = consentSource;
+    if (customFields !== undefined) updateData.customFields = customFields;
+
+    if (
+      (emailOptIn !== undefined && !!emailOptIn !== lead.emailOptIn) ||
+      (smsOptIn !== undefined && !!smsOptIn !== lead.smsOptIn)
+    ) {
+      updateData.consentTimestamp = new Date();
+      if (!updateData.consentSource && !lead.consentSource) {
+        updateData.consentSource = "Manual Update";
+      }
+    }
+
+    updateData.timeline = {
+      create: {
+        type: "SYNC_UPDATE",
+        description: `Lead updated by ${req.user.name || req.user.email}`,
+      },
+    };
+
+    const updatedLead = await prisma.lead.update({
+      where: { id },
+      data: updateData,
+      include: {
+        owner: {
+          select: { name: true, email: true },
+        },
+      },
+    });
+
+    return res.json(updatedLead);
+  } catch (error) {
+    console.error("Update lead error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getLeadTimeline = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.user || !req.user.companyId) {
+      return res
+        .status(403)
+        .json({ message: "User is not associated with a company." });
+    }
+
+    const lead = await prisma.lead.findUnique({
+      where: { id },
+    });
+
+    if (!lead || lead.companyId !== req.user.companyId) {
+      return res.status(404).json({ message: "Lead not found." });
+    }
+
+    if (
+      req.user.role.toUpperCase() === "HOMEOWNER" &&
+      lead.ownerId !== req.user.id
+    ) {
+      return res
+        .status(403)
+        .json({ message: "You do not have permission to view this lead's timeline." });
+    }
+
+    const timeline = await prisma.leadTimeline.findMany({
+      where: { leadId: id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return res.json(timeline);
+  } catch (error) {
+    console.error("Get lead timeline error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

@@ -236,6 +236,12 @@ export const enrollCampaign = async (req, res) => {
       return res.status(404).json({ message: "Campaign not found" });
     }
 
+    // Fetch the first campaign step to inspect if it starts with a DELAY
+    const firstStep = await prisma.campaignStep.findFirst({
+      where: { campaignId: id },
+      orderBy: { position: "asc" },
+    });
+
     let enrolledCount = 0;
 
     for (const leadId of leadIds) {
@@ -247,7 +253,23 @@ export const enrollCampaign = async (req, res) => {
 
         if (!lead) continue;
 
-        // Upsert enrollment to start at step 0 immediately
+        let initialStepPosition = 0;
+        let nextRunAt = new Date();
+
+        if (firstStep && firstStep.type === "DELAY") {
+          initialStepPosition = 1;
+          const value = firstStep.delayValue || 0;
+          const unit = (firstStep.delayUnit || "DAYS").toUpperCase();
+          if (unit === "MINUTES" || unit === "MINUTE") {
+            nextRunAt.setMinutes(nextRunAt.getMinutes() + value);
+          } else if (unit === "HOURS" || unit === "HOUR") {
+            nextRunAt.setHours(nextRunAt.getHours() + value);
+          } else {
+            nextRunAt.setDate(nextRunAt.getDate() + value);
+          }
+        }
+
+        // Upsert enrollment to start at step 0 immediately (or step 1 if delayed)
         await prisma.campaignEnrollment.upsert({
           where: {
             leadId_campaignId: {
@@ -259,13 +281,13 @@ export const enrollCampaign = async (req, res) => {
             leadId,
             campaignId: id,
             status: "ACTIVE",
-            currentStepPosition: 0,
-            nextRunAt: new Date(), // run first step immediately
+            currentStepPosition: initialStepPosition,
+            nextRunAt,
           },
           update: {
             status: "ACTIVE",
-            currentStepPosition: 0,
-            nextRunAt: new Date(),
+            currentStepPosition: initialStepPosition,
+            nextRunAt,
             exitedReason: null,
           },
         });

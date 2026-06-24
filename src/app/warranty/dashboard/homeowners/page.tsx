@@ -34,6 +34,7 @@ import {
   Copy,
   CheckCircle,
   Home,
+  Lock,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -63,6 +64,7 @@ export default function HomeownersManagementPage() {
   const [newHomeowner, setNewHomeowner] = useState({
     name: "",
     email: "",
+    password: "",
   });
 
   // Redirect if not admin or staff
@@ -101,6 +103,11 @@ export default function HomeownersManagementPage() {
       return;
     }
 
+    if (!newHomeowner.password || newHomeowner.password.length < 8) {
+      setFormError("Password must be at least 8 characters");
+      return;
+    }
+
     try {
       const res = await fetch("/api/homeowners", {
         method: "POST",
@@ -110,11 +117,11 @@ export default function HomeownersManagementPage() {
       const data = await res.json();
       if (!res.ok) { setFormError(data.message || "Failed to create homeowner"); return; }
 
-      setSuccess(`Homeowner ${newHomeowner.name} added successfully!`);
-      setNewHomeowner({ name: "", email: "" });
+      setSuccess(`Homeowner ${newHomeowner.name} added successfully! They can now log in with their credentials.`);
+      setNewHomeowner({ name: "", email: "", password: "" });
       setIsDialogOpen(false);
       fetchHomeowners();
-      setTimeout(() => setSuccess(""), 4000);
+      setTimeout(() => setSuccess(""), 5000);
     } catch {
       setFormError("An unexpected error occurred.");
     }
@@ -177,7 +184,7 @@ export default function HomeownersManagementPage() {
               <DialogHeader>
                 <DialogTitle>Add Homeowner</DialogTitle>
                 <DialogDescription>
-                  Register a homeowner name and email address for Botpress verification.
+                  Create a login account for the homeowner. They can log in immediately with these credentials and reset their password at any time.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleCreateHomeowner} className="space-y-4 mt-2">
@@ -212,6 +219,21 @@ export default function HomeownersManagementPage() {
                       onChange={(e) => setNewHomeowner({ ...newHomeowner, email: e.target.value })}
                     />
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="Min. 8 characters"
+                      className="pl-9"
+                      value={newHomeowner.password}
+                      onChange={(e) => setNewHomeowner({ ...newHomeowner, password: e.target.value })}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">The homeowner can reset this via "Forgot Password" at any time.</p>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>

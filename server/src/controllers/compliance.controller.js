@@ -267,3 +267,228 @@ export const processInbound = async (req, res) => {
       .json({ message: error.message || "Internal server error" });
   }
 };
+
+export const unsubscribeWebhook = async (req, res) => {
+  try {
+    const { email, phone, companyId } = req.body;
+
+    if (!companyId) {
+      return res.status(400).json({ message: "companyId is required." });
+    }
+
+    if (!email && !phone) {
+      return res.status(400).json({ message: "Either email or phone must be provided." });
+    }
+
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+    });
+
+    if (!company) {
+      return res.status(404).json({ message: "Company not found." });
+    }
+
+    const isEmail = !!email;
+    const normalizedValue = isEmail
+      ? email.trim().toLowerCase()
+      : phone.replace(/\D/g, "");
+
+    if (!normalizedValue) {
+      return res.status(400).json({ message: "Normalized value is empty." });
+    }
+
+    // 1. Add to suppression list
+    const suppressionItem = await prisma.suppressionList.upsert({
+      where: {
+        companyId_value: {
+          companyId,
+          value: normalizedValue,
+        },
+      },
+      create: {
+        companyId,
+        value: normalizedValue,
+        reason: "UNSUBSCRIBE",
+      },
+      update: {
+        reason: "UNSUBSCRIBE",
+      },
+    });
+
+    // 2. Find matching leads and update opt-in flags + timeline
+    let leadsToUpdate = [];
+    if (isEmail) {
+      leadsToUpdate = await prisma.lead.findMany({
+        where: {
+          companyId,
+          email: normalizedValue,
+        },
+      });
+
+      if (leadsToUpdate.length > 0) {
+        await prisma.lead.updateMany({
+          where: {
+            companyId,
+            email: normalizedValue,
+          },
+          data: {
+            emailOptIn: false,
+            consentSource: "Unsubscribe Webhook",
+            consentTimestamp: new Date(),
+          },
+        });
+      }
+    } else {
+      leadsToUpdate = await prisma.lead.findMany({
+        where: {
+          companyId,
+          phone: { contains: normalizedValue.slice(-10) },
+        },
+      });
+
+      if (leadsToUpdate.length > 0) {
+        await prisma.lead.updateMany({
+          where: {
+            companyId,
+            phone: { contains: normalizedValue.slice(-10) },
+          },
+          data: {
+            smsOptIn: false,
+            consentSource: "Unsubscribe Webhook",
+            consentTimestamp: new Date(),
+          },
+        });
+      }
+    }
+
+    // Create timeline events for matching leads
+    for (const lead of leadsToUpdate) {
+      await prisma.leadTimeline.create({
+        data: {
+          leadId: lead.id,
+          type: "SYNC_UPDATE",
+          description: `Lead opted out of ${isEmail ? "Email" : "SMS"} via unsubscribe webhook`,
+          metadata: { email, phone, companyId },
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Successfully processed unsubscribe webhook for ${isEmail ? "email" : "phone"}.`,
+      leadsUpdated: leadsToUpdate.length,
+      suppressedItem: suppressionItem,
+    });
+  } catch (error) {
+    console.error("[Unsubscribe Webhook] Error:", error);
+    return res.status(500).json({ message: error.message || "Internal server error" });
+  }
+};
+
+export const processBrevoInboundEmail = async (req, res) => {
+  try {
+    const companyId = req.query.companyId || req.body.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({ message: "companyId is required." });
+    }
+
+    const { items } = req.body;
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ message: "Invalid payload format. Expected 'items' array." });
+    }
+
+    let processedCount = 0;
+
+    for (const item of items) {
+      const fromEmail = item.From?.Address;
+      const subject = item.Subject || "";
+      const textBody = item.TextBody || "";
+      const htmlBody = item.HtmlBody || "";
+
+      if (!fromEmail) {
+        console.warn("[Brevo Webhook] Item is missing From.Address, skipping.");
+        continue;
+      }
+
+      const normalizedEmail = fromEmail.trim().toLowerCase();
+
+      // Find matching leads
+      const leads = await prisma.lead.findMany({
+        where: {
+          companyId,
+          email: normalizedEmail,
+        },
+      });
+
+      for (const lead of leads) {
+        // Create timeline event REPLY_RECEIVED
+        const replyContent = textBody || htmlBody || "No body content";
+        await prisma.leadTimeline.create({
+          data: {
+            leadId: lead.id,
+            type: "REPLY_RECEIVED",
+            description: `Received inbound email reply: "${subject}"`,
+            metadata: {
+              subject,
+              body: replyContent.slice(0, 1000),
+            },
+          },
+        });
+
+        // Find active campaign enrollments to exit
+        const activeEnrollments = await prisma.campaignEnrollment.findMany({
+          where: {
+            leadId: lead.id,
+            status: "ACTIVE",
+          },
+        });
+
+        if (activeEnrollments.length > 0) {
+          await prisma.campaignEnrollment.updateMany({
+            where: {
+              leadId: lead.id,
+              status: "ACTIVE",
+            },
+            data: {
+              status: "EXITED",
+              exitedReason: "REPLY",
+            },
+          });
+
+          // Check campaign completion for each campaign
+          for (const enrollment of activeEnrollments) {
+            try {
+              const activeCount = await prisma.campaignEnrollment.count({
+                where: {
+                  campaignId: enrollment.campaignId,
+                  status: { in: ["ACTIVE", "PAUSED"] }
+                }
+              });
+
+              if (activeCount === 0) {
+                await prisma.campaign.update({
+                  where: { id: enrollment.campaignId },
+                  data: { status: "Ready" }
+                });
+                console.log(`[Brevo Webhook] Campaign ${enrollment.campaignId} marked as Ready because all enrollments are finished.`);
+              }
+            } catch (completionErr) {
+              console.error(`[Brevo Webhook] Error checking completion for campaign ${enrollment.campaignId}:`, completionErr);
+            }
+          }
+        }
+      }
+
+      processedCount++;
+    }
+
+    return res.json({
+      success: true,
+      processedItems: processedCount,
+    });
+  } catch (error) {
+    console.error("[Brevo Webhook] Error processing inbound email:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};

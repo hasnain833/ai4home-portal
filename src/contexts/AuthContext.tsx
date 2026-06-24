@@ -142,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateProfile = async (data: Partial<User>) => {
     if (user) {
+      const originalUser = user;
       const updated = { ...user, ...data };
       setUser(updated);
 
@@ -153,14 +154,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         if (!response.ok) {
-          throw new Error("Failed to update profile on server");
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.message || "Failed to update profile on server");
         }
 
         const serverData = await response.json();
         const finalUser = { ...updated, ...serverData };
         setUser(finalUser);
+
+        if (data.email) {
+          await supabaseRef.current.auth.refreshSession();
+        }
       } catch (err) {
         console.error("Profile update API failed", err);
+        setUser(originalUser);
+        throw err;
       }
     }
   };

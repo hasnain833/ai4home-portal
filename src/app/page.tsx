@@ -11,41 +11,34 @@ export default function Home() {
   useEffect(() => {
     if (!isLoading) {
       if (user) {
-        // ── TEMPORARY: Always redirect to warranty workspace (hub & sales hidden) ──
-        if (user.hasWarrantyAccess) {
-          router.push("/warranty/dashboard");
-        } else {
-          logoutAndRedirect();
-        }
-
         // ── ORIGINAL multi-workspace routing — re-enable when hub & sales are ready ──
-        // const storedLastWorkspace = localStorage.getItem("last-workspace");
-        // const getCookie = (name: string) => {
-        //   const value = `; ${document.cookie}`;
-        //   const parts = value.split(`; ${name}=`);
-        //   if (parts.length === 2) return parts.pop()?.split(";").shift();
-        //   return null;
-        // };
-        // const cookieLastWorkspace = getCookie("last-workspace");
-        // const lastWorkspace = storedLastWorkspace || cookieLastWorkspace;
-        //
-        // if (lastWorkspace === "warranty" && user.hasWarrantyAccess) {
-        //   router.push("/warranty/dashboard");
-        // } else if (lastWorkspace === "sales" && user.hasSalesAccess) {
-        //   router.push("/sales/dashboard");
-        // } else {
-        //   const hasWarranty = user.hasWarrantyAccess;
-        //   const hasSales = user.hasSalesAccess;
-        //   if (hasWarranty && hasSales) {
-        //     router.push("/hub");
-        //   } else if (hasWarranty) {
-        //     router.push("/warranty/dashboard");
-        //   } else if (hasSales) {
-        //     router.push("/sales/dashboard");
-        //   } else {
-        //     logoutAndRedirect();
-        //   }
-        // }
+        const storedLastWorkspace = localStorage.getItem("last-workspace");
+        const getCookie = (name: string) => {
+          const value = `; ${document.cookie}`;
+          const parts = value.split(`; ${name}=`);
+          if (parts.length === 2) return parts.pop()?.split(";").shift();
+          return null;
+        };
+        const cookieLastWorkspace = getCookie("last-workspace");
+        const lastWorkspace = storedLastWorkspace || cookieLastWorkspace;
+
+        if (lastWorkspace === "warranty" && user.hasWarrantyAccess) {
+          router.push("/warranty/dashboard");
+        } else if (lastWorkspace === "sales" && user.hasSalesAccess) {
+          router.push("/sales/dashboard");
+        } else {
+          const hasWarranty = user.hasWarrantyAccess;
+          const hasSales = user.hasSalesAccess;
+          if (hasWarranty && hasSales) {
+            router.push("/hub");
+          } else if (hasWarranty) {
+            router.push("/warranty/dashboard");
+          } else if (hasSales) {
+            router.push("/sales/dashboard");
+          } else {
+            logoutAndRedirect();
+          }
+        }
       } else {
         router.push("/login");
       }

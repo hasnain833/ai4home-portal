@@ -3,6 +3,16 @@ import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
 import prisma from "../lib/prisma.js";
 
+// Initialize Supabase Admin client
+const getSupabaseAdmin = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error("Missing Supabase credentials");
+  }
+  return createClient(supabaseUrl, supabaseServiceKey);
+};
+
 export const getMe = async (req, res) => {
   try {
     if (!req.user) {
@@ -11,7 +21,7 @@ export const getMe = async (req, res) => {
 
     const dbUser = await prisma.user.findUnique({
       where: { email: req.user.email },
-      include: { company: true },
+      include: { company: true, properties: true },
     });
 
     if (!dbUser) {
@@ -52,11 +62,52 @@ export const updateProfile = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { name, avatar } = req.body;
+    const { name, avatar, email } = req.body;
 
     const updateData = {};
     if (name) updateData.name = name;
     if (avatar !== undefined) updateData.avatar = avatar;
+
+    if (email && email.toLowerCase() !== req.user.email.toLowerCase()) {
+      const emailLower = email.toLowerCase();
+      // 1. Verify email is not already taken in DB
+      const existingUser = await prisma.user.findUnique({ where: { email: emailLower } });
+      if (existingUser) {
+        return res.status(400).json({ message: "An account with this email already exists" });
+      }
+
+      // 2. Find corresponding Supabase Auth user
+      const supabaseAdmin = getSupabaseAdmin();
+      const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+      if (listError) {
+        console.error("Supabase user list error:", listError);
+        return res.status(500).json({ message: "Failed to verify authentication account" });
+      }
+
+      const supabaseUser = usersData.users.find(
+        (u) => u.email.toLowerCase() === req.user.email.toLowerCase()
+      );
+
+      if (!supabaseUser) {
+        return res.status(404).json({ message: "Supabase user not found for current email" });
+      }
+
+      // 3. Update Supabase Auth user email and automatically confirm it
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+        supabaseUser.id,
+        {
+          email: emailLower,
+          email_confirm: true,
+        }
+      );
+
+      if (authError) {
+        console.error("Supabase auth email update error:", authError);
+        return res.status(400).json({ message: authError.message || "Failed to update authentication account" });
+      }
+
+      updateData.email = emailLower;
+    }
 
     if (Object.keys(updateData).length === 0) {
       return res.status(200).json({ message: "No db fields updated" });
@@ -71,6 +122,7 @@ export const updateProfile = async (req, res) => {
         email: true,
         role: true,
         companyId: true,
+        avatar: true,
       },
     });
 

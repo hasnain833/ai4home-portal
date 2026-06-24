@@ -52,17 +52,76 @@ export class NurtureRunner {
       try {
         const { lead, campaign } = enrollment;
 
-        // 1. Check Exit Conditions / Compliance
+        // 1. Fetch the next step in the campaign
+        const nextPosition = enrollment.currentStepPosition + 1;
+        const currentStep = campaign.steps.find((s) => s.position === nextPosition);
+
+        if (!currentStep) {
+          // No more steps, complete the campaign
+          await prisma.campaignEnrollment.update({
+            where: { id: enrollment.id },
+            data: {
+              status: "COMPLETED",
+            },
+          });
+
+          await this.checkCampaignCompletion(campaign.id);
+
+          await prisma.leadTimeline.create({
+            data: {
+              leadId: lead.id,
+              type: "SYNC_UPDATE",
+              description: `Completed nurture campaign: "${campaign.name}"`,
+            },
+          });
+
+          console.log(`[Nurture Runner] Lead ${lead.firstName} ${lead.lastName} finished campaign "${campaign.name}"`);
+          continue;
+        }
+
+        // 2. Check Exit Conditions / Compliance
         let shouldExit = false;
         let exitReason = "";
 
-        // Condition A: Lead opted out or suppression
-        if (lead.emailOptIn === false || lead.smsOptIn === false) {
+        // Condition A: Lead opted out
+        if (currentStep.type === "EMAIL" && lead.emailOptIn === false) {
+          shouldExit = true;
+          exitReason = "UNSUBSCRIBE";
+        } else if (currentStep.type === "SMS" && lead.smsOptIn === false) {
           shouldExit = true;
           exitReason = "UNSUBSCRIBE";
         }
 
-        // Condition B: Reply received since enrollment started
+        // Condition B: Suppression List Check
+        if (!shouldExit) {
+          if (currentStep.type === "EMAIL" && lead.email) {
+            const normalizedEmail = lead.email.trim().toLowerCase();
+            const suppressed = await prisma.suppressionList.findFirst({
+              where: {
+                companyId: lead.companyId,
+                value: normalizedEmail,
+              },
+            });
+            if (suppressed) {
+              shouldExit = true;
+              exitReason = "SUPPRESSED";
+            }
+          } else if (currentStep.type === "SMS" && lead.phone) {
+            const normalizedPhone = lead.phone.replace(/\D/g, "");
+            const suppressed = await prisma.suppressionList.findFirst({
+              where: {
+                companyId: lead.companyId,
+                value: normalizedPhone,
+              },
+            });
+            if (suppressed) {
+              shouldExit = true;
+              exitReason = "SUPPRESSED";
+            }
+          }
+        }
+
+        // Condition C: Reply received since enrollment started
         if (!shouldExit) {
           const reply = await prisma.leadTimeline.findFirst({
             where: {
@@ -79,7 +138,7 @@ export class NurtureRunner {
           }
         }
 
-        // Condition C: Appointment booked since enrollment started
+        // Condition D: Appointment booked since enrollment started
         if (!shouldExit) {
           const appointment = await prisma.salesAppointment.findFirst({
             where: {
@@ -115,33 +174,6 @@ export class NurtureRunner {
           });
 
           console.log(`[Nurture Runner] Lead ${lead.firstName} ${lead.lastName} exited campaign "${campaign.name}" due to ${exitReason}`);
-          continue;
-        }
-
-        // 2. Fetch the next step in the campaign
-        const nextPosition = enrollment.currentStepPosition + 1;
-        const currentStep = campaign.steps.find((s) => s.position === nextPosition);
-
-        if (!currentStep) {
-          // No more steps, complete the campaign
-          await prisma.campaignEnrollment.update({
-            where: { id: enrollment.id },
-            data: {
-              status: "COMPLETED",
-            },
-          });
-
-          await this.checkCampaignCompletion(campaign.id);
-
-          await prisma.leadTimeline.create({
-            data: {
-              leadId: lead.id,
-              type: "SYNC_UPDATE",
-              description: `Completed nurture campaign: "${campaign.name}"`,
-            },
-          });
-
-          console.log(`[Nurture Runner] Lead ${lead.firstName} ${lead.lastName} finished campaign "${campaign.name}"`);
           continue;
         }
 

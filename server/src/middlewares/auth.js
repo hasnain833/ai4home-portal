@@ -109,6 +109,8 @@ export async function requireAuth(req, res, next) {
       name: dbUser.name,
       role: dbUser.role,
       companyId: dbUser.companyId,
+      hasWarrantyAccess: dbUser.hasWarrantyAccess,
+      hasSalesAccess: dbUser.hasSalesAccess,
     };
 
     next();
