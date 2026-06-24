@@ -125,6 +125,41 @@ export async function GET() {
       '  border: none;' +
       '  background: #ffffff;' +
       '}' +
+      '#warranty-widget-iframe.loaded {' +
+      '  opacity: 1;' +
+      '}' +
+      '#warranty-widget-skeleton {' +
+      '  position: absolute;' +
+      '  top: 0; left: 0; right: 0; bottom: 0;' +
+      '  display: flex;' +
+      '  flex-direction: column;' +
+      '  align-items: center;' +
+      '  justify-content: center;' +
+      '  gap: 16px;' +
+      '  background: #ffffff;' +
+      '  z-index: 2;' +
+      '  transition: opacity 0.3s ease;' +
+      '}' +
+      '#warranty-widget-skeleton.hidden {' +
+      '  opacity: 0;' +
+      '  pointer-events: none;' +
+      '}' +
+      '#warranty-widget-skeleton .spinner {' +
+      '  width: 36px;' +
+      '  height: 36px;' +
+      '  border: 3px solid #e5e7eb;' +
+      '  border-top-color: ' + botColor + ';' +
+      '  border-radius: 50%;' +
+      '  animation: ww-spin 0.7s linear infinite;' +
+      '}' +
+      '#warranty-widget-skeleton .label {' +
+      '  font-size: 13px;' +
+      '  color: #6b7280;' +
+      '  font-weight: 500;' +
+      '}' +
+      '@keyframes ww-spin {' +
+      '  to { transform: rotate(360deg); }' +
+      '}' +
       '@media (max-width: 480px) {' +
       '  #warranty-widget-container {' +
       '    bottom: 15px;' +
@@ -165,12 +200,32 @@ export async function GET() {
     var panel = document.createElement('div');
     panel.id = 'warranty-widget-panel';
 
-    // Iframe inside the panel
+    // Skeleton loading UI shown while iframe loads
+    var skeleton = document.createElement('div');
+    skeleton.id = 'warranty-widget-skeleton';
+    skeleton.innerHTML = '<div class="spinner"></div><div class="label">Loading assistant...</div>';
+
+    // Iframe inside the panel — pass branding as query params to eliminate inner API call
     var iframe = document.createElement('iframe');
     iframe.id = 'warranty-widget-iframe';
-    var iframeSrc = portalUrl + '/widget/' + companyId;
+    var iframeSrc = portalUrl + '/widget/' + companyId +
+      '?botColor=' + encodeURIComponent(botColor) +
+      '&botName=' + encodeURIComponent(botName) +
+      '&botLogo=' + encodeURIComponent(logo);
     iframe.title = botName + ' Chat Widget';
 
+    // Preload iframe immediately (don't wait for first click)
+    iframe.src = iframeSrc;
+
+    // Hide skeleton once iframe content is ready
+    iframe.addEventListener('load', function() {
+      setTimeout(function() {
+        skeleton.classList.add('hidden');
+        iframe.classList.add('loaded');
+      }, 500);
+    });
+
+    panel.appendChild(skeleton);
     panel.appendChild(iframe);
     container.appendChild(panel);
     container.appendChild(bubble);
@@ -178,7 +233,6 @@ export async function GET() {
 
     // 5. Setup interaction handlers
     var isOpen = false;
-    var iframeLoaded = false;
 
     function toggleWidget() {
       isOpen = !isOpen;
@@ -187,12 +241,6 @@ export async function GET() {
       var closeSvg = document.getElementById('warranty-icon-close');
 
       if (isOpen) {
-        // Lazy load iframe on first click
-        if (!iframeLoaded) {
-          iframe.src = iframeSrc;
-          iframeLoaded = true;
-        }
-
         panel.style.display = 'flex';
         // Force browser layout update
         panel.offsetHeight;
@@ -245,6 +293,7 @@ export async function GET() {
     headers: {
       "Content-Type": "application/javascript",
       "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
     },
   });
 }

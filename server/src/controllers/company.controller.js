@@ -73,6 +73,8 @@ export const getCompanyBranding = async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    // Cache branding for 5 minutes, serve stale for 10 minutes while revalidating
+    res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=600");
     
     return res.json(company);
   } catch (error) {

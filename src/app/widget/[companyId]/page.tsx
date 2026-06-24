@@ -1,21 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 
 const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v3.6/inject.js";
 const CONFIG_URL = process.env.NEXT_PUBLIC_BOTPRESS_CONFIG_URL || "https://files.bpcontent.cloud/2026/02/10/12/20260210121824-S8YDKPLR.js";
 
 export default function WidgetPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const companyId = (params?.companyId as string) || "demo-company";
 
-  const [themeColor, setThemeColor] = useState("#0F3B3D");
-  const [botName, setBotName] = useState("AI Assistant");
-  const [botLogoUrl, setBotLogoUrl] = useState("");
-  const [loading, setLoading] = useState(true);
+  // Read branding from query params first (passed by widget.js), fallback to API
+  const qColor = searchParams.get("botColor");
+  const qName = searchParams.get("botName");
+  const qLogo = searchParams.get("botLogo");
 
+  const hasBrandingParams = !!(qColor || qName || qLogo);
+
+  const [themeColor, setThemeColor] = useState(qColor || "#0F3B3D");
+  const [botName, setBotName] = useState(qName || "AI Assistant");
+  const [botLogoUrl, setBotLogoUrl] = useState(qLogo || "");
+  const [loading, setLoading] = useState(!hasBrandingParams); // Skip loading if params already present
+
+  // Only fetch branding from API if no query params were provided (direct iframe access)
   useEffect(() => {
+    if (hasBrandingParams) return; // Already have branding from query params
+
     const fetchBranding = async () => {
       try {
         const response = await fetch(`/api/company/branding?id=${companyId}`);
@@ -35,7 +46,27 @@ export default function WidgetPage() {
     };
 
     fetchBranding();
-  }, [companyId]);
+  }, [companyId, hasBrandingParams]);
+
+  // Preload Botpress CDN scripts as soon as component mounts
+  useEffect(() => {
+    const preloadInject = document.createElement("link");
+    preloadInject.rel = "preload";
+    preloadInject.href = INJECT_URL;
+    preloadInject.as = "script";
+    document.head.appendChild(preloadInject);
+
+    const preloadConfig = document.createElement("link");
+    preloadConfig.rel = "preload";
+    preloadConfig.href = CONFIG_URL;
+    preloadConfig.as = "script";
+    document.head.appendChild(preloadConfig);
+
+    return () => {
+      if (document.head.contains(preloadInject)) document.head.removeChild(preloadInject);
+      if (document.head.contains(preloadConfig)) document.head.removeChild(preloadConfig);
+    };
+  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -129,7 +160,7 @@ export default function WidgetPage() {
           }
         });
       }
-    }, 300);
+    }, 200); // Reduced from 300ms to 200ms for faster detection
 
     return () => {
       clearInterval(checkBotpress);
