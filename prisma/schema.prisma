@@ -311,6 +311,9 @@ model CampaignStep {
   position        Int                  // 1-indexed order of the step
   delayValue      Int?                 // e.g. 2
   delayUnit       String?              // "MINUTES" | "HOURS" | "DAYS"
+  sendWindowDays  String?              // Comma-separated, e.g., "Mon,Tue,Wed,Thu,Fri"
+  sendWindowStart String?              // HH:mm format, e.g., "09:00"
+  sendWindowEnd   String?              // HH:mm format, e.g., "18:00"
   subject         String?              // For email
   body            String?              // For email or SMS
   templateId      String?              // Reference to EmailTemplate

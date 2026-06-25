@@ -7,12 +7,14 @@ import {
   updateCampaign,
   updateCampaignSteps,
   enrollCampaign,
-  deleteCampaign
+  deleteCampaign,
+  generateCampaignCopy
 } from "../controllers/campaigns.controller.js";
 
 const router = Router();
 
 router.get("/", requireAuth, getCampaigns);
+router.post("/generate-copy", requireAuth, generateCampaignCopy);
 router.get("/:id", requireAuth, getCampaignDetail);
 router.post("/", requireAuth, createCampaign);
 router.put("/:id", requireAuth, updateCampaign);

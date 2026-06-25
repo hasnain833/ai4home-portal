@@ -124,13 +124,13 @@
   - Create lead timeline event (`REPLY_RECEIVED`)
   - Files: `server/src/controllers/compliance.controller.js`, `server/src/routes/compliance.js`
 
-- [ ] **5.2 — Twilio Inbound SMS Webhook Endpoint**
-  - Add `POST /api/sales/compliance/inbound/sms` public endpoint
-  - Parse Twilio `application/x-www-form-urlencoded` payload (`From`, `Body`)
-  - Normalize sender phone (match trailing 10 digits) to locate lead under company
-  - Match and handle compliance keywords (STOP/HELP/START) via `ComplianceService.handleInboundKeyword`
-  - If not keyword compliance action: exit lead from active campaigns with reason `REPLY`, add timeline event (`REPLY_RECEIVED`)
-  - Files: `server/src/controllers/compliance.controller.js`, `server/src/routes/compliance.js`
+- [x] **5.2 — Twilio Inbound SMS Webhook Endpoint**
+  - [x] Add `POST /api/sales/compliance/inbound/sms` public endpoint
+  - [x] Parse Twilio `application/x-www-form-urlencoded` payload (`From`, `Body`)
+  - [x] Normalize sender phone (match trailing 10 digits) to locate lead under company
+  - [x] Match and handle compliance keywords (STOP/HELP/START) via `ComplianceService.handleInboundKeyword`
+  - [x] If not keyword compliance action: exit lead from active campaigns with reason `REPLY`, add timeline event (`REPLY_RECEIVED`)
+  - [x] Files: `server/src/controllers/compliance.controller.js`, `server/src/routes/compliance.js`
 
 - [ ] **5.3 — Simple Appointment Automation Trigger**
   - Extract/detect reply event inside webhook processing
@@ -150,15 +150,15 @@ The Sales workspace is powered by **9 specialized AI agents**. All agents use Cl
 ### 1. 🌱 Nurture Agent *(SW-NUR) — In Progress*
 > Manages drip email/SMS sequences — each lead follows an ordered set of steps with configurable delays between them.
 
-- [ ] **Sequence execution engine**: Send ordered steps (email or SMS) with timing defined per step (e.g. "wait 3 days", with optional send window such as weekdays 9am–6pm lead-local time)
+- [x] **Sequence execution engine**: Send ordered steps (email or SMS) with timing defined per step (e.g. "wait 3 days", with optional send window such as weekdays 9am–6pm lead-local time)
 - [ ] **Durable step sleep via Inngest** (`step.sleep`): Multi-day waits that survive server restarts and deploys; support 1–50 steps per sequence
-- [ ] **Enrollment logic (SW-NUR-002)**: Enroll leads manually (single or bulk), by segment, or via automation trigger; prevent duplicate enrollment in same sequence; warn on concurrent enrollment in multiple sequences
-- [ ] **Exit condition handling (SW-NUR-003)**: Auto-exit sequence when lead replies, books appointment, unsubscribes, changes to a configured status, or is manually removed; stop all further steps immediately
-- [ ] **Reply ingestion (SW-NUR-004)**: Receive inbound email/SMS webhooks from ESP/SMS provider; attach reply to lead timeline; trigger exit condition and appointment flow where configured
-- [ ] **Compliance gate (SW-NUR-006)**: Before every send, enforce: consent check per channel, suppression list check, SMS quiet hours (8am–9pm lead-local time per TCPA), mandatory unsubscribe footer (email) / STOP instruction (SMS)
-- [ ] **STOP/HELP keyword processing**: Auto-process STOP/HELP replies; update lead consent flags immediately; never send another SMS to an opted-out number
-- [ ] **AI content assist (SW-NUR-005)**: In the sequence editor, generate AI draft copy per step based on sequence goal, audience description, and brand voice; require explicit human approval before any AI draft is activated for sending
-- [ ] **Sequence versioning (SW-NUR-007)**: Editing an active sequence creates a new version; existing enrolled leads continue on old version or migrate at next step, per tenant policy choice
+- [x] **Enrollment logic (SW-NUR-002)**: Enroll leads manually (single or bulk), by segment, or via automation trigger; prevent duplicate enrollment in same sequence; warn on concurrent enrollment in multiple sequences
+- [x] **Exit condition handling (SW-NUR-003)**: Auto-exit sequence when lead replies, books appointment, unsubscribes, changes to a configured status, or is manually removed; stop all further steps immediately
+- [x] **Reply ingestion (SW-NUR-004)**: Receive inbound email/SMS webhooks from ESP/SMS provider; attach reply to lead timeline; trigger exit condition and appointment flow where configured
+- [x] **Compliance gate (SW-NUR-006)**: Before every send, enforce: consent check per channel, suppression list check, SMS quiet hours (8am–9pm lead-local time per TCPA), mandatory unsubscribe footer (email) / STOP instruction (SMS)
+- [x] **STOP/HELP keyword processing**: Auto-process STOP/HELP replies; update lead consent flags immediately; never send another SMS to an opted-out number
+- [x] **AI content assist (SW-NUR-005)**: In the sequence editor, generate AI draft copy per step based on sequence goal, audience description, and brand voice; require explicit human approval before any AI draft is activated for sending
+- [x] **Sequence versioning (SW-NUR-007)**: Editing an active sequence creates a new version; existing enrolled leads continue on old version or migrate at next step, per tenant policy choice
 - [ ] **Per-sequence analytics (SW-NUR-008)**: Track and display per-sequence and per-step: enrolled, active, completed, exited (by reason), sent, delivered, opened, clicked, replied, unsubscribed, bounced
 
 ---

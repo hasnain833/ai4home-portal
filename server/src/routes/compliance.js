@@ -6,7 +6,8 @@ import {
   deleteSuppression,
   processInbound,
   unsubscribeWebhook,
-  processBrevoInboundEmail
+  processBrevoInboundEmail,
+  processTwilioInboundSms
 } from "../controllers/compliance.controller.js";
 
 const router = Router();
@@ -18,5 +19,6 @@ router.delete("/suppression", requireAuth, requireRoles(["ADMIN", "STAFF"]), del
 router.post("/inbound", processInbound);
 router.post("/unsubscribe", unsubscribeWebhook);
 router.post("/inbound/email", processBrevoInboundEmail);
+router.post("/inbound/sms", processTwilioInboundSms);
 
 export default router;

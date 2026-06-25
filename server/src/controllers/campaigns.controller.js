@@ -182,7 +182,46 @@ export const updateCampaignSteps = async (req, res) => {
       ? (steps.length > 0 ? "Ready" : "Draft") 
       : campaign.status;
 
-    // Delete existing steps and insert new steps in transaction
+    let targetCampaignId = id;
+
+    // SW-NUR-007: Sequence Versioning
+    // Editing an active sequence creates a new version; existing enrolled leads continue on old version.
+    if (campaign.status === "Active") {
+      const newVersion = await prisma.campaign.create({
+        data: {
+          companyId: req.user.companyId,
+          name: `${campaign.name} (v2)`,
+          description: campaign.description,
+          channel: campaign.channel,
+          status: "Draft", // Create as draft, user can activate it
+        }
+      });
+      targetCampaignId = newVersion.id;
+
+      await prisma.campaignStep.createMany({
+        data: steps.map((step, idx) => ({
+          campaignId: targetCampaignId,
+          type: step.type,
+          position: idx + 1,
+          delayValue: step.delayValue !== undefined ? parseInt(step.delayValue, 10) : null,
+          delayUnit: step.delayUnit || null,
+          sendWindowDays: step.sendWindowDays || null,
+          sendWindowStart: step.sendWindowStart || null,
+          sendWindowEnd: step.sendWindowEnd || null,
+          subject: step.subject || null,
+          body: step.body || null,
+          templateId: step.templateId || null,
+        })),
+      });
+
+      const updatedCampaign = await prisma.campaign.findUnique({
+        where: { id: targetCampaignId },
+        include: { steps: { orderBy: { position: "asc" } } },
+      });
+      return res.json({ newVersion: true, campaign: updatedCampaign });
+    }
+
+    // Delete existing steps and insert new steps in transaction for non-active campaigns
     await prisma.$transaction([
       prisma.campaign.update({
         where: { id },
@@ -196,6 +235,9 @@ export const updateCampaignSteps = async (req, res) => {
           position: idx + 1,
           delayValue: step.delayValue !== undefined ? parseInt(step.delayValue, 10) : null,
           delayUnit: step.delayUnit || null, // "MINUTES", "HOURS", "DAYS"
+          sendWindowDays: step.sendWindowDays || null,
+          sendWindowStart: step.sendWindowStart || null,
+          sendWindowEnd: step.sendWindowEnd || null,
           subject: step.subject || null,
           body: step.body || null,
           templateId: step.templateId || null,
@@ -243,6 +285,8 @@ export const enrollCampaign = async (req, res) => {
     });
 
     let enrolledCount = 0;
+    const skippedDuplicates = [];
+    const concurrentWarnings = [];
 
     for (const leadId of leadIds) {
       try {
@@ -252,6 +296,28 @@ export const enrollCampaign = async (req, res) => {
         });
 
         if (!lead) continue;
+
+        // SW-NUR-002: Prevent duplicate enrollment in the same sequence
+        const existingEnrollment = await prisma.campaignEnrollment.findUnique({
+          where: { leadId_campaignId: { leadId, campaignId: id } }
+        });
+
+        if (existingEnrollment && (existingEnrollment.status === "ACTIVE" || existingEnrollment.status === "PAUSED")) {
+          skippedDuplicates.push(leadId);
+          continue; // skip duplicate enrollment
+        }
+
+        // SW-NUR-002: Warn on concurrent enrollment in multiple sequences
+        const concurrentEnrollments = await prisma.campaignEnrollment.findFirst({
+          where: { 
+            leadId, 
+            status: { in: ["ACTIVE", "PAUSED"] },
+            campaignId: { not: id }
+          }
+        });
+        if (concurrentEnrollments) {
+          concurrentWarnings.push(leadId);
+        }
 
         let initialStepPosition = 0;
         let nextRunAt = new Date();
@@ -307,7 +373,14 @@ export const enrollCampaign = async (req, res) => {
       }
     }
 
-    return res.json({ success: true, enrolledCount });
+    return res.json({ 
+      success: true, 
+      enrolledCount, 
+      skippedDuplicatesCount: skippedDuplicates.length,
+      concurrentWarningsCount: concurrentWarnings.length,
+      skippedDuplicates,
+      concurrentWarnings 
+    });
   } catch (error) {
     console.error("[Campaign Enroll] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -335,6 +408,68 @@ export const deleteCampaign = async (req, res) => {
     return res.json({ success: true, message: "Campaign deleted successfully" });
   } catch (error) {
     console.error("[Campaign Delete] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const generateCampaignCopy = async (req, res) => {
+  try {
+    if (!req.user || !req.user.companyId) {
+      return res.status(403).json({ message: "No company associated" });
+    }
+
+    const { goal, audience, brandVoice, stepType, contextInfo } = req.body;
+
+    if (!goal || !stepType) {
+      return res.status(400).json({ message: "Goal and stepType are required" });
+    }
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(500).json({ message: "Anthropic API key is not configured" });
+    }
+
+    const systemPrompt = `You are an expert sales copywriter specializing in home builder and warranty care lead nurturing. 
+Your task is to write a single ${stepType === 'SMS' ? 'text message' : 'email'} draft.
+Keep the tone: ${brandVoice || 'Professional, warm, and helpful'}.
+Audience: ${audience || 'Homebuyers or existing homeowners'}.
+Goal of this message: ${goal}.
+
+Additional Context: ${contextInfo || 'None'}
+
+Rules:
+${stepType === 'SMS' ? '- Keep it under 160 characters if possible.\n- Do NOT include placeholders like [Name]. Use generic but warm greetings.' : '- Provide a concise Subject Line.\n- Provide the Email Body.\n- Do NOT use placeholders like [Lead Name], instead write it so it works universally or use standard greetings.'}
+Output your draft clearly.`;
+
+    // Direct fetch to Anthropic API
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "claude-3-5-sonnet-20241022",
+        max_tokens: 500,
+        system: systemPrompt,
+        messages: [
+          { role: "user", content: "Please generate the draft copy based on the provided parameters." }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[Anthropic API Error]:", errorText);
+      return res.status(500).json({ message: "Failed to generate copy from AI provider" });
+    }
+
+    const data = await response.json();
+    const content = data.content[0].text;
+
+    return res.json({ success: true, draft: content });
+  } catch (error) {
+    console.error("[Generate Copy] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

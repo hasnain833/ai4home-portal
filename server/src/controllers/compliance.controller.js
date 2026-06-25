@@ -268,6 +268,114 @@ export const processInbound = async (req, res) => {
   }
 };
 
+export const processTwilioInboundSms = async (req, res) => {
+  try {
+    const { From, Body } = req.body;
+    // companyId might be passed via query param (e.g. ?companyId=123) by the Twilio webhook URL
+    const companyId = req.query.companyId;
+
+    if (!From || !Body || !companyId) {
+      console.warn("[Twilio Webhook] Missing From, Body, or companyId");
+      return res.status(400).send("Missing required parameters");
+    }
+
+    const sender = From;
+    const body = Body;
+    const channel = "SMS";
+
+    const normalizedContact = sender.replace(/\D/g, "");
+
+    // Find the lead to ensure it exists
+    const leads = await prisma.lead.findMany({
+      where: {
+        companyId,
+        phone: { contains: normalizedContact.slice(-10) },
+      },
+    });
+
+    // Handle Compliance Keywords
+    const result = await ComplianceService.handleInboundKeyword(
+      companyId,
+      sender,
+      body,
+      channel
+    );
+
+    // If it's a compliance action, Twilio expects TwiML response to send back the reply
+    if (result.isComplianceAction) {
+      const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${result.replyText}</Message></Response>`;
+      res.set("Content-Type", "text/xml");
+      return res.send(twiml);
+    }
+
+    // It's a normal reply
+    if (leads.length > 0) {
+      for (const lead of leads) {
+        // Log timeline event
+        await prisma.leadTimeline.create({
+          data: {
+            leadId: lead.id,
+            type: "REPLY_RECEIVED",
+            description: `Received inbound SMS reply: "${body.slice(0, 150)}${body.length > 150 ? "..." : ""}"`,
+            metadata: { body, channel, sender },
+          },
+        });
+
+        // Exit active campaigns with reason REPLY
+        const activeEnrollments = await prisma.campaignEnrollment.findMany({
+          where: {
+            leadId: lead.id,
+            status: "ACTIVE",
+          },
+        });
+
+        if (activeEnrollments.length > 0) {
+          await prisma.campaignEnrollment.updateMany({
+            where: {
+              leadId: lead.id,
+              status: "ACTIVE",
+            },
+            data: {
+              status: "EXITED",
+              exitedReason: "REPLY",
+            },
+          });
+
+          // Check if any campaigns should be marked Ready because they have no active enrollments left
+          for (const enrollment of activeEnrollments) {
+            try {
+              const activeCount = await prisma.campaignEnrollment.count({
+                where: {
+                  campaignId: enrollment.campaignId,
+                  status: { in: ["ACTIVE", "PAUSED"] }
+                }
+              });
+
+              if (activeCount === 0) {
+                await prisma.campaign.update({
+                  where: { id: enrollment.campaignId },
+                  data: { status: "Ready" }
+                });
+              }
+            } catch (completionErr) {
+              console.error(`[Twilio Webhook] Error checking completion for campaign ${enrollment.campaignId}:`, completionErr);
+            }
+          }
+        }
+      }
+    }
+
+    // Always return empty TwiML if no automatic reply is needed
+    res.set("Content-Type", "text/xml");
+    return res.send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+  } catch (error) {
+    console.error("[Twilio Webhook] Error:", error);
+    // Return empty TwiML on error to avoid Twilio failing aggressively
+    res.set("Content-Type", "text/xml");
+    return res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+  }
+};
+
 export const unsubscribeWebhook = async (req, res) => {
   try {
     const { email, phone, companyId } = req.body;

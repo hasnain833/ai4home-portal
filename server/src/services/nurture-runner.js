@@ -1,6 +1,8 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "./mail-service.js";
 import { sendSms } from "./sms.service.js";
+import { getLeadTimezone, getNextValidSendWindow } from "../lib/timezone.js";
+import { ComplianceService } from "./compliance-service.js";
 
 export class NurtureRunner {
   static IS_RUNNING = false;
@@ -82,43 +84,30 @@ export class NurtureRunner {
         // 2. Check Exit Conditions / Compliance
         let shouldExit = false;
         let exitReason = "";
-
-        // Condition A: Lead opted out
-        if (currentStep.type === "EMAIL" && lead.emailOptIn === false) {
-          shouldExit = true;
-          exitReason = "UNSUBSCRIBE";
-        } else if (currentStep.type === "SMS" && lead.smsOptIn === false) {
-          shouldExit = true;
-          exitReason = "UNSUBSCRIBE";
-        }
-
-        // Condition B: Suppression List Check
-        if (!shouldExit) {
-          if (currentStep.type === "EMAIL" && lead.email) {
-            const normalizedEmail = lead.email.trim().toLowerCase();
-            const suppressed = await prisma.suppressionList.findFirst({
-              where: {
-                companyId: lead.companyId,
-                value: normalizedEmail,
-              },
-            });
-            if (suppressed) {
-              shouldExit = true;
-              exitReason = "SUPPRESSED";
+        // --- Auto-Exit Checks ---
+        // Exited checks are handled below and within validateOutboundMessage.
+        // We removed the redundant opt-in check because ComplianceService handles it.
+        // If they book an appointment during the campaign, exit them.
+        if (lead.appointmentDate) {
+          await prisma.campaignEnrollment.update({
+            where: { id: enrollment.id },
+            data: {
+              status: "EXITED",
+              exitedReason: "APPOINTMENT",
+            },
+          });
+          console.log(
+            `[Nurture Runner] Exited campaign ${campaign.id} for lead ${lead.id} due to Appointment booked.`
+          );
+          
+          await prisma.leadTimeline.create({
+            data: {
+              leadId: lead.id,
+              type: "SYNC_UPDATE",
+              description: `Campaign auto-exited because lead booked an appointment on ${lead.appointmentDate.toLocaleDateString()}`
             }
-          } else if (currentStep.type === "SMS" && lead.phone) {
-            const normalizedPhone = lead.phone.replace(/\D/g, "");
-            const suppressed = await prisma.suppressionList.findFirst({
-              where: {
-                companyId: lead.companyId,
-                value: normalizedPhone,
-              },
-            });
-            if (suppressed) {
-              shouldExit = true;
-              exitReason = "SUPPRESSED";
-            }
-          }
+          });
+          continue;
         }
 
         // Condition C: Reply received since enrollment started
@@ -199,10 +188,15 @@ export class NurtureRunner {
 
         if (currentStep.type === "DELAY") {
           // If delay, calculate next execution time
-          const nextTime = this.calculateDelayTime(
+          let nextTime = this.calculateDelayTime(
             currentStep.delayValue || 0,
             currentStep.delayUnit || "DAYS"
           );
+
+          if (currentStep.sendWindowDays && currentStep.sendWindowStart && currentStep.sendWindowEnd) {
+            const tz = getLeadTimezone(lead.state);
+            nextTime = getNextValidSendWindow(nextTime, tz, currentStep.sendWindowDays, currentStep.sendWindowStart, currentStep.sendWindowEnd);
+          }
 
           await prisma.campaignEnrollment.update({
             where: { id: enrollment.id },
@@ -215,7 +209,66 @@ export class NurtureRunner {
           console.log(
             `[Nurture Runner] Delay step processed. Lead scheduled for next run at: ${nextTime.toLocaleString()}`
           );
-        } else if (currentStep.type === "EMAIL") {
+          continue;
+        }
+
+        // Before sending EMAIL or SMS, check if we are within the send window right now
+        if (currentStep.sendWindowDays && currentStep.sendWindowStart && currentStep.sendWindowEnd) {
+          const tz = getLeadTimezone(lead.state);
+          const nextValidTime = getNextValidSendWindow(new Date(), tz, currentStep.sendWindowDays, currentStep.sendWindowStart, currentStep.sendWindowEnd);
+          
+          // If nextValidTime is strictly in the future (more than a minute away), it means we are outside the window
+          if (nextValidTime.getTime() > new Date().getTime() + 60000) {
+            await prisma.campaignEnrollment.update({
+              where: { id: enrollment.id },
+              data: {
+                nextRunAt: nextValidTime,
+              },
+            });
+            console.log(`[Nurture Runner] Outside send window for step ${nextPosition}. Rescheduled to ${nextValidTime.toLocaleString()}`);
+            continue; // Skip execution until the window opens
+          }
+        }
+
+        // Compliance Gate: Enforce consent, suppression, and quiet hours
+        const complianceCheck = await ComplianceService.validateOutboundMessage(lead.id, currentStep.type);
+        if (!complianceCheck.allowed) {
+          if (complianceCheck.reason.includes("Quiet Hours")) {
+            // It's SMS quiet hours. We must not exit the sequence, but reschedule.
+            // Push execution forward to the next hour.
+            const nextHour = new Date();
+            nextHour.setHours(nextHour.getHours() + 1);
+            nextHour.setMinutes(0, 0, 0);
+
+            await prisma.campaignEnrollment.update({
+              where: { id: enrollment.id },
+              data: { nextRunAt: nextHour }
+            });
+            console.log(`[Nurture Runner] Compliance Gate: SMS Quiet hours active. Rescheduled step ${nextPosition} to ${nextHour.toLocaleString()}`);
+            continue;
+          } else {
+            // Consent revoked or suppressed - exit sequence permanently
+            await prisma.campaignEnrollment.update({
+              where: { id: enrollment.id },
+              data: {
+                status: "EXITED",
+                exitedReason: "SUPPRESSED"
+              }
+            });
+            console.log(`[Nurture Runner] Compliance Gate Failed: ${complianceCheck.reason}. Exited campaign ${campaign.id} for lead ${lead.id}`);
+            
+            await prisma.leadTimeline.create({
+              data: {
+                leadId: lead.id,
+                type: "SYNC_UPDATE",
+                description: `Campaign auto-exited. Reason: ${complianceCheck.reason}`
+              }
+            });
+            continue;
+          }
+        }
+
+        if (currentStep.type === "EMAIL") {
           // Send Nurture Email
           if (lead.email) {
             const subject = renderText(currentStep.subject || "Outreach Update");
@@ -235,17 +288,6 @@ export class NurtureRunner {
                 <div style="padding: 40px; color: #334155; line-height: 1.8; font-size: 16px;">
                   ${body.replace(/\n/g, "<br />")}
                 </div>
-
-                <!-- Footer -->
-                <div style="background-color: #f8fafc; padding: 30px 40px; text-align: center; border-top: 1px solid #e2e8f0;">
-                  <p style="margin: 0 0 10px 0; font-size: 13px; color: #64748b; line-height: 1.5;">
-                    This email was sent to <strong>${lead.email}</strong>.<br />
-                    If you wish to update your communication preferences, you can securely opt out below.
-                  </p>
-                  <a href="${bookingLink}&unsubscribe=true" style="display: inline-block; margin-top: 10px; color: #b48c3c; font-size: 13px; font-weight: bold; text-decoration: none;">
-                    Unsubscribe from notifications
-                  </a>
-                </div>
               </div>
               <div style="text-align: center; margin-top: 20px;">
                 <span style="font-family: sans-serif; font-size: 11px; color: #94a3b8;">
@@ -254,10 +296,16 @@ export class NurtureRunner {
               </div>
             `;
 
+            const finalHtml = ComplianceService.addEmailUnsubscribeFooter(
+              formattedHtml,
+              `${bookingLink}&unsubscribe=true`,
+              lead.company?.name || "Warranty Care Portal"
+            );
+
             await MailService.sendEmail({
               to: lead.email,
               subject,
-              html: formattedHtml,
+              html: finalHtml,
               fromName: lead.company?.name || undefined,
               fromEmail: lead.company?.email || undefined,
             });
@@ -275,14 +323,15 @@ export class NurtureRunner {
           // Advance position and schedule next step
           await this.advanceAndScheduleNextStep(enrollment.id, nextPosition, campaign.steps);
         } else if (currentStep.type === "SMS") {
-          // Send Nurture SMS via Twilio
+          // Send Nurture SMS
           if (lead.phone) {
-            const body = renderText(currentStep.body || "") + " Reply STOP to opt out.";
+            const rawBody = renderText(currentStep.body || "");
+            const finalBody = ComplianceService.addSmsOptOutSuffix(rawBody);
             
             let smsSuccess = false;
             let errorMessage = "";
             try {
-              await sendSms({ to: lead.phone, body });
+              await sendSms({ to: lead.phone, body: finalBody });
               smsSuccess = true;
             } catch (smsError) {
               errorMessage = smsError.message;
@@ -290,13 +339,13 @@ export class NurtureRunner {
             }
 
             if (smsSuccess) {
-              console.log(`[Nurture Runner] SMS sent to ${lead.phone}: "${body}"`);
+              console.log(`[Nurture Runner] SMS sent to ${lead.phone}: "${finalBody}"`);
               await prisma.leadTimeline.create({
                 data: {
                   leadId: lead.id,
                   type: "SMS_SENT",
-                  description: `Sent campaign SMS: "${body.slice(0, 50)}${body.length > 50 ? "..." : ""}"`,
-                  metadata: { body },
+                  description: `Sent campaign SMS: "${finalBody.slice(0, 50)}${finalBody.length > 50 ? "..." : ""}"`,
+                  metadata: { body: finalBody },
                 },
               });
             } else {
@@ -325,14 +374,6 @@ export class NurtureRunner {
     const nextStep = steps.find((s) => s.position === nextPosition);
 
     let nextRunAt = new Date(); // default: run immediately next minute
-
-    if (nextStep && nextStep.type === "DELAY") {
-      // If the subsequent step is a delay, apply it right now
-      nextRunAt = this.calculateDelayTime(
-        nextStep.delayValue || 0,
-        nextStep.delayUnit || "DAYS"
-      );
-    }
 
     await prisma.campaignEnrollment.update({
       where: { id: enrollmentId },
