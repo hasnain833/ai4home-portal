@@ -45,8 +45,6 @@
   - [x] **CSV export for all reporting views** (SW-DSH-002)
   - [x] **Real-time batch progress**: Surface announcement and import progress via polling or websocket
 
----
-
 ### 📅 Phase 4: Integrations & Campaigns *(UI Built — Functionality Pending)*
 - [x] **Salesforce Connection** *(UI done)*:
   - [ ] **OAuth 2.0 flow (SW-CRM-002)**: Implement authorization code flow; store access/refresh tokens in secrets vault (never in `.env` or logs)
