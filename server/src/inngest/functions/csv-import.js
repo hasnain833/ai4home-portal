@@ -2,8 +2,7 @@ import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 
 export const handleCsvImport = inngest.createFunction(
-  { id: "handle-csv-import" },
-  { event: "csv/import.started" },
+  { id: "handle-csv-import", event: "csv/import.started" },
   async ({ event, step }) => {
     const { rows, mergeStrategy, companyId, userId, userRole, userName } = event.data;
     
