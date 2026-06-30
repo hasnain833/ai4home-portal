@@ -27,139 +27,143 @@ enum TicketPriority {
 }
 
 model User {
-  id                String             @id @default(cuid())
-  email             String             @unique
-  password          String
-  name              String?
-  avatar            String?            // Personal avatar for staff members
-  role              Role               @default(HOMEOWNER)
-  companyId         String?
-  company           Company?           @relation(fields: [companyId], references: [id])
-  properties        Property[]
-  tickets           Ticket[]           @relation("HomeownerTickets")
-  knowledgeBaseId   String?
-  hasWarrantyAccess Boolean            @default(true)
-  hasSalesAccess    Boolean            @default(false)
-  lastActiveWorkspace String?          @default("warranty")
-  ownedLeads        Lead[]             @relation("LeadOwner")
-  agentAppointments SalesAppointment[] @relation("AgentAppointments")
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id                  String             @id @default(cuid())
+  email               String             @unique
+  password            String
+  name                String?
+  avatar              String? // Personal avatar for staff members
+  role                Role               @default(HOMEOWNER)
+  companyId           String?
+  company             Company?           @relation(fields: [companyId], references: [id])
+  properties          Property[]
+  tickets             Ticket[]           @relation("HomeownerTickets")
+  knowledgeBaseId     String?
+  hasWarrantyAccess   Boolean            @default(true)
+  hasSalesAccess      Boolean            @default(false)
+  lastActiveWorkspace String?            @default("warranty")
+  ownedLeads          Lead[]             @relation("LeadOwner")
+  agentAppointments   SalesAppointment[] @relation("AgentAppointments")
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 }
 
 model Company {
-  id                    String                  @id @default(cuid())
-  name                  String
-  logo                  String?
-  email                 String?
-  phone                 String?
-  address               String?
-  warrantyPolicy        String?                 @db.Text
-  botColor              String?                 @default("#0F3B3D")
-  users                 User[]
-  knowledgeBase         KnowledgeBaseDocument[]
-  integrations          Integration[]
-  communities           Community[]
-  leads                 Lead[]
-  segments              LeadSegment[]
-  salesforceConnection  SalesforceConnection?
-  knowledgeBaseId       String?
-  defaultLeadOwner      String?
-  voiceProfile          String?                 @default("professional")
-  maxSmsPerHour         Int                     @default(60)
-  complianceOptInRequired Boolean               @default(true)
-  salesEnabled          Boolean                 @default(true)
-  suppressionList       SuppressionList[]
-  campaigns             Campaign[]
-  emailTemplates        EmailTemplate[]
-  calendarEvents        ContentCalendar[]
-  salesKB               SalesKB[]
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime             @updatedAt
+  id                      String                  @id @default(cuid())
+  name                    String
+  logo                    String?
+  email                   String?
+  phone                   String?
+  address                 String?
+  warrantyPolicy          String?                 @db.Text
+  botColor                String?                 @default("#0F3B3D")
+  users                   User[]
+  knowledgeBase           KnowledgeBaseDocument[]
+  integrations            Integration[]
+  communities             Community[]
+  leads                   Lead[]
+  segments                LeadSegment[]
+  salesforceConnection    SalesforceConnection?
+  knowledgeBaseId         String?
+  defaultLeadOwner        String?
+  voiceProfile            String?                 @default("professional")
+  maxSmsPerHour           Int                     @default(60)
+  complianceOptInRequired Boolean                 @default(true)
+  salesEnabled            Boolean                 @default(true)
+  suppressionList         SuppressionList[]
+  campaigns               Campaign[]
+  emailTemplates          EmailTemplate[]
+  calendarEvents          ContentCalendar[]
+  salesKB                 SalesKB[]
+  availabilitySetting     AvailabilitySetting?
+  calendarConnections     CalendarConnection[]
+  // Default appointment-agent behaviour for replies not tied to a campaign that sets its own mode.
+  // OFF | SIMPLE | AI
+  appointmentMode         String                  @default("AI")
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
 }
 
 model Integration {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  platform    String   // "BUILTOPIA", "BUILDERTREND", "BREVO_EMAIL", "BREVO_SMS", "TWILIO"
+  company     Company @relation(fields: [companyId], references: [id])
+  platform    String // "BUILTOPIA", "BUILDERTREND", "BREVO_EMAIL", "BREVO_SMS", "TWILIO"
   apiKey      String?
   secretKey   String?
-  environment String   @default("production")
-  isActive    Boolean  @default(true)
-  
+  environment String  @default("production")
+  isActive    Boolean @default(true)
+
   // Messaging specific fields
   smtpHost    String?
   smtpPort    Int?
   senderEmail String?
   senderName  String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Property {
-  id            String    @id @default(cuid())
-  address       String
-  city          String?
-  state         String?
-  zipCode       String?
-  areaOfHome    String?
-  coeDate       DateTime?
-  coverageTerm  DateTime?
-  homeownerId   String
-  homeowner     User      @relation(fields: [homeownerId], references: [id])
-  tickets       Ticket[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  address      String
+  city         String?
+  state        String?
+  zipCode      String?
+  areaOfHome   String?
+  coeDate      DateTime?
+  coverageTerm DateTime?
+  homeownerId  String
+  homeowner    User      @relation(fields: [homeownerId], references: [id])
+  tickets      Ticket[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Ticket {
-  id            String         @id @default(cuid())
-  issueType     String
-  ticketType    String?
-  description   String?        @db.Text
-  status        TicketStatus   @default(OPEN)
-  priority      TicketPriority @default(MEDIUM)
-  isEmergency   Boolean        @default(false)
-  warrantyYear  Int            @default(1)
-  erpSyncStatus String?        @default("PENDING")
+  id             String         @id @default(cuid())
+  issueType      String
+  ticketType     String?
+  description    String?        @db.Text
+  status         TicketStatus   @default(OPEN)
+  priority       TicketPriority @default(MEDIUM)
+  isEmergency    Boolean        @default(false)
+  warrantyYear   Int            @default(1)
+  erpSyncStatus  String?        @default("PENDING")
   erpReferenceId String?
-  draftResponse String?        @db.Text
-  chatSummary   String?        @db.Text
-  extractedInfo String?        @db.Text
-  kbReferences  String?        @db.Text
-  homeownerId   String
-  homeowner     User           @relation("HomeownerTickets", fields: [homeownerId], references: [id])
-  propertyId    String?
-  property      Property?      @relation(fields: [propertyId], references: [id])
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  draftResponse  String?        @db.Text
+  chatSummary    String?        @db.Text
+  extractedInfo  String?        @db.Text
+  kbReferences   String?        @db.Text
+  homeownerId    String
+  homeowner      User           @relation("HomeownerTickets", fields: [homeownerId], references: [id])
+  propertyId     String?
+  property       Property?      @relation(fields: [propertyId], references: [id])
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 }
 
-
 model Community {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  name        String
-  color       String   @default("#0F3B3D")
-  documents   KnowledgeBaseDocument[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String                  @id @default(cuid())
+  companyId String
+  company   Company                 @relation(fields: [companyId], references: [id])
+  name      String
+  color     String                  @default("#0F3B3D")
+  documents KnowledgeBaseDocument[]
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
 }
 
 model KnowledgeBaseDocument {
-  id            String         @id @default(cuid())
-  companyId     String
-  company       Company        @relation(fields: [companyId], references: [id])
-  communityId   String?
-  community     Community?     @relation(fields: [communityId], references: [id], onDelete: SetNull)
-  name          String
-  size          String
-  url           String
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id          String     @id @default(cuid())
+  companyId   String
+  company     Company    @relation(fields: [companyId], references: [id])
+  communityId String?
+  community   Community? @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  name        String
+  size        String
+  url         String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 }
 
 enum LeadSource {
@@ -169,40 +173,41 @@ enum LeadSource {
 }
 
 model Lead {
-  id                String             @id @default(cuid())
-  companyId         String
-  company           Company            @relation(fields: [companyId], references: [id])
-  source            LeadSource         @default(MANUAL)
-  externalId        String?            // CRM Record ID
-  firstName         String
-  lastName          String
-  email             String?
-  phone             String?
-  street            String?
-  city              String?
-  state             String?
-  zipCode           String?
-  status            String             @default("New")
-  ownerId           String?
-  owner             User?              @relation("LeadOwner", fields: [ownerId], references: [id])
-  tags              String[]           @default([])
-  emailOptIn        Boolean            @default(false)
-  smsOptIn          Boolean            @default(false)
-  consentSource     String?
-  consentTimestamp  DateTime?
-  customFields      Json?              // Custom metadata (key-value)
-  timeline          LeadTimeline[]
-  appointments      SalesAppointment[]
-  campaignEnrollments CampaignEnrollment[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id                      String                   @id @default(cuid())
+  companyId               String
+  company                 Company                  @relation(fields: [companyId], references: [id])
+  source                  LeadSource               @default(MANUAL)
+  externalId              String? // CRM Record ID
+  firstName               String
+  lastName                String
+  email                   String?
+  phone                   String?
+  street                  String?
+  city                    String?
+  state                   String?
+  zipCode                 String?
+  status                  String                   @default("New")
+  ownerId                 String?
+  owner                   User?                    @relation("LeadOwner", fields: [ownerId], references: [id])
+  tags                    String[]                 @default([])
+  emailOptIn              Boolean                  @default(false)
+  smsOptIn                Boolean                  @default(false)
+  consentSource           String?
+  consentTimestamp        DateTime?
+  customFields            Json? // Custom metadata (key-value)
+  timeline                LeadTimeline[]
+  appointments            SalesAppointment[]
+  campaignEnrollments     CampaignEnrollment[]
+  schedulingConversations SchedulingConversation[]
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
 }
 
 model LeadTimeline {
   id          String   @id @default(cuid())
   leadId      String
   lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  type        String   // EMAIL_SENT, SMS_SENT, REPLY_RECEIVED, APPOINTMENT_SET, STATUS_CHANGE, CONSENT_CHANGE, SYNC_UPDATE, IMPORT
+  type        String // EMAIL_SENT, SMS_SENT, REPLY_RECEIVED, APPOINTMENT_SET, STATUS_CHANGE, CONSENT_CHANGE, SYNC_UPDATE, IMPORT
   description String   @db.Text
   metadata    Json?
   createdAt   DateTime @default(now())
@@ -213,22 +218,40 @@ model LeadSegment {
   companyId String
   company   Company  @relation(fields: [companyId], references: [id])
   name      String
-  filters   Json     // Dynamic JSON rules
+  filters   Json // Dynamic JSON rules
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model SalesAppointment {
-  id        String   @id @default(cuid())
-  leadId    String
-  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  title     String
-  time      DateTime
-  status    String   @default("CONFIRMED") // CONFIRMED, PENDING, CANCELLED
-  agentId   String
-  agent     User     @relation("AgentAppointments", fields: [agentId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String    @id @default(cuid())
+  leadId          String
+  lead            Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  title           String
+  time            DateTime
+  endTime         DateTime?
+  durationMinutes Int       @default(30)
+  status          String    @default("CONFIRMED") // CONFIRMED, PENDING, CANCELLED, RESCHEDULED
+  locationType    String    @default("VIRTUAL") // VIRTUAL | ONSITE
+  meetingLink     String? // Google Meet URL (virtual visits)
+  googleEventId   String? // Linked Google Calendar event id
+  notes           String?   @db.Text
+  leadTimezone    String? // IANA tz used when the slot was offered/confirmed
+  bookedVia       String    @default("STAFF") // STAFF | AI_AGENT | SELF
+  rescheduleToken String    @unique @default(cuid())
+  cancelToken     String    @unique @default(cuid())
+  reminder24Sent  Boolean   @default(false)
+  reminder1Sent   Boolean   @default(false)
+  agentId         String
+  agent           User      @relation("AgentAppointments", fields: [agentId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Atomic slot reservation: two concurrent attempts to book the same agent at the same
+  // start time can never both succeed — the second hits a unique-constraint violation and
+  // is gracefully re-offered alternatives. Cancelled rows keep the slot occupied, so
+  // booking logic must hard-delete or move cancelled rows before the slot can be reused.
+  @@unique([agentId, time])
 }
 
 // ─── Salesforce CRM Connector Models ──────────────────────────────────────────
@@ -237,17 +260,17 @@ model SalesforceConnection {
   id              String    @id @default(cuid())
   companyId       String    @unique
   company         Company   @relation(fields: [companyId], references: [id])
-  instanceUrl     String                // e.g., https://yourorg.my.salesforce.com
-  accessToken     String    @db.Text    // Encrypted OAuth access token
-  refreshToken    String    @db.Text    // Encrypted OAuth refresh token
-  tokenExpiresAt  DateTime              // When the access token expires
-  environment     String    @default("sandbox")  // "production" | "sandbox"
-  clientId        String                // OAuth Consumer Key
-  clientSecret    String    @db.Text    // OAuth Consumer Secret (encrypted)
-  syncInterval    Int       @default(15)         // Minutes between cron syncs
+  instanceUrl     String // e.g., https://yourorg.my.salesforce.com
+  accessToken     String    @db.Text // Encrypted OAuth access token
+  refreshToken    String    @db.Text // Encrypted OAuth refresh token
+  tokenExpiresAt  DateTime // When the access token expires
+  environment     String    @default("sandbox") // "production" | "sandbox"
+  clientId        String // OAuth Consumer Key
+  clientSecret    String    @db.Text // OAuth Consumer Secret (encrypted)
+  syncInterval    Int       @default(15) // Minutes between cron syncs
   isActive        Boolean   @default(true)
   lastSyncAt      DateTime?
-  lastSyncStatus  String?               // "SUCCESS" | "ERROR" | "WARNING"
+  lastSyncStatus  String? // "SUCCESS" | "ERROR" | "WARNING"
   lastSyncMessage String?   @db.Text
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -256,26 +279,26 @@ model SalesforceConnection {
 model SyncLog {
   id          String   @id @default(cuid())
   companyId   String
-  direction   String              // "INBOUND" | "OUTBOUND" (write-back)
-  action      String              // "BULK_IMPORT" | "INCREMENTAL_SYNC" | "WRITE_BACK"
-  status      String              // "SUCCESS" | "WARNING" | "ERROR"
+  direction   String // "INBOUND" | "OUTBOUND" (write-back)
+  action      String // "BULK_IMPORT" | "INCREMENTAL_SYNC" | "WRITE_BACK"
+  status      String // "SUCCESS" | "WARNING" | "ERROR"
   recordCount Int      @default(0)
   errorCount  Int      @default(0)
   message     String?  @db.Text
-  metadata    Json?               // Additional details (e.g., error rows)
+  metadata    Json? // Additional details (e.g., error rows)
   createdAt   DateTime @default(now())
 }
 
 model SalesforceFieldMapping {
-  id               String   @id @default(cuid())
-  companyId        String
-  salesforceField  String              // e.g., "FirstName"
-  portalField      String              // e.g., "firstName"
-  description      String?
-  isActive         Boolean  @default(true)
-  isConsentField   Boolean  @default(false)  // Flag for consent mapping (SW-CRM-009)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(cuid())
+  companyId       String
+  salesforceField String // e.g., "FirstName"
+  portalField     String // e.g., "firstName"
+  description     String?
+  isActive        Boolean  @default(true)
+  isConsentField  Boolean  @default(false) // Flag for consent mapping (SW-CRM-009)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@unique([companyId, salesforceField])
 }
@@ -284,8 +307,8 @@ model SuppressionList {
   id        String   @id @default(cuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id])
-  value     String   // email address or phone number
-  reason    String   // "UNSUBSCRIBE" | "BOUNCE" | "COMPLAINT"
+  value     String // email address or phone number
+  reason    String // "UNSUBSCRIBE" | "BOUNCE" | "COMPLAINT"
   createdAt DateTime @default(now())
 
   @@unique([companyId, value])
@@ -305,88 +328,153 @@ model Campaign {
   description     String?
   status          String               @default("Draft") // "Active" | "Draft" | "Archived"
   channel         String               @default("Email & SMS")
+  // Appointment-agent behaviour when a lead replies to this sequence.
+  // INHERIT (use company default) | OFF | SIMPLE | AI
+  appointmentMode String               @default("INHERIT")
   steps           CampaignStep[]
   enrollments     CampaignEnrollment[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
-
 }
 
 model CampaignStep {
-  id              String               @id @default(cuid())
+  id              String         @id @default(cuid())
   campaignId      String
-  campaign        Campaign             @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaign        Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   type            StepType
-  position        Int                  // 1-indexed order of the step
-  delayValue      Int?                 // e.g. 2
-  delayUnit       String?              // "MINUTES" | "HOURS" | "DAYS"
-  sendWindowDays  String?              // Comma-separated, e.g., "Mon,Tue,Wed,Thu,Fri"
-  sendWindowStart String?              // HH:mm format, e.g., "09:00"
-  sendWindowEnd   String?              // HH:mm format, e.g., "18:00"
-  subject         String?              // For email
-  body            String?              // For email or SMS
-  templateId      String?              // Reference to EmailTemplate
-  template        EmailTemplate?       @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-
+  position        Int // 1-indexed order of the step
+  delayValue      Int? // e.g. 2
+  delayUnit       String? // "MINUTES" | "HOURS" | "DAYS"
+  sendWindowDays  String? // Comma-separated, e.g., "Mon,Tue,Wed,Thu,Fri"
+  sendWindowStart String? // HH:mm format, e.g., "09:00"
+  sendWindowEnd   String? // HH:mm format, e.g., "18:00"
+  subject         String? // For email
+  body            String? // For email or SMS
+  templateId      String? // Reference to EmailTemplate
+  template        EmailTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 }
 
 model CampaignEnrollment {
-  id                  String             @id @default(cuid())
+  id                  String    @id @default(cuid())
   leadId              String
-  lead                Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead                Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
   campaignId          String
-  campaign            Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  status              String             @default("ACTIVE") // ACTIVE, COMPLETED, PAUSED, EXITED
-  exitedReason        String?            // "REPLY", "APPOINTMENT", "UNSUBSCRIBE", "MANUAL", "STATUS_CHANGE"
-  currentStepPosition Int                @default(0)        // Last executed step position
-  nextRunAt           DateTime?          // Scheduled time for the next step execution
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+  campaign            Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  status              String    @default("ACTIVE") // ACTIVE, COMPLETED, PAUSED, EXITED
+  exitedReason        String? // "REPLY", "APPOINTMENT", "UNSUBSCRIBE", "MANUAL", "STATUS_CHANGE"
+  currentStepPosition Int       @default(0) // Last executed step position
+  nextRunAt           DateTime? // Scheduled time for the next step execution
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@unique([leadId, campaignId])
 }
 
 model EmailTemplate {
-  id          String         @id @default(cuid())
-  companyId   String
-  company     Company        @relation(fields: [companyId], references: [id])
-  name        String
-  subject     String
-  body        String         @db.Text
-  variables   String[]       @default([]) // e.g. ["firstName", "lastName", "bookingLink"]
-  steps       CampaignStep[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id        String         @id @default(cuid())
+  companyId String
+  company   Company        @relation(fields: [companyId], references: [id])
+  name      String
+  subject   String
+  body      String         @db.Text
+  variables String[]       @default([]) // e.g. ["firstName", "lastName", "bookingLink"]
+  steps     CampaignStep[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 }
 
 model ContentCalendar {
-  id          String         @id @default(cuid())
-  companyId   String
-  company     Company        @relation(fields: [companyId], references: [id])
-  title       String
-  channel     String         // "Email" | "SMS" | "Blog" | "Announcement"
-  scheduledAt DateTime
-  status      String         @default("Draft") // "Suggested" | "Draft" | "Approved" | "Scheduled" | "Sent" | "Published" | "Failed" | "Dismissed"
-  content     String         @db.Text
-  subject     String?
-  reason      String?        // AI suggestion context
-  outline     String?        // AI suggestion outline
-  isAiSuggested Boolean      @default(false)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id])
+  title         String
+  channel       String // "Email" | "SMS" | "Blog" | "Announcement"
+  scheduledAt   DateTime
+  status        String   @default("Draft") // "Suggested" | "Draft" | "Approved" | "Scheduled" | "Sent" | "Published" | "Failed" | "Dismissed"
+  content       String   @db.Text
+  subject       String?
+  reason        String? // AI suggestion context
+  outline       String? // AI suggestion outline
+  isAiSuggested Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model SalesKB {
-  id          String         @id @default(cuid())
-  companyId   String
-  company     Company        @relation(fields: [companyId], references: [id])
-  name        String
-  size        String
-  url         String
-  category    String         @default("General") // "Community", "Pricing", "FAQ", etc.
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  size      String
+  url       String
+  category  String   @default("General") // "Community", "Pricing", "FAQ", etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
+// ─── Appointment Scheduling (SW-APT) ──────────────────────────────────────────
+
+enum CalendarProvider {
+  GOOGLE
+  MICROSOFT
+}
+
+// Company-wide availability used by the conversational agent and the public booking
+// page to compute offerable slots.
+model AvailabilitySetting {
+  id               String   @id @default(cuid())
+  companyId        String   @unique
+  company          Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dayStart         String   @default("09:00") // HH:mm, in `timezone`
+  dayEnd           String   @default("17:00") // HH:mm, in `timezone`
+  bufferMinutes    Int      @default(15) // gap enforced between appointments
+  slotDuration     Int      @default(30) // default appointment length (minutes)
+  workingDays      String   @default("Mon,Tue,Wed,Thu,Fri") // comma-separated short day names
+  timezone         String   @default("America/New_York") // IANA tz the hours are expressed in
+  appointmentTypes Json? // [{ name, durationMinutes, locationType }]
+  reminderHours    Int[]    @default([24, 1]) // hours-before reminders to send
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// OAuth tokens for two-way calendar sync + Google Meet link creation. One row per
+// (company, provider).
+model CalendarConnection {
+  id             String           @id @default(cuid())
+  companyId      String
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  provider       CalendarProvider
+  accessToken    String           @db.Text
+  refreshToken   String?          @db.Text
+  tokenExpiresAt DateTime?
+  scope          String?          @db.Text
+  accountEmail   String?
+  calendarId     String           @default("primary")
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([companyId, provider])
+}
+
+// Durable state for the multi-turn conversational booking agent. Email/SMS replies
+// arrive asynchronously (possibly hours apart), so each inbound reply advances one turn
+// against this persisted transcript rather than holding a long-lived function open.
+model SchedulingConversation {
+  id           String   @id @default(cuid())
+  leadId       String
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  channel      String // EMAIL | SMS
+  mode         String   @default("AI") // SIMPLE | AI
+  status       String   @default("ACTIVE") // ACTIVE | BOOKED | ESCALATED | CLOSED
+  turnCount    Int      @default(0) // unresolved agent turns (for escalation cap)
+  transcript   Json     @default("[]") // [{ role: "lead"|"agent", content, at }]
+  offeredSlots Json? // ISO start times last offered to the lead
+  campaignId   String? // originating sequence, if any
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([leadId])
+}

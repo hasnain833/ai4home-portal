@@ -221,7 +221,7 @@ export const getCalendarSuggestions = async (req, res) => {
     });
 
     const voiceProfile = company?.voiceProfile || "professional";
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
 
     if (apiKey) {
       try {

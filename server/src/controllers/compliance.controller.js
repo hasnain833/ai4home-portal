@@ -246,6 +246,11 @@ export const processInbound = async (req, res) => {
 
         const { inngest } = await import("../lib/inngest.js");
         await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
+        // Kick off the appointment-scheduling agent for this reply (email or SMS).
+        await inngest.send({
+          name: "lead.reply.received",
+          data: { leadId: lead.id, companyId, channel, body, sender },
+        });
       }
 
       return res.json({
@@ -327,6 +332,11 @@ export const processTwilioInboundSms = async (req, res) => {
         // Exit active campaigns with reason REPLY via Inngest
         const { inngest } = await import("../lib/inngest.js");
         await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
+        // Kick off the appointment-scheduling agent for this SMS reply.
+        await inngest.send({
+          name: "lead.reply.received",
+          data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
+        });
       }
     }
 
@@ -645,6 +655,11 @@ export const processBrevoInboundEmail = async (req, res) => {
         // Exit active campaigns with reason REPLY via Inngest
         const { inngest } = await import("../lib/inngest.js");
         await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
+        // Kick off the appointment-scheduling agent for this email reply.
+        await inngest.send({
+          name: "lead.reply.received",
+          data: { leadId: lead.id, companyId, channel: "EMAIL", body: replyContent, sender: normalizedEmail },
+        });
       }
 
       processedCount++;

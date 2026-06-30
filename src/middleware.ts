@@ -1,8 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Public routes (no auth required)
-const publicRoutes = ["/login", "/signup", "/", "/forgot-password", "/widget", "/widget.js"];
+// Public routes (no auth required). "/book" is the lead-facing self-booking +
+// reschedule/cancel flow, which is reached by leads with no portal account.
+const publicRoutes = ["/login", "/signup", "/", "/forgot-password", "/widget", "/widget.js", "/book"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
