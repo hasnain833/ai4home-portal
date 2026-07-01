@@ -42,6 +42,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "ESCALATED";
 type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
@@ -105,7 +106,6 @@ export default function TicketDetail() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [draftResponse, setDraftResponse] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
   const [isProcessingDraft, setIsProcessingDraft] = useState(false);
@@ -192,21 +192,16 @@ export default function TicketDetail() {
           setTicket(updatedTicket);
         }
       } else {
-        alert(data.message || "Failed to sync ticket to ERP");
+        toast.error(data.message || "Failed to sync ticket to ERP");
       }
     } catch (error) {
       console.error("Error syncing ticket:", error);
-      alert("Failed to connect to synchronization service.");
+      toast.error("Failed to connect to synchronization service.");
     } finally {
       setSyncing(false);
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2005);
-  };
 
   const handleApproveDraft = async () => {
     if (!draftText.trim()) return;
@@ -225,7 +220,7 @@ export default function TicketDetail() {
         }
       } else {
         const errorData = await response.json();
-        alert(errorData.message || "Failed to approve draft.");
+        toast.error(errorData.message || "Failed to approve draft.");
       }
     } catch (error) {
       console.error("Error approving draft:", error);
@@ -252,7 +247,7 @@ export default function TicketDetail() {
           });
         }
       } else {
-        alert("Failed to reject draft.");
+        toast.error("Failed to reject draft.");
       }
     } catch (error) {
       console.error("Error rejecting draft:", error);

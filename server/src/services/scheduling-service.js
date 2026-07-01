@@ -17,19 +17,13 @@ const DEFAULTS = {
   reminderHours: [24, 1],
 };
 
-/** Minimum lead time before a slot can be offered/booked (minutes). */
 const MIN_LEAD_MINUTES = 60;
 
-/** Returns the company's AvailabilitySetting, falling back to sane defaults. */
 export async function getAvailabilitySetting(companyId) {
   const existing = await prisma.availabilitySetting.findUnique({ where: { companyId } });
   return existing || { companyId, ...DEFAULTS, appointmentTypes: null };
 }
 
-/**
- * Resolve which agent owns an appointment for a lead: the lead owner, else the
- * company's default lead owner, else the first ADMIN. Returns an agent id or null.
- */
 export async function resolveAgentId(lead) {
   if (lead.ownerId) return lead.ownerId;
   const company = await prisma.company.findUnique({
@@ -39,18 +33,12 @@ export async function resolveAgentId(lead) {
   return company?.defaultLeadOwner || company?.users.find((u) => u.role === "ADMIN")?.id || null;
 }
 
-/** Lead's IANA timezone (from state), defaulting to the company availability tz. */
 export function leadTimezone(lead, setting) {
   if (lead?.state) return getLeadTimezone(lead.state);
   return setting?.timezone || DEFAULTS.timezone;
 }
 
-/**
- * Compute bookable slots for a company/agent. Subtracts existing (non-cancelled)
- * appointments for the agent and external Google Calendar busy blocks.
- *
- * @returns {Promise<{ start: Date, label: string, iso: string }[]>}
- */
+
 export async function getAvailableSlots({ companyId, agentId, from, days = 14, limit = 12, displayTz }) {
   const setting = await getAvailabilitySetting(companyId);
   const start = from ? new Date(from) : new Date(Date.now() + MIN_LEAD_MINUTES * 60000);
@@ -58,7 +46,6 @@ export async function getAvailableSlots({ companyId, agentId, from, days = 14, l
 
   const busy = [];
 
-  // Internal: this agent's existing appointments.
   if (agentId) {
     const appts = await prisma.salesAppointment.findMany({
       where: {
@@ -75,7 +62,6 @@ export async function getAvailableSlots({ companyId, agentId, from, days = 14, l
     }
   }
 
-  // External: Google Calendar busy/free (two-way sync). Best-effort; empty if not connected.
   try {
     const gbusy = await GoogleCalendar.getBusyIntervals(companyId, start, horizonEnd);
     busy.push(...gbusy);
@@ -88,17 +74,6 @@ export async function getAvailableSlots({ companyId, agentId, from, days = 14, l
   return slots.map((s) => ({ start: s, iso: s.toISOString(), label: formatSlotLabel(s, tz) }));
 }
 
-/**
- * Atomically book a slot. Concurrency is decided at the database via the
- * @@unique([agentId, time]) constraint: two racing attempts for the same agent+time
- * can never both insert — the loser gets { success:false, conflict:true } and should
- * be re-offered alternatives.
- *
- * Side effects on success: creates a Google Calendar event + Meet link (virtual,
- * when connected), updates lead status, writes the timeline, and exits active campaigns.
- *
- * @returns {Promise<{ success:boolean, conflict?:boolean, reason?:string, appointment?:object }>}
- */
 export async function bookSlot({
   leadId,
   startTime,
@@ -126,7 +101,7 @@ export async function bookSlot({
   const tz = leadTimezone(lead, setting);
   const apptTitle = title || "Sales Appointment";
 
-  // 1) Atomic reservation — insert first, let the DB arbitrate races.
+
   let appointment;
   try {
     appointment = await prisma.salesAppointment.create({
@@ -152,7 +127,6 @@ export async function bookSlot({
     return { success: false, reason: "Could not reserve the slot" };
   }
 
-  // 2) Create the calendar event + Meet link (virtual visits). Non-fatal on failure.
   let meetingLink = null;
   let googleEventId = null;
   if (locationType === "VIRTUAL") {
@@ -175,7 +149,6 @@ export async function bookSlot({
     }
   }
 
-  // 3) Lead status + timeline.
   await prisma.lead.update({ where: { id: leadId }, data: { status: "Appointment Set" } });
   await prisma.leadTimeline.create({
     data: {
@@ -186,7 +159,6 @@ export async function bookSlot({
     },
   });
 
-  // 4) Exit any active nurture campaigns for this lead.
   try {
     const { inngest } = await import("../lib/inngest.js");
     await inngest.send({ name: "campaign.exit", data: { leadId, reason: "APPOINTMENT" } });
@@ -194,7 +166,6 @@ export async function bookSlot({
     console.error("[Scheduling] failed to emit campaign.exit:", e.message);
   }
 
-  // 5) Confirmation messages to the lead (email + SMS as available).
   await sendConfirmations(lead, appointment, tz).catch((e) =>
     console.error("[Scheduling] confirmation send failed:", e.message)
   );
@@ -202,7 +173,6 @@ export async function bookSlot({
   return { success: true, appointment };
 }
 
-/** Send booking-confirmation email + SMS to the lead (best-effort, compliance-aware). */
 async function sendConfirmations(lead, appointment, tz) {
   const when = formatSlotLabel(appointment.time, tz);
   const meet = appointment.meetingLink;
@@ -237,15 +207,10 @@ async function sendConfirmations(lead, appointment, tz) {
     const body = ComplianceService.addSmsOptOutSuffix(
       `Your ${appointment.title} is confirmed for ${when}.${meet ? ` Join: ${meet}` : ""} Manage: ${rescheduleUrl}`
     );
-    await sendSms({ to: lead.phone, body, smsConfig }).catch(() => {});
+    await sendSms({ to: lead.phone, body, smsConfig }).catch(() => { });
   }
 }
 
-/**
- * Reschedule an existing appointment to a new start time. Atomic on the new slot via
- * the unique constraint (returns { conflict:true } if the new time is taken). Updates
- * the linked Google event, resets reminder flags, logs the timeline, and re-notifies.
- */
 export async function rescheduleAppointment({ appointmentId, rescheduleToken, newStartTime, durationMinutes }) {
   const where = appointmentId ? { id: appointmentId } : { rescheduleToken };
   const appt = await prisma.salesAppointment.findUnique({ where, include: { lead: { include: { company: true } } } });
@@ -291,15 +256,10 @@ export async function rescheduleAppointment({ appointmentId, rescheduleToken, ne
     },
   });
 
-  await sendConfirmations(appt.lead, updated, tz).catch(() => {});
+  await sendConfirmations(appt.lead, updated, tz).catch(() => { });
   return { success: true, appointment: updated };
 }
 
-/**
- * Cancel an appointment. The row is hard-deleted so the slot is freed for re-booking
- * (the @@unique([agentId, time]) constraint would otherwise keep a cancelled row
- * occupying the slot); cancellation history is preserved on the lead timeline.
- */
 export async function cancelAppointment({ appointmentId, cancelToken, reason = "Cancelled" }) {
   const where = appointmentId ? { id: appointmentId } : { cancelToken };
   const appt = await prisma.salesAppointment.findUnique({ where, include: { lead: { include: { company: true } } } });
@@ -321,7 +281,6 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
     },
   });
 
-  // Notify the lead of the cancellation (best-effort).
   try {
     const { smtpConfig, smsConfig } = await getMessagingConfig(appt.lead.companyId);
     const when = formatSlotLabel(appt.time, tz);
@@ -343,7 +302,7 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
         to: appt.lead.phone,
         body: ComplianceService.addSmsOptOutSuffix(`Your ${appt.title} for ${when} has been cancelled. Reply to rebook.`),
         smsConfig,
-      }).catch(() => {});
+      }).catch(() => { });
     }
   } catch (e) {
     console.error("[Scheduling] cancel notification failed:", e.message);

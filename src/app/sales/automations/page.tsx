@@ -39,8 +39,11 @@ import {
   Sparkles,
   RefreshCw,
   Search,
-  MessageSquare
+  MessageSquare,
+  Filter,
+  BarChart
 } from "lucide-react";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface AutomationRule {
@@ -207,7 +210,7 @@ export default function AutomationsPage() {
 
   const handleSaveRule = () => {
     if (!ruleName.trim()) {
-      alert("Automation rule name is required.");
+      toast.error("Automation rule name is required.");
       return;
     }
 

@@ -4,6 +4,7 @@ import { MailService } from "../../services/mail-service.js";
 import { sendSms } from "../../services/sms.service.js";
 import { getLeadTimezone, getNextValidSendWindow } from "../../lib/timezone.js";
 import { ComplianceService } from "../../services/compliance-service.js";
+import { getMessagingConfig } from "../../lib/messaging-config.js";
 
 // Helper function to calculate delay
 const calculateDelayTime = (value, unit) => {
@@ -22,9 +23,6 @@ const calculateDelayTime = (value, unit) => {
 export const runNurtureCampaign = inngest.createFunction(
   {
     id: "run-nurture-campaign-v4",
-    // Delivery is at-least-once, so the trigger can arrive more than once for the same
-    // enrollment. Dedupe duplicate triggers and never run two copies of one enrollment
-    // in parallel (which would double-send).
     idempotency: "event.data.enrollmentId",
     concurrency: [{ key: "event.data.enrollmentId", limit: 1 }],
     triggers: [{ event: "campaign.enrollment.started" }],
@@ -36,16 +34,10 @@ export const runNurtureCampaign = inngest.createFunction(
     const e = await prisma.campaignEnrollment.findUnique({
       where: { id: enrollmentId },
       include: {
-        lead: { 
-          include: { 
-            company: {
-              include: {
-                integrations: {
-                  where: { platform: { in: ["BREVO_EMAIL", "BREVO_SMS", "TWILIO"] } }
-                }
-              }
-            }
-          } 
+        lead: {
+          include: {
+            company: true
+          }
         },
         campaign: { include: { steps: { orderBy: { position: "asc" } } } },
       },
@@ -67,43 +59,14 @@ export const runNurtureCampaign = inngest.createFunction(
     console.log(`[Nurture] Processing ${steps.length} steps. currentStepPosition=${enrollment.currentStepPosition}`);
     let currentPosition = enrollment.currentStepPosition || 1;
 
-    // Extract messaging configurations
-    let smtpConfig = null;
-    let smsConfig = null;
-    
-    if (lead?.company?.integrations) {
-      const emailInt = lead.company.integrations.find(i => i.platform === "BREVO_EMAIL" && i.isActive);
-      if (emailInt) {
-        smtpConfig = {
-          host: emailInt.smtpHost,
-          port: emailInt.smtpPort,
-          user: emailInt.apiKey,
-          pass: emailInt.secretKey,
-          senderEmail: emailInt.senderEmail,
-          senderName: emailInt.senderName,
-        };
-      }
-      
-      const smsInt = lead.company.integrations.find(i => (i.platform === "BREVO_SMS" || i.platform === "TWILIO") && i.isActive);
-      if (smsInt) {
-        smsConfig = {
-          provider: smsInt.platform,
-          apiKey: smsInt.apiKey,
-          apiSecret: smsInt.secretKey,
-          senderName: smsInt.senderName,
-        };
-      }
-    }
+    // Extract messaging configurations via centralized helper
+    const { smtpConfig, smsConfig } = await getMessagingConfig(lead?.companyId);
 
     for (const currentStep of steps) {
       if (currentStep.position < currentPosition) continue;
       console.log(`[Nurture] Executing step position=${currentStep.position}, type=${currentStep.type}`);
 
       if (currentStep.type === "DELAY") {
-        // Compute the wake time INSIDE a durable step so it is memoized. Computing it in
-        // plain scope recomputes it on every replay; combined with a timestamp-based sleep
-        // id that made the delay re-fire for the full duration on each wake. The sleep id is
-        // now stable (position only), and the recorded wake time is fixed on first run.
         const nextTime = await step.run(`calc-delay-${currentStep.position}`, async () => {
           const delayValue = currentStep.delayValue || 0;
           const delayUnit = currentStep.delayUnit || "DAYS";
@@ -129,13 +92,10 @@ export const runNurtureCampaign = inngest.createFunction(
         continue;
       }
 
-      // Send-window check (EMAIL/SMS). Compute the target inside a durable step and sleep
-      // with a STABLE id so replays cannot re-arm the wait.
       if (currentStep.sendWindowDays && currentStep.sendWindowStart && currentStep.sendWindowEnd) {
         const windowTarget = await step.run(`calc-window-${currentStep.position}`, async () => {
           const tz = getLeadTimezone(lead.state);
           const nextValidTime = getNextValidSendWindow(new Date(), tz, currentStep.sendWindowDays, currentStep.sendWindowStart, currentStep.sendWindowEnd);
-          // Only wait if the window opens more than a minute from now.
           if (new Date(nextValidTime).getTime() > Date.now() + 60000) {
             return new Date(nextValidTime).toISOString();
           }
@@ -145,13 +105,6 @@ export const runNurtureCampaign = inngest.createFunction(
           await step.sleepUntil(`wait-for-window-${currentStep.position}`, windowTarget);
         }
       }
-
-      // Compliance gate. Runs fresh (not memoized) so consent/suppression/quiet-hours are
-      // re-evaluated accurately on every replay. Quiet-hours is transient: sleep until the
-      // lead-local send window opens, then re-check the SAME step. Each wait uses an
-      // attempt-scoped stable id so a memoized sleep returns instantly without advancing the
-      // loop (the previous code used `continue` after the sleep, which skipped the step on
-      // replay) and without colliding with a fresh wait.
       let complianceCheck;
       let quietHoursAttempts = 0;
       while (true) {
@@ -164,8 +117,7 @@ export const runNurtureCampaign = inngest.createFunction(
 
         quietHoursAttempts += 1;
         const resumeAt = await step.run(`calc-quiet-hours-${currentStep.position}-${quietHoursAttempts}`, async () => {
-          const tz = ComplianceService.getLeadTimezone(lead.state, lead.phone);
-          // Next valid moment inside the TCPA window (8am–9pm lead-local), any day.
+          const tz = getLeadTimezone(lead.state, lead.phone);
           const target = getNextValidSendWindow(new Date(Date.now() + 60000), tz, "Mon,Tue,Wed,Thu,Fri,Sat,Sun", "08:00", "21:00");
           return new Date(target).toISOString();
         });
@@ -198,10 +150,6 @@ export const runNurtureCampaign = inngest.createFunction(
         return { status: "exited", reason: "suppressed" };
       }
 
-      // Send (isolated, non-idempotent I/O). Returns a serializable result and performs NO
-      // database writes, so if the bookkeeping step below fails and is retried, the message
-      // is NOT sent again — the memoized send result is reused. The send itself never throws
-      // (failures are captured into the result) so this step is not retried on a send error.
       const sendResult = await step.run(`send-step-${currentStep.position}`, async () => {
         const bookingLink = `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/sales/scheduling?leadId=${lead.id}`;
         const variables = {
@@ -259,9 +207,7 @@ export const runNurtureCampaign = inngest.createFunction(
             html: finalHtml,
             fromName: lead.company?.name || undefined,
             smtpConfig,
-            // NOTE: Do NOT pass fromEmail here. The company email (e.g. contact@bitzsolhomes.com)
-            // is not verified in Brevo and will cause rejection. Let MailService use the
-            // verified SENDER_EMAIL from .env instead.
+            headers: { "X-Mailin-Tag": currentStep.id },
           });
 
           return {
@@ -279,7 +225,7 @@ export const runNurtureCampaign = inngest.createFunction(
 
           try {
             console.log(`[Nurture] Step ${currentStep.position}: Triggering sendSms to ${lead.phone}...`);
-            await sendSms({ to: lead.phone, body: finalBody, smsConfig });
+            await sendSms({ to: lead.phone, body: finalBody, smsConfig, tag: currentStep.id });
             console.log(`[Nurture] Step ${currentStep.position}: sendSms completed successfully!`);
             return { channel: "SMS", attempted: true, success: true, error: null, body: finalBody };
           } catch (smsError) {
@@ -287,45 +233,56 @@ export const runNurtureCampaign = inngest.createFunction(
             return { channel: "SMS", attempted: true, success: false, error: smsError.message || "Unknown error", body: finalBody };
           }
         }
-
-        // Step type with no matching contact channel on the lead -> nothing sent.
         return { channel: currentStep.type, attempted: false };
       });
 
-      // Bookkeeping (DB writes only). Separated from the send so a retry here never re-sends.
       await step.run(`record-step-${currentStep.position}`, async () => {
         if (sendResult.attempted && sendResult.channel === "EMAIL") {
           await prisma.leadTimeline.create({
             data: sendResult.success
               ? {
-                  leadId: lead.id,
-                  type: "EMAIL_SENT",
-                  description: `Sent campaign email: "${sendResult.subject}"`,
-                  metadata: { subject: sendResult.subject, body: sendResult.body, campaignId: campaign.id, stepPosition: currentStep.position, messageId: sendResult.messageId },
-                }
+                leadId: lead.id,
+                type: "EMAIL_SENT",
+                description: `Sent campaign email: "${sendResult.subject}"`,
+                metadata: { subject: sendResult.subject, body: sendResult.body, campaignId: campaign.id, stepPosition: currentStep.position, messageId: sendResult.messageId },
+              }
               : {
-                  leadId: lead.id,
-                  type: "EMAIL_FAILED",
-                  description: `Failed to send campaign email: ${sendResult.error}`,
-                  metadata: { subject: sendResult.subject, body: sendResult.body, error: sendResult.error, campaignId: campaign.id, stepPosition: currentStep.position },
-                },
+                leadId: lead.id,
+                type: "EMAIL_FAILED",
+                description: `Failed to send campaign email: ${sendResult.error}`,
+                metadata: { subject: sendResult.subject, body: sendResult.body, campaignId: campaign.id, stepPosition: currentStep.position, error: sendResult.error },
+              },
           });
+
+          if (sendResult.success) {
+            await prisma.campaignStep.update({
+              where: { id: currentStep.id },
+              data: { sentCount: { increment: 1 } }
+            });
+          }
         } else if (sendResult.attempted && sendResult.channel === "SMS") {
           await prisma.leadTimeline.create({
             data: sendResult.success
               ? {
-                  leadId: lead.id,
-                  type: "SMS_SENT",
-                  description: `Sent campaign SMS: "${sendResult.body.slice(0, 50)}${sendResult.body.length > 50 ? "..." : ""}"`,
-                  metadata: { body: sendResult.body, campaignId: campaign.id, stepPosition: currentStep.position },
-                }
+                leadId: lead.id,
+                type: "SMS_SENT",
+                description: `Sent campaign SMS: "${sendResult.body.slice(0, 50)}${sendResult.body.length > 50 ? "..." : ""}"`,
+                metadata: { body: sendResult.body, campaignId: campaign.id, stepPosition: currentStep.position },
+              }
               : {
-                  leadId: lead.id,
-                  type: "SMS_FAILED",
-                  description: `Failed to send campaign SMS: ${sendResult.error}`,
-                  metadata: { body: sendResult.body, error: sendResult.error, campaignId: campaign.id, stepPosition: currentStep.position },
-                },
+                leadId: lead.id,
+                type: "SMS_FAILED",
+                description: `Failed to send campaign SMS: ${sendResult.error}`,
+                metadata: { body: sendResult.body, error: sendResult.error, campaignId: campaign.id, stepPosition: currentStep.position },
+              },
           });
+
+          if (sendResult.success) {
+            await prisma.campaignStep.update({
+              where: { id: currentStep.id },
+              data: { sentCount: { increment: 1 } }
+            });
+          }
         } else {
           console.log(`[Nurture] Step ${currentStep.position}: no ${currentStep.type} contact channel on lead; nothing sent.`);
         }

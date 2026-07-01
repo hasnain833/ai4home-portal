@@ -11,7 +11,7 @@ export const getMessagingSettings = async (req, res) => {
     const integrations = await prisma.integration.findMany({
       where: {
         companyId: session.companyId || "demo-company",
-        platform: { in: ["BREVO_EMAIL", "BREVO_SMS", "TWILIO"] },
+        platform: { in: ["BREVO_EMAIL", "BREVO_SMS"] },
       },
     });
 
@@ -34,7 +34,7 @@ export const getMessagingSettings = async (req, res) => {
       };
     }
 
-    const smsInt = integrations.find(i => i.platform === "BREVO_SMS" || i.platform === "TWILIO");
+    const smsInt = integrations.find(i => i.platform === "BREVO_SMS");
     if (smsInt) {
       settings.sms = {
         id: smsInt.id,
@@ -102,15 +102,15 @@ export const saveSmsSettings = async (req, res) => {
     const { provider, apiKey, apiSecret, senderName, isActive } = req.body;
     const companyId = session.companyId || "demo-company";
     
-    if (!["BREVO_SMS", "TWILIO"].includes(provider)) {
+    if (provider !== "BREVO_SMS") {
       return res.status(400).json({ message: "Invalid SMS provider" });
     }
 
-    // Delete any existing SMS integrations that don't match the new provider
+    // Delete any stale SMS integrations
     await prisma.integration.deleteMany({
       where: {
         companyId,
-        platform: { in: ["BREVO_SMS", "TWILIO"], not: provider },
+        platform: "BREVO_SMS",
       },
     });
 

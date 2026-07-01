@@ -239,33 +239,18 @@ export default function MessagingSettingsTab() {
           <CardContent className="space-y-4 pt-6 flex-1">
             <div className="space-y-2">
               <Label>SMS Provider</Label>
-              <Select value={smsConfig.provider} onValueChange={(val) => setSmsConfig({...smsConfig, provider: val})}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="BREVO_SMS">Brevo</SelectItem>
-                  <SelectItem value="TWILIO">Twilio</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input value="Brevo" disabled className="bg-slate-50 dark:bg-slate-900/40" />
             </div>
 
             <div className="space-y-2">
-              <Label>{smsConfig.provider === "TWILIO" ? "Account SID" : "API Key"}</Label>
+              <Label>API Key</Label>
               <Input type="password" value={smsConfig.apiKey} onChange={e => setSmsConfig({...smsConfig, apiKey: e.target.value})} placeholder="••••••••" />
             </div>
-            
-            {smsConfig.provider === "TWILIO" && (
-              <div className="space-y-2">
-                <Label>Auth Token</Label>
-                <Input type="password" value={smsConfig.apiSecret} onChange={e => setSmsConfig({...smsConfig, apiSecret: e.target.value})} placeholder="••••••••" />
-              </div>
-            )}
 
             <div className="space-y-2">
-              <Label>Sender Name or Phone Number</Label>
-              <Input value={smsConfig.senderName} onChange={e => setSmsConfig({...smsConfig, senderName: e.target.value})} placeholder={smsConfig.provider === "TWILIO" ? "+1234567890" : "YourCompany"} />
-              <p className="text-xs text-slate-500">For Brevo, alphanumeric sender ID up to 11 characters. For Twilio, use your Twilio phone number.</p>
+              <Label>Sender Name</Label>
+              <Input value={smsConfig.senderName} onChange={e => setSmsConfig({...smsConfig, senderName: e.target.value})} placeholder="YourCompany" />
+              <p className="text-xs text-slate-500">Alphanumeric sender ID, up to 11 characters.</p>
             </div>
 
             <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800">

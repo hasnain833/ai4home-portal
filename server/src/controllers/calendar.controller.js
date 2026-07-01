@@ -1,10 +1,7 @@
 import prisma from "../lib/prisma.js";
-import { GoogleGenAI } from "@google/genai";
+import { Anthropic } from "@anthropic-ai/sdk";
 import { getNextValidSendWindow } from "../lib/timezone.js";
-
-// ─── Content Calendar lifecycle ───────────────────────────────────────────────
-// Suggested → Draft → Approved → Scheduled → Sent | Published → (Failed)
-// Dismissed is a terminal off-ramp available from the early states.
+import { inngest } from "../lib/inngest.js";
 
 const VALID_STATUSES = [
   "Suggested",
@@ -28,20 +25,14 @@ const STATUS_TRANSITIONS = {
   Dismissed: [],
 };
 
-// Approval gate: only an ADMIN may move an item into these states.
 const APPROVAL_REQUIRED_TARGETS = new Set(["Approved"]);
-// Items in a terminal/sent state can no longer be edited or rescheduled.
+
 const NON_EDITABLE_STATUSES = new Set(["Sent", "Published", "Dismissed"]);
 const EDITABLE_FIELDS = ["title", "content", "subject", "reason", "outline", "channel"];
 
-// ─── SMS compliance window (TCPA quiet hours 8 AM–9 PM) ───────────────────────
-// ContentCalendar items are company-level (not tied to a single lead), so there
-// is no per-recipient timezone. We enforce the window against a configurable
-// default tz. Per-recipient quiet hours are still enforced at actual send time
-// by ComplianceService.
-const DEFAULT_TIMEZONE = process.env.DEFAULT_SEND_TIMEZONE || "America/New_York";
-const SMS_WINDOW_START_HOUR = 8; // 8 AM inclusive
-const SMS_WINDOW_END_HOUR = 21; // 9 PM exclusive
+const DEFAULT_TIMEZONE = "America/New_York";
+const SMS_WINDOW_START_HOUR = 8;
+const SMS_WINDOW_END_HOUR = 21;
 
 function getHourInTz(date, tz) {
   const formatter = new Intl.DateTimeFormat("en-US", {
@@ -49,7 +40,7 @@ function getHourInTz(date, tz) {
     hour: "numeric",
     hour12: false,
   });
-  return parseInt(formatter.format(date), 10) % 24; // guard against "24" at midnight
+  return parseInt(formatter.format(date), 10) % 24;
 }
 
 function isWithinSmsWindow(date, tz) {
@@ -57,7 +48,6 @@ function isWithinSmsWindow(date, tz) {
   return hour >= SMS_WINDOW_START_HOUR && hour < SMS_WINDOW_END_HOUR;
 }
 
-// Returns null if the date is sendable, otherwise an error payload with a suggested time.
 function checkSmsWindow(date) {
   if (isWithinSmsWindow(date, DEFAULT_TIMEZONE)) return null;
   const suggestedTime = getNextValidSendWindow(
@@ -101,18 +91,14 @@ export const getCalendarEvents = async (req, res) => {
       }
     });
 
-    // Group enrollments by date and campaign step
     const groupedCampaigns = {};
 
     for (const enrollment of activeEnrollments) {
       if (!enrollment.createdAt) continue;
-
-      // Project the entire campaign timeline from the moment they enrolled
       let currentSimTime = new Date(enrollment.createdAt);
 
       for (const step of enrollment.campaign.steps) {
         if (step.type === "DELAY") {
-          // Advance the simulation time
           if (step.delayUnit === "DAYS") {
             currentSimTime.setDate(currentSimTime.getDate() + (step.delayValue || 0));
           } else if (step.delayUnit === "HOURS") {
@@ -121,7 +107,6 @@ export const getCalendarEvents = async (req, res) => {
             currentSimTime.setMinutes(currentSimTime.getMinutes() + (step.delayValue || 0));
           }
         } else {
-          // It's an executable step (EMAIL/SMS), project it onto the calendar
           const dateString = currentSimTime.toISOString().split('T')[0];
           const isCompleted = step.position <= enrollment.currentStepPosition;
           const key = `${enrollment.campaignId}_${step.id}_${dateString}_${isCompleted}`;
@@ -148,7 +133,6 @@ export const getCalendarEvents = async (req, res) => {
     const campaignEvents = Object.values(groupedCampaigns);
     const allEvents = [...manualEvents, ...campaignEvents];
 
-    // Optionally sort by date
     allEvents.sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
 
     return res.json(allEvents);
@@ -175,14 +159,11 @@ export const createCalendarEvent = async (req, res) => {
       return res.status(400).json({ message: "Invalid scheduledAt date" });
     }
 
-    // Lifecycle entry point: AI items land as "Suggested", manual items as "Draft".
-    // Callers may explicitly request another state (e.g. "Scheduled") via `status`.
     const initialStatus = status || (isAiSuggested ? "Suggested" : "Draft");
     if (!VALID_STATUSES.includes(initialStatus)) {
       return res.status(400).json({ message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` });
     }
 
-    // If created directly in a send-ready state, enforce the SMS quiet-hours window.
     if (initialStatus === "Scheduled" && channel === "SMS") {
       const windowError = checkSmsWindow(scheduledDate);
       if (windowError) return res.status(422).json(windowError);
@@ -200,8 +181,19 @@ export const createCalendarEvent = async (req, res) => {
         outline: outline || null,
         isAiSuggested: !!isAiSuggested,
         status: initialStatus,
+        ownerId: req.user.id,
       },
     });
+
+    if (initialStatus === "Scheduled") {
+      await inngest.send({
+        name: "calendar.item.scheduled",
+        data: {
+          calendarId: event.id,
+          scheduledAt: event.scheduledAt.toISOString()
+        }
+      });
+    }
 
     return res.status(201).json(event);
   } catch (error) {
@@ -216,79 +208,114 @@ export const getCalendarSuggestions = async (req, res) => {
       return res.status(403).json({ message: "No company associated" });
     }
 
+    const companyId = req.user.companyId;
+
     const company = await prisma.company.findUnique({
-      where: { id: req.user.companyId },
+      where: { id: companyId },
     });
 
     const voiceProfile = company?.voiceProfile || "professional";
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
-    if (apiKey) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: `You are an AI assistant for a homebuilder. Generate exactly 3 content calendar suggestions for nurture campaigns (SMS/Email) targeting new leads or post-closing homeowners. The company's communication voice profile is: "${voiceProfile}".
-          
-          Provide the output as a raw JSON array matching this structure:
-          [
-            {
-              "id": "string",
-              "topic": "string",
-              "channel": "Email" | "SMS",
-              "date": "string",
-              "reason": "string",
-              "outline": "string"
-            }
-          ]
-          Return ONLY the JSON array without any markdown formatting or surrounding blocks.`,
-        });
-
-        const text = response.text || "";
-        const cleanedText = text.replace(/```json/g, "").replace(/```/g, "").trim();
-        const suggestions = JSON.parse(cleanedText);
-        return res.json(suggestions);
-      } catch (geminiError) {
-        console.warn("[Gemini API] Failed to generate suggestions, using high-quality defaults:", geminiError);
-      }
+    if (!apiKey) {
+      return res.status(500).json({ message: "ANTHROPIC_API_KEY is missing. Please configure it in your environment variables." });
     }
 
-    // High quality customized default suggestions fallback
-    const defaults = [
-      {
-        id: "S-1",
-        topic: "Post-COE Move-In Anniversary Nurture",
-        channel: "Email",
-        date: "June 25",
-        reason: `Gap detected: Lead has completed closing (COE) and is in Day 30 without feedback outreach. Scoped for "${voiceProfile}" voice.`,
-        outline: "Friendly check-in about their first 30 days in the new community, attaching a service request form and local builder contacts.",
+    const existingEvents = await prisma.contentCalendar.findMany({
+      where: {
+        companyId,
+        scheduledAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+        status: { in: ["Draft", "Approved", "Scheduled", "Sent", "Published"] }
       },
-      {
-        id: "S-2",
-        topic: "Mortgage Lock Rate drop alert broadcast",
-        channel: "SMS",
-        date: "June 28",
-        reason: "Market Event: Federal interest rate drop trends observed. Ideal for cold buyer leads.",
-        outline: "Quick text: 'Great news! Home loan rates just dropped. Let's look at how much you'll save on monthly payments. Tap here to view slots.'",
-      },
-      {
-        id: "S-3",
-        topic: "Energy Efficiency Guarantee brochure share",
-        channel: "Email",
-        date: "July 2",
-        reason: "Educational: Target engaged leads who toured models but haven't reserved a home yet.",
-        outline: "Highlights the structural insulations, double-pane windows, and smart utility meters that save homeowners an average of $150/mo.",
-      }
-    ];
+      select: { scheduledAt: true, title: true, channel: true },
+      orderBy: { scheduledAt: "asc" }
+    });
 
-    return res.json(defaults);
+    const existingEventsText = existingEvents
+      .map(e => `${e.scheduledAt.toISOString().split('T')[0]}: ${e.channel} - ${e.title}`)
+      .join("\n");
+
+    const dismissedItems = await prisma.contentCalendar.findMany({
+      where: { companyId, status: "Dismissed" },
+      select: { title: true, reason: true },
+      orderBy: { updatedAt: "desc" },
+      take: 10
+    });
+
+    const dismissedText = dismissedItems.length > 0 
+      ? dismissedItems.map(d => `${d.title} (${d.reason || 'No reason'})`).join("\n")
+      : "None";
+
+    const anthropic = new Anthropic({ apiKey });
+
+    const systemPrompt = `You are a Content Assist Agent for a homebuilder company named "${company?.name || 'Homebuilder'}". 
+Your voice profile is: "${voiceProfile}".
+Your task is to generate exactly 3 content calendar suggestions for marketing (SMS, Email, Blog, or Announcement).
+Current date: ${new Date().toISOString()}
+
+Context:
+Existing upcoming/recent scheduled events:
+${existingEventsText || "No existing events."}
+
+Recently Dismissed Topics (DO NOT suggest these):
+${dismissedText}
+
+Requirements:
+- Find schedule gaps and suggest dates (ISO 8601 strings) for the next 2-4 weeks.
+- Suggest topics based on tenant profile, current real estate/mortgage market trends, and seasonal events.
+- Return ONLY a raw JSON array matching this structure:
+[
+  {
+    "topic": "string",
+    "channel": "Email" | "SMS" | "Blog" | "Announcement",
+    "scheduledAt": "ISO date string",
+    "reason": "string (Why you suggested this, considering gaps/news)",
+    "outline": "string (Draft copy or outline)"
+  }
+]`;
+
+    const response = await anthropic.messages.create({
+      model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
+      max_tokens: 1500,
+      system: systemPrompt,
+      messages: [{ role: "user", content: "Generate the suggestions as raw JSON." }],
+    });
+
+    const text = response.content[0].text || "";
+    // Clean up potential markdown blocks
+    const cleanedText = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const suggestionsJson = JSON.parse(cleanedText);
+
+    const createdSuggestions = [];
+    for (const s of suggestionsJson) {
+      let scheduledDate = new Date();
+      if (s.scheduledAt && !isNaN(new Date(s.scheduledAt).getTime())) {
+        scheduledDate = new Date(s.scheduledAt);
+      }
+
+      const item = await prisma.contentCalendar.create({
+        data: {
+          companyId,
+          title: s.topic || "Suggested Topic",
+          channel: s.channel || "Email",
+          scheduledAt: scheduledDate,
+          status: "Suggested",
+          content: s.outline || "",
+          reason: s.reason || "",
+          isAiSuggested: true,
+          ownerId: req.user.id
+        }
+      });
+      createdSuggestions.push(item);
+    }
+
+    return res.json(createdSuggestions);
   } catch (error) {
     console.error("[Calendar Suggestions] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// PATCH /api/sales/calendar/:id — reschedule (drag-and-drop) and/or edit content
 export const updateCalendarEvent = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -311,7 +338,6 @@ export const updateCalendarEvent = async (req, res) => {
       if (req.body[field] !== undefined) data[field] = req.body[field];
     }
 
-    // Reschedule: validate the new date and enforce compliance windows on it.
     if (req.body.scheduledAt !== undefined) {
       const newDate = new Date(req.body.scheduledAt);
       if (isNaN(newDate.getTime())) {
@@ -343,7 +369,6 @@ export const updateCalendarEvent = async (req, res) => {
   }
 };
 
-// PATCH /api/sales/calendar/:id/status — move an item through its lifecycle
 export const transitionCalendarEvent = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -367,7 +392,7 @@ export const transitionCalendarEvent = async (req, res) => {
     }
 
     if (item.status === target) {
-      return res.json(item); // no-op
+      return res.json(item);
     }
 
     const allowed = STATUS_TRANSITIONS[item.status] || [];
@@ -377,12 +402,9 @@ export const transitionCalendarEvent = async (req, res) => {
       });
     }
 
-    // Approval gate per tenant policy (default: ADMIN-only approval).
     if (APPROVAL_REQUIRED_TARGETS.has(target) && req.user.role?.toUpperCase() !== "ADMIN") {
       return res.status(403).json({ message: "Only an ADMIN can approve calendar items" });
     }
-
-    // Moving into a send-ready state re-checks the SMS quiet-hours window.
     if (target === "Scheduled" && item.channel === "SMS") {
       const windowError = checkSmsWindow(item.scheduledAt);
       if (windowError) return res.status(422).json(windowError);
@@ -392,6 +414,17 @@ export const transitionCalendarEvent = async (req, res) => {
       where: { id: item.id },
       data: { status: target },
     });
+
+    if (target === "Scheduled") {
+      await inngest.send({
+        name: "calendar.item.scheduled",
+        data: {
+          calendarId: updated.id,
+          scheduledAt: updated.scheduledAt.toISOString()
+        }
+      });
+    }
+
     return res.json(updated);
   } catch (error) {
     console.error("[Calendar Transition] Error:", error);

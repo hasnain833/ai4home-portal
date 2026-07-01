@@ -75,7 +75,7 @@ export const getCompanyBranding = async (req, res) => {
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     // Cache branding for 5 minutes, serve stale for 10 minutes while revalidating
     res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=600");
-    
+
     return res.json(company);
   } catch (error) {
     console.error("Error fetching company branding:", error);
@@ -86,14 +86,14 @@ export const getCompanyBranding = async (req, res) => {
 export const uploadCompanyLogo = async (req, res) => {
   try {
     const session = req.user;
-    
+
     // Both ADMIN and STAFF can upload logos
     if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
     const file = req.file;
-    
+
     if (!file) {
       return res.status(400).json({ message: "No file provided" });
     }
@@ -101,9 +101,9 @@ export const uploadCompanyLogo = async (req, res) => {
     const companyId = session.companyId || "demo-company";
 
     // 1. Initialize Supabase Admin Client
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    
+
     if (!supabaseUrl || !supabaseServiceKey) {
       console.error("Missing Supabase credentials for logo upload");
       return res.status(500).json({ message: "Server configuration error" });
@@ -127,7 +127,7 @@ export const uploadCompanyLogo = async (req, res) => {
     const fileBuffer = file.buffer;
     const originalName = file.originalname || "logo.png";
     const fileName = `${companyId}/${Date.now()}_${originalName.replace(/[^a-zA-Z0-9.\-_]/g, '')}`;
-    
+
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(bucketName)
       .upload(fileName, fileBuffer, {
@@ -144,7 +144,7 @@ export const uploadCompanyLogo = async (req, res) => {
     const { data: publicUrlData } = supabase.storage
       .from(bucketName)
       .getPublicUrl(fileName);
-      
+
     const url = publicUrlData.publicUrl;
 
     // 5. Save to database

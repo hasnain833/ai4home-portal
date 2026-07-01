@@ -5,7 +5,7 @@ import prisma from "../lib/prisma.js";
 
 // Initialize Supabase Admin client
 const getSupabaseAdmin = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !supabaseServiceKey) {
     throw new Error("Missing Supabase credentials");
@@ -292,13 +292,6 @@ export const forgotPassword = async (req, res) => {
         .status(404)
         .json({ message: "No account found with this email address." });
     }
-
-    // All roles are allowed to reset their password
-    // if (user.role !== "ADMIN") {
-    //   return res
-    //     .status(403)
-    //     .json({ message: "Only administrators are allowed to reset passwords." });
-    // }
 
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,

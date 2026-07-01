@@ -34,6 +34,7 @@ import { inngest } from "./lib/inngest.js";
 import { runNurtureCampaign, handleCampaignExit } from "./inngest/functions/nurture.js";
 import { handleCsvImport } from "./inngest/functions/csv-import.js";
 import { appointmentSchedulingAgent, appointmentReminders } from "./inngest/functions/appointment.js";
+import { scheduleCalendarItem } from "./inngest/functions/calendar.js";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -47,8 +48,6 @@ app.use(
 );
 
 app.use(express.json({ limit: "10mb" }));
-// Twilio (and other SMS providers) post inbound webhooks as
-// application/x-www-form-urlencoded, so this parser is required for /inbound/sms.
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Route registrations
@@ -81,7 +80,7 @@ app.use("/api/users", usersRouter);
 // Inngest Endpoint
 app.use("/api/inngest", (req, res, next) => {
   next();
-}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders] }));
+}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders, scheduleCalendarItem] }));
 
 // Health Check
 app.get("/api/health", (req, res) => {

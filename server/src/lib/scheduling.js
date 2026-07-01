@@ -1,16 +1,5 @@
-/**
- * scheduling.js
- * Timezone-aware helpers for computing appointment slots from a company's
- * AvailabilitySetting. All persisted appointment times are UTC `Date`s; these
- * helpers translate between a tenant's wall-clock working hours (expressed in an
- * IANA timezone) and those UTC instants.
- */
-
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/**
- * Offset (ms) of `tz` from UTC at the given UTC instant. Positive east of UTC.
- */
 function getTimezoneOffsetMs(utcMs, tz) {
   const dtf = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
@@ -36,10 +25,6 @@ function getTimezoneOffsetMs(utcMs, tz) {
   return asUTC - utcMs;
 }
 
-/**
- * Convert a wall-clock time in `tz` to the corresponding UTC Date.
- * Uses the standard two-pass correction so DST transitions are handled.
- */
 export function zonedTimeToUtc(year, month1, day, hour, minute, tz) {
   const wallAsUtc = Date.UTC(year, month1 - 1, day, hour, minute, 0);
   let offset = getTimezoneOffsetMs(wallAsUtc, tz);
@@ -49,7 +34,6 @@ export function zonedTimeToUtc(year, month1, day, hour, minute, tz) {
   return new Date(result);
 }
 
-/** Wall-clock parts of `date` as observed in `tz`. */
 export function getZonedParts(date, tz) {
   const dtf = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
@@ -73,10 +57,6 @@ export function getZonedParts(date, tz) {
   };
 }
 
-/**
- * Human-friendly slot label, e.g. "Mon, Jul 7 at 2:00 PM EDT". The " at " separator is
- * relied on by the booking UI to split the day heading from the time.
- */
 export function formatSlotLabel(date, tz) {
   const day = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
@@ -100,13 +80,6 @@ function parseHHMM(str, fallbackH, fallbackM) {
   return [h, m];
 }
 
-/**
- * Generate candidate slot start-times for a single calendar day (in the tenant tz),
- * stepping by (slotDuration + buffer). Returns UTC Date objects.
- *
- * @param {Date}   dayAnchor UTC instant whose tenant-local date defines the day to generate
- * @param {Object} setting   AvailabilitySetting-like { dayStart, dayEnd, slotDuration, bufferMinutes, workingDays, timezone }
- */
 export function generateDaySlots(dayAnchor, setting) {
   const tz = setting.timezone || "America/New_York";
   const { year, month, day, weekday } = getZonedParts(dayAnchor, tz);
@@ -136,20 +109,6 @@ export function generateDaySlots(dayAnchor, setting) {
   return slots;
 }
 
-/**
- * Generate available slots across the next `days` calendar days starting from `from`,
- * excluding any start time that collides with a busy interval (existing appointments
- * and/or external calendar busy blocks). Two intervals collide if they overlap once
- * the slot duration is taken into account.
- *
- * @param {Object} opts
- * @param {Object} opts.setting       AvailabilitySetting
- * @param {Date}   opts.from          earliest acceptable start (usually now + leadMinutes)
- * @param {number} opts.days          how many days forward to scan
- * @param {Array<{start:Date,end:Date}>} opts.busy busy intervals to subtract
- * @param {number} opts.limit         max slots to return
- * @returns {Date[]} available UTC start times, ascending
- */
 export function computeAvailableSlots({ setting, from, days = 14, busy = [], limit = 100 }) {
   const tz = setting.timezone || "America/New_York";
   const duration = (setting.slotDuration || 30) * 60000;
@@ -171,7 +130,6 @@ export function computeAvailableSlots({ setting, from, days = 14, busy = [], lim
       if (out.length >= limit) break;
     }
   }
-  // Dedupe (consecutive day anchors can overlap) and sort.
   const seen = new Set();
   return out
     .filter((s) => {

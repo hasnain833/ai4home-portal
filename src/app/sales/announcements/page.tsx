@@ -22,6 +22,7 @@ import {
   CheckCircle,
   FileText
 } from "lucide-react";
+import { toast } from "sonner";
 import {
   Select,
   SelectContent,
@@ -51,7 +52,7 @@ export default function AnnouncementsPage() {
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
-    alert("Broadcast announcement queued in Inngest batch pipeline successfully!");
+    toast.success("Broadcast announcement queued in Inngest batch pipeline successfully!");
     setActiveTab("past");
   };
 

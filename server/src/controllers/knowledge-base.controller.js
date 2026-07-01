@@ -41,7 +41,7 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
 
     const file = req.file;
     const communityId = req.body.communityId;
-    
+
     if (!file) {
       return res.status(400).json({ message: "No file provided" });
     }
@@ -49,12 +49,12 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
     const companyId = session.companyId || "demo-company";
 
     // 1. Initialize Supabase Admin Client
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    
+
     if (!supabaseUrl || !supabaseServiceKey) {
-       console.error("Missing Supabase credentials for KB upload");
-       return res.status(500).json({ message: "Server configuration error" });
+      console.error("Missing Supabase credentials for KB upload");
+      return res.status(500).json({ message: "Server configuration error" });
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -73,7 +73,7 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
     const fileBuffer = file.buffer;
     const originalName = file.originalname || "document";
     const fileName = `${companyId}/${Date.now()}_${originalName.replace(/[^a-zA-Z0-9.\-_]/g, '')}`;
-    
+
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from(bucketName)
       .upload(fileName, fileBuffer, {
@@ -90,7 +90,7 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
     const { data: publicUrlData } = supabase.storage
       .from(bucketName)
       .getPublicUrl(fileName);
-      
+
     const url = publicUrlData.publicUrl;
     const size = formatFileSize(file.size);
 

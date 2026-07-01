@@ -2,6 +2,7 @@ import prisma from "../lib/prisma.js";
 import { calculateWarrantyYear } from "../lib/utils.js";
 import { generateTicketId } from "../lib/ticket-utils.js";
 import { MessagingService } from "../services/messaging-service.js";
+import { getMessagingConfig } from "../lib/messaging-config.js";
 
 export const getTickets = async (req, res) => {
   try {
@@ -169,18 +170,12 @@ export const updateTicket = async (req, res) => {
     // Get old ticket to check if status changed and verify company
     const oldTicket = await prisma.ticket.findUnique({
       where: { id },
-      include: { 
+      include: {
         homeowner: {
-          include: { 
-            company: {
-              include: {
-                integrations: {
-                  where: { platform: "BREVO_EMAIL" }
-                }
-              }
-            }
+          include: {
+            company: true
           }
-        } 
+        }
       }
     });
 
@@ -222,24 +217,7 @@ export const updateTicket = async (req, res) => {
       if (oldTicket.homeowner?.email) {
         try {
           // Extract SMTP config if available
-          let smtpConfig = null;
-          if (oldTicket.homeowner.company?.integrations) {
-            const emailInt = oldTicket.homeowner.company.integrations.find(i => i.platform === "BREVO_EMAIL" && i.isActive);
-            if (emailInt) {
-              smtpConfig = {
-                host: emailInt.smtpHost,
-                port: emailInt.smtpPort,
-                user: emailInt.apiKey,
-                pass: emailInt.secretKey,
-                senderEmail: emailInt.senderEmail,
-                senderName: emailInt.senderName,
-              };
-            }
-          }
-
-          // Attempting to send an email, not failing the request if mail fails.
-          // Routed through MessagingService so suppressed (bounced/complained/unsubscribed)
-          // homeowners are not emailed.
+          const { smtpConfig } = await getMessagingConfig(oldTicket.homeowner.companyId);
           const mailResult = await MessagingService.sendTicketStatusUpdate({
             companyId: oldTicket.homeowner.companyId,
             to: oldTicket.homeowner.email,

@@ -43,6 +43,7 @@ import {
   ChevronRight,
   AlertCircle
 } from "lucide-react";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface BlogPost {
@@ -186,7 +187,7 @@ export default function BlogDraftingPage() {
 
   const handleSavePost = () => {
     if (!editorTitle.trim()) {
-      alert("Title is required.");
+      toast.error("Title is required.");
       return;
     }
 
@@ -246,7 +247,7 @@ export default function BlogDraftingPage() {
   // Simulate AI blog generation
   const handleGenerateAIDraft = () => {
     if (!aiPrompt.trim()) {
-      alert("Please enter a topic prompt or keywords.");
+      toast.error("Please enter a topic prompt or keywords.");
       return;
     }
     setGeneratingDraft(true);

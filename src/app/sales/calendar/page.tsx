@@ -16,36 +16,81 @@ import {
   Bell,
   CheckCircle2
 } from "lucide-react";
-
-const mockAISuggestions = [
-  { id: "S-1", topic: "Post-COE Followup Survey", channel: "Email", date: "June 18", reason: "Gap detected: 14 days without customer contact post COE", outline: "Drip campaign trigger to gather testimonials and survey responses." },
-  { id: "S-2", topic: "Mortgage Interest Rate Drop Alert", channel: "SMS", date: "June 20", reason: "News Trigger: Interest rates dropped below 5.8%", outline: "Broadcast SMS alert to cold leads detailing updated monthly estimates." }
-];
+import { toast } from "sonner";
 
 export default function ContentCalendarPage() {
-  const [suggestions, setSuggestions] = useState(mockAISuggestions);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const fetchEvents = async () => {
+    try {
+      const res = await fetch("/api/sales/calendar");
+      if (res.ok) {
+        const data = await res.json();
+        setEvents(data);
+        setSuggestions(data.filter((e: any) => e.status === "Suggested"));
+      }
+    } catch (err) {
+      console.error("Failed to fetch calendar events", err);
+    }
+  };
 
   useEffect(() => {
-    const fetchEvents = async () => {
-      try {
-        const res = await fetch("/api/sales/calendar");
-        if (res.ok) {
-          const data = await res.json();
-          setEvents(data);
-        }
-      } catch (err) {
-        console.error("Failed to fetch calendar events", err);
-      }
-    };
     fetchEvents();
   }, []);
 
-  const handleApproveSuggestion = (id: string) => {
-    setSuggestions(prev => prev.filter(s => s.id !== id));
-    alert("Suggestion approved and converted to draft calendar slot!");
+  const handleGenerateSuggestions = async () => {
+    setIsGenerating(true);
+    try {
+      const res = await fetch("/api/sales/calendar/suggestions", { method: "POST" });
+      if (res.ok) {
+        await fetchEvents();
+      } else {
+        toast.error("Failed to generate suggestions.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleApproveSuggestion = async (id: string) => {
+    try {
+      const res = await fetch(`/api/sales/calendar/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "Draft" })
+      });
+      if (res.ok) {
+        toast.success("Suggestion approved and converted to draft calendar slot!");
+        fetchEvents();
+      } else {
+        toast.error("Failed to approve suggestion.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDismissSuggestion = async (id: string) => {
+    try {
+      const res = await fetch(`/api/sales/calendar/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "Dismissed" })
+      });
+      if (res.ok) {
+        fetchEvents();
+      } else {
+        toast.error("Failed to dismiss suggestion.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
@@ -105,22 +150,42 @@ export default function ContentCalendarPage() {
                           <div key={s.id} className="p-3 border dark:border-slate-800 bg-white dark:bg-slate-950 rounded-xl space-y-2 shadow-sm">
                             <div className="flex justify-between items-center text-[10px]">
                               <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 font-semibold">{s.channel}</Badge>
-                              <span className="text-slate-400 font-bold">{s.date}</span>
+                              <span className="text-slate-400 font-bold">
+                                {s.scheduledAt ? new Date(s.scheduledAt).toLocaleDateString() : s.date}
+                              </span>
                             </div>
-                            <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">{s.topic}</h4>
-                            <p className="text-xs text-muted-foreground">{s.outline}</p>
+                            <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">{s.title || s.topic}</h4>
+                            <p className="text-xs text-muted-foreground">{s.content || s.outline}</p>
                             <p className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold italic">★ {s.reason}</p>
-                            <Button
-                              onClick={() => handleApproveSuggestion(s.id)}
-                              className="w-full h-8 text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg mt-2"
-                            >
-                              Approve Suggestion
-                            </Button>
+                            <div className="flex gap-2 mt-2">
+                              <Button
+                                onClick={() => handleApproveSuggestion(s.id)}
+                                className="flex-1 h-8 text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg"
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                onClick={() => handleDismissSuggestion(s.id)}
+                                variant="outline"
+                                className="h-8 text-xs font-semibold rounded-lg text-slate-600 hover:text-red-600"
+                              >
+                                Dismiss
+                              </Button>
+                            </div>
                           </div>
                         ))
                       ) : (
                         <p className="text-sm text-center text-slate-400 py-6">All suggestions processed.</p>
                       )}
+                      
+                      <Button 
+                        onClick={handleGenerateSuggestions} 
+                        disabled={isGenerating}
+                        className="w-full mt-2" 
+                        variant="secondary"
+                      >
+                        {isGenerating ? "Generating..." : "Generate New Suggestions"}
+                      </Button>
                     </div>
                   </div>
                 )}

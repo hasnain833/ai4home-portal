@@ -1,16 +1,6 @@
 import { google } from "googleapis";
 import prisma from "../lib/prisma.js";
 
-/**
- * Google Calendar + Meet integration for two-way busy/free sync and conference link
- * creation. Tokens are stored per-company in CalendarConnection (provider GOOGLE).
- *
- * Required env:
- *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
- *   (redirect URI must exactly match one registered in the Google Cloud console,
- *    e.g. https://app.example.com/api/sales/scheduling/google/callback)
- */
-
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/calendar.readonly",
@@ -30,11 +20,6 @@ function newOAuthClient() {
   );
 }
 
-/**
- * Build the consent URL. `state` carries the companyId (and any return path) so the
- * callback can attribute the tokens. `prompt: "consent"` + `access_type: "offline"`
- * ensures we receive a refresh_token even on re-auth.
- */
 export function getAuthUrl(state) {
   const client = newOAuthClient();
   return client.generateAuthUrl({
@@ -46,13 +31,10 @@ export function getAuthUrl(state) {
   });
 }
 
-/** Exchange an authorization code for tokens and the connected account email. */
 export async function exchangeCodeAndStore(companyId, code) {
   const client = newOAuthClient();
   const { tokens } = await client.getToken(code);
   client.setCredentials(tokens);
-
-  // Capture which Google account was connected (for display).
   let accountEmail = null;
   try {
     const oauth2 = google.oauth2({ version: "v2", auth: client });
@@ -78,10 +60,6 @@ export async function exchangeCodeAndStore(companyId, code) {
   });
 }
 
-/**
- * Return an authenticated OAuth2 client for the company, or null if not connected.
- * Refreshed access tokens are persisted automatically.
- */
 export async function getAuthedClient(companyId) {
   const conn = await prisma.calendarConnection.findUnique({
     where: { companyId_provider: { companyId, provider: "GOOGLE" } },
@@ -132,10 +110,6 @@ export async function disconnect(companyId) {
   }
 }
 
-/**
- * Query busy intervals on the connected calendar between two instants.
- * Returns [{ start: Date, end: Date }]. Falls back to [] when not connected.
- */
 export async function getBusyIntervals(companyId, timeMin, timeMax) {
   const authed = await getAuthedClient(companyId);
   if (!authed) return [];
@@ -157,10 +131,6 @@ export async function getBusyIntervals(companyId, timeMin, timeMax) {
   }
 }
 
-/**
- * Create a calendar event with a Google Meet conference link.
- * Returns { eventId, meetLink, htmlLink } or null when not connected / on error.
- */
 export async function createEventWithMeet(companyId, { summary, description, start, end, attendees = [], timezone }) {
   const authed = await getAuthedClient(companyId);
   if (!authed) return null;

@@ -52,7 +52,7 @@ export class MailService {
     return this.transporters.get(cacheKey);
   }
 
-  static async sendEmail({ to, subject, html, fromName, fromEmail, smtpConfig }) {
+  static async sendEmail({ to, subject, html, fromName, fromEmail, smtpConfig, headers }) {
     if (!smtpConfig && (!this.SMTP_USER || !this.SMTP_PASS)) {
       console.warn("[Mail Service] SMTP credentials missing and no custom config provided. Email will not be sent.");
       return { success: false, error: "SMTP credentials missing" };
@@ -78,6 +78,7 @@ export class MailService {
         to,
         subject,
         html,
+        headers,
       });
 
       console.log(`[Mail Service] ✅ Email sent successfully!`);

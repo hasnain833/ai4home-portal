@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 
 // Initialize Supabase Admin client
 const getSupabaseAdmin = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !supabaseServiceKey) {
     throw new Error("Missing Supabase credentials");
@@ -15,7 +15,7 @@ const getSupabaseAdmin = () => {
 export const getCompanies = async (req, res) => {
   try {
     const session = req.user;
-    
+
     // Only Admin can fetch all companies
     if (!session || session.role !== "ADMIN") {
       return res.status(403).json({ message: "Unauthorized" });

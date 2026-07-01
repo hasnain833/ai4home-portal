@@ -276,80 +276,7 @@ export const processInbound = async (req, res) => {
   }
 };
 
-export const processTwilioInboundSms = async (req, res) => {
-  try {
-    const { From, Body } = req.body;
-    // companyId might be passed via query param (e.g. ?companyId=123) by the Twilio webhook URL
-    const companyId = req.query.companyId;
 
-    if (!From || !Body || !companyId) {
-      console.warn("[Twilio Webhook] Missing From, Body, or companyId");
-      return res.status(400).send("Missing required parameters");
-    }
-
-    const sender = From;
-    const body = Body;
-    const channel = "SMS";
-
-    const normalizedContact = sender.replace(/\D/g, "");
-
-    // Find the lead to ensure it exists
-    const leads = await prisma.lead.findMany({
-      where: {
-        companyId,
-        phone: { contains: normalizedContact.slice(-10) },
-      },
-    });
-
-    // Handle Compliance Keywords
-    const result = await ComplianceService.handleInboundKeyword(
-      companyId,
-      sender,
-      body,
-      channel
-    );
-
-    // If it's a compliance action, Twilio expects TwiML response to send back the reply
-    if (result.isComplianceAction) {
-      const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${result.replyText}</Message></Response>`;
-      res.set("Content-Type", "text/xml");
-      return res.send(twiml);
-    }
-
-    // It's a normal reply
-    if (leads.length > 0) {
-      for (const lead of leads) {
-        // Log timeline event
-        await prisma.leadTimeline.create({
-          data: {
-            leadId: lead.id,
-            type: "REPLY_RECEIVED",
-            description: `Received inbound SMS reply: "${body.slice(0, 150)}${body.length > 150 ? "..." : ""}"`,
-            metadata: { body, channel, sender },
-          },
-        });
-
-        // Exit active campaigns with reason REPLY via Inngest
-        const { inngest } = await import("../lib/inngest.js");
-        await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
-        // Kick off the appointment-scheduling agent for this SMS reply.
-        await inngest.send({
-          name: "lead.reply.received",
-          data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
-        });
-      }
-    }
-
-    // Always return empty TwiML if no automatic reply is needed
-    res.set("Content-Type", "text/xml");
-    return res.send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
-  } catch (error) {
-    console.error("[Twilio Webhook] Error:", error);
-    // Return empty TwiML on error to avoid Twilio failing aggressively
-    res.set("Content-Type", "text/xml");
-    return res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
-  }
-};
 
 export const unsubscribeWebhook = async (req, res) => {
   try {
@@ -471,11 +398,6 @@ export const unsubscribeWebhook = async (req, res) => {
   }
 };
 
-/**
- * Brevo transactional email event webhook. Brevo POSTs delivery/engagement/failure events
- * either as a single object or batched under `items`/an array. Each event carries `event`,
- * `email`, and (for bounces) `reason`. companyId is supplied via the webhook URL `?companyId=`.
- */
 export const processBrevoEmailEvents = async (req, res) => {
   try {
     const companyId = req.query.companyId || req.body?.companyId;
@@ -487,10 +409,10 @@ export const processBrevoEmailEvents = async (req, res) => {
     const events = Array.isArray(raw)
       ? raw
       : Array.isArray(raw?.items)
-      ? raw.items
-      : Array.isArray(raw?.events)
-      ? raw.events
-      : [raw];
+        ? raw.items
+        : Array.isArray(raw?.events)
+          ? raw.events
+          : [raw];
 
     let handled = 0;
     for (const ev of events) {
@@ -523,9 +445,6 @@ export const processBrevoEmailEvents = async (req, res) => {
   }
 };
 
-/**
- * Brevo transactional SMS event webhook (delivered / hard_bounce / blocked / unsubscribed …).
- */
 export const processBrevoSmsEvents = async (req, res) => {
   try {
     const companyId = req.query.companyId || req.body?.companyId;
@@ -537,8 +456,8 @@ export const processBrevoSmsEvents = async (req, res) => {
     const events = Array.isArray(raw)
       ? raw
       : Array.isArray(raw?.items)
-      ? raw.items
-      : [raw];
+        ? raw.items
+        : [raw];
 
     let handled = 0;
     for (const ev of events) {
@@ -553,7 +472,7 @@ export const processBrevoSmsEvents = async (req, res) => {
         contact: phone,
         rawEventType: eventType,
         errorCode: ev.errorCode || ev.error_code || null,
-        metadata: { messageId: ev.messageId || ev["message-id"], reason: ev.reason, ts: ev.ts || ev.date },
+        metadata: { messageId: ev.messageId || ev["message-id"], reason: ev.reason, ts: ev.ts || ev.date, tag: ev.tag },
       });
       if (result.handled) handled++;
     }
@@ -565,38 +484,7 @@ export const processBrevoSmsEvents = async (req, res) => {
   }
 };
 
-/**
- * Twilio message status callback (form-encoded): MessageStatus = queued|sent|delivered|
- * undelivered|failed, plus ErrorCode for failures (21610 = STOP/opt-out, 30007 = carrier spam).
- * companyId via `?companyId=`. Responds with empty TwiML so Twilio doesn't retry.
- */
-export const processTwilioStatusCallback = async (req, res) => {
-  try {
-    const companyId = req.query.companyId;
-    const { MessageStatus, To, MessageSid, ErrorCode } = req.body || {};
 
-    if (companyId && To && MessageStatus) {
-      await ComplianceService.handleMessageEvent({
-        companyId,
-        channel: "SMS",
-        provider: "TWILIO",
-        contact: To,
-        rawEventType: MessageStatus,
-        errorCode: ErrorCode || null,
-        metadata: { messageSid: MessageSid },
-      });
-    } else {
-      console.warn("[Twilio Status] Missing companyId, To, or MessageStatus");
-    }
-
-    res.set("Content-Type", "text/xml");
-    return res.send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
-  } catch (error) {
-    console.error("[Twilio Status] Error:", error);
-    res.set("Content-Type", "text/xml");
-    return res.status(500).send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
-  }
-};
 
 export const processBrevoInboundEmail = async (req, res) => {
   try {
@@ -616,9 +504,6 @@ export const processBrevoInboundEmail = async (req, res) => {
     for (const item of items) {
       const fromEmail = item.From?.Address;
       const subject = item.Subject || "";
-      // Brevo's inbound-parse payload uses RawTextBody / RawHtmlBody (and
-      // ExtractedMarkdownMessage). Fall back across the known field names so the reply body
-      // is captured regardless of which Brevo provides.
       const textBody = item.RawTextBody || item.TextBody || item.ExtractedMarkdownMessage || "";
       const htmlBody = item.RawHtmlBody || item.HtmlBody || "";
 
@@ -671,6 +556,86 @@ export const processBrevoInboundEmail = async (req, res) => {
     });
   } catch (error) {
     console.error("[Brevo Webhook] Error processing inbound email:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const processBrevoInboundSms = async (req, res) => {
+  try {
+    const companyId = req.query.companyId || req.body?.companyId;
+
+    if (!companyId) {
+      return res.status(400).json({ message: "companyId is required." });
+    }
+
+    const raw = req.body;
+    const items = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.items)
+        ? raw.items
+        : [raw];
+
+    let processedCount = 0;
+
+    for (const item of items) {
+      const sender = item.from || item.From || item.sender;
+      const body = item.text || item.Text || item.body || item.Body || "";
+
+      if (!sender || !body) {
+        console.warn("[Brevo SMS Webhook] Item is missing from/text, skipping.");
+        continue;
+      }
+
+      const normalizedContact = sender.replace(/\D/g, "");
+
+      // Check compliance keywords (STOP, UNSUBSCRIBE, etc.)
+      const result = await ComplianceService.handleInboundKeyword(
+        companyId,
+        sender,
+        body,
+        "SMS"
+      );
+
+      if (result.isComplianceAction) {
+        processedCount++;
+        continue; // Compliance action handled; move on
+      }
+
+      // Find matching leads
+      const leads = await prisma.lead.findMany({
+        where: {
+          companyId,
+          phone: { contains: normalizedContact.slice(-10) },
+        },
+      });
+
+      for (const lead of leads) {
+        await prisma.leadTimeline.create({
+          data: {
+            leadId: lead.id,
+            type: "REPLY_RECEIVED",
+            description: `Received inbound SMS reply: "${body.slice(0, 150)}${body.length > 150 ? "..." : ""}"`,
+            metadata: { body, channel: "SMS", sender },
+          },
+        });
+
+        const { inngest } = await import("../lib/inngest.js");
+        await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
+        await inngest.send({
+          name: "lead.reply.received",
+          data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
+        });
+      }
+
+      processedCount++;
+    }
+
+    return res.json({
+      success: true,
+      processedItems: processedCount,
+    });
+  } catch (error) {
+    console.error("[Brevo SMS Webhook] Error processing inbound SMS:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

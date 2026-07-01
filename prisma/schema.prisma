@@ -43,6 +43,7 @@ model User {
   lastActiveWorkspace String?            @default("warranty")
   ownedLeads          Lead[]             @relation("LeadOwner")
   agentAppointments   SalesAppointment[] @relation("AgentAppointments")
+  contentCalendars    ContentCalendar[]
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 }
@@ -87,7 +88,7 @@ model Integration {
   id          String  @id @default(cuid())
   companyId   String
   company     Company @relation(fields: [companyId], references: [id])
-  platform    String // "BUILTOPIA", "BUILDERTREND", "BREVO_EMAIL", "BREVO_SMS", "TWILIO"
+  platform    String // "BUILTOPIA", "BUILDERTREND", "BREVO_EMAIL", "BREVO_SMS"
   apiKey      String?
   secretKey   String?
   environment String  @default("production")
@@ -352,6 +353,12 @@ model CampaignStep {
   body            String? // For email or SMS
   templateId      String? // Reference to EmailTemplate
   template        EmailTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  sentCount       Int            @default(0)
+  deliveredCount  Int            @default(0)
+  openedCount     Int            @default(0)
+  clickedCount    Int            @default(0)
+  bouncedCount    Int            @default(0)
+  complaintCount  Int            @default(0)
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 }
@@ -394,10 +401,12 @@ model ContentCalendar {
   scheduledAt   DateTime
   status        String   @default("Draft") // "Suggested" | "Draft" | "Approved" | "Scheduled" | "Sent" | "Published" | "Failed" | "Dismissed"
   content       String   @db.Text
-  subject       String?
-  reason        String? // AI suggestion context
-  outline       String? // AI suggestion outline
+  subject       String? // Optionally store subject for email channel
+  reason        String? // Rationale from AI
+  outline       String? // Recommended structure/content from AI
   isAiSuggested Boolean  @default(false)
+  ownerId       String?
+  owner         User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
