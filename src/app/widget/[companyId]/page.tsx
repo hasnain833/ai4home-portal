@@ -100,8 +100,8 @@ export default function WidgetPage() {
           if (bp.updateUser) {
             try {
               bp.updateUser({
-                data: { companyId, role: "homeowner" },
-                tags: { companyId, role: "homeowner" },
+                data: { companyId, role: "staff" },
+                tags: { companyId, role: "staff" },
               });
             } catch (err) {
               console.error("Failed to update user in Botpress:", err);
