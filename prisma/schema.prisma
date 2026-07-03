@@ -7,6 +7,7 @@ datasource db {
 }
 
 enum Role {
+  SUPER_ADMIN
   ADMIN
   STAFF
   HOMEOWNER
@@ -70,6 +71,7 @@ model Company {
   maxSmsPerHour           Int                     @default(60)
   complianceOptInRequired Boolean                 @default(true)
   salesEnabled            Boolean                 @default(true)
+  warrantyEnabled         Boolean                 @default(true)
   suppressionList         SuppressionList[]
   campaigns               Campaign[]
   emailTemplates          EmailTemplate[]
@@ -77,6 +79,7 @@ model Company {
   salesKB                 SalesKB[]
   availabilitySetting     AvailabilitySetting?
   calendarConnections     CalendarConnection[]
+  scrapedNews             ScrapedNews[]
   // Default appointment-agent behaviour for replies not tied to a campaign that sets its own mode.
   // OFF | SIMPLE | AI
   appointmentMode         String                  @default("AI")
@@ -487,4 +490,21 @@ model SchedulingConversation {
   updatedAt    DateTime @updatedAt
 
   @@index([leadId])
+}
+
+// ─── News Scraping Agent (SW-NEWS) ──────────────────────────────────────────
+
+model ScrapedNews {
+  id             String   @id @default(cuid())
+  companyId      String   // Using companyId allows filtering news by tenant if needed
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title          String
+  originalUrl    String
+  summary        String   @db.Text
+  source         String   @default("Google News RSS")
+  imageUrl       String?
+  publishedAt    DateTime
+  wasBroadcasted Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }

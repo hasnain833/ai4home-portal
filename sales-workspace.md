@@ -55,11 +55,11 @@ This document serves as the single, authoritative checklist and status tracker f
 
 ## 🤖 6. News Scraping Agent (SW-NEWS)
 > Collects and AI-summarizes housing market news.
-- [ ] **Configurable sources (SW-NEWS-001)**: RSS, APIs, web pages.
-- [ ] **Scheduled scraping (SW-NEWS-002)**: Inngest cron.
-- [ ] **AI summarization (SW-NEWS-003)**: Summarize with Claude + tag.
-- [ ] **Compliance (SW-NEWS-005)**: Honor robots.txt, rate limit.
-- [ ] **Failure isolation (SW-NEWS-006)**: Quarantine failing sources.
+- [x] **Configurable sources (SW-NEWS-001)**: RSS, APIs, web pages.
+- [x] **Scheduled scraping (SW-NEWS-002)**: Inngest cron.
+- [x] **AI summarization (SW-NEWS-003)**: Summarize with Claude + tag.
+- [x] **Compliance (SW-NEWS-005)**: Honor robots.txt, rate limit.
+- [x] **Failure isolation (SW-NEWS-006)**: Quarantine failing sources.
 
 ## 🤖 7. Blog Drafting Agent (SW-BLOG)
 > Generates blog post drafts from news items.
@@ -78,10 +78,10 @@ This document serves as the single, authoritative checklist and status tracker f
 - [ ] **Audit & analytics (SW-AMK-005)**.
 
 ## 🤖 9. Sales KB & Brand Voice Agent (SW-KB / SW-AGT)
-> Manages Sales workspace KB.
-- [ ] **Document upload API (SW-KB-001)**.
-- [ ] **Chunking & embedding (SW-KB-002)**: Inngest step + vector upsert.
-- [ ] **Lifecycle (SW-KB-003)**: Soft-delete.
+> Manages Sales workspace KB. **Vector store decision: use pgvector on the existing Supabase Postgres — NOT Pinecone/FAISS/Chroma.** See "RAG Knowledge Base" section below for rationale.
+- [x] **Document upload API (SW-KB-001)**: Two stores already exist — `knowledgeBaseDocument` (Supabase storage upload) + `salesKB` (URL/metadata). These hold the FILES only; vector layer is the missing half.
+- [ ] **Chunking & embedding (SW-KB-002)**: Inngest step + vector upsert into pgvector `kb_chunks` table (companyId-scoped).
+- [ ] **Lifecycle (SW-KB-003)**: Soft-delete (cascade delete of chunks when a doc is removed).
 - [ ] **Category tagging (SW-KB-004)**.
 - [ ] **Citation visibility (SW-KB-005)**.
 - [ ] **Brand voice & company profile (SW-KB-006)**.
@@ -103,3 +103,44 @@ This document serves as the single, authoritative checklist and status tracker f
 - [ ] **CSV virus scan** (NFR-S-006).
 - [ ] **Merge-field injection-safe rendering** (NFR-S-008).
 - [ ] **AI PII minimization** (NFR-S-007).
+
+
+
+
+## 🧠 RAG Knowledge Base for Nurture & Sales Agents (do later)
+> Original ask: "Build a KB for the Nurture and Sales Agents using Pinecone."
+> **DECISION: use pgvector on the existing Supabase Postgres instead of Pinecone/FAISS/Chroma.**
+
+**Why pgvector (not Pinecone/FAISS/Chroma):**
+- No new vendor/service — it's the Postgres we already run on Supabase (just enable the `vector` extension).
+- Data lives on the live production server (same DB the agents already query) — meets the "data must be on live server" requirement with no external call.
+- Minimal project size — vectors are DB rows, NOT files in the repo/deploy bundle (~6 KB per chunk; 10k chunks ≈ ~60 MB in DB, 0 MB added to app). FAISS = in-memory index file to manage; Chroma = a whole extra service + disk volume.
+- Multi-tenant ready — reuse the existing `companyId` scoping on the vector rows.
+
+**Open decision before build:** embedding provider — Anthropic key exists but Anthropic serves NO embeddings. Pick OpenAI `text-embedding-3-small` (1536-dim) or Voyage. Confirm before implementing.
+
+**Where it plugs into the agents:**
+- **Nurture Agent (`server/src/inngest/functions/nurture.js`) has NO LLM step today** — it's a deterministic template drip sender (merge fields only, `nurture.js:163-171`). A KB can't feed it until we add an AI generation step (either an "AI-personalized" step type, or route lead replies through the AI agent). Prereq, not a plug-in.
+- **Appointment Agent (`server/src/inngest/functions/appointment.js`) is the clean insertion point** — it already runs a Claude tool-calling loop. Its prompt currently ESCALATES pricing/product/warranty questions because it has no knowledge source (`appointment.js:128`). Add a retrieval step before `claude-decide` (`appointment.js:230`): embed lead's message → pgvector top-k query → inject chunks + citations into the system prompt.
+
+**Build checklist:**
+- [ ] Enable `pgvector` extension on Supabase Postgres.
+- [ ] Prisma migration: `kb_chunks` table (id, companyId, documentId, content, embedding vector, metadata) + IVFFlat/HNSW index. Map vector type via `Unsupported("vector")` / raw SQL.
+- [ ] `server/src/services/vector-store.service.js`: embed(text), upsertChunks(), query(companyId, text, k).
+- [ ] Inngest step on document upload: extract text → chunk → embed → upsert (soft-delete cascade on doc removal).
+- [ ] Retrieval injection into appointment agent prompt (before `claude-decide`) with source citations.
+- [ ] (Prereq for Nurture) add an AI generation step so the KB has something to feed there.
+
+[ ] Build the KB (see decision + checklist above).
+[ ] Prepare the Super Admin portal, allowing administrators to enable or disable workspaces for each tenant.
+[ ] When a new tenant signs up, keep the entire dashboard in a read-only, greyed-out state and display a message informing them that they must complete payment or clear any outstanding invoices before they can access the portal.
+[ ] When a new tenant signs up, automatically send an email notification to Steven informing him of the new registration. He can then upload the tenant’s invoice in the dashboard and enable the purchased workspaces.
+[ ] After an invoice is uploaded, automatically share it with the tenant via email.
+[ ] Send an onboarding/welcome email to the tenant after their first invoice has been paid.
+[ ] Create the Terms of Service and Privacy Policy pages.
+[ ] Enhance the Nurture Agent to automatically share news, mortgage rates, and home pricing updates using content generated by the blog scraper.
+[ ] Complete the following Sales Workspace features by 10 July:
+[ ] AI Content Calendar
+[ ] Appointment Calendar
+[ ] Lead Management
+[ ] Blog Scraper

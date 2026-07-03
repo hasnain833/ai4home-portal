@@ -15,6 +15,7 @@ import csvRouter from "./routes/csv.js";
 import salesDashboardRouter from "./routes/sales-dashboard.js";
 import messagingSettingsRouter from "./routes/messaging-settings.js";
 import schedulingRouter from "./routes/scheduling.js";
+import newsRouter from "./routes/news.js";
 
 // Core Warranty Routes
 import dashboardRouter from "./routes/dashboard.js";
@@ -35,6 +36,7 @@ import { runNurtureCampaign, handleCampaignExit } from "./inngest/functions/nurt
 import { handleCsvImport } from "./inngest/functions/csv-import.js";
 import { appointmentSchedulingAgent, appointmentReminders } from "./inngest/functions/appointment.js";
 import { scheduleCalendarItem } from "./inngest/functions/calendar.js";
+import { scrapeNews } from "./inngest/functions/news-scraper.js";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -64,6 +66,7 @@ app.use("/api/sales/segments", segmentsRouter);
 app.use("/api/sales/csv", csvRouter);
 app.use("/api/sales/dashboard", salesDashboardRouter);
 app.use("/api/sales/settings/messaging", messagingSettingsRouter);
+app.use("/api/sales/news", newsRouter);
 
 // Core Warranty Route Mounts
 app.use("/api/dashboard", dashboardRouter);
@@ -80,7 +83,7 @@ app.use("/api/users", usersRouter);
 // Inngest Endpoint
 app.use("/api/inngest", (req, res, next) => {
   next();
-}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders, scheduleCalendarItem] }));
+}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders, scheduleCalendarItem, scrapeNews] }));
 
 // Health Check
 app.get("/api/health", (req, res) => {
