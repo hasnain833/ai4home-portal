@@ -28,6 +28,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  isSuperAdmin?: boolean;
   avatar?: string;
   companyId?: string;
   companyName?: string;
@@ -43,7 +44,11 @@ export interface User {
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, password: string, redirectPath?: string) => Promise<void>;
+  login: (
+    email: string,
+    password: string,
+    redirectPath?: string,
+  ) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
   updateAvatar: (avatarUrl: string) => void;
@@ -84,21 +89,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event: AuthChangeEvent) => {
-        if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
-          // Avoid double-fetch: INITIAL_SESSION fires on mount, skip the manual call below
-          if (event === "INITIAL_SESSION") initialFetchDone = true;
-          fetchUser();
-        } else if (event === "SIGNED_OUT") {
-          if (mounted) {
-            setUser(null);
-            setIsLoading(false);
-          }
-          router.push("/login");
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+        // Avoid double-fetch: INITIAL_SESSION fires on mount, skip the manual call below
+        if (event === "INITIAL_SESSION") initialFetchDone = true;
+        fetchUser();
+      } else if (event === "SIGNED_OUT") {
+        if (mounted) {
+          setUser(null);
+          setIsLoading(false);
         }
+        router.push("/login");
       }
-    );
+    });
 
     // Fallback: if onAuthStateChange didn't fire INITIAL_SESSION (older SDK), fetch manually
     setTimeout(() => {
@@ -113,10 +118,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [router]); // router is stable
 
-
-  const login = async (email: string, password: string, redirectPath?: string) => {
+  const login = async (
+    email: string,
+    password: string,
+    redirectPath?: string,
+  ) => {
     setIsLoading(true);
     try {
+      const response = await fetch("/api/auth/superadmin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        const body = await response.json();
+        if (body.isSuperAdmin) {
+          router.push(redirectPath || "/admin");
+          return;
+        }
+      }
+
       const { error } = await supabaseRef.current.auth.signInWithPassword({
         email,
         password,
@@ -133,7 +155,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
-      await supabaseRef.current.auth.signOut();
+      if (user?.isSuperAdmin) {
+        await fetch("/api/auth/logout", { method: "POST" });
+      } else {
+        await supabaseRef.current.auth.signOut();
+      }
     } catch (err) {
       console.error("Logout API failed", err);
     }
@@ -156,7 +182,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.message || "Failed to update profile on server");
+          throw new Error(
+            errData.message || "Failed to update profile on server",
+          );
         }
 
         const serverData = await response.json();

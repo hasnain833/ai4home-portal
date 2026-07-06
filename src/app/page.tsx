@@ -11,7 +11,11 @@ export default function Home() {
   useEffect(() => {
     if (!isLoading) {
       if (user) {
-        // ── ORIGINAL multi-workspace routing — re-enable when hub & sales are ready ──
+        if (user.isSuperAdmin) {
+          router.push("/admin");
+          return;
+        }
+
         const storedLastWorkspace = localStorage.getItem("last-workspace");
         const getCookie = (name: string) => {
           const value = `; ${document.cookie}`;
@@ -20,7 +24,10 @@ export default function Home() {
           return null;
         };
         const cookieLastWorkspace = getCookie("last-workspace");
-        const lastWorkspace = user.lastActiveWorkspace || storedLastWorkspace || cookieLastWorkspace;
+        const lastWorkspace =
+          user.lastActiveWorkspace ||
+          storedLastWorkspace ||
+          cookieLastWorkspace;
 
         if (lastWorkspace === "warranty" && user.hasWarrantyAccess) {
           router.push("/warranty/dashboard");

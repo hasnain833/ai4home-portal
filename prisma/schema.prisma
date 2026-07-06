@@ -8,6 +8,7 @@ datasource db {
 
 enum Role {
   ADMIN
+  SUPER_ADMIN
   STAFF
   HOMEOWNER
 }
@@ -67,9 +68,10 @@ model Company {
   knowledgeBaseId         String?
   defaultLeadOwner        String?
   voiceProfile            String?                 @default("professional")
+  warrantyEnabled         Boolean                 @default(true)
+  salesEnabled            Boolean                 @default(true)
   maxSmsPerHour           Int                     @default(60)
   complianceOptInRequired Boolean                 @default(true)
-  salesEnabled            Boolean                 @default(true)
   suppressionList         SuppressionList[]
   campaigns               Campaign[]
   emailTemplates          EmailTemplate[]

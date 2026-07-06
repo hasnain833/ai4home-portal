@@ -47,13 +47,21 @@ function AuthContainer() {
   // Forgot password state
   const [forgotEmail, setForgotEmail] = useState("");
 
-  const [loginEmail, setLoginEmail] = useState(() => {
-    try { return localStorage.getItem("remembered_email") ?? ""; } catch { return ""; }
-  });
+  const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(() => {
-    try { return !!localStorage.getItem("remembered_email"); } catch { return false; }
-  });
+  const [rememberMe, setRememberMe] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedEmail = localStorage.getItem("remembered_email");
+      if (savedEmail) {
+        setLoginEmail(savedEmail);
+        setRememberMe(true);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Signup states
   // Signup states

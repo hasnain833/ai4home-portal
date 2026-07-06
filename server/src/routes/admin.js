@@ -1,16 +1,28 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.js";
 import {
-  getCompanies,
   getStaff,
   createStaff,
   updateStaff,
-  deleteStaff
+  deleteStaff,
 } from "../controllers/admin.controller.js";
+import {
+  getCompanies,
+  getUsers,
+  updateCompanyWorkspaces,
+  updateUserAccess,
+} from "../admin/superadmin.controller.js";
 
 const router = express.Router();
 
 router.get("/companies", requireAuth, getCompanies);
+router.get("/users", requireAuth, getUsers);
+router.patch(
+  "/companies/:companyId/workspaces",
+  requireAuth,
+  updateCompanyWorkspaces,
+);
+router.patch("/users/:userId/access", requireAuth, updateUserAccess);
 router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);
 router.put("/staff", requireAuth, updateStaff);
