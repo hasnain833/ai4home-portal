@@ -250,27 +250,6 @@ export default function CampaignsPage() {
     }
   };
 
-  const restartCampaign = async () => {
-    if (!activeSeq) return;
-    try {
-      const res = await fetch(`/api/sales/campaigns/${activeSeq.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "Active", relaunch: true })
-      });
-      if (res.ok) {
-        fetchCampaigns();
-        setActiveSeq({ ...activeSeq, status: "Active" });
-        const resDetail = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
-        if (resDetail.ok) setActiveSeqDetail(await resDetail.json());
-        toast.success("Campaign restarted for all enrolled leads!");
-      } else {
-        toast.error("Failed to restart campaign.");
-      }
-    } catch (e) {
-      toast.error("Error restarting campaign.");
-    }
-  };
 
   const pauseCampaign = async () => {
     if (!activeSeq) return;
@@ -410,14 +389,6 @@ export default function CampaignsPage() {
                       <Button variant="outline" size="sm" className="h-8 text-xs font-semibold" onClick={openEnrollModal}>
                         <Users className="h-3.5 w-3.5 mr-1" /> Enroll Leads
                       </Button>
-
-                      {activeSeq.status === "Ready" &&
-                        activeSeqDetail?.enrollments?.length > 0 &&
-                        activeSeqDetail.enrollments.every((e: any) => e.status === "COMPLETED" || e.status === "EXITED") && (
-                          <Button size="sm" variant="outline" className="h-8 text-xs font-semibold text-[#b48c3c] hover:text-[#b48c3c] hover:bg-[#b48c3c]/10 border-[#b48c3c]/50" onClick={restartCampaign}>
-                            <Play className="h-3.5 w-3.5 mr-1" /> Restart
-                          </Button>
-                        )}
 
                       {activeSeq.status !== "Active" ? (
                         <Button size="sm" className="bg-green-600 text-white hover:bg-green-700 h-8 text-xs font-semibold" onClick={launchCampaign} disabled={activeSeq.status === "Draft"}>

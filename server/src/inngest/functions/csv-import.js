@@ -1,5 +1,6 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
+import { triggerAutomation } from "../../lib/automation-events.js";
 
 export const handleCsvImport = inngest.createFunction(
   { id: "handle-csv-import", triggers: [{ event: "csv/import.started" }] },
@@ -91,7 +92,7 @@ export const handleCsvImport = inngest.createFunction(
             }
           }
 
-          await prisma.lead.create({
+          const createdLead = await prisma.lead.create({
             data: {
               companyId,
               source: "CSV",
@@ -119,6 +120,8 @@ export const handleCsvImport = inngest.createFunction(
             },
           });
           createdCount++;
+          // SW-AMK: newly imported leads can trigger automation rules.
+          await triggerAutomation({ companyId, leadId: createdLead.id, event: "CRM_INGEST", context: { source: "CSV" } });
         }
       }
 

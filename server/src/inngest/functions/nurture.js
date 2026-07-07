@@ -112,7 +112,7 @@ export const runNurtureCampaign = inngest.createFunction(
         console.log(`[Nurture] Compliance check result: allowed=${complianceCheck.allowed}, reason=${complianceCheck.reason || 'none'}`);
 
         if (complianceCheck.allowed || !complianceCheck.reason?.includes("Quiet Hours")) {
-          break; // clear to send, or a terminal block (suppressed / opted-out)
+          break; // clear to send, or a per-channel block (opted-out / no contact / suppressed)
         }
 
         quietHoursAttempts += 1;
@@ -125,29 +125,28 @@ export const runNurtureCampaign = inngest.createFunction(
       }
 
       if (!complianceCheck.allowed) {
-        // Terminal block (suppression list / opted out) -> exit the campaign.
-        await step.run(`exit-suppressed-${currentStep.position}`, async () => {
-          await prisma.campaignEnrollment.update({
-            where: { id: enrollment.id },
-            data: { status: "EXITED", exitedReason: "SUPPRESSED" },
-          });
+        // This lead can't receive THIS step's channel — they're opted out of it, have no
+        // address/phone for it, or that contact value is suppressed. SKIP just this step
+        // and continue: a lead who only opted into SMS should still get the SMS steps of a
+        // mixed email+SMS campaign (and vice versa). Global opt-outs (unsubscribe, bounce,
+        // complaint, STOP, reply, appointment) exit the whole campaign via the separate
+        // `campaign.exit` event, so we never lose those.
+        await step.run(`skip-step-${currentStep.position}`, async () => {
           await prisma.leadTimeline.create({
             data: {
               leadId: lead.id,
               type: "SYNC_UPDATE",
-              description: `Campaign auto-exited. Reason: ${complianceCheck.reason}`,
+              description: `Skipped ${currentStep.type} step ${currentStep.position} for this lead: ${complianceCheck.reason}`,
+              metadata: { campaignId: campaign.id, stepPosition: currentStep.position, reason: complianceCheck.reason, skipped: true },
             },
           });
-
-          // Check campaign completion
-          const activeCount = await prisma.campaignEnrollment.count({
-            where: { campaignId, status: { in: ["ACTIVE", "PAUSED"] } }
+          await prisma.campaignEnrollment.update({
+            where: { id: enrollment.id },
+            data: { currentStepPosition: currentStep.position },
           });
-          if (activeCount === 0) {
-            await prisma.campaign.update({ where: { id: campaignId }, data: { status: "Ready" } });
-          }
         });
-        return { status: "exited", reason: "suppressed" };
+        currentPosition = currentStep.position + 1;
+        continue;
       }
 
       const sendResult = await step.run(`send-step-${currentStep.position}`, async () => {
@@ -157,6 +156,8 @@ export const runNurtureCampaign = inngest.createFunction(
           lastName: lead.lastName || "",
           email: lead.email || "",
           phone: lead.phone || "",
+          city: lead.city || "",
+          companyName: lead.company?.name || "",
           bookingLink,
         };
 
@@ -167,6 +168,8 @@ export const runNurtureCampaign = inngest.createFunction(
             .replace(/{lastName}/g, variables.lastName)
             .replace(/{email}/g, variables.email)
             .replace(/{phone}/g, variables.phone)
+            .replace(/{city}/g, variables.city)
+            .replace(/{companyName}/g, variables.companyName)
             .replace(/{bookingLink}/g, variables.bookingLink);
         };
 
@@ -195,9 +198,10 @@ export const runNurtureCampaign = inngest.createFunction(
             </div>
           `;
 
+          const unsubscribeUrl = `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/unsubscribe/${lead.id}`;
           const finalHtml = ComplianceService.addEmailUnsubscribeFooter(
             formattedHtml,
-            `${bookingLink}&unsubscribe=true`,
+            unsubscribeUrl,
             lead.company?.name || "Warranty Care Portal"
           );
 
@@ -327,23 +331,60 @@ export const runNurtureCampaign = inngest.createFunction(
 );
 
 // Exit function to handle DB updates when a campaign run is cancelled
+// SW-NUR-003: decide whether a given exit reason should actually exit a lead from a
+// specific sequence, honouring that sequence's configured exit conditions.
+// Unsubscribe / bounce / complaint / manual always exit (deliverability & consent).
+// Reply / appointment / status-change are configurable per sequence.
+function shouldExitCampaign(reason, exitConditions, newStatus) {
+  const cfg = exitConditions || {};
+  switch (reason) {
+    case "REPLY":
+      return cfg.onReply !== false; // default: exit on reply
+    case "APPOINTMENT":
+      return cfg.onAppointment !== false; // default: exit on appointment
+    case "STATUS_CHANGE":
+      return !!cfg.onStatusChange && cfg.onStatusChange === newStatus;
+    default:
+      return true; // UNSUBSCRIBE, BOUNCE, COMPLAINT, MANUAL, etc.
+  }
+}
+
 export const handleCampaignExit = inngest.createFunction(
   { id: "handle-campaign-exit", triggers: [{ event: "campaign.exit" }] },
   async ({ event, step }) => {
-    const { leadId, reason } = event.data;
+    const { leadId, reason, newStatus } = event.data;
 
-    await step.run("update-enrollments-exited", async () => {
+    const result = await step.run("update-enrollments-exited", async () => {
       // Find all active enrollments for this lead
       const enrollments = await prisma.campaignEnrollment.findMany({
         where: { leadId, status: { in: ["ACTIVE", "PAUSED"] } },
         include: { campaign: true }
       });
 
+      let exited = 0;
       for (const enrollment of enrollments) {
+        // Respect each sequence's configured exit conditions.
+        if (!shouldExitCampaign(reason, enrollment.campaign.exitConditions, newStatus)) {
+          continue;
+        }
+
         await prisma.campaignEnrollment.update({
           where: { id: enrollment.id },
           data: { status: "EXITED", exitedReason: reason },
         });
+
+        // SW-NUR-008: attribute a reply to the step the lead last received.
+        if (reason === "REPLY" && enrollment.currentStepPosition > 0) {
+          const stepRow = await prisma.campaignStep.findFirst({
+            where: { campaignId: enrollment.campaignId, position: enrollment.currentStepPosition },
+          });
+          if (stepRow) {
+            await prisma.campaignStep.update({
+              where: { id: stepRow.id },
+              data: { repliedCount: { increment: 1 } },
+            });
+          }
+        }
 
         await prisma.leadTimeline.create({
           data: {
@@ -361,8 +402,10 @@ export const handleCampaignExit = inngest.createFunction(
         if (activeCount === 0) {
           await prisma.campaign.update({ where: { id: enrollment.campaignId }, data: { status: "Ready" } });
         }
+        exited += 1;
       }
+      return { exited };
     });
-    return { exitedCount: 1 }; // For logging
+    return result;
   }
 );

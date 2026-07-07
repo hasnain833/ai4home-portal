@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -32,16 +32,8 @@ import {
   ArrowRight,
   ShieldCheck,
   Zap,
-  CheckCircle,
-  HelpCircle,
   AlertTriangle,
   Clock,
-  Sparkles,
-  RefreshCw,
-  Search,
-  MessageSquare,
-  Filter,
-  BarChart
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -71,73 +63,9 @@ interface AutomationRule {
   totalRuns: number;
 }
 
-const initialRules: AutomationRule[] = [
-  {
-    id: "AUTO-001",
-    name: "Lead Replied Campaign Enrollment",
-    description: "When a builder prospect replies to any SMS or email, automatically pause active nurture campaigns and notify the owner.",
-    trigger: {
-      event: "LEAD_REPLIED",
-      description: "Prospect responds to email, SMS, or portal chat"
-    },
-    conditions: [
-      { field: "status", operator: "EQUALS", value: "Nurturing" }
-    ],
-    actions: [
-      { type: "PAUSE_CAMPAIGNS", params: { reason: "Customer Replied" } },
-      { type: "NOTIFY_OWNER", params: { channels: "SMS, Email", priority: "HIGH" } },
-      { type: "UPDATE_STATUS", params: { newStatus: "Engaged" } }
-    ],
-    isActive: true,
-    rateLimitCount: 1,
-    rateLimitWindow: "DAY",
-    cooldownPeriod: 24,
-    lastTriggered: "42 minutes ago",
-    totalRuns: 184
-  },
-  {
-    id: "AUTO-002",
-    name: "Salesforce Import - Post-Close Care Campaign",
-    description: "Triggers when a lead object is synced from CRM and has a 'Year 1' tag. Enrolls them into the Year 1 onboarding campaign.",
-    trigger: {
-      event: "CRM_INGEST",
-      description: "Lead is synchronized from Salesforce"
-    },
-    conditions: [
-      { field: "tags", operator: "CONTAINS", value: "Year 1" },
-      { field: "emailOptIn", operator: "EQUALS", value: "true" }
-    ],
-    actions: [
-      { type: "ENROLL_CAMPAIGN", params: { campaignId: "SEQ-09", campaignName: "Year 1 Care Campaign" } }
-    ],
-    isActive: true,
-    rateLimitCount: 5,
-    rateLimitWindow: "WEEK",
-    cooldownPeriod: 72,
-    lastTriggered: "3 hours ago",
-    totalRuns: 45
-  },
-  {
-    id: "AUTO-003",
-    name: "Quiet Hours SMS Enforcement Block",
-    description: "Checks local timezone offsets before firing automated texts. Holds delivery until standard active windows (9 AM - 6 PM).",
-    trigger: {
-      event: "OUTBOUND_SMS_TRIGGERED",
-      description: "Campaign attempt to send automated text"
-    },
-    conditions: [
-      { field: "localTime", operator: "NOT_IN_WINDOW", value: "09:00-18:00" }
-    ],
-    actions: [
-      { type: "DELAY_DELIVERY", params: { resumeTime: "09:00 LOCAL" } }
-    ],
-    isActive: false,
-    rateLimitCount: 10,
-    rateLimitWindow: "HOUR",
-    cooldownPeriod: 0,
-    totalRuns: 0
-  }
-];
+// No seeded rules — the automation engine (SW-AMK) backend is not built yet, so this
+// list starts empty rather than showing fabricated automations with fake run counts.
+const initialRules: AutomationRule[] = [];
 
 const standardTriggers = [
   { value: "LEAD_REPLIED", label: "Prospect Replied (Email/SMS)", desc: "Triggers when a client responds to outreach." },
@@ -170,8 +98,46 @@ const staggerContainer = {
 
 export default function AutomationsPage() {
   const [rules, setRules] = useState<AutomationRule[]>(initialRules);
+  const [killSwitch, setKillSwitch] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [selectedRule, setSelectedRule] = useState<AutomationRule | null>(null);
+
+  const fetchRules = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sales/automations");
+      if (res.ok) {
+        const data = await res.json();
+        setRules(Array.isArray(data.rules) ? data.rules : []);
+        setKillSwitch(!!data.killSwitch);
+      }
+    } catch {
+      // surfaced on actions
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRules();
+  }, [fetchRules]);
+
+  const toggleKillSwitch = async () => {
+    try {
+      const res = await fetch("/api/sales/automations/kill-switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ killSwitch: !killSwitch }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setKillSwitch(!!data.killSwitch);
+        toast.success(data.killSwitch ? "All automations paused (kill switch ON)." : "Kill switch OFF — automations resumed.");
+      } else {
+        toast.error("Could not update the kill switch.");
+      }
+    } catch {
+      toast.error("Network error.");
+    }
+  };
 
   // Form State
   const [ruleName, setRuleName] = useState("");
@@ -208,70 +174,85 @@ export default function AutomationsPage() {
     setRuleModalOpen(true);
   };
 
-  const handleSaveRule = () => {
+  const handleSaveRule = async () => {
     if (!ruleName.trim()) {
       toast.error("Automation rule name is required.");
       return;
     }
+    if (saving) return;
+    setSaving(true);
 
-    const matchedTrigger = standardTriggers.find(t => t.value === ruleTrigger);
+    const payload = {
+      name: ruleName,
+      description: ruleDescription,
+      triggerEvent: ruleTrigger,
+      conditions: ruleConditions,
+      actions: ruleActions,
+      rateLimitCount: ruleRateLimitCount,
+      rateLimitWindow: ruleRateLimitWindow,
+      cooldownHours: ruleCooldown,
+    };
 
-    if (selectedRule) {
-      // Update
-      setRules(prev =>
-        prev.map(r =>
-          r.id === selectedRule.id
-            ? {
-                ...r,
-                name: ruleName,
-                description: ruleDescription,
-                trigger: {
-                  event: ruleTrigger,
-                  description: matchedTrigger?.desc || ""
-                },
-                conditions: ruleConditions,
-                actions: ruleActions,
-                rateLimitCount: ruleRateLimitCount,
-                rateLimitWindow: ruleRateLimitWindow,
-                cooldownPeriod: ruleCooldown
-              }
-            : r
-        )
-      );
-    } else {
-      // Create
-      const newRule: AutomationRule = {
-        id: `AUTO-${Math.floor(100 + Math.random() * 900)}`,
-        name: ruleName,
-        description: ruleDescription,
-        trigger: {
-          event: ruleTrigger,
-          description: matchedTrigger?.desc || ""
-        },
-        conditions: ruleConditions,
-        actions: ruleActions,
-        isActive: true,
-        rateLimitCount: ruleRateLimitCount,
-        rateLimitWindow: ruleRateLimitWindow,
-        cooldownPeriod: ruleCooldown,
-        totalRuns: 0
-      };
-      setRules(prev => [...prev, newRule]);
-    }
-    setRuleModalOpen(false);
-  };
-
-  const handleDeleteRule = (id: string) => {
-    if (confirm("Delete this automation rule? This will stop active trigger intercepting.")) {
-      setRules(prev => prev.filter(r => r.id !== id));
+    try {
+      const res = selectedRule
+        ? await fetch(`/api/sales/automations/${selectedRule.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        : await fetch("/api/sales/automations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.message || "Failed to save automation.");
+        return;
+      }
+      toast.success(selectedRule ? "Automation updated." : "Automation created (inactive — activate it when ready).");
       setRuleModalOpen(false);
+      fetchRules();
+    } catch {
+      toast.error("Network error while saving.");
+    } finally {
+      setSaving(false);
     }
   };
 
-  const toggleRuleActive = (id: string) => {
-    setRules(prev =>
-      prev.map(r => (r.id === id ? { ...r, isActive: !r.isActive } : r))
-    );
+  const handleDeleteRule = async (id: string) => {
+    if (!confirm("Delete this automation rule? This will stop it from running.")) return;
+    try {
+      const res = await fetch(`/api/sales/automations/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("Automation deleted.");
+        setRuleModalOpen(false);
+        fetchRules();
+      } else {
+        toast.error("Could not delete the automation.");
+      }
+    } catch {
+      toast.error("Network error.");
+    }
+  };
+
+  const toggleRuleActive = async (id: string) => {
+    const rule = rules.find((r) => r.id === id);
+    try {
+      const res = await fetch(`/api/sales/automations/${id}/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: rule ? !rule.isActive : true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.message || "Could not update the automation.");
+        return;
+      }
+      fetchRules();
+    } catch {
+      toast.error("Network error.");
+    }
   };
 
   const addConditionRow = () => {
@@ -340,13 +321,31 @@ export default function AutomationsPage() {
                 Workflow Automation Builder
               </h1>
               <p className="text-muted-foreground text-sm mt-1">
-                Configure automated rules (Trigger $\rightarrow$ Condition $\rightarrow$ Action) to coordinate campaign enrollment and Salesforce routing.
+                Configure automated rules (Trigger → Condition → Action) to coordinate campaign enrollment and Salesforce routing.
               </p>
             </div>
-            <Button onClick={() => handleOpenRuleModal()} className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-2 h-9 border-none">
-              <Plus className="h-4 w-4" /> Create Automation Rule
-            </Button>
+            <div className="flex items-center gap-2.5">
+              <Button
+                variant="outline"
+                onClick={toggleKillSwitch}
+                className={`gap-2 h-9 text-xs font-semibold ${killSwitch ? "border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20" : "text-muted-foreground"}`}
+                title="Instantly pause or resume ALL automations for your account"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {killSwitch ? "Automations Paused — Resume" : "Kill Switch"}
+              </Button>
+              <Button onClick={() => handleOpenRuleModal()} className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-2 h-9 border-none">
+                <Plus className="h-4 w-4" /> Create Automation Rule
+              </Button>
+            </div>
           </motion.div>
+
+          {killSwitch && (
+            <motion.div variants={fadeInUp} className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-900/40 px-4 py-3 text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              The kill switch is ON — no automations will run for your account until you turn it off.
+            </motion.div>
+          )}
 
           {/* Compliance & Safeguard Banner */}
           <motion.div variants={fadeInUp}>
@@ -365,13 +364,12 @@ export default function AutomationsPage() {
 
           {/* List of Rules */}
           <motion.div variants={fadeInUp} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
+
             {/* Visual Canvas Representation */}
             <div className="lg:col-span-2 space-y-4">
               {rules.map((rule) => (
-                <Card key={rule.id} className={`overflow-hidden border transition-all ${
-                  rule.isActive ? "border-border shadow-xs" : "border-dashed opacity-75 bg-slate-50/20"
-                }`}>
+                <Card key={rule.id} className={`overflow-hidden border transition-all ${rule.isActive ? "border-border shadow-xs" : "border-dashed opacity-75 bg-slate-50/20"
+                  }`}>
                   <CardHeader className="pb-3 border-b border-border/40 bg-slate-50/50 dark:bg-slate-900/35">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
@@ -379,22 +377,19 @@ export default function AutomationsPage() {
                         <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100">{rule.name}</CardTitle>
                       </div>
                       <div className="flex items-center gap-3">
-                        <Badge variant="outline" className={`text-[10px] font-semibold ${
-                          rule.isActive ? "border-green-300 text-green-700 bg-green-50/30" : "border-gray-300 text-gray-500"
-                        }`}>
+                        <Badge variant="outline" className={`text-[10px] font-semibold ${rule.isActive ? "border-green-300 text-green-700 bg-green-50/30" : "border-gray-300 text-gray-500"
+                          }`}>
                           {rule.isActive ? "Active Monitoring" : "Paused"}
                         </Badge>
-                        
+
                         {/* Custom Switch Toggle */}
                         <button
                           onClick={() => toggleRuleActive(rule.id)}
-                          className={`w-9 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors outline-hidden ${
-                            rule.isActive ? "bg-green-600" : "bg-slate-300"
-                          }`}
+                          className={`w-9 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors outline-hidden ${rule.isActive ? "bg-green-600" : "bg-slate-300"
+                            }`}
                         >
-                          <div className={`bg-white w-4 h-4 rounded-full shadow-xs transform transition-transform ${
-                            rule.isActive ? "translate-x-4" : "translate-x-0"
-                          }`} />
+                          <div className={`bg-white w-4 h-4 rounded-full shadow-xs transform transition-transform ${rule.isActive ? "translate-x-4" : "translate-x-0"
+                            }`} />
                         </button>
                       </div>
                     </div>
@@ -403,10 +398,10 @@ export default function AutomationsPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="p-4 space-y-4">
-                    
+
                     {/* Visual T-C-A steps cards */}
                     <div className="grid grid-cols-1 md:grid-cols-11 items-center gap-2 text-xs">
-                      
+
                       {/* Trigger Block */}
                       <div className="md:col-span-3 p-3 bg-indigo-50/50 dark:bg-indigo-950/10 border border-indigo-200/50 rounded-xl">
                         <p className="text-[10px] font-mono uppercase font-bold text-indigo-500 flex items-center gap-1">
@@ -450,7 +445,7 @@ export default function AutomationsPage() {
                         <div className="mt-1 space-y-1 font-bold">
                           {rule.actions.map((act, i) => (
                             <div key={i} className="text-[11px] text-slate-800 dark:text-slate-200">
-                              • {act.type} 
+                              • {act.type}
                               {Object.keys(act.params).length > 0 && (
                                 <span className="block text-[9px] font-mono text-slate-400 font-medium pl-2">
                                   {JSON.stringify(act.params).replace(/[{}"]/g, "")}
@@ -491,7 +486,7 @@ export default function AutomationsPage() {
 
             {/* Sidebar Guidelines */}
             <div className="space-y-6">
-              
+
               {/* Trigger list helper */}
               <Card className="border border-border/80 shadow-xs">
                 <CardHeader className="pb-2">

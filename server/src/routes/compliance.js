@@ -8,6 +8,7 @@ import {
   deleteSuppression,
   processInbound,
   unsubscribeWebhook,
+  unsubscribeByLead,
   processBrevoInboundEmail,
   processTwilioInboundSms,
   processBrevoEmailEvents,
@@ -21,6 +22,8 @@ router.post("/suppression", requireAuth, requireRoles(["ADMIN", "STAFF"]), addSu
 router.delete("/suppression", requireAuth, requireRoles(["ADMIN", "STAFF"]), deleteSuppression);
 router.post("/inbound", verifyWebhookSecret, processInbound);
 router.post("/unsubscribe", verifyWebhookSecret, unsubscribeWebhook);
+// Public: the "unsubscribe here" link a recipient clicks in an email (keyed by lead id).
+router.post("/unsubscribe-link/:leadId", unsubscribeByLead);
 router.post("/inbound/email", verifyWebhookSecret, processBrevoInboundEmail);
 router.post("/inbound/sms", verifyTwilioSignature, processTwilioInboundSms);
 router.post("/events/email", verifyWebhookSecret, processBrevoEmailEvents);

@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { triggerAutomation } from "../lib/automation-events.js";
 
 export const getLeads = async (req, res) => {
   try {
@@ -115,6 +116,9 @@ export const createLead = async (req, res) => {
         },
       },
     });
+
+    // SW-AMK: fire automation rules for manually-created leads.
+    await triggerAutomation({ companyId: lead.companyId, leadId: lead.id, event: "MANUAL_CREATION" });
 
     return res.json(lead);
   } catch (error) {
@@ -449,6 +453,23 @@ export const updateLead = async (req, res) => {
         },
       },
     });
+
+    // SW-NUR-003: a status change can be a configured exit condition for a sequence.
+    // Emit the event; handleCampaignExit only exits sequences that opted into this status.
+    if (status !== undefined && status !== lead.status) {
+      const { inngest } = await import("../lib/inngest.js");
+      await inngest.send({
+        name: "campaign.exit",
+        data: { leadId: id, reason: "STATUS_CHANGE", newStatus: status },
+      });
+      // SW-AMK: status changes can trigger automation rules.
+      await triggerAutomation({
+        companyId: req.user.companyId,
+        leadId: id,
+        event: "STATUS_CHANGE",
+        context: { newStatus: status, previousStatus: lead.status },
+      });
+    }
 
     return res.json(updatedLead);
   } catch (error) {

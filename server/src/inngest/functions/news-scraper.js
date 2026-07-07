@@ -3,27 +3,35 @@ import prisma from "../../lib/prisma.js";
 import Parser from "rss-parser";
 import { Anthropic } from "@anthropic-ai/sdk";
 const parser = new Parser();
-import { MailService } from "../../services/mail-service.js";
-import { sendSms } from "../../services/sms.service.js";
 import crypto from "crypto";
 
 /**
  * News Scraping Agent (SW-NEWS)
- * Runs daily to fetch, summarize, and distribute housing market news.
+ *
+ * Runs daily to fetch and AI-summarize housing-market news, then STORES it.
+ *
+ * Per SRS SW-NEWS-004, scraped news only *feeds* downstream surfaces — the
+ * "Market news" feed page (`/api/sales/news`), the content-calendar suggestion
+ * engine (SW-CAL-002), and the blog drafter (SW-BLOG). It does NOT send anything
+ * to leads directly: SRS Constraint #4 / NFR-U-002 require human approval before
+ * any AI-generated content goes out. A human approves a calendar item or blog
+ * post first; sending then happens through the normal (compliance-gated) paths.
  */
 export const scrapeNews = inngest.createFunction(
-  { 
-    id: "scrape-housing-news", 
-    name: "Scrape Housing News & Distribute",
-    triggers: [{ cron: "0 9 * * *" }] // Run daily at 9:00 AM UTC
+  {
+    id: "scrape-housing-news",
+    name: "Scrape Housing News (store for approval)",
+    triggers: [{ cron: "0 9 * * *" }], // Run daily at 9:00 AM UTC
   },
-  async ({ event, step }) => {
+  async ({ step }) => {
     // 1. Fetch News from Google News RSS
     const articles = await step.run("fetch-rss-news", async () => {
       try {
-        const feed = await parser.parseURL("https://news.google.com/rss/search?q=housing+market+real+estate&hl=en-US&gl=US&ceid=US:en");
+        const feed = await parser.parseURL(
+          "https://news.google.com/rss/search?q=housing+market+real+estate&hl=en-US&gl=US&ceid=US:en"
+        );
         // Get top 3 articles to process
-        return feed.items.slice(0, 3).map(item => ({
+        return feed.items.slice(0, 3).map((item) => ({
           title: item.title,
           link: item.link,
           pubDate: item.pubDate,
@@ -39,43 +47,42 @@ export const scrapeNews = inngest.createFunction(
       return { message: "No news fetched." };
     }
 
-    const processedNews = [];
+    let savedCount = 0;
 
     // Process each article
     for (const article of articles) {
-      // 2. Check if we already scraped this article (by URL or similar title)
-      // Since Google News URLs change, we use a hash of the title
+      // 2. Deduplicate. Google News URLs rotate, so we key off a hash of the title.
       const titleHash = crypto.createHash("md5").update(article.title).digest("hex");
-      
+
       const isDuplicate = await step.run(`check-duplicate-${titleHash}`, async () => {
         const existing = await prisma.scrapedNews.findFirst({
-          where: { title: article.title }
+          where: { title: article.title },
         });
         return !!existing;
       });
 
       if (isDuplicate) continue;
 
-      // 3. Summarize with Claude
+      // 3. Summarize with Claude (SW-NEWS-003). Store summaries + links only — never
+      // full article text (SW-NEWS-005).
       const summary = await step.run(`summarize-${titleHash}`, async () => {
         if (!process.env.ANTHROPIC_API_KEY) {
-           return article.contentSnippet || "No summary available.";
+          return article.contentSnippet || "No summary available.";
         }
-        const anthropic = new Anthropic({
-          apiKey: process.env.ANTHROPIC_API_KEY,
-        });
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
         try {
           const response = await anthropic.messages.create({
             model: "claude-3-haiku-20240307",
             max_tokens: 300,
-            system: "You are an expert real estate content marketer. You rewrite news snippets into engaging, 2-3 sentence summaries that are easy to read for homeowners and leads. Always maintain a professional, helpful tone.",
+            system:
+              "You are an expert real estate content marketer. You rewrite news snippets into engaging, 2-3 sentence summaries that are easy to read for homeowners and leads. Always maintain a professional, helpful tone.",
             messages: [
               {
                 role: "user",
-                content: `Title: ${article.title}\nSnippet: ${article.contentSnippet}\n\nPlease write a short, engaging summary of this news.`
-              }
-            ]
+                content: `Title: ${article.title}\nSnippet: ${article.contentSnippet}\n\nPlease write a short, engaging summary of this news.`,
+              },
+            ],
           });
           return response.content[0].text;
         } catch (error) {
@@ -84,131 +91,35 @@ export const scrapeNews = inngest.createFunction(
         }
       });
 
-      // 4. Save to Database
-      const savedArticle = await step.run(`save-article-${titleHash}`, async () => {
-        // Find companies that have sales enabled
+      // 4. Save per sales-enabled company for the Market News feed + calendar/blog use.
+      const saved = await step.run(`save-article-${titleHash}`, async () => {
         const companies = await prisma.company.findMany({
-          where: { salesEnabled: true }
+          where: { salesEnabled: true },
         });
 
-        const createdItems = [];
+        let created = 0;
         for (const company of companies) {
-          const news = await prisma.scrapedNews.create({
+          await prisma.scrapedNews.create({
             data: {
               companyId: company.id,
               title: article.title,
               originalUrl: article.link,
-              summary: summary,
+              summary,
               source: "Google News",
               publishedAt: new Date(article.pubDate || new Date()),
-              wasBroadcasted: false
-            }
+              // Not broadcast automatically — a human approves a calendar item / blog
+              // post before anything is sent to leads (SRS Constraint #4).
+              wasBroadcasted: false,
+            },
           });
-          createdItems.push(news);
+          created += 1;
         }
-        return createdItems;
+        return created;
       });
-      
-      if (savedArticle.length > 0) {
-        processedNews.push(savedArticle);
-      }
+
+      if (saved > 0) savedCount += 1;
     }
 
-    // 5. Distribute as Campaign to Leads
-    if (processedNews.length > 0) {
-      await step.run("distribute-news", async () => {
-        const companies = await prisma.company.findMany({
-          where: { salesEnabled: true },
-          include: { integrations: true }
-        });
-
-        for (const company of companies) {
-          // Get new articles for this company that weren't broadcasted
-          const newArticles = await prisma.scrapedNews.findMany({
-            where: { companyId: company.id, wasBroadcasted: false }
-          });
-
-          if (newArticles.length === 0) continue;
-
-          // Get opted-in leads
-          const leads = await prisma.lead.findMany({
-            where: { companyId: company.id, OR: [{ emailOptIn: true }, { smsOptIn: true }] }
-          });
-
-          if (leads.length === 0) {
-             // Mark as broadcasted anyway to prevent piling up
-             for (const article of newArticles) {
-               await prisma.scrapedNews.update({
-                 where: { id: article.id },
-                 data: { wasBroadcasted: true }
-               });
-             }
-             continue;
-          }
-
-          // Combine articles into a single digest or just take the first one
-          const topArticle = newArticles[0];
-          
-          const emailSubject = `Housing Market Update: ${topArticle.title}`;
-          const emailBody = `
-            <h2>Housing Market Update</h2>
-            <p>${topArticle.summary}</p>
-            <p><a href="${topArticle.originalUrl}">Read more here</a></p>
-          `;
-          
-          const smsBody = `Housing Update: ${topArticle.title} - ${topArticle.summary.substring(0, 100)}... Read more: ${topArticle.originalUrl}`;
-
-          for (const lead of leads) {
-            try {
-              if (lead.emailOptIn && lead.email) {
-                await MailService.sendEmail({
-                  companyId: company.id,
-                  to: lead.email,
-                  subject: emailSubject,
-                  html: emailBody
-                });
-                
-                await prisma.leadTimeline.create({
-                  data: {
-                    leadId: lead.id,
-                    type: "EMAIL_SENT",
-                    description: `Sent News Update: ${topArticle.title}`
-                  }
-                });
-              }
-
-              if (lead.smsOptIn && lead.phone) {
-                await sendSms({
-                  to: lead.phone, 
-                  body: smsBody,
-                  // smsConfig might be needed if resolving per-company, or tag
-                  tag: "news-scraper"
-                });
-                
-                await prisma.leadTimeline.create({
-                  data: {
-                    leadId: lead.id,
-                    type: "SMS_SENT",
-                    description: `Sent News Update SMS: ${topArticle.title}`
-                  }
-                });
-              }
-            } catch (err) {
-              console.error(`Failed to send news to lead ${lead.id}:`, err);
-            }
-          }
-
-          // Mark as broadcasted
-          for (const article of newArticles) {
-            await prisma.scrapedNews.update({
-              where: { id: article.id },
-              data: { wasBroadcasted: true }
-            });
-          }
-        }
-      });
-    }
-
-    return { processed: processedNews.length };
+    return { processed: savedCount };
   }
 );

@@ -67,6 +67,7 @@ const salesNavItems = [
   { name: "Announcements", href: "/sales/announcements", icon: Bot, roles: ["admin", "staff"] },
   { name: "News Feed", href: "/sales/news", icon: Activity, roles: ["admin", "staff"] },
   { name: "Blog Posts", href: "/sales/blog", icon: Pencil, roles: ["admin", "staff"] },
+  { name: "Knowledge Base", href: "/sales/knowledge-base", icon: Database, roles: ["admin", "staff"] },
   { name: "Automations", href: "/sales/automations", icon: Plug, roles: ["admin"] },
   { name: "Settings", href: "/sales/settings", icon: Settings, roles: ["admin", "staff"] },
 ];

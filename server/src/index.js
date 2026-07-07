@@ -16,6 +16,8 @@ import salesDashboardRouter from "./routes/sales-dashboard.js";
 import messagingSettingsRouter from "./routes/messaging-settings.js";
 import schedulingRouter from "./routes/scheduling.js";
 import newsRouter from "./routes/news.js";
+import announcementsRouter from "./routes/announcements.js";
+import automationsRouter from "./routes/automations.js";
 
 // Core Warranty Routes
 import dashboardRouter from "./routes/dashboard.js";
@@ -37,6 +39,9 @@ import { handleCsvImport } from "./inngest/functions/csv-import.js";
 import { appointmentSchedulingAgent, appointmentReminders } from "./inngest/functions/appointment.js";
 import { scheduleCalendarItem } from "./inngest/functions/calendar.js";
 import { scrapeNews } from "./inngest/functions/news-scraper.js";
+import { sendAnnouncement } from "./inngest/functions/announcement.js";
+import { ingestKbDocument } from "./inngest/functions/kb-ingest.js";
+import { runAutomationRules } from "./inngest/functions/automation.js";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -67,6 +72,8 @@ app.use("/api/sales/csv", csvRouter);
 app.use("/api/sales/dashboard", salesDashboardRouter);
 app.use("/api/sales/settings/messaging", messagingSettingsRouter);
 app.use("/api/sales/news", newsRouter);
+app.use("/api/sales/announcements", announcementsRouter);
+app.use("/api/sales/automations", automationsRouter);
 
 // Core Warranty Route Mounts
 app.use("/api/dashboard", dashboardRouter);
@@ -83,7 +90,7 @@ app.use("/api/users", usersRouter);
 // Inngest Endpoint
 app.use("/api/inngest", (req, res, next) => {
   next();
-}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders, scheduleCalendarItem, scrapeNews] }));
+}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders, scheduleCalendarItem, scrapeNews, sendAnnouncement, ingestKbDocument, runAutomationRules] }));
 
 // Health Check
 app.get("/api/health", (req, res) => {

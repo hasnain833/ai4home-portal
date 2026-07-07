@@ -1,15 +1,31 @@
 # AI4Home Warranty Care Portal — Sales Workspace 
 
-This document serves as the single, authoritative checklist and status tracker for the Sales Workspace backend functionality and agents. It maps directly to the SRS.
+This document serves as the single, authoritative checklist and status tracker for the Sales Workspace backend functionality and agents. It maps directly to the **Ai.Lumen Sales Workspace SRS v1.1**. Legend: `[x]` done · `[~]` partial / needs verification · `[ ]` not started.
 
-## 🤖 1. Nurture Agent (SW-NUR)
-> Executes multi-step drip campaigns, ensuring compliant delivery and recording timeline events.
-- [x] **Inngest determinism (C1)**: Sleeps use stable ids; wake times memoized.
-- [x] **Duplicate-send risk (C2)**: Send is an isolated step with no DB writes; bookkeeping is separate.
-- [x] **Quiet-hours retry (H1)**: Attempt-scoped re-check loop; sleeps until local TCPA window opens.
-- [x] **Idempotency/concurrency key**: Function uses `event.data.enrollmentId` idempotency.
-- [x] **Analytics (SW-NUR-008)**: Delivered/opened/clicked/bounced metrics processed via webhooks.
-- [ ] **Versioning (SW-NUR-007)**: Verify version-on-edit + mid-sequence migration policy.
+> **Runtime note:** Per SRS §11.4, the Sales scheduling agent ships on the **native Claude + Inngest** runtime (not Botpress). Botpress remains the Warranty-workspace bot engine only — see [warranty-workspace.md]. All Sales AI features run as Inngest + Claude pipelines.
+
+## 🧱 0. Foundation — Workspace Hub & Lead Model (SRS §3, §4.0)
+> Coexistence shell + canonical Lead entity that every Sales module depends on.
+- [x] **Workspace hub / switcher (HUB-001/002/005)**: Hub landing at `src/app/hub/page.tsx` with workspace selection; `/warranty/...` and `/sales/...` route prefixes exist.
+- [x] **Lead data model (SW-LEAD-001)**: `Lead`, `LeadTimeline`, `LeadSegment`, `SuppressionList` models present with source/consent fields.
+- [x] **Activity timeline (SW-LEAD-005)**: `LeadTimeline` records messaging/enrollment/sync events.
+- [x] **Segments (SW-LEAD-004)**: `LeadSegment` model + `/api/sales/segments`.
+- [ ] **Entitlements / feature flag (HUB-003/009)**: Confirm per-tenant Sales entitlement gating (hub shows Lock icon) is enforced server-side and behind a per-tenant flag, not just UI.
+- [ ] **Deduplication (SW-LEAD-003)**: Confirm email→phone match keys + per-import merge strategy (skip/update/create) on both CSV and CRM ingestion.
+- [ ] **Last-workspace memory + notification routing (HUB-006/007)**.
+
+## 🤖 1. Nurture Agent (SW-NUR) — ✅ core complete
+> Executes multi-step drip campaigns, ensuring compliant delivery and recording timeline events. **Campaigns are one-time** (the "Restart"/relaunch reset was removed — a completed lead is not re-run).
+- [x] **Sequence builder (SW-NUR-001)**: EMAIL/SMS/DELAY steps, delay + send-window, subject/body; merge fields `{firstName} {lastName} {email} {phone} {city} {companyName} {bookingLink}`; **1–50 step** bound enforced.
+- [x] **Enrollment (SW-NUR-002)**: manual single/**bulk** + **enroll by saved segment** (`enroll` accepts `segmentId` → resolves filters to leads); duplicate-enrollment prevention; concurrent-enrollment warning.
+- [x] **Exit conditions (SW-NUR-003)**: **per-sequence configurable** via `Campaign.exitConditions` (`onReply`, `onAppointment`, `onStatusChange`); unsubscribe/bounce/complaint always exit; **manual removal** endpoint (`/:id/unenroll`); status-change exits wired from `updateLead`. `handleCampaignExit` honours each sequence's config.
+- [x] **Reply detection (SW-NUR-004)**: email+SMS webhooks → timeline → exit → appointment flow. Per-channel skip so single-channel leads aren't dropped.
+- [x] **AI content assist (SW-NUR-005)**: `generateCampaignCopy` (Claude) now grounded in the tenant's **brand profile** (`salesBrandProfile` + `voiceProfile`, SW-KB-006); human-approved before send.
+- [x] **Compliance (SW-NUR-006)**: consent, suppression, SMS quiet hours; unsubscribe footer → dedicated `/unsubscribe/<leadId>` page; STOP/HELP.
+- [x] **Versioning + migrate policy (SW-NUR-007)**: editing an Active sequence forks a new version (**FINISH_OLD**, default) or edits in place (**MIGRATE**) per `Campaign.versionPolicy`.
+- [x] **Analytics (SW-NUR-008)**: sequence (enrolled/active/completed/exited-by-reason) + per-step (sent/delivered/opened/clicked/**replied**/bounced/unsubscribed); `repliedCount` attributed to the step the lead last received.
+- [x] Inngest determinism, isolated-send, quiet-hours retry, `enrollmentId` idempotency/concurrency.
+- [~] **Remaining polish**: front-end UI to *edit* exit-conditions / version-policy / segment-enroll (backend + API done; wire the campaign settings panel); confirm delivered/opened/clicked populate from the live Brevo webhook; full mid-run MIGRATE (in-flight Inngest runs finish their loaded step list).
 
 ## 🤖 2. Appointment Scheduling Agent (SW-APT)
 > Conversational AI agent (Claude + Inngest) that reads lead replies and books appointments automatically.
@@ -33,59 +49,75 @@ This document serves as the single, authoritative checklist and status tracker f
 - [x] **Accept/edit/dismiss API (SW-CAL-003)**: Record dismissals for ranking.
 - [x] **First-class sources (SW-CAL-001)**: Surface announcements & blogs as items.
 
-## 🤖 4. Announcements Agent (SW-ANN)
-> Handles mass email/SMS broadcasts to lead segments with compliant batch delivery.
-- [ ] **Model & Authoring API**: Announcement model + API for rich email/SMS authoring.
-- [ ] **Batch delivery via Inngest (SW-ANN-002)**: Audience snapshot → chunk → throttle → retry → dead-letter.
-- [ ] **Geographic targeting (SW-ANN-004)**: Filter by state/city/zip.
-- [ ] **Scheduling API (SW-ANN-003)**: Schedule + cancel-until-processing.
-- [ ] **Reporting (SW-ANN-005)**: Per-announcement metrics.
-- [ ] **Role restriction (SW-ANN-006)**: Admin/Member only + compliance gate.
+## 🤖 4. Announcements Agent (SW-ANN) — ✅ BUILT (email + SMS)
+> Broadcasts fanned out to a lead audience by **email, SMS, or both** through the central compliance gate. `Announcement` model + `announcements.controller.js` + `/api/sales/announcements` + Inngest `sendAnnouncement` (`announcement.js`); frontend `sales/announcements` wired to the real API with a channel selector.
+- [x] **Model & Authoring API (SW-ANN-001)**: `Announcement` model (title, subject, body, ctaLink, channel, audienceType, segmentId, geoFilter, status, metrics); full CRUD + preview endpoints.
+- [x] **Channels + batch delivery via Inngest (SW-ANN-002)**: EMAIL/SMS/BOTH; channel-aware audience resolution; `announcement.send` → snapshot → chunked fan-out (50/chunk) → per-tenant concurrency + throttle (200/min) → per-lead+channel idempotency guard.
+- [x] **Geographic targeting (SW-ANN-004)**: Filter by state/city/zip list in `resolveAnnouncementAudience`.
+- [x] **Scheduling API (SW-ANN-003)**: `scheduledAt` → `step.sleepUntil`; cancel-until-processing via `announcement.cancel` event + `cancelOn`.
+- [x] **Reporting (SW-ANN-005)**: Per-announcement sent/failed counters live per chunk; delivered/opened/clicked/unsubscribed fed from provider webhooks (email + SMS) via `ann_<id>` tag in `ComplianceService.handleMessageEvent`.
+- [x] **Role restriction (SW-ANN-006)** + **Compliance (SW-ANN-007)**: Routes gated to `ADMIN`/`STAFF`; every send (email + SMS) passes `validateOutboundMessage` (consent, suppression, and TCPA quiet hours for SMS); email gets the unsubscribe footer, SMS gets the STOP opt-out suffix. Human-authored, so the "send" action satisfies the human-approval constraint.
+- [ ] **Deferred to v2**: rich-text/image editor, radius geo-targeting, dead-letter queue surfacing in UI, per-timezone SMS quiet-hours deferral (blocked-by-quiet-hours SMS are currently skipped, not requeued).
 
 ## 🤖 5. CRM Sync Agent (SW-CRM)
-> Keeps Salesforce leads continuously in sync with the local lead database.
-- [ ] **OAuth 2.0 flow (SW-CRM-002)**: Authorization code flow + secrets vault.
-- [ ] **Connection management API**: Connect/disconnect/pause endpoints.
-- [ ] **Field mapping API (SW-CRM-004)**: Versioned field mappings.
-- [ ] **Initial bulk import (SW-CRM-005)**: Filtered import via Bulk API 2.0.
-- [ ] **Incremental sync cron (SW-CRM-006)**: Inngest cron + `LastModifiedDate` watermarks.
-- [ ] **Rate limit & backoff (SW-CRM-007)**: Exponential backoff on 429/5xx.
-- [ ] **Write-back to Salesforce (SW-CRM-008)**: Push status changes/appointments.
-- [ ] **Consent on import (SW-CRM-009)**: Default imported leads to "consent unknown".
+> Keeps Salesforce leads in sync with the local lead database. **Substantially built** — models `SalesforceConnection`, `SyncLog`, `SalesforceFieldMapping`; service `salesforce-service.js` (AES-256-GCM token encryption); controller + routes at `/api/sales/salesforce`; UI at `sales/settings`.
+- [x] **OAuth 2.0 flow (SW-CRM-002)**: Authorization-code connect + callback (`connectSalesforce`, `salesforceCallback`); tokens encrypted at rest.
+- [x] **Connection management API (SW-CRM-003)**: Connect / disconnect / pause + status endpoints (`updateSalesforceStatus`); last sync time & last error surfaced.
+- [x] **Field mapping API (SW-CRM-004)**: Mapping CRUD (`getMappings`/`saveMapping`/`deleteMapping`) with default mappings + consent-field flag.
+- [x] **Initial bulk import (SW-CRM-005)**: `bulkImport` endpoint (filtered import from SF Lead).
+- [~] **Incremental sync (SW-CRM-006)**: Watermark logic **exists** — `manualSync` queries `WHERE SystemModstamp > lastSyncAt`. **Gap: not on an Inngest cron** — sync is manual-triggered only. Add a scheduled per-tenant Inngest function (default 15 min).
+- [ ] **Rate limit & backoff (SW-CRM-007)**: Confirm exponential backoff on 429/5xx and idempotent partial-failure handling; surface persistent failures as admin notifications.
+- [ ] **Write-back to Salesforce (SW-CRM-008)**: Push status changes / appointment-booked / unsubscribe to mapped SF fields (off by default, per-tenant gate).
+- [~] **Consent on import (SW-CRM-009)**: `isConsentField` mapping flag exists; confirm imported leads default to "consent unknown" and are excluded from SMS/opt-in-required email.
 
-## 🤖 6. News Scraping Agent (SW-NEWS)
-> Collects and AI-summarizes housing market news.
+## 📄 6. CSV Upload (SW-CSV)
+> Bulk lead ingestion via CSV. **Built** — `csv.controller.js` + Inngest `handleCsvImport` (`csv-import.js`, async background job) + UI in `sales/leads`. Not previously tracked here.
+- [x] **CSV upload + async processing (SW-CSV-001/004)**: Upload endpoint routes to background Inngest import job.
+- [ ] **Column mapping templates (SW-CSV-002)**: Confirm header auto-detect + savable mapping template.
+- [ ] **Validation & preview (SW-CSV-003)**: Confirm pre-commit preview (valid/invalid/duplicate counts) + downloadable rejected-rows report.
+- [ ] **Consent attestation (SW-CSV-005)** + **Homeowner limits (SW-CSV-006)**: Confirm attestation gate and lower per-homeowner caps.
+- [ ] **CSV virus scan + 30-day retention (NFR-S-006)**.
+
+## 🤖 7. News Scraping Agent (SW-NEWS)
+> Collects and AI-summarizes housing market news, then **stores it for downstream use** — it does NOT send to leads.
 - [x] **Configurable sources (SW-NEWS-001)**: RSS, APIs, web pages.
-- [x] **Scheduled scraping (SW-NEWS-002)**: Inngest cron.
-- [x] **AI summarization (SW-NEWS-003)**: Summarize with Claude + tag.
-- [x] **Compliance (SW-NEWS-005)**: Honor robots.txt, rate limit.
-- [x] **Failure isolation (SW-NEWS-006)**: Quarantine failing sources.
+- [x] **Scheduled scraping (SW-NEWS-002)**: Inngest cron (daily).
+- [x] **AI summarization (SW-NEWS-003)**: Summarize with Claude, store summary + link only.
+- [x] **Consumption, no auto-send (SW-NEWS-004)**: **FIXED** — the previous auto-blast of scraped news to leads was removed (`news-scraper.js`). News now only feeds the Market News feed (`/api/sales/news`) + calendar suggestions (SW-CAL-002) + blog drafter (SW-BLOG). Nothing goes out until a human approves a calendar item / blog post (SRS Constraint #4 / NFR-U-002).
+- [x] **Compliance (SW-NEWS-005)**: Summaries + links only, never full text.
+- [x] **Failure isolation (SW-NEWS-006)**: Per-article steps isolate failures.
 
-## 🤖 7. Blog Drafting Agent (SW-BLOG)
-> Generates blog post drafts from news items.
+## 🤖 8. Blog Drafting Agent (SW-BLOG)
+> Generates blog post drafts from news items. **Frontend page exists** (`sales/blog`, ~676 lines) — now shows an empty state (fabricated seed posts removed); **no backend model, API, route, or Inngest pipeline** yet.
 - [ ] **News-to-draft pipeline (SW-BLOG-001)**: Claude generates draft.
 - [ ] **Brand voice RAG (SW-BLOG-002)**: Pull brand profile + KB documents.
 - [ ] **Human approval gate (SW-BLOG-004)**: Explicit approval required.
 - [ ] **Publish/export (SW-BLOG-005)**.
 - [ ] **Calendar integration (SW-BLOG-006)**.
 
-## 🤖 8. Automated Marketing Rules Agent (SW-AMK)
-> Event-driven automation engine.
-- [ ] **Rule builder wiring (SW-AMK-002)**: Validate rules before activation.
-- [ ] **Trigger/Condition/Action engine**.
-- [ ] **Idempotent at-least-once (SW-AMK-003)**: Cooldown prevention.
-- [ ] **Rate caps & kill switch (SW-AMK-004)**.
-- [ ] **Audit & analytics (SW-AMK-005)**.
+## 🤖 9. Automated Marketing Rules Agent (SW-AMK) — ✅ BUILT
+> Event-driven "if this happens, then do that" engine. `MarketingRule` + `MarketingRuleRun` models, engine `automation.js` (`runAutomationRules` on Inngest), `automations.controller.js` + `/api/sales/automations`, and the `sales/automations` builder UI wired to the API. Triggers emitted from the lead lifecycle via `lib/automation-events.js`.
 
-## 🤖 9. Sales KB & Brand Voice Agent (SW-KB / SW-AGT)
-> Manages Sales workspace KB. **Vector store decision: use pgvector on the existing Supabase Postgres — NOT Pinecone/FAISS/Chroma.** See "RAG Knowledge Base" section below for rationale.
-- [x] **Document upload API (SW-KB-001)**: Two stores already exist — `knowledgeBaseDocument` (Supabase storage upload) + `salesKB` (URL/metadata). These hold the FILES only; vector layer is the missing half.
-- [ ] **Chunking & embedding (SW-KB-002)**: Inngest step + vector upsert into pgvector `kb_chunks` table (companyId-scoped).
-- [ ] **Lifecycle (SW-KB-003)**: Soft-delete (cascade delete of chunks when a doc is removed).
-- [ ] **Category tagging (SW-KB-004)**.
-- [ ] **Citation visibility (SW-KB-005)**.
-- [ ] **Brand voice & company profile (SW-KB-006)**.
-- [ ] **Agent runtime abstraction (SW-AGT-001)**.
+### Build status
+- [x] **Data model**: `MarketingRule` (triggerEvent, conditions[], actions[], isActive, cooldownHours, rateLimit, runCount, lastTriggeredAt) + `MarketingRuleRun` audit rows.
+- [x] **Trigger/Condition/Action engine (SW-AMK-001)**: `evaluateRulesForTrigger` — evaluate conditions (EQUALS/NOT_EQUALS/CONTAINS/IN/IS_TRUE/IS_FALSE over lead fields incl. consent) → run actions (PAUSE_CAMPAIGNS, ENROLL_CAMPAIGN, UPDATE_STATUS, UPDATE_TAGS, NOTIFY_OWNER). Triggers emitted: **MANUAL_CREATION** (createLead), **STATUS_CHANGE** (updateLead), **LEAD_REPLIED** (reply webhooks ×3), **CRM_INGEST** (CSV import + Salesforce sync).
+- [x] **Rule builder wiring (SW-AMK-002)**: `sales/automations` UI loads/creates/updates/deletes/toggles via the API; **activation blocked** for incomplete rules or an SMS action without an `smsOptIn=true` consent condition.
+- [x] **Idempotent execution + loop prevention (SW-AMK-003)**: per-(rule, lead) **cooldown** (default 24h) via `MarketingRuleRun` history; UPDATE_STATUS writes directly (doesn't re-emit STATUS_CHANGE) to avoid loops.
+- [x] **Kill switch (SW-AMK-004)**: `Company.automationsKillSwitch` — engine skips all rules when ON; one-click toggle in the UI header. Daily cap field stored (`automationDailyCap`).
+- [x] **Audit & analytics (SW-AMK-005)**: every evaluation logs a `MarketingRuleRun` (MATCHED / SKIPPED_CONDITIONS / SKIPPED_COOLDOWN / ERROR); `/analytics` endpoint aggregates runs.
+- [x] **Compliance**: rule-driven messaging goes through campaigns/notify which use the central compliance gate; SMS actions require a consent filter to activate.
+- [~] **Remaining polish**: `send single email/SMS`, `create task`, `draft announcement` actions and `APPOINTMENT_BOOKED`/date-based triggers (SRS "should-haves") not yet wired; daily-cap enforcement is stored but not yet counted against sends; analytics UI panel (data + endpoint exist). **Verified E2E:** match→action→audit, cooldown block, kill-switch skip, and activation validation all tested against the live DB.
+
+## 🤖 10. Sales KB & Brand Voice Agent (SW-KB / SW-AGT) — ✅ BUILT (needs keys to go live)
+> RAG knowledge base. **DECISION (ratified): Pinecone vector store + OpenAI `text-embedding-3-small` (1536-dim) embeddings** — per SRS §11.1 (Pinecone named) and because Anthropic serves no embeddings. `vector-store.service.js` + Inngest `ingestKbDocument` (`kb-ingest.js`) + upgraded `kb.controller.js` / `/api/sales/kb`.
+- [x] **Document upload API + UI (SW-KB-001)**: `POST /api/sales/kb/upload` (multer → Supabase `sales_knowledge_base` bucket → SalesKB row → fires `sales.kb.ingest`). PDF / DOCX / TXT (pdf-parse / mammoth / utf-8). **Uploader page at `/sales/knowledge-base`** (nav link added): drag-and-drop, category tagging, live indexing-status badges (auto-refresh while indexing), soft-delete, and a retrieval-test panel showing matches + citations.
+- [x] **Chunking & embedding (SW-KB-002)**: Inngest extract → chunk (~1000 chars, 150 overlap) → OpenAI embed → Pinecone upsert into a **per-tenant Sales namespace** (`sales__<companyId>`), isolated from Warranty. Status tracked (PENDING→INDEXING→READY/FAILED), `chunkCount` recorded.
+- [x] **Lifecycle / soft-delete (SW-KB-003)**: Delete = drop the doc's vectors from Pinecone (by deterministic ids) + `isDeleted=true` (row retained for rollback/audit); hidden from the active list.
+- [x] **Category tagging (SW-KB-004)**: `category` on each doc + stored in vector metadata; retrieval supports a category filter.
+- [x] **Citation visibility (SW-KB-005)**: `POST /api/sales/kb/search` returns top-k chunks + a de-duplicated citation list (documentId, name, category). AI features that draw on the KB record these when built.
+- [x] **Brand voice & company profile (SW-KB-006)**: `Company.salesBrandProfile` (Json) + `GET/PUT /api/sales/kb/brand-profile`.
+- [~] **Agent runtime abstraction (SW-AGT-001)**: Retrieval is a clean service (`vector-store.service.js`) any AI feature can call; consumers (blog drafter, nurture assist) wire it as they're built.
+- [ ] **⚠️ LIVE ACTIVATION REQUIRED**: set `OPENAI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX` in `server/.env` and create a **Pinecone serverless index (dimension 1536, metric cosine)**. Until then, uploads mark `FAILED: vector store not configured` and search returns 503. Code degrades gracefully.
 
 ## 🛡️ Webhooks & Compliance Spine (SW-CMP)
 > Cross-cutting delivery compliance.
