@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { triggerAutomation } from "../lib/automation-events.js";
 import {
   SalesforceClient,
   encrypt,
@@ -544,7 +545,7 @@ export const manualSync = async (req, res) => {
           });
           updatedCount++;
         } else {
-          await prisma.lead.create({
+          const createdSfLead = await prisma.lead.create({
             data: {
               companyId,
               source: "SALESFORCE",
@@ -578,6 +579,8 @@ export const manualSync = async (req, res) => {
             },
           });
           createdCount++;
+          // SW-AMK: newly synced Salesforce leads can trigger automation rules.
+          await triggerAutomation({ companyId, leadId: createdSfLead.id, event: "CRM_INGEST", context: { source: "SALESFORCE" } });
         }
       } catch (recordError) {
         errorCount++;
@@ -737,7 +740,7 @@ export const bulkImport = async (req, res) => {
           });
           updatedCount++;
         } else {
-          await prisma.lead.create({
+          const createdSfLead = await prisma.lead.create({
             data: {
               companyId,
               source: "SALESFORCE",
@@ -765,6 +768,8 @@ export const bulkImport = async (req, res) => {
             },
           });
           createdCount++;
+          // SW-AMK: newly synced Salesforce leads can trigger automation rules.
+          await triggerAutomation({ companyId, leadId: createdSfLead.id, event: "CRM_INGEST", context: { source: "SALESFORCE" } });
         }
       } catch (recordError) {
         errorCount++;

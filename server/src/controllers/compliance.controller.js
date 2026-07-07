@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { ComplianceService } from "../services/compliance-service.js";
+import { triggerAutomation } from "../lib/automation-events.js";
 
 export const getSuppressions = async (req, res) => {
   try {
@@ -251,6 +252,7 @@ export const processInbound = async (req, res) => {
           name: "lead.reply.received",
           data: { leadId: lead.id, companyId, channel, body, sender },
         });
+        await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel } });
       }
 
       return res.json({
@@ -277,6 +279,66 @@ export const processInbound = async (req, res) => {
 };
 
 
+
+// Public, user-facing unsubscribe (the "unsubscribe here" link in emails).
+// Keyed by the lead's own id (a non-sequential cuid, unique per recipient). No auth:
+// leads have no portal account, and opting someone OUT is always a safe action.
+export const unsubscribeByLead = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const channel = String(req.query.channel || req.body?.channel || "EMAIL").toUpperCase();
+    const isEmail = channel !== "SMS";
+
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      include: { company: true },
+    });
+    if (!lead) {
+      return res.status(404).json({ success: false, message: "This unsubscribe link is invalid or has expired." });
+    }
+
+    const value = isEmail ? lead.email : lead.phone;
+    if (value) {
+      const normalized = isEmail ? value.trim().toLowerCase() : value.replace(/\D/g, "");
+      await prisma.suppressionList.upsert({
+        where: { companyId_value: { companyId: lead.companyId, value: normalized } },
+        create: { companyId: lead.companyId, value: normalized, reason: "UNSUBSCRIBE" },
+        update: { reason: "UNSUBSCRIBE" },
+      });
+    }
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        ...(isEmail ? { emailOptIn: false } : { smsOptIn: false }),
+        consentSource: isEmail ? "Email unsubscribe link" : "SMS unsubscribe link",
+        consentTimestamp: new Date(),
+      },
+    });
+
+    await prisma.leadTimeline.create({
+      data: {
+        leadId: lead.id,
+        type: "CONSENT_CHANGE",
+        description: `Opted out of ${isEmail ? "Email" : "SMS"} via unsubscribe link.`,
+      },
+    });
+
+    // Stop any active sequences for this lead.
+    const { inngest } = await import("../lib/inngest.js");
+    await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "UNSUBSCRIBE" } });
+
+    return res.json({
+      success: true,
+      channel: isEmail ? "EMAIL" : "SMS",
+      email: isEmail ? lead.email : null,
+      companyName: lead.company?.name || null,
+    });
+  } catch (error) {
+    console.error("[Unsubscribe Link] Error:", error);
+    return res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
+  }
+};
 
 export const unsubscribeWebhook = async (req, res) => {
   try {
@@ -543,6 +605,7 @@ export const processBrevoInboundEmail = async (req, res) => {
           name: "lead.reply.received",
           data: { leadId: lead.id, companyId, channel: "EMAIL", body: replyContent, sender: normalizedEmail },
         });
+        await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "EMAIL" } });
       }
 
       processedCount++;
@@ -633,6 +696,7 @@ export const processTwilioInboundSms = async (req, res) => {
         name: "lead.reply.received",
         data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
       });
+      await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "SMS" } });
     }
 
     // Acknowledge without an auto-reply (the scheduling agent handles any response).

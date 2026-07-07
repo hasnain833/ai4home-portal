@@ -51,7 +51,7 @@ const warrantyNavItems = [
   { name: "Tickets", href: "/warranty/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
   { name: "Team", href: "/warranty/dashboard/team", icon: Users, roles: ["admin"] },
   { name: "Homeowners", href: "/warranty/dashboard/homeowners", icon: User, roles: ["admin", "staff"] },
-  { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
+  // { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
   { name: "Knowledge Base", href: "/warranty/knowledge-base", icon: Database, roles: ["admin", "staff"] },
   { name: "Company", href: "/warranty/company", icon: Building2, roles: ["admin", "staff"] },
   { name: "Reports", href: "/warranty/reports", icon: BarChart3, roles: ["admin", "staff"] },
@@ -67,6 +67,7 @@ const salesNavItems = [
   { name: "Announcements", href: "/sales/announcements", icon: Bot, roles: ["admin", "staff"] },
   { name: "News Feed", href: "/sales/news", icon: Activity, roles: ["admin", "staff"] },
   { name: "Blog Posts", href: "/sales/blog", icon: Pencil, roles: ["admin", "staff"] },
+  { name: "Knowledge Base", href: "/sales/knowledge-base", icon: Database, roles: ["admin", "staff"] },
   { name: "Automations", href: "/sales/automations", icon: Plug, roles: ["admin"] },
   { name: "Settings", href: "/sales/settings", icon: Settings, roles: ["admin", "staff"] },
 ];
@@ -87,6 +88,23 @@ export default function PortalLayout({
   const { theme, setTheme } = useTheme();
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (mounted && user) {
+      // Update document title
+      document.title = user.companyName || "Aiforhomebuilder";
+
+      // Update favicon
+      const logoUrl = user.companyLogo || "/favicon.ico";
+      let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+      if (!link) {
+        link = document.createElement("link");
+        link.rel = "icon";
+        document.head.appendChild(link);
+      }
+      link.href = logoUrl;
+    }
+  }, [mounted, user]);
 
   const navItems = workspace === "warranty" ? warrantyNavItems : salesNavItems;
   const filteredNav = navItems.filter((item) => user && item.roles.includes(user.role));

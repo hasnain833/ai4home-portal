@@ -109,11 +109,7 @@ const staggerContainer = {
 
 // ─── Custom Fields (local state, preserved from original) ─────────────────────
 
-const initialCustomFields: CustomField[] = [
-  { id: "CF-01", name: "DesiredMoveInQuarter", type: "TEXT", isRequired: false },
-  { id: "CF-02", name: "MaximumBudgetLimit", type: "NUMBER", isRequired: false },
-  { id: "CF-03", name: "CurrentlyRentOrOwn", type: "TEXT", isRequired: false }
-];
+const initialCustomFields: CustomField[] = [];
 
 function SettingsPageContent() {
   const searchParams = useSearchParams();
@@ -148,7 +144,8 @@ function SettingsPageContent() {
   const [loadingLogs, setLoadingLogs] = useState(false);
 
   // ─── Outreach & Compliance State ──────────────────────────────────────────
-  const [defaultOwner, setDefaultOwner] = useState("Alex Chen");
+  const [defaultOwner, setDefaultOwner] = useState("Unassigned");
+  const [teamMembers, setTeamMembers] = useState<{ id: string; name: string | null; email: string }[]>([]);
   const [voiceProfile, setVoiceProfile] = useState("professional");
   const [maxSmsPerHour, setMaxSmsPerHour] = useState(60);
   const [complianceOptInRequired, setComplianceOptInRequired] = useState(true);
@@ -241,6 +238,17 @@ function SettingsPageContent() {
       }
     } catch (error) {
       console.error("Failed to fetch company compliance settings:", error);
+    }
+
+    // Populate the "default lead owner" dropdown from real team members.
+    try {
+      const usersRes = await fetch("/api/users");
+      if (usersRes.ok) {
+        const users = await usersRes.json();
+        if (Array.isArray(users)) setTeamMembers(users);
+      }
+    } catch (error) {
+      console.error("Failed to fetch team members:", error);
     }
   }, []);
 
@@ -962,9 +970,12 @@ function SettingsPageContent() {
                       <Select value={defaultOwner} onValueChange={setDefaultOwner}>
                         <SelectTrigger id="defaultOwner"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Alex Chen">Alex Chen (Senior Agent)</SelectItem>
-                          <SelectItem value="Jessica Smith">Jessica Smith (Agent)</SelectItem>
                           <SelectItem value="Unassigned">Assign to Pool Queue</SelectItem>
+                          {teamMembers.map((m) => (
+                            <SelectItem key={m.id} value={m.name || m.email}>
+                              {m.name || m.email}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>

@@ -60,46 +60,9 @@ interface BlogPost {
   author: string;
 }
 
-const initialPosts: BlogPost[] = [
-  {
-    id: "B-101",
-    title: "5 Hidden Smart Home Features that Boost Resale Value",
-    excerpt: "From integrated wiring conduits to solar battery storage options, learn what modern home buyers are scanning listings for in 2026.",
-    content: "## Smart Home Valuation in 2026\n\nThe landscape of residential valuation has dramatically shifted toward smart integration. Home buyers are no longer satisfied with retrofitted smart plugs; they expect embedded infrastructure.\n\n### 1. Dedicated Wiring Conduits\nFuture-proofing your walls with fiber-optic wiring and structured ethernet lines increases value by ensuring seamless smart device networks.\n\n### 2. High-Capacity Battery Backup Storage\nResidential solar arrays paired with wall-mounted battery systems (such as Tesla Powerwall 3 or Enphase) are commanding premium prices of up to 4.2% above neighborhood comps.\n\n### 3. Integrated Indoor Air Filtration Monitors\nAutomated air quality monitors hooked directly into zone-controlled HVAC systems ensure consistent HEPA filtering without manual scheduling.",
-    status: "PUBLISHED",
-    publishDate: "2026-06-10",
-    readTime: "4 min read",
-    category: "Home Design",
-    tags: ["Smart Home", "Resale Value", "Energy Efficiency"],
-    aiAssisted: true,
-    author: "Marketing Copilot"
-  },
-  {
-    id: "B-102",
-    title: "Navigating Interest Rate Fluctuations: Homeowner Guide",
-    excerpt: "Interest rates are moving, but your dream home does not have to wait. We break down the buy-down programs and developer credits available this quarter.",
-    content: "## Lock in Your Rate: Developer Buy-Downs\n\nMacroeconomic variables have introduced turbulence in the mortgage rates, but homebuilders are deploying creative financing tools to bridge the affordability gap.\n\n### Understanding the 2-1 Buy-down Program\nUnder this arrangement, the builder pays a lump sum upfront to reduce your effective interest rate by 2% in the first year and 1% in the second year, returning to the par rate in year three. This saves homeowners hundreds of dollars monthly during initial moving and furnishing transitions.",
-    status: "SCHEDULED",
-    publishDate: "2026-06-25",
-    readTime: "6 min read",
-    category: "Finance",
-    tags: ["Mortgage Rates", "Homebuying", "Developer Credits"],
-    aiAssisted: false,
-    author: "Jessica Smith"
-  },
-  {
-    id: "B-103",
-    title: "Understanding Year 1 vs Year 2 Builder Warranty Policies",
-    excerpt: "A guide for new homeowners detailing structural coverage milestones, fit-and-finish claims, and when to file requests on the Care Portal.",
-    content: "## Builder Warranty Cycles Demystified\n\nEvery homebuyer deserves complete confidence in their structure. Most new builds operate on a segmented warranty framework (1-2-10 structure) designed to match material lifespans.\n\n### Year 1: Fit-and-Finish Coverage\nThis covers nail pops, drywall cracks, paint touch-ups, door alignments, and minor appliance calibration.\n\n### Year 2: Major Systems Coverage\nThis layer transitions into behind-the-wall systems: electrical routing, plumbing integrity, HVAC ductwork, and duct pressure seals.",
-    status: "DRAFT",
-    readTime: "5 min read",
-    category: "Warranty & Support",
-    tags: ["Builder Policy", "Home Maintenance", "Portal Tips"],
-    aiAssisted: true,
-    author: "AI Drafting Engine"
-  }
-];
+// No seeded posts — the blog drafting backend (SW-BLOG) is not built yet, so this
+// list starts empty rather than showing fabricated articles.
+const initialPosts: BlogPost[] = [];
 
 const aiTopicIdeas = [
   {

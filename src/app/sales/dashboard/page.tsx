@@ -17,27 +17,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { motion } from "framer-motion";
-
-// Mock Data representing CRM and CSV ingested leads
-const initialLeads = [
-  { id: "L-9021", name: "Sarah Jenkins", email: "sarah.j@example.com", phone: "+1 (555) 019-2834", status: "Engaged", source: "Salesforce Sync", owner: "Alex Chen", date: "2026-06-12" },
-  { id: "L-9022", name: "David Miller", email: "david.m@example.com", phone: "+1 (555) 014-9988", status: "New", source: "CSV Upload", owner: "Alex Chen", date: "2026-06-12" },
-  { id: "L-9023", name: "Emily Watson", email: "emily.w@example.com", phone: "+1 (555) 017-7722", status: "Appointment Set", source: "Salesforce Sync", owner: "Jessica Smith", date: "2026-06-11" },
-  { id: "L-9024", name: "Michael Chang", email: "m.chang@example.com", phone: "+1 (555) 012-3344", status: "Nurturing", source: "Manual Input", owner: "Jessica Smith", date: "2026-06-10" },
-  { id: "L-9025", name: "Amanda Ross", email: "amanda.ross@example.com", phone: "+1 (555) 015-5566", status: "Qualified", source: "Salesforce Sync", owner: "Alex Chen", date: "2026-06-09" }
-];
-
-const mockAppointments = [
-  { id: "A-501", leadName: "Emily Watson", type: "Model Home Tour", time: "Tomorrow at 2:00 PM", status: "Confirmed", agent: "Jessica Smith" },
-  { id: "A-502", leadName: "Sarah Jenkins", type: "Initial Consultation", time: "June 15 at 10:00 AM", status: "Confirmed", agent: "Alex Chen" },
-  { id: "A-503", leadName: "James Carter", type: "Design Center Review", time: "June 18 at 4:30 PM", status: "Pending", agent: "Alex Chen" }
-];
-
-const mockCampaigns = [
-  { name: "First-Time Homebuyer Campaign", channel: "Email & SMS", steps: 12, enrolled: 1420, active: 840, conversionRate: 8.4 },
-  { name: "Model Home Tour Follow-up", channel: "Email Only", steps: 5, enrolled: 310, active: 45, conversionRate: 15.2 },
-  { name: "Interest Rate Drop Alert", channel: "SMS Only", steps: 2, enrolled: 2450, active: 2450, conversionRate: 4.8 }
-];
+import { toast } from "sonner";
 
 const statusColors: Record<string, string> = {
   New: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200/50",
@@ -60,85 +40,119 @@ const staggerContainer = {
   }
 };
 
+type Appointment = { id: string; leadName: string; type: string; time: string; status: string };
+
+function formatRelative(iso: string | null): string {
+  if (!iso) return "Never synced";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 export default function SalesDashboardPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [leads, setLeads] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [stats, setStats] = useState({ totalLeads: 0, activeCampaigns: 0, totalEnrolled: 0 });
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [stats, setStats] = useState({ totalLeads: 0, activeCampaigns: 0, totalEnrolled: 0, appointmentRate: 0 });
   const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState("12 minutes ago");
+  const [lastSync, setLastSync] = useState<string | null>(null);
+
+  async function fetchData() {
+    try {
+      const [dashboardRes, leadsRes, campaignsRes] = await Promise.all([
+        fetch("/api/sales/dashboard"),
+        fetch("/api/sales/leads"),
+        fetch("/api/sales/campaigns")
+      ]);
+
+      if (dashboardRes.ok) {
+        const data = await dashboardRes.json();
+        const total = data.leads?.total || 0;
+        const appointmentSet = data.leads?.appointmentSet || 0;
+        setStats(s => ({
+          ...s,
+          totalLeads: total,
+          activeCampaigns: data.campaigns?.activeCount || 0,
+          appointmentRate: total > 0 ? Math.round((appointmentSet / total) * 1000) / 10 : 0,
+        }));
+        setAppointments(
+          (data.upcomingAppointments || []).map((a: any) => ({
+            id: a.id,
+            leadName: a.lead ? `${a.lead.firstName} ${a.lead.lastName}` : "Lead",
+            type: a.title || "Appointment",
+            time: a.time,
+            status: a.status,
+          }))
+        );
+        setLastSync(data.crmSyncHealth?.lastSyncAt || null);
+      }
+
+      if (leadsRes.ok) {
+        const allLeadsData = await leadsRes.json();
+        setLeads(allLeadsData.slice(0, 5).map((l: any) => ({
+          id: `L-${l.id.slice(-4).toUpperCase()}`,
+          name: `${l.firstName} ${l.lastName}`,
+          email: l.email,
+          phone: l.phone,
+          status: l.status,
+          source: l.source || "System",
+          owner: l.owner?.name || "Unassigned",
+          date: new Date(l.createdAt).toISOString().slice(0, 10)
+        })));
+      }
+
+      if (campaignsRes.ok) {
+        const campaignsData = await campaignsRes.json();
+        let enrolledCamps = 0;
+        const mappedCamps = campaignsData.map((c: any) => {
+          const totalEnrollments = c.totalLeads ?? (c.enrollments?.length || 0);
+          const activeEnrollments = c.enrollments?.filter((e: any) => e.status === "ACTIVE").length ?? 0;
+          enrolledCamps += totalEnrollments;
+          return {
+            name: c.name,
+            channel: c.channel || "Email & SMS",
+            enrolled: totalEnrollments,
+            active: activeEnrollments,
+            conversionRate: typeof c.conversionRate === "string" ? parseFloat(c.conversionRate) : (c.conversionRate || 0)
+          };
+        });
+        setCampaigns(mappedCamps);
+        setStats(s => ({ ...s, totalEnrolled: enrolledCamps }));
+      }
+    } catch (err) {
+      console.error("Error fetching dashboard data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [dashboardRes, leadsRes, campaignsRes] = await Promise.all([
-          fetch("/api/sales/dashboard"),
-          fetch("/api/sales/leads"),
-          fetch("/api/sales/campaigns")
-        ]);
-
-        if (dashboardRes.ok) {
-          const data = await dashboardRes.json();
-          setStats(s => ({
-            ...s,
-            totalLeads: data.leads?.total || 0,
-            activeCampaigns: data.campaigns?.activeCount || 0,
-          }));
-        }
-
-        if (leadsRes.ok) {
-          const allLeadsData = await leadsRes.json();
-          setLeads(allLeadsData.slice(0, 5).map((l: any) => ({
-            id: `L-${l.id.slice(-4).toUpperCase()}`,
-            name: `${l.firstName} ${l.lastName}`,
-            email: l.email,
-            phone: l.phone,
-            status: l.status,
-            source: l.source || "System",
-            owner: l.owner?.name || "Unassigned",
-            date: new Date(l.createdAt).toISOString().slice(0, 10)
-          })));
-        }
-
-        if (campaignsRes.ok) {
-          const campaignsData = await campaignsRes.json();
-          let enrolledCamps = 0;
-          const mappedCamps = campaignsData.map((c: any) => {
-            const totalEnrollments = c.enrollments?.length || 0;
-            const activeEnrollments = c.enrollments?.filter((e: any) => e.status === "ACTIVE").length || 0;
-            enrolledCamps += totalEnrollments;
-            return {
-              name: c.name,
-              channel: c.channel || "Email & SMS",
-              enrolled: totalEnrollments,
-              active: activeEnrollments,
-              conversionRate: c.conversionRate || 0
-            };
-          });
-          setCampaigns(mappedCamps);
-          setStats(s => ({ ...s, totalEnrolled: enrolledCamps }));
-        }
-      } catch (err) {
-        console.error("Error fetching dashboard data:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSync = () => {
+  const handleSync = async () => {
     setSyncing(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/sales/salesforce/sync", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(data.message || "Salesforce sync complete.");
+        await fetchData();
+      } else {
+        toast.error(data.message || "Salesforce is not connected. Configure it in Settings.");
+      }
+    } catch {
+      toast.error("Network error while syncing Salesforce.");
+    } finally {
       setSyncing(false);
-      setLastSync("Just now");
-      // Add a fresh lead to simulate incoming CRM data
-      setLeads(prev => [
-        { id: `L-${Math.floor(1000 + Math.random() * 9000)}`, name: "Robert Downey", email: "r.downey@example.com", phone: "+1 (555) 011-8833", status: "New", source: "Salesforce Sync", owner: "Alex Chen", date: "Just now" },
-        ...prev
-      ]);
-    }, 1500);
+    }
   };
 
   const handleExportCSV = () => {
@@ -164,7 +178,10 @@ export default function SalesDashboardPage() {
                 Manage, nurture, and automate outreach to your homebuilder prospects.
               </p>
             </div>
-            <div className="flex gap-2.5">
+            <div className="flex items-center gap-2.5">
+              <span className="hidden sm:block text-[10px] text-muted-foreground">
+                Last sync: {formatRelative(lastSync)}
+              </span>
               <Button
                 variant="outline"
                 size="sm"
@@ -226,8 +243,12 @@ export default function SalesDashboardPage() {
                     <Calendar className="h-4 w-4 text-green-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">{mockAppointments.length}</div>
-                    <p className="text-xs text-muted-foreground mt-1">Next booking: Tomorrow 2 PM</p>
+                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">{appointments.length}</div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {appointments.length > 0
+                        ? `Next booking: ${new Date(appointments[0].time).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+                        : "No upcoming bookings"}
+                    </p>
                   </CardContent>
                 </Card>
 
@@ -237,8 +258,8 @@ export default function SalesDashboardPage() {
                     <TrendingUp className="h-4 w-4 text-emerald-500" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">9.4%</div>
-                    <p className="text-xs text-muted-foreground mt-1">Lead $\rightarrow$ Appointment Rate</p>
+                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">{stats.appointmentRate}%</div>
+                    <p className="text-xs text-muted-foreground mt-1">Lead → Appointment rate</p>
                   </CardContent>
                 </Card>
               </>
@@ -308,20 +329,24 @@ export default function SalesDashboardPage() {
                   <CardDescription>Bookings scheduled by the AI Assistant and manual links.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {mockAppointments.map((appt) => (
-                    <div key={appt.id} className="p-3 border dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/20 hover:bg-slate-50 dark:hover:bg-slate-900/30 transition rounded-lg">
-                      <div className="flex justify-between items-start">
-                        <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">{appt.leadName}</p>
-                        <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400 border-emerald-200/50 text-[10px]">
-                          {appt.status}
-                        </Badge>
+                  {appointments.length === 0 && !loading ? (
+                    <div className="text-xs text-muted-foreground py-4 text-center">No upcoming appointments.</div>
+                  ) : (
+                    appointments.map((appt) => (
+                      <div key={appt.id} className="p-3 border dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/20 hover:bg-slate-50 dark:hover:bg-slate-900/30 transition rounded-lg">
+                        <div className="flex justify-between items-start">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">{appt.leadName}</p>
+                          <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400 border-emerald-200/50 text-[10px]">
+                            {appt.status}
+                          </Badge>
+                        </div>
+                        <p className="text-[11px] font-medium text-slate-500 mt-1">{appt.type}</p>
+                        <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                          <Calendar className="h-3 w-3" /> {new Date(appt.time).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                        </p>
                       </div>
-                      <p className="text-[11px] font-medium text-slate-500 mt-1">{appt.type}</p>
-                      <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
-                        <Calendar className="h-3 w-3" /> {appt.time}
-                      </p>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </CardContent>
               </Card>
 

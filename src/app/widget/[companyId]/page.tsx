@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 
 const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v3.6/inject.js";
-const CONFIG_URL = process.env.NEXT_PUBLIC_BOTPRESS_CONFIG_URL || "https://files.bpcontent.cloud/2026/02/10/12/20260210121824-S8YDKPLR.js";
+const CONFIG_URL = process.env.NEXT_PUBLIC_BOTPRESS_CONFIG_URL || "https://files.bpcontent.cloud/2026/06/24/12/20260624123527-XY5YMA41.js";
 
 export default function WidgetPage() {
   const params = useParams();
@@ -71,118 +71,66 @@ export default function WidgetPage() {
   useEffect(() => {
     if (loading) return;
 
-    // Intercept Botpress initialization to customize theme and branding for the widget
-    const w = window as any;
-    let realBotpress: any = null;
-    try {
-      Object.defineProperty(w, 'botpress', {
-        get: () => realBotpress,
-        set: (val) => {
-          if (val && val.init) {
-            realBotpress = Object.create(val);
-            Object.defineProperty(realBotpress, 'init', {
-              value: function (options: any) {
-                if (options && options.configuration) {
-                  options.configuration.color = themeColor;
-                  options.configuration.botName = botName;
-                  if (botLogoUrl) {
-                    options.configuration.avatarUrl = botLogoUrl;
-                    options.configuration.botAvatar = botLogoUrl;
-                    options.configuration.botAvatarUrl = botLogoUrl;
-                  }
-                }
-                val.init.call(val, options);
-              },
-              writable: true,
-              configurable: true,
-              enumerable: true
-            });
-          } else {
-            realBotpress = val;
-          }
-        },
-        configurable: true,
-        enumerable: true
-      });
-    } catch (e) {
-      console.error("Failed to define botpress getter/setter:", e);
-    }
+    let cancelled = false;
 
+    // Load inject.js, then a same-origin /bp-config script with per-company branding
+    // + embeddedChatId baked in. We DON'T proxy window.botpress — that breaks
+    // Botpress' inline (embedded) mount and forces the floating widget.
     const injectScript = document.createElement("script");
     injectScript.src = INJECT_URL;
     injectScript.async = true;
 
+    const params = new URLSearchParams({ botColor: themeColor, botName });
+    if (botLogoUrl) params.set("botLogo", botLogoUrl);
     const configScript = document.createElement("script");
-    configScript.src = CONFIG_URL;
-    configScript.async = true;
+    configScript.src = `/bp-config?${params.toString()}`;
     configScript.defer = true;
 
-    document.body.appendChild(injectScript);
-    document.body.appendChild(configScript);
+    const startWebchat = () => {
+      if (cancelled) return;
+      const bp = (window as any).botpress;
+      if (!bp) {
+        setTimeout(startWebchat, 100);
+        return;
+      }
 
-    const checkBotpress = setInterval(() => {
-      const bp = w.botpressWebChat || w.botpressWebchat || w.botpress;
-
-      if (bp) {
-        clearInterval(checkBotpress);
-
+      // Register listeners BEFORE the config script calls botpress.init(...).
+      try {
         bp.on("webchat:initialized", () => {
-          if (bp.open) bp.open();
-
           if (bp.updateUser) {
             try {
               bp.updateUser({
-                data: {
-                  companyId: companyId,
-                  role: "homeowner"
-                },
-                tags: {
-                  companyId: companyId,
-                  role: "homeowner"
-                }
+                data: { companyId, role: "staff" },
+                tags: { companyId, role: "staff" },
               });
             } catch (err) {
               console.error("Failed to update user in Botpress:", err);
             }
           }
-
-          try {
-            if (bp.config) {
-              bp.config({
-                avatarUrl: botLogoUrl,
-                botAvatar: botLogoUrl,
-                botAvatarUrl: botLogoUrl,
-                botName: botName
-              });
-            }
-          } catch (e) {
-            console.error("Could not override botpress config", e);
-          }
         });
+      } catch (err) {
+        console.error("Failed to register Botpress listener:", err);
       }
-    }, 200); // Reduced from 300ms to 200ms for faster detection
+
+      document.body.appendChild(configScript);
+    };
+
+    injectScript.onload = startWebchat;
+    document.body.appendChild(injectScript);
 
     return () => {
-      clearInterval(checkBotpress);
-      try {
-        delete w.botpress;
-      } catch (e) {
-        // Ignore
-      }
-      if (document.body.contains(injectScript)) {
-        document.body.removeChild(injectScript);
-      }
-
-      const configScripts = document.querySelectorAll(`script[src="${CONFIG_URL}"]`);
-      configScripts.forEach((s) => s.remove());
+      cancelled = true;
+      if (document.body.contains(injectScript)) document.body.removeChild(injectScript);
+      if (document.body.contains(configScript)) document.body.removeChild(configScript);
       const bpElements = document.querySelectorAll(
-        "[id^='bp-'], [class^='bp-'], iframe[src*='botpress'], .bp-webchat-container"
+        "[class^='bp-'], iframe[src*='botpress'], .bp-webchat-container"
       );
-      bpElements.forEach((el) => {
-        if (el.id !== "bp-embedded-webchat") {
-          el.remove();
-        }
-      });
+      bpElements.forEach((el) => el.remove());
+      try {
+        delete (window as any).botpress;
+      } catch {
+        // Ignore — inject.js may define it as non-configurable.
+      }
     };
   }, [loading, companyId, themeColor, botName, botLogoUrl]);
 

@@ -36,9 +36,10 @@ This document serves as the single, authoritative checklist and status tracker f
 - [ ] **Full Integration Testing**: Test full loop of Builtopia sync status via external webhook.
 
 ## 🤖 4. Multi-Agent System (Phase 2 / SRS §5)
-> The SRS specifies a custom Orchestrator + 7 sub-agents on LangGraph. Currently, this is fully offloaded to Botpress.
-- [ ] **Decision needed**: Ratify "Botpress satisfies Phase 2" vs. build the SRS's orchestrated MAS. If keeping Botpress, explicitly record deviation from §5 so acceptance criteria 9-14 are re-scoped.
-- [ ] **§5.8 Portal features (if MAS pursued)**: per-claim agent-step display, token breakdown, MAS-vs-workflow trigger config, Reviewer Agent toggle.
+> The SRS specifies a custom Orchestrator + 7 sub-agents on LangGraph. **DECISION (ratified):** the entire warranty conversational workflow — intake, identify, diagnose, resolve, escalate — is **handled by Botpress**, which satisfies Phase 1 and, by agreement, stands in for the Phase 2 MAS. No custom LangGraph orchestrator will be built.
+- [x] **Botpress-as-Phase-2 decision ratified**: Warranty bot logic lives in Botpress; §5 orchestrated MAS is intentionally **not** implemented in-repo.
+- [ ] **Record the deviation formally**: Note in the SRS/acceptance record that §5 (Orchestrator + sub-agents) and acceptance criteria 9–14 are **out of scope / re-scoped to Botpress** so QA does not test against them.
+- [ ] **§5.8 portal features — descope confirmation**: per-claim agent-step display, per-agent token breakdown, MAS-vs-workflow trigger config, and Reviewer Agent toggle are **not applicable** under the Botpress decision. Confirm they can be dropped (or map token/step analytics to Botpress-provided data if the client still wants them).
 
 ## 🔐 5. Security, NFRs & Architecture
 - [x] **Botpress Embedded & Multi-Tenancy**: Dynamic Widget Generation injects `companyId` into payload.

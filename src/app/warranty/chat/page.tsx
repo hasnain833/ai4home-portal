@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 
 const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v3.6/inject.js";
-const CONFIG_URL = process.env.NEXT_PUBLIC_BOTPRESS_CONFIG_URL || "https://files.bpcontent.cloud/2026/02/10/12/20260210121824-S8YDKPLR.js";
+const CONFIG_URL = process.env.NEXT_PUBLIC_BOTPRESS_CONFIG_URL || "https://files.bpcontent.cloud/2026/06/24/12/20260624123527-XY5YMA41.js";
 
 export default function AIChatPage() {
   const { user, isLoading } = useAuth();
@@ -48,63 +48,34 @@ export default function AIChatPage() {
     // Wait until the user data is fully loaded before initializing the chat
     if (isLoading || !user) return;
 
-    // Intercept Botpress initialization to customize theme and branding for the preview bot
-    const w = window as any;
-    let realBotpress: any = null;
-    try {
-      Object.defineProperty(w, 'botpress', {
-        get: () => realBotpress,
-        set: (val) => {
-          if (val && val.init) {
-            // Create a wrapper object that inherits from original to override read-only init function
-            realBotpress = Object.create(val);
-            Object.defineProperty(realBotpress, 'init', {
-              value: function (options: any) {
-                if (options && options.configuration) {
-                  options.configuration.color = themeColor;
-                  options.configuration.botName = botName;
-                  options.configuration.avatarUrl = botLogoUrl;
-                  options.configuration.botAvatar = botLogoUrl;
-                  options.configuration.botAvatarUrl = botLogoUrl;
-                }
-                val.init.call(val, options);
-              },
-              writable: true,
-              configurable: true,
-              enumerable: true
-            });
-          } else {
-            realBotpress = val;
-          }
-        },
-        configurable: true,
-        enumerable: true
-      });
-    } catch (e) {
-      console.error("Failed to define botpress getter/setter:", e);
-    }
+    let cancelled = false;
 
+    // Load Botpress' inject.js, then a same-origin config script (/bp-config) that
+    // has per-company branding + embeddedChatId baked in. We DON'T proxy
+    // window.botpress — doing so breaks Botpress' inline (embedded) mount and forces
+    // the floating widget. Branding is applied server-side instead (see /bp-config).
     const injectScript = document.createElement("script");
     injectScript.src = INJECT_URL;
     injectScript.async = true;
 
+    const params = new URLSearchParams({ botColor: themeColor, botName });
+    if (botLogoUrl) params.set("botLogo", botLogoUrl);
     const configScript = document.createElement("script");
-    configScript.src = CONFIG_URL;
-    configScript.async = true;
+    configScript.src = `/bp-config?${params.toString()}`;
     configScript.defer = true;
 
-    document.body.appendChild(injectScript);
-    document.body.appendChild(configScript);
+    const startWebchat = () => {
+      if (cancelled) return;
+      const bp = (window as any).botpress;
+      if (!bp) {
+        // inject.js hasn't defined window.botpress yet — retry shortly.
+        setTimeout(startWebchat, 100);
+        return;
+      }
 
-    const checkBotpress = setInterval(() => {
-      const bp = (window as any).botpressWebChat || (window as any).botpressWebchat || (window as any).botpress;
-
-      if (bp) {
-        clearInterval(checkBotpress);
-
+      // Register listeners BEFORE the config script calls botpress.init(...).
+      try {
         bp.on("webchat:initialized", () => {
-          if (bp.open) bp.open();
-
           if (user && bp.updateUser) {
             try {
               bp.updateUser({
@@ -114,7 +85,7 @@ export default function AIChatPage() {
                   name: user.name || "",
                   role: user.role || "",
                   companyId: user.companyId || "",
-                  companyName: user.companyName || ""
+                  companyName: user.companyName || "",
                 },
                 tags: {
                   email: user.email || "",
@@ -122,51 +93,37 @@ export default function AIChatPage() {
                   name: user.name || "",
                   role: user.role || "",
                   companyId: user.companyId || "",
-                  companyName: user.companyName || ""
-                }
+                  companyName: user.companyName || "",
+                },
               });
             } catch (err) {
               console.error("Failed to update user in Botpress:", err);
             }
           }
-
-          try {
-            if (bp.config) {
-              bp.config({
-                avatarUrl: botLogoUrl,
-                botAvatar: botLogoUrl,
-                botAvatarUrl: botLogoUrl,
-                botName: botName
-              });
-            }
-          } catch (e) {
-            console.error("Could not override botpress config", e);
-          }
         });
+      } catch (err) {
+        console.error("Failed to register Botpress listener:", err);
       }
-    }, 300);
+
+      document.body.appendChild(configScript);
+    };
+
+    injectScript.onload = startWebchat;
+    document.body.appendChild(injectScript);
 
     return () => {
-      clearInterval(checkBotpress);
+      cancelled = true;
+      if (document.body.contains(injectScript)) document.body.removeChild(injectScript);
+      if (document.body.contains(configScript)) document.body.removeChild(configScript);
+      const bpElements = document.querySelectorAll(
+        "[class^='bp-'], iframe[src*='botpress'], .bp-webchat-container"
+      );
+      bpElements.forEach((el) => el.remove());
       try {
         delete (window as any).botpress;
-      } catch (e) {
-        // Ignore
+      } catch {
+        // Ignore — inject.js may define it as non-configurable.
       }
-      if (document.body.contains(injectScript)) {
-        document.body.removeChild(injectScript);
-      }
-
-      const configScripts = document.querySelectorAll(`script[src="${CONFIG_URL}"]`);
-      configScripts.forEach((s) => s.remove());
-      const bpElements = document.querySelectorAll(
-        "[id^='bp-'], [class^='bp-'], iframe[src*='botpress'], .bp-webchat-container"
-      );
-      bpElements.forEach((el) => {
-        if (el.id !== "bp-embedded-webchat") {
-          el.remove();
-        }
-      });
     };
   }, [user, isLoading, themeColor, botName, botLogoUrl]);
 

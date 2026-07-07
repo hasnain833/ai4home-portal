@@ -412,22 +412,46 @@ export class ComplianceService {
     }
 
     if (metadata.tag) {
-      const metricFieldMap = {
-        DELIVERED: "deliveredCount",
-        OPENED: "openedCount",
-        CLICKED: "clickedCount",
-        BOUNCED: "bouncedCount",
-        COMPLAINED: "complaintCount",
-      };
-      const field = metricFieldMap[category];
-      if (field) {
-        try {
-          await prisma.campaignStep.update({
-            where: { id: metadata.tag },
-            data: { [field]: { increment: 1 } }
-          });
-        } catch (e) {
-          // ignore if tag is not a valid CampaignStep ID
+      // Announcement sends are tagged `ann_<id>` so their per-announcement metrics
+      // (SW-ANN-005) can be updated from provider webhooks, distinct from campaign steps.
+      if (metadata.tag.startsWith("ann_")) {
+        const annFieldMap = {
+          DELIVERED: "deliveredCount",
+          OPENED: "openedCount",
+          CLICKED: "clickedCount",
+          BOUNCED: "failedCount",
+          FAILED: "failedCount",
+          UNSUBSCRIBED: "unsubscribedCount",
+        };
+        const field = annFieldMap[category];
+        if (field) {
+          try {
+            await prisma.announcement.update({
+              where: { id: metadata.tag.slice(4) },
+              data: { [field]: { increment: 1 } },
+            });
+          } catch (e) {
+            // ignore if tag is not a valid Announcement ID
+          }
+        }
+      } else {
+        const metricFieldMap = {
+          DELIVERED: "deliveredCount",
+          OPENED: "openedCount",
+          CLICKED: "clickedCount",
+          BOUNCED: "bouncedCount",
+          COMPLAINED: "complaintCount",
+        };
+        const field = metricFieldMap[category];
+        if (field) {
+          try {
+            await prisma.campaignStep.update({
+              where: { id: metadata.tag },
+              data: { [field]: { increment: 1 } }
+            });
+          } catch (e) {
+            // ignore if tag is not a valid CampaignStep ID
+          }
         }
       }
     }

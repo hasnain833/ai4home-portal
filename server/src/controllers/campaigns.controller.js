@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { buildPrismaWhereClause } from "./segments.controller.js";
 
 export const getCampaigns = async (req, res) => {
   try {
@@ -95,9 +96,10 @@ export const getCampaignDetail = async (req, res) => {
       stepAnalytics[step.id] = {
         sent: 0,
         delivered: 0,
-        opened: 0,
-        clicked: 0,
-        replied: 0,
+        // Webhook-fed counters live on the step itself (SW-NUR-008).
+        opened: step.openedCount || 0,
+        clicked: step.clickedCount || 0,
+        replied: step.repliedCount || 0,
         bounced: 0,
         unsubscribed: 0
       };
@@ -173,7 +175,7 @@ export const updateCampaign = async (req, res) => {
     }
 
     const { id } = req.params;
-    const { name, description, channel, status } = req.body;
+    const { name, description, channel, status, exitConditions, versionPolicy } = req.body;
 
     const campaign = await prisma.campaign.findFirst({
       where: { id, companyId: req.user.companyId },
@@ -190,25 +192,17 @@ export const updateCampaign = async (req, res) => {
         description: description !== undefined ? description : campaign.description,
         channel: channel || campaign.channel,
         status: status || campaign.status,
+        // SW-NUR-003 / SW-NUR-007
+        exitConditions: exitConditions !== undefined ? exitConditions : campaign.exitConditions,
+        versionPolicy: versionPolicy !== undefined ? versionPolicy : campaign.versionPolicy,
       },
     });
 
+    // A campaign runs once — launching fires its enrolled leads. There is no "restart"
+    // (relaunch) that resets completed/exited enrollments back to step 0.
     const isLaunching = campaign.status !== "Active" && status === "Active";
-    const isRelaunching = status === "Active" && req.body.relaunch;
 
-    if (isRelaunching) {
-      await prisma.campaignEnrollment.updateMany({
-        where: { campaignId: id },
-        data: {
-          status: "ACTIVE",
-          currentStepPosition: 0,
-          nextRunAt: new Date(),
-          exitedReason: null
-        }
-      });
-    }
-
-    if (isLaunching || isRelaunching) {
+    if (isLaunching) {
       const enrollments = await prisma.campaignEnrollment.findMany({
         where: {
           campaignId: id,
@@ -218,7 +212,7 @@ export const updateCampaign = async (req, res) => {
 
       if (enrollments.length > 0) {
         const { inngest } = await import("../lib/inngest.js");
-        console.log(`[Campaign Controller] Campaign ${id} launch/relaunch: sending Inngest events for ${enrollments.length} enrolled leads.`);
+        console.log(`[Campaign Controller] Campaign ${id} launch: sending Inngest events for ${enrollments.length} enrolled leads.`);
         const events = enrollments.map((enrollment) => ({
           name: "campaign.enrollment.started",
           data: {
@@ -230,7 +224,7 @@ export const updateCampaign = async (req, res) => {
         await inngest.send(events);
         console.log(`[Campaign Controller] Sent ${events.length} Inngest events successfully.`);
       } else {
-        console.log(`[Campaign Controller] Campaign ${id} launch/relaunch: no active enrollments found to trigger.`);
+        console.log(`[Campaign Controller] Campaign ${id} launch: no active enrollments found to trigger.`);
       }
     }
 
@@ -263,15 +257,22 @@ export const updateCampaignSteps = async (req, res) => {
       return res.status(404).json({ message: "Campaign not found" });
     }
 
-    const finalStatus = (campaign.status === "Draft" || campaign.status === "Ready") 
-      ? (steps.length > 0 ? "Ready" : "Draft") 
+    // SW-NUR-001: sequences support 1–50 steps.
+    if (steps.length > 50) {
+      return res.status(400).json({ message: "A sequence can have at most 50 steps." });
+    }
+
+    const finalStatus = (campaign.status === "Draft" || campaign.status === "Ready")
+      ? (steps.length > 0 ? "Ready" : "Draft")
       : campaign.status;
 
     let targetCampaignId = id;
 
-    // SW-NUR-007: Sequence Versioning
-    // Editing an active sequence creates a new version; existing enrolled leads continue on old version.
-    if (campaign.status === "Active") {
+    // SW-NUR-007: Sequence versioning policy when editing an ACTIVE sequence.
+    //  • FINISH_OLD (default): fork a new version; leads already mid-sequence finish the
+    //    old one and the new version is created as a Draft.
+    //  • MIGRATE: edit steps in place so in-flight leads continue on the updated steps.
+    if (campaign.status === "Active" && (campaign.versionPolicy || "FINISH_OLD") === "FINISH_OLD") {
       const newVersion = await prisma.campaign.create({
         data: {
           companyId: req.user.companyId,
@@ -350,10 +351,25 @@ export const enrollCampaign = async (req, res) => {
     const { inngest } = await import("../lib/inngest.js");
 
     const { id } = req.params;
-    const { leadIds } = req.body;
+    let { leadIds } = req.body;
+    const { segmentId } = req.body;
+
+    // SW-NUR-002: enroll by saved segment — resolve the segment's filters to lead ids
+    // at enroll time. (Either leadIds or segmentId may be provided.)
+    if (segmentId) {
+      const segment = await prisma.leadSegment.findFirst({
+        where: { id: segmentId, companyId: req.user.companyId },
+      });
+      if (!segment) {
+        return res.status(404).json({ message: "Segment not found" });
+      }
+      const where = buildPrismaWhereClause(segment.filters, req.user.companyId);
+      const segLeads = await prisma.lead.findMany({ where, select: { id: true } });
+      leadIds = segLeads.map((l) => l.id);
+    }
 
     if (!Array.isArray(leadIds) || leadIds.length === 0) {
-      return res.status(400).json({ message: "leadIds array is required" });
+      return res.status(400).json({ message: "Provide a non-empty leadIds array or a segmentId that matches leads." });
     }
 
     const campaign = await prisma.campaign.findFirst({
@@ -471,6 +487,57 @@ export const enrollCampaign = async (req, res) => {
   }
 };
 
+// SW-NUR-003: manually remove leads from a sequence (exit with reason MANUAL).
+export const unenrollCampaign = async (req, res) => {
+  try {
+    if (!req.user || !req.user.companyId) {
+      return res.status(403).json({ message: "No company associated" });
+    }
+    const { id } = req.params;
+    const { leadIds } = req.body;
+
+    if (!Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ message: "leadIds array is required" });
+    }
+
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, companyId: req.user.companyId },
+    });
+    if (!campaign) {
+      return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    const result = await prisma.campaignEnrollment.updateMany({
+      where: { campaignId: id, leadId: { in: leadIds }, status: { in: ["ACTIVE", "PAUSED"] } },
+      data: { status: "EXITED", exitedReason: "MANUAL" },
+    });
+
+    for (const leadId of leadIds) {
+      await prisma.leadTimeline.create({
+        data: {
+          leadId,
+          type: "SYNC_UPDATE",
+          description: `Manually removed from campaign "${campaign.name}".`,
+          metadata: { campaignId: id },
+        },
+      });
+    }
+
+    // Mark the campaign idle again if nobody is left running.
+    const activeCount = await prisma.campaignEnrollment.count({
+      where: { campaignId: id, status: { in: ["ACTIVE", "PAUSED"] } },
+    });
+    if (activeCount === 0 && campaign.status === "Active") {
+      await prisma.campaign.update({ where: { id }, data: { status: "Ready" } });
+    }
+
+    return res.json({ success: true, removed: result.count });
+  } catch (error) {
+    console.error("[Campaign Unenroll] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const deleteCampaign = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -512,16 +579,34 @@ export const generateCampaignCopy = async (req, res) => {
       return res.status(500).json({ message: "Anthropic API key is not configured" });
     }
 
-    const systemPrompt = `You are an expert sales copywriter specializing in home builder and warranty care lead nurturing. 
+    // SW-NUR-005 / SW-KB-006: ground the AI copy in the tenant's structured brand profile
+    // rather than a free-text tone string alone.
+    const company = await prisma.company.findUnique({
+      where: { id: req.user.companyId },
+      select: { name: true, voiceProfile: true, salesBrandProfile: true },
+    });
+    const bp = company?.salesBrandProfile || {};
+    const brandLines = [
+      company?.name ? `Company/builder name: ${company.name}` : null,
+      brandVoice || bp.tone || company?.voiceProfile ? `Tone/voice: ${brandVoice || bp.tone || company?.voiceProfile}` : null,
+      bp.markets || bp.communities ? `Markets/communities: ${bp.markets || bp.communities}` : null,
+      bp.signature ? `Signature/sign-off: ${bp.signature}` : null,
+      bp.about ? `About the builder: ${bp.about}` : null,
+    ].filter(Boolean).join("\n");
+
+    const systemPrompt = `You are an expert sales copywriter specializing in home builder and warranty care lead nurturing.
 Your task is to write a single ${stepType === 'SMS' ? 'text message' : 'email'} draft.
-Keep the tone: ${brandVoice || 'Professional, warm, and helpful'}.
+
+Brand profile (reflect this voice and details):
+${brandLines || 'Professional, warm, and helpful.'}
+
 Audience: ${audience || 'Homebuyers or existing homeowners'}.
 Goal of this message: ${goal}.
 
 Additional Context: ${contextInfo || 'None'}
 
 Rules:
-${stepType === 'SMS' ? '- Keep it under 160 characters if possible.\n- Do NOT include placeholders like [Name]. Use generic but warm greetings.' : '- Provide a concise Subject Line.\n- Provide the Email Body.\n- Do NOT use placeholders like [Lead Name], instead write it so it works universally or use standard greetings.'}
+${stepType === 'SMS' ? '- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}. No other placeholders.' : '- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do NOT invent other placeholders.'}
 Output your draft clearly.`;
 
     // Direct fetch to Anthropic API
