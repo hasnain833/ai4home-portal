@@ -43,7 +43,10 @@ import {
   CheckCircle2,
   Clock,
   ShieldCheck,
-  Trash2
+  Trash2,
+  Download,
+  Save,
+  AlertTriangle
 } from "lucide-react";
 
 interface Lead {
@@ -116,6 +119,12 @@ export default function LeadsPage() {
   const [consentAttested, setConsentAttested] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<any>(null);
+  // SW-CSV-003 validation preview + SW-CSV-002 mapping templates
+  const [validation, setValidation] = useState<any>(null);
+  const [validating, setValidating] = useState(false);
+  const [csvTemplates, setCsvTemplates] = useState<any[]>([]);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   // Timeline dialog
   const [timelineLead, setTimelineLead] = useState<Lead | null>(null);
@@ -282,29 +291,120 @@ export default function LeadsPage() {
     setCsvStep(2); // Map Columns Step
   };
 
+  // Build the mapped leads list from parsed rows + current column mapping.
+  const buildLeadsList = () => {
+    return csvRows.map(row => {
+      const leadObj: any = {};
+      csvHeaders.forEach((header, idx) => {
+        const mappedKey = csvMapping[header];
+        if (mappedKey) {
+          const rawVal = row[idx];
+          if (mappedKey === "emailOptIn" || mappedKey === "smsOptIn") {
+            const strVal = (rawVal || "").toLowerCase();
+            leadObj[mappedKey] = strVal === "true" || strVal === "yes" || strVal === "1";
+          } else if (mappedKey === "tags") {
+            leadObj[mappedKey] = rawVal ? rawVal.split(";").map(t => t.trim()).filter(Boolean) : [];
+          } else {
+            leadObj[mappedKey] = rawVal || "";
+          }
+        }
+      });
+      return leadObj;
+    });
+  };
+
+  // SW-CSV-003: pre-commit dry run — fetch valid/invalid/duplicate counts.
+  const runValidation = async () => {
+    setValidating(true);
+    setValidation(null);
+    try {
+      const res = await fetch("/api/sales/csv/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadsList: buildLeadsList() }),
+      });
+      const data = await res.json();
+      if (res.ok) setValidation(data);
+      else showToast(data.message || "Validation failed.");
+    } catch {
+      showToast("Error validating rows.");
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  // Download the rejected (invalid) rows as a CSV report.
+  const downloadRejected = () => {
+    const rejected = validation?.rejected || [];
+    if (!rejected.length) return;
+    const header = ["row", "firstName", "lastName", "email", "phone", "reason"];
+    const escape = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = [
+      header.join(","),
+      ...rejected.map((r: any) => header.map(h => escape(r[h])).join(",")),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rejected-rows.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // SW-CSV-002: mapping templates
+  const fetchCsvTemplates = async () => {
+    try {
+      const res = await fetch("/api/sales/csv/templates");
+      if (res.ok) setCsvTemplates(await res.json());
+    } catch { /* non-fatal */ }
+  };
+
+  const saveCsvTemplate = async () => {
+    if (!newTemplateName.trim()) { showToast("Enter a template name."); return; }
+    setSavingTemplate(true);
+    try {
+      const res = await fetch("/api/sales/csv/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newTemplateName.trim(), mapping: csvMapping }),
+      });
+      if (res.ok) {
+        setNewTemplateName("");
+        showToast("Mapping template saved.");
+        fetchCsvTemplates();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        showToast(d.message || "Failed to save template.");
+      }
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  const applyCsvTemplate = (templateId: string) => {
+    const tpl = csvTemplates.find(t => t.id === templateId);
+    if (!tpl) return;
+    // Only apply mappings for headers present in this file.
+    const applied: Record<string, string> = {};
+    csvHeaders.forEach(h => { applied[h] = tpl.mapping?.[h] || ""; });
+    setCsvMapping(applied);
+    showToast(`Applied template "${tpl.name}".`);
+  };
+
+  const deleteCsvTemplate = async (id: string) => {
+    try {
+      const res = await fetch(`/api/sales/csv/templates/${id}`, { method: "DELETE" });
+      if (res.ok) fetchCsvTemplates();
+    } catch { /* non-fatal */ }
+  };
+
   // Run Import Request
   const handleCSVImportExecute = async () => {
     setImporting(true);
     try {
       // 1. Build leads list from row parsing + column mapping
-      const leadsList = csvRows.map(row => {
-        const leadObj: any = {};
-        csvHeaders.forEach((header, idx) => {
-          const mappedKey = csvMapping[header];
-          if (mappedKey) {
-            const rawVal = row[idx];
-            if (mappedKey === "emailOptIn" || mappedKey === "smsOptIn") {
-              const strVal = (rawVal || "").toLowerCase();
-              leadObj[mappedKey] = strVal === "true" || strVal === "yes" || strVal === "1";
-            } else if (mappedKey === "tags") {
-              leadObj[mappedKey] = rawVal ? rawVal.split(";").map(t => t.trim()).filter(Boolean) : [];
-            } else {
-              leadObj[mappedKey] = rawVal || "";
-            }
-          }
-        });
-        return leadObj;
-      });
+      const leadsList = buildLeadsList();
 
       // 2. Call API
       const res = await fetch("/api/sales/csv/upload", {
@@ -342,7 +442,20 @@ export default function LeadsPage() {
     setCsvMapping({});
     setConsentAttested(false);
     setImportResults(null);
+    setValidation(null);
+    setNewTemplateName("");
   };
+
+  // Load saved mapping templates whenever the CSV wizard opens.
+  useEffect(() => {
+    if (csvModalOpen) fetchCsvTemplates();
+  }, [csvModalOpen]);
+
+  // Run the pre-commit dry run whenever the user reaches the Preview step.
+  useEffect(() => {
+    if (csvStep === 3 && csvRows.length > 0) runValidation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvStep]);
 
   // Open timeline previewer
   const openTimeline = async (lead: Lead) => {
@@ -741,6 +854,44 @@ export default function LeadsPage() {
                 <Label className="font-semibold text-sm">Map CSV Headers to Lead Data Model</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">Assign your CSV columns to the appropriate fields. Leftover columns will be omitted.</p>
 
+                {/* SW-CSV-002: mapping templates */}
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-end p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border mt-3">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-[11px] font-semibold text-muted-foreground">Apply a saved template</Label>
+                    <Select onValueChange={applyCsvTemplate}>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder={csvTemplates.length ? "Choose template…" : "No templates saved yet"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {csvTemplates.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-end gap-1.5">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-muted-foreground">Save current as</Label>
+                      <Input value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder="Template name" className="h-8 text-xs w-40" />
+                    </div>
+                    <Button size="sm" variant="outline" className="h-8 text-xs" disabled={savingTemplate || !newTemplateName.trim()} onClick={saveCsvTemplate}>
+                      <Save className="h-3.5 w-3.5 mr-1" /> Save
+                    </Button>
+                  </div>
+                </div>
+                {csvTemplates.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {csvTemplates.map((t) => (
+                      <span key={t.id} className="inline-flex items-center gap-1 text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full">
+                        {t.name}
+                        <button type="button" onClick={() => deleteCsvTemplate(t.id)} className="text-slate-400 hover:text-red-500" title="Delete template">
+                          <Trash2 className="h-2.5 w-2.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <div className="space-y-3 mt-4">
                   {csvHeaders.map((header) => (
                     <div key={header} className="flex items-center justify-between gap-4 p-2 bg-slate-50 dark:bg-slate-900 rounded-lg">
@@ -789,6 +940,41 @@ export default function LeadsPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Parsed <strong className="text-foreground">{csvRows.length}</strong> potential records. Choose duplicate handling logic.
                 </p>
+
+                {/* SW-CSV-003: pre-commit validation summary */}
+                <div className="my-4">
+                  {validating ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Validating rows…
+                    </div>
+                  ) : validation ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="rounded-lg border bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 p-3 text-center">
+                          <span className="block text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400">Valid (new)</span>
+                          <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300">{validation.valid}</span>
+                        </div>
+                        <div className="rounded-lg border bg-amber-50 dark:bg-amber-950/20 border-amber-200 p-3 text-center">
+                          <span className="block text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">Duplicates</span>
+                          <span className="text-lg font-bold text-amber-700 dark:text-amber-300">{validation.duplicates}</span>
+                        </div>
+                        <div className="rounded-lg border bg-rose-50 dark:bg-rose-950/20 border-rose-200 p-3 text-center">
+                          <span className="block text-[10px] uppercase font-bold text-rose-700 dark:text-rose-400">Invalid</span>
+                          <span className="text-lg font-bold text-rose-700 dark:text-rose-300">{validation.invalid}</span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-2 flex items-start gap-1">
+                        <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
+                        {validation.duplicatesInDb} already in your database · {validation.duplicatesInFile} repeated within this file. Duplicates follow the strategy below; invalid rows are skipped on import.
+                      </p>
+                      {validation.invalid > 0 && (
+                        <Button variant="outline" size="sm" className="h-8 text-xs mt-2 text-rose-600 border-rose-200 hover:bg-rose-50" onClick={downloadRejected}>
+                          <Download className="h-3.5 w-3.5 mr-1" /> Download {validation.invalid} rejected row{validation.invalid === 1 ? "" : "s"}
+                        </Button>
+                      )}
+                    </>
+                  ) : null}
+                </div>
 
                 <div className="space-y-4 my-4 p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border">
                   <div className="space-y-1.5">

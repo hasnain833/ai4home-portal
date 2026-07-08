@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -220,8 +221,14 @@ export default function AutomationsPage() {
     }
   };
 
+  const confirm = useConfirm();
+
   const handleDeleteRule = async (id: string) => {
-    if (!confirm("Delete this automation rule? This will stop it from running.")) return;
+    if (!(await confirm({
+      title: "Delete automation rule?",
+      description: "This will stop it from running.",
+      confirmText: "Delete",
+    }))) return;
     try {
       const res = await fetch(`/api/sales/automations/${id}`, { method: "DELETE" });
       if (res.ok) {

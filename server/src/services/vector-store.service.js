@@ -1,8 +1,9 @@
 import OpenAI from "openai";
 import { Pinecone } from "@pinecone-database/pinecone";
 
-const EMBED_MODEL = "text-embedding-3-small";
-export const EMBED_DIM = 1536;
+const EMBED_MODEL = process.env.EMBED_MODEL || "text-embedding-3-small";
+export const EMBED_DIM = Number(process.env.EMBED_DIM || 1024);
+const SUPPORTS_DIMENSIONS = /text-embedding-3/.test(EMBED_MODEL);
 const UPSERT_BATCH = 100;
 
 let _openai = null;
@@ -42,7 +43,9 @@ export function salesNamespace(companyId) {
 
 export async function embed(texts) {
   const input = Array.isArray(texts) ? texts : [texts];
-  const res = await openai().embeddings.create({ model: EMBED_MODEL, input });
+  const params = { model: EMBED_MODEL, input };
+  if (SUPPORTS_DIMENSIONS) params.dimensions = EMBED_DIM;
+  const res = await openai().embeddings.create(params);
   return res.data.map((d) => d.embedding);
 }
 

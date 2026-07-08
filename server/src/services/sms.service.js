@@ -12,14 +12,20 @@ function resolveTwilioConfig(smsConfig) {
   return { accountSid, authToken, from, statusCallbackUrl };
 }
 
+const preview = (text, n = 160) =>
+  (text || "").replace(/\s+/g, " ").slice(0, n) + ((text || "").length > n ? "…" : "");
+
 export const sendSms = async ({ to, body, smsConfig, tag }) => {
   const cfg = resolveTwilioConfig(smsConfig);
 
   // No usable Twilio credentials (dev / not yet configured) — simulate a send.
   if (!cfg) {
+    console.log(`[SMS OUT] (SIMULATED — no Twilio credentials) to=${to} | body="${preview(body)}"`);
     await new Promise((resolve) => setTimeout(resolve, 500));
     return { messageId: "SIMULATED_MSG_ID", status: "delivered", to, body, provider: "TWILIO_SMS_SIMULATED" };
   }
+
+  console.log(`[SMS OUT] → sending via Twilio | from=${cfg.from} to=${to}${tag ? ` tag=${tag}` : ""} | body="${preview(body)}"`);
 
   try {
     const params = new URLSearchParams();
@@ -55,8 +61,11 @@ export const sendSms = async ({ to, body, smsConfig, tag }) => {
 
     const data = await response.json();
     if (!response.ok) {
+      console.error(`[SMS OUT] ✗ Twilio rejected message to ${to} | code=${data.code || response.status} | ${data.message || "unknown error"}`);
       throw new Error(data.message || `Failed to send Twilio SMS (code ${data.code || response.status})`);
     }
+
+    console.log(`[SMS OUT] ✓ accepted by Twilio | sid=${data.sid} status=${data.status} to=${data.to}`);
 
     return {
       messageId: data.sid,

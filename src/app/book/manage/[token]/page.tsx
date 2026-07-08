@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { CalendarDays, Video, CheckCircle2, XCircle } from "lucide-react";
 
 type Slot = { iso: string; label: string };
@@ -19,6 +20,7 @@ function splitLabel(label: string) {
 
 export default function ManageBookingPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
+  const confirm = useConfirm();
   const [data, setData] = useState<ManageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -73,7 +75,13 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
   };
 
   const cancel = async () => {
-    if (!data || !confirm("Cancel this appointment?")) return;
+    if (!data) return;
+    if (!(await confirm({
+      title: "Cancel appointment?",
+      description: "This will cancel your appointment. You can always book again later.",
+      confirmText: "Cancel appointment",
+      cancelText: "Keep it",
+    }))) return;
     setBusy(true);
     try {
       const res = await fetch("/api/sales/scheduling/public/cancel", {

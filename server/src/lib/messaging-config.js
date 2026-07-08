@@ -1,22 +1,17 @@
 import prisma from "./prisma.js";
 
-// A host is publicly reachable (i.e. Twilio can POST to it) if it's not a
-// loopback / private / .local address. Twilio rejects non-public callback URLs.
 function isPubliclyReachable(hostname) {
   const h = hostname.toLowerCase();
   if (h === "localhost" || h.endsWith(".local") || h.endsWith(".localhost")) return false;
   if (h === "0.0.0.0" || h === "::1" || h === "[::1]") return false;
-  if (/^127\./.test(h)) return false; // loopback
-  if (/^10\./.test(h)) return false; // private class A
-  if (/^192\.168\./.test(h)) return false; // private class C
-  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(h)) return false; // private class B
-  if (/^169\.254\./.test(h)) return false; // link-local
+  if (/^127\./.test(h)) return false;
+  if (/^10\./.test(h)) return false;
+  if (/^192\.168\./.test(h)) return false;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(h)) return false;
+  if (/^169\.254\./.test(h)) return false;
   return true;
 }
 
-// Build a publicly reachable backend webhook URL (used for Twilio status callbacks).
-// Returns null when no public base URL is configured, or when the resolved URL is
-// not publicly reachable (e.g. localhost in dev) — callers then omit it gracefully.
 export function buildSmsWebhookUrl(path, companyId) {
   const base = process.env.PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_URL;
   if (!base) return null;
@@ -65,7 +60,6 @@ export async function getMessagingConfig(companyId) {
       provider: "TWILIO_SMS",
       accountSid: smsInt.apiKey,
       authToken: smsInt.secretKey,
-      // `from` is a Twilio phone number (E.164) or a Messaging Service SID.
       from: smsInt.senderName,
       statusCallbackUrl: buildSmsWebhookUrl("/api/sales/compliance/events/sms", companyId),
     };

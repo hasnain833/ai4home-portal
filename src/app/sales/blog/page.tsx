@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -198,8 +199,14 @@ export default function BlogDraftingPage() {
     setEditorOpen(false);
   };
 
-  const handleDeletePost = (id: string) => {
-    if (confirm("Are you sure you want to delete this blog post?")) {
+  const confirm = useConfirm();
+
+  const handleDeletePost = async (id: string) => {
+    if (await confirm({
+      title: "Delete blog post?",
+      description: "This can't be undone.",
+      confirmText: "Delete",
+    })) {
       setPosts(prev => prev.filter(p => p.id !== id));
       if (selectedPost && selectedPost.id === id) {
         setEditorOpen(false);

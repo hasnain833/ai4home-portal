@@ -350,11 +350,14 @@ export default function CampaignsPage() {
                           {seq.name}
                         </CardTitle>
                         <Badge className={`text-[10px] px-1.5 py-0 font-semibold ${seq.status === "Active" ? "bg-green-50 text-green-700 border-green-200/50 dark:bg-green-950/20 dark:text-green-400" :
-                          seq.status === "Ready" ? "bg-blue-50 text-blue-700 border-blue-200/50 dark:bg-blue-950/20 dark:text-blue-400" :
-                            seq.status === "Paused" ? "bg-orange-50 text-orange-700 border-orange-200/50 dark:bg-orange-950/20 dark:text-orange-400" :
-                              "bg-gray-100 text-gray-700 dark:bg-gray-800"
+                          seq.status === "Completed" ? "bg-emerald-100 text-emerald-800 border-emerald-300/50 dark:bg-emerald-900/30 dark:text-emerald-300" :
+                            seq.status === "Ready" ? "bg-blue-50 text-blue-700 border-blue-200/50 dark:bg-blue-950/20 dark:text-blue-400" :
+                              seq.status === "Paused" ? "bg-orange-50 text-orange-700 border-orange-200/50 dark:bg-orange-950/20 dark:text-orange-400" :
+                                "bg-gray-100 text-gray-700 dark:bg-gray-800"
                           }`}>
-                          {seq.status}
+                          {seq.status === "Completed" ? (
+                            <span className="inline-flex items-center gap-0.5"><CheckCircle className="h-2.5 w-2.5" /> Completed</span>
+                          ) : seq.status}
                         </Badge>
                       </div>
                       <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setSeqToDelete(seq); }} className="h-6 w-6 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -386,18 +389,27 @@ export default function CampaignsPage() {
                       <CardDescription className="text-xs mt-1">Multi-step drip campaign flow settings.</CardDescription>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" className="h-8 text-xs font-semibold" onClick={openEnrollModal}>
-                        <Users className="h-3.5 w-3.5 mr-1" /> Enroll Leads
-                      </Button>
-
-                      {activeSeq.status !== "Active" ? (
-                        <Button size="sm" className="bg-green-600 text-white hover:bg-green-700 h-8 text-xs font-semibold" onClick={launchCampaign} disabled={activeSeq.status === "Draft"}>
-                          <Play className="h-3.5 w-3.5 mr-1" /> {activeSeq.status === "Paused" ? "Resume" : "Launch"}
-                        </Button>
+                      {activeSeq.status === "Completed" ? (
+                        // A completed campaign is terminal — no re-enroll / re-launch.
+                        <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/40">
+                          <CheckCircle className="h-3.5 w-3.5" /> Completed
+                        </span>
                       ) : (
-                        <Button size="sm" variant="outline" className="h-8 text-xs font-semibold text-orange-600 hover:text-orange-700 hover:bg-orange-50 border-orange-200" onClick={pauseCampaign}>
-                          <Clock className="h-3.5 w-3.5 mr-1" /> Pause
-                        </Button>
+                        <>
+                          <Button variant="outline" size="sm" className="h-8 text-xs font-semibold" onClick={openEnrollModal}>
+                            <Users className="h-3.5 w-3.5 mr-1" /> Enroll Leads
+                          </Button>
+
+                          {activeSeq.status !== "Active" ? (
+                            <Button size="sm" className="bg-green-600 text-white hover:bg-green-700 h-8 text-xs font-semibold" onClick={launchCampaign} disabled={activeSeq.status === "Draft"}>
+                              <Play className="h-3.5 w-3.5 mr-1" /> {activeSeq.status === "Paused" ? "Resume" : "Launch"}
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" className="h-8 text-xs font-semibold text-orange-600 hover:text-orange-700 hover:bg-orange-50 border-orange-200" onClick={pauseCampaign}>
+                              <Clock className="h-3.5 w-3.5 mr-1" /> Pause
+                            </Button>
+                          )}
+                        </>
                       )}
                     </div>
                   </CardHeader>
@@ -411,7 +423,9 @@ export default function CampaignsPage() {
                         </div>
                       ) : activeSeqDetail?.steps?.length > 0 ? (
                         activeSeqDetail.steps.map((step: any, index: number) => {
-                          const isRunning = activeSeq.status === "Active" || activeSeq.status === "Paused";
+                          // Treat a finished campaign like a running one for the step
+                          // visualization so completed steps still render as done.
+                          const isRunning = activeSeq.status === "Active" || activeSeq.status === "Paused" || activeSeq.status === "Completed";
                           const totalEnrollments = activeSeqDetail?.enrollments?.length || 0;
                           const completedCount = activeSeqDetail?.enrollments?.filter((e: any) => e.currentStepPosition >= step.position).length || 0;
                           const isFullyCompleted = isRunning && totalEnrollments > 0 && completedCount === totalEnrollments;

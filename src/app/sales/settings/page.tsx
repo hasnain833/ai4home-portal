@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useSearchParams } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -328,8 +329,14 @@ function SettingsPageContent() {
     }
   };
 
+  const confirm = useConfirm();
+
   const handleDeleteSuppression = async (id: string) => {
-    if (!confirm("Are you sure you want to remove this contact from the suppression list?")) return;
+    if (!(await confirm({
+      title: "Remove from suppression list?",
+      description: "This contact will be eligible to receive messages again.",
+      confirmText: "Remove",
+    }))) return;
     try {
       const res = await fetch("/api/sales/compliance/suppression", {
         method: "DELETE",
@@ -417,7 +424,11 @@ function SettingsPageContent() {
   };
 
   const handleDisconnectSF = async () => {
-    if (!confirm("Disconnecting will pause all background sync. Proceed?")) return;
+    if (!(await confirm({
+      title: "Disconnect Salesforce?",
+      description: "Disconnecting will pause all background sync.",
+      confirmText: "Disconnect",
+    }))) return;
     setDisconnecting(true);
     try {
       const res = await fetch("/api/sales/salesforce/disconnect", {

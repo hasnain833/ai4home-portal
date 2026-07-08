@@ -12,12 +12,11 @@ import {
   leadTimezone,
   getAvailabilitySetting,
 } from "../../services/scheduling-service.js";
+import { query as kbQuery, isVectorStoreConfigured } from "../../services/vector-store.service.js";
 
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
-// Escalate to a human once the agent has taken this many turns without booking.
-const MAX_TURNS = 4;
-
-// ─── Outbound helper ──────────────────────────────────────────────────────────
+const MAX_TURNS = 8;
+const KB_MIN_SCORE = 0.3;
 
 function brandedEmail(companyName, bodyText) {
   return `
@@ -52,9 +51,6 @@ async function sendLeadMessage(lead, channel, text, subject) {
   return { channel, body: text, skipped: true };
 }
 
-// ─── Mode resolution ──────────────────────────────────────────────────────────
-
-// OFF | SIMPLE | AI — campaign overrides company default unless it INHERITs.
 async function resolveMode(lead, campaignId) {
   let campaign = null;
   if (campaignId) {
@@ -73,10 +69,6 @@ async function resolveMode(lead, campaignId) {
   return campaign.appointmentMode;
 }
 
-// ─── Claude turn ──────────────────────────────────────────────────────────────
-
-// Collapse a transcript into alternating Anthropic messages (merging consecutive
-// same-role turns, which the API does not allow).
 function toAnthropicMessages(transcript) {
   const msgs = [];
   for (const t of transcript) {
@@ -85,7 +77,6 @@ function toAnthropicMessages(transcript) {
     if (last && last.role === role) last.content += `\n${t.content}`;
     else msgs.push({ role, content: t.content });
   }
-  // Anthropic requires the first message to be from the user.
   while (msgs.length && msgs[0].role !== "user") msgs.shift();
   return msgs;
 }
@@ -93,20 +84,31 @@ function toAnthropicMessages(transcript) {
 const RESPOND_TOOL = {
   name: "respond",
   description:
-    "Produce your reply to the lead and the action to take. Use 'book' ONLY when the lead has clearly agreed to one of the available slots (slot_iso MUST be one of the provided slot ISO values). Use 'escalate' if the lead needs a human or is asking something you cannot handle. Otherwise use 'propose' to offer/confirm times or answer briefly.",
+    "Produce your reply to the lead and the action to take. Use 'book' ONLY when the lead has clearly agreed to one of the available slots (slot_iso MUST be one of the provided slot ISO values). Use 'escalate' if the lead genuinely needs a human (a complaint, a demand you cannot satisfy, or a factual question the knowledge base does not answer). Otherwise use 'reply' to answer the lead's question(s) and/or offer/confirm visit times.",
   input_schema: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["propose", "book", "escalate"] },
+      action: { type: "string", enum: ["reply", "book", "escalate"] },
       message: { type: "string", description: "The exact message text to send to the lead." },
       slot_iso: { type: "string", description: "Required when action is 'book': the chosen slot's ISO start time, copied verbatim from the available slots." },
       location_type: { type: "string", enum: ["VIRTUAL", "ONSITE"], description: "Visit type when booking. Default VIRTUAL." },
+      used_kb: { type: "boolean", description: "True if your answer drew on the Company Knowledge Base context." },
     },
     required: ["action", "message"],
   },
 };
 
-async function runClaudeTurn({ lead, company, channel, transcript, slots, timezone }) {
+export function formatKbContext(chunks) {
+  if (!chunks || chunks.length === 0) {
+    return "No knowledge-base context was retrieved for this message. Answer only from what you are certain of; if you don't know, offer to have a team member follow up.";
+  }
+  const body = chunks
+    .map((c, i) => `[${i + 1}] Source: ${c.name || "Company document"}${c.category ? ` (${c.category})` : ""}\n${c.text}`)
+    .join("\n\n");
+  return `Company Knowledge Base — use ONLY this to answer factual questions about the company, homes, communities, pricing, process, and warranty. Do not invent facts beyond it:\n\n${body}`;
+}
+
+export async function runClaudeTurn({ lead, company, channel, transcript, slots, timezone, kbChunks }) {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const slotList = slots.map((s, i) => `${i + 1}. ${s.label}  [iso:${s.iso}]`).join("\n") || "(no slots currently available)";
@@ -115,18 +117,23 @@ async function runClaudeTurn({ lead, company, channel, transcript, slots, timezo
       ? "This is an SMS conversation. Keep replies under 320 characters, plain text, no markdown."
       : "This is an email conversation. Keep replies concise and friendly.";
 
-  const system = `You are an automated appointment-scheduling assistant for ${company.name}, a homebuilder. You are NOT a human and must make that clear if asked. Your only job is to help this lead book a model-home visit or sales consultation.
+  const system = `You are the automated sales assistant for ${company.name}, a homebuilder. You are NOT a human and must say so if asked. You have two jobs, in this order of priority based on what the lead needs:
+1. ANSWER the lead's questions about ${company.name} — who we are, our homes and communities, pricing, the buying process, and warranty — using the Company Knowledge Base below. Leads often know nothing about us, so be genuinely helpful.
+2. HELP the lead book a model-home visit or sales consultation when they show interest or ask to meet.
 
 Lead: ${lead.firstName} ${lead.lastName}. Times are in ${timezone}.
 
-Available slots (offer these; never invent times):
+${formatKbContext(kbChunks)}
+
+Available visit slots (offer these; NEVER invent times):
 ${slotList}
 
 Rules:
-- Offer 2-4 of the available slots at a time. If the lead proposes a specific time, match it to the closest AVAILABLE slot; if none matches, say so and offer the nearest alternatives.
-- Book ONLY when the lead clearly confirms one of the available slots. Copy its iso value exactly into slot_iso.
-- For off-topic questions (pricing, product details, complaints), answer very briefly if trivial, otherwise politely say a team member will follow up and use 'escalate'.
-- Never promise anything beyond scheduling. Be warm, brief, professional.
+- If the lead asks a question, answer it first using the Knowledge Base. Set used_kb=true when you relied on it. If the Knowledge Base doesn't cover it and it's a factual question you can't answer, don't guess — say a team member will follow up (use 'escalate' if they clearly need a person).
+- When the lead wants to meet/visit/book, offer 2-4 available slots. If they propose a specific time, match it to the closest AVAILABLE slot; if none matches, say so and offer the nearest alternatives.
+- Book ONLY when the lead clearly confirms one of the available slots. Copy its iso value exactly into slot_iso. Booking uses this lead's own details automatically — you do not need to ask for their name/email.
+- You may answer a question and offer times in the same reply when it's natural to do so.
+- Never promise anything the Knowledge Base doesn't support. Be warm, brief, professional.
 - ${channelGuidance}
 
 Always reply by calling the 'respond' tool.`;
@@ -146,24 +153,21 @@ Always reply by calling the 'respond' tool.`;
   const toolUse = resp.content.find((b) => b.type === "tool_use" && b.name === "respond");
   if (!toolUse) {
     const text = resp.content.find((b) => b.type === "text")?.text;
-    return { action: "propose", message: text || "Could you let me know which time works best for you?" };
+    return { action: "reply", message: text || "Could you let me know which time works best for you?" };
   }
   return toolUse.input;
 }
 
-// ─── Function ─────────────────────────────────────────────────────────────────
 
 export const appointmentSchedulingAgent = inngest.createFunction(
   {
     id: "appointment-scheduling-agent",
-    // One turn per lead at a time so two fast replies can't double-book or interleave.
     concurrency: [{ key: "event.data.leadId", limit: 1 }],
     triggers: [{ event: "lead.reply.received" }],
   },
   async ({ event, step }) => {
     const { leadId, channel = "EMAIL", body = "", campaignId } = event.data;
 
-    // 1) Load lead + decide mode + load/seed the conversation.
     const ctx = await step.run("load-context", async () => {
       const lead = await prisma.lead.findUnique({ where: { id: leadId }, include: { company: true } });
       if (!lead) return { stop: "lead-not-found" };
@@ -186,7 +190,6 @@ export const appointmentSchedulingAgent = inngest.createFunction(
     if (ctx.stop) return { status: "skipped", reason: ctx.stop };
     const { lead, mode, convoId } = ctx;
 
-    // 2) SIMPLE mode: one-shot booking link, then close.
     if (mode === "SIMPLE") {
       await step.run("send-booking-link", async () => {
         const portal = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
@@ -206,10 +209,8 @@ export const appointmentSchedulingAgent = inngest.createFunction(
       return { status: "sent-booking-link" };
     }
 
-    // 3) AI mode. Record the inbound message first.
     const transcript = [...ctx.transcript, { role: "lead", content: body, at: new Date().toISOString() }];
 
-    // Escalate if we've already exhausted our turn budget.
     if (ctx.turnCount >= MAX_TURNS) {
       await step.run("escalate-max-turns", async () => {
         await escalate(lead, channel, convoId, transcript, "Reached maximum automated turns without booking.");
@@ -217,7 +218,6 @@ export const appointmentSchedulingAgent = inngest.createFunction(
       return { status: "escalated", reason: "max-turns" };
     }
 
-    // 4) Compute current availability (durable).
     const slots = await step.run("compute-slots", async () => {
       const setting = await getAvailabilitySetting(lead.companyId);
       const agentId = await resolveAgentId(lead);
@@ -226,7 +226,22 @@ export const appointmentSchedulingAgent = inngest.createFunction(
       return { tz, agentId, list: s.map((x) => ({ iso: x.iso, label: x.label })) };
     });
 
-    // 5) Ask Claude what to do (durable; memoized on success).
+
+    const kb = await step.run("kb-retrieve", async () => {
+      if (!isVectorStoreConfigured()) return { chunks: [] };
+      const q = (body || "").trim();
+      if (!q) return { chunks: [] };
+      try {
+        const matches = await kbQuery(lead.companyId, q, 5);
+        const chunks = matches.filter((m) => (m.score ?? 0) >= KB_MIN_SCORE);
+        return { chunks };
+      } catch (e) {
+        console.error("[Appointment Agent] KB retrieval failed:", e.message);
+        return { chunks: [] };
+      }
+    });
+
+
     const decision = await step.run("claude-decide", async () => {
       return runClaudeTurn({
         lead,
@@ -235,10 +250,10 @@ export const appointmentSchedulingAgent = inngest.createFunction(
         transcript,
         slots: slots.list,
         timezone: slots.tz,
+        kbChunks: kb.chunks,
       });
     });
 
-    // 6) Act on the decision.
     if (decision.action === "escalate") {
       await step.run("act-escalate", async () => {
         await escalate(lead, channel, convoId, transcript, decision.message);
@@ -247,19 +262,18 @@ export const appointmentSchedulingAgent = inngest.createFunction(
     }
 
     if (decision.action === "book") {
-      // Guardrail: the chosen slot must be one we actually offered/availability still has.
       const valid = slots.list.some((s) => s.iso === decision.slot_iso);
       const booking = valid
         ? await step.run("book-slot", async () =>
-            bookSlot({
-              leadId: lead.id,
-              startTime: decision.slot_iso,
-              title: "Model Home Visit",
-              locationType: decision.location_type || "VIRTUAL",
-              agentId: slots.agentId,
-              bookedVia: "AI_AGENT",
-            })
-          )
+          bookSlot({
+            leadId: lead.id,
+            startTime: decision.slot_iso,
+            title: "Model Home Visit",
+            locationType: decision.location_type || "VIRTUAL",
+            agentId: slots.agentId,
+            bookedVia: "AI_AGENT",
+          })
+        )
         : { success: false, conflict: true };
 
       await step.run("respond-booking", async () => {
@@ -281,7 +295,6 @@ export const appointmentSchedulingAgent = inngest.createFunction(
             },
           });
         } else {
-          // Slot was taken in the race — apologise and re-offer fresh slots.
           const reoffer = `Sorry — that time was just taken. Here are the next available options:\n${slots.list
             .slice(0, 3)
             .map((s) => `• ${s.label}`)
@@ -301,26 +314,25 @@ export const appointmentSchedulingAgent = inngest.createFunction(
       return { status: booking.success ? "booked" : "reoffered" };
     }
 
-    // action === "propose" (default)
-    await step.run("respond-propose", async () => {
-      const sent = await sendLeadMessage(lead, channel, decision.message, "Scheduling your visit");
+    await step.run("respond-reply", async () => {
+      const subject = slots.list.length ? "Scheduling your visit" : `Re: your question for ${lead.company?.name || "us"}`;
+      const sent = await sendLeadMessage(lead, channel, decision.message, subject);
       const finalTranscript = [...transcript, { role: "agent", content: decision.message, at: new Date().toISOString() }];
       await prisma.schedulingConversation.update({
         where: { id: convoId },
         data: { transcript: finalTranscript, offeredSlots: slots.list.map((s) => s.iso), turnCount: { increment: 1 } },
       });
-      await logAgentReply(lead, sent);
+      const citations =
+        decision.used_kb && kb.chunks.length
+          ? [...new Set(kb.chunks.map((c) => c.name).filter(Boolean))]
+          : [];
+      await logAgentReply(lead, sent, citations);
     });
 
-    return { status: "proposed" };
+    return { status: "replied" };
   }
 );
 
-// ─── Reminders (cron) ─────────────────────────────────────────────────────────
-// Runs every 15 minutes and sends 24h / 1h reminders for upcoming confirmed
-// appointments. Each reminder is sent at most once via the reminder24Sent /
-// reminder1Sent flags. Honours the company's configured reminderHours (defaults
-// [24, 1]); only the 24h and 1h reminders are backed by flags.
 
 export const appointmentReminders = inngest.createFunction(
   { id: "appointment-reminders", triggers: [{ cron: "*/15 * * * *" }] },
@@ -375,19 +387,18 @@ export const appointmentReminders = inngest.createFunction(
   }
 );
 
-async function logAgentReply(lead, sent) {
+async function logAgentReply(lead, sent, citations = []) {
   await prisma.leadTimeline.create({
     data: {
       leadId: lead.id,
       type: sent.channel === "SMS" ? "SMS_SENT" : "EMAIL_SENT",
-      description: `Appointment agent replied: "${(sent.body || "").slice(0, 80)}${(sent.body || "").length > 80 ? "..." : ""}"`,
-      metadata: { channel: sent.channel },
+      description: `Sales agent replied: "${(sent.body || "").slice(0, 80)}${(sent.body || "").length > 80 ? "..." : ""}"`,
+      metadata: { channel: sent.channel, ...(citations.length ? { kbCitations: citations } : {}) },
     },
   });
 }
 
 async function escalate(lead, channel, convoId, transcript, reason) {
-  // Tell the lead a human will follow up.
   const text = `Thanks ${lead.firstName} — I'll have a member of our team reach out to you personally to finish setting this up.`;
   const sent = await sendLeadMessage(lead, channel, text, "A team member will follow up");
   const finalTranscript = [...transcript, { role: "agent", content: text, at: new Date().toISOString() }];
@@ -405,7 +416,7 @@ async function escalate(lead, channel, convoId, transcript, reason) {
     },
   });
 
-  // Notify the owning agent / company so a human picks it up.
+
   try {
     const { smtpConfig } = await getMessagingConfig(lead.companyId);
     const agentId = await resolveAgentId(lead);

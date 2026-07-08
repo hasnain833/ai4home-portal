@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -220,8 +221,15 @@ export default function AppointmentsPage() {
     }
   };
 
+  const confirm = useConfirm();
+
   const doCancel = async (appt: Appointment) => {
-    if (!confirm(`Cancel "${appt.title}" with ${appt.lead?.firstName || "this lead"}?`)) return;
+    if (!(await confirm({
+      title: "Cancel appointment?",
+      description: `Cancel "${appt.title}" with ${appt.lead?.firstName || "this lead"}?`,
+      confirmText: "Cancel appointment",
+      cancelText: "Keep it",
+    }))) return;
     try {
       const res = await fetch("/api/sales/scheduling/cancel", {
         method: "POST",

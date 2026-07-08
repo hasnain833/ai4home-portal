@@ -55,11 +55,56 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
   // Stable ref — createClient() returns a singleton so this is safe
   const supabaseRef = useRef(createClient());
+
+  // Track the latest user without re-installing the fetch interceptor
+  const userRef = useRef<User | null>(null);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  // Global session-expiry interceptor: wrap fetch so that when an authenticated
+  // API call comes back 401 (token invalid/expired), we sign the user out and
+  // show a blurred "session expired" overlay instead of failing silently.
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (...args: Parameters<typeof fetch>) => {
+      const response = await originalFetch(...args);
+      try {
+        const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url || "";
+        const isApiCall = url.includes("/api/") && !url.includes("/api/auth/me");
+        // Only escalate if a user was actually signed in — a 401 during the
+        // initial /api/auth/me probe just means "not logged in yet".
+        if (response.status === 401 && isApiCall && userRef.current) {
+          setSessionExpired(true);
+        }
+      } catch {
+        // never let the interceptor break a real request
+      }
+      return response;
+    };
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
+  // When the session expires, tear down the local session in the background.
+  useEffect(() => {
+    if (!sessionExpired) return;
+    supabaseRef.current.auth.signOut().catch(() => {});
+    setUser(null);
+  }, [sessionExpired]);
+
+  const handleSessionExpiredRedirect = () => {
+    setSessionExpired(false);
+    router.push("/login");
+  };
 
   useEffect(() => {
     const supabase = supabaseRef.current;
@@ -132,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    setLoggingOut(true);
     try {
       await supabaseRef.current.auth.signOut();
     } catch (err) {
@@ -139,6 +185,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUser(null);
     router.push("/login");
+    // Keep the overlay up briefly so the transition to /login feels intentional,
+    // then tear it down (AuthProvider stays mounted at the root).
+    setTimeout(() => setLoggingOut(false), 600);
   };
 
   const updateProfile = async (data: Partial<User>) => {
@@ -215,6 +264,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      {loggingOut && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 backdrop-blur-md">
+          <div className="mx-4 flex flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white px-8 py-7 text-center shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Logging out…</p>
+          </div>
+        </div>
+      )}
+      {sessionExpired && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 backdrop-blur-md">
+          <div className="mx-4 w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+              <svg className="h-6 w-6 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+              </svg>
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Session expired</h2>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              You&apos;ve been logged out for your security. Please sign in again to continue.
+            </p>
+            <button
+              onClick={handleSessionExpiredRedirect}
+              className="mt-5 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+            >
+              Log in again
+            </button>
+          </div>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 }

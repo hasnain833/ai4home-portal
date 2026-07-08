@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "sonner";
 import "./globals.css";
 
@@ -27,7 +28,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthProvider>
-          <ThemeProvider>{children}</ThemeProvider>
+          <ThemeProvider>
+            <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
+          </ThemeProvider>
         </AuthProvider>
         <Toaster richColors position="top-right" />
       </body>
