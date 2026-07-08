@@ -112,7 +112,7 @@ export const runNurtureCampaign = inngest.createFunction(
         console.log(`[Nurture] Compliance check result: allowed=${complianceCheck.allowed}, reason=${complianceCheck.reason || 'none'}`);
 
         if (complianceCheck.allowed || !complianceCheck.reason?.includes("Quiet Hours")) {
-          break; // clear to send, or a per-channel block (opted-out / no contact / suppressed)
+          break;
         }
 
         quietHoursAttempts += 1;
@@ -125,12 +125,7 @@ export const runNurtureCampaign = inngest.createFunction(
       }
 
       if (!complianceCheck.allowed) {
-        // This lead can't receive THIS step's channel — they're opted out of it, have no
-        // address/phone for it, or that contact value is suppressed. SKIP just this step
-        // and continue: a lead who only opted into SMS should still get the SMS steps of a
-        // mixed email+SMS campaign (and vice versa). Global opt-outs (unsubscribe, bounce,
-        // complaint, STOP, reply, appointment) exit the whole campaign via the separate
-        // `campaign.exit` event, so we never lose those.
+
         await step.run(`skip-step-${currentStep.position}`, async () => {
           await prisma.leadTimeline.create({
             data: {
@@ -316,13 +311,11 @@ export const runNurtureCampaign = inngest.createFunction(
           metadata: { campaignId: campaign.id }
         },
       });
-
-      // Check campaign completion
       const activeCount = await prisma.campaignEnrollment.count({
         where: { campaignId, status: { in: ["ACTIVE", "PAUSED"] } }
       });
       if (activeCount === 0) {
-        await prisma.campaign.update({ where: { id: campaignId }, data: { status: "Ready" } });
+        await prisma.campaign.updateMany({ where: { id: campaignId, status: "Active" }, data: { status: "Completed" } });
       }
     });
 
@@ -330,22 +323,17 @@ export const runNurtureCampaign = inngest.createFunction(
   }
 );
 
-// Exit function to handle DB updates when a campaign run is cancelled
-// SW-NUR-003: decide whether a given exit reason should actually exit a lead from a
-// specific sequence, honouring that sequence's configured exit conditions.
-// Unsubscribe / bounce / complaint / manual always exit (deliverability & consent).
-// Reply / appointment / status-change are configurable per sequence.
 function shouldExitCampaign(reason, exitConditions, newStatus) {
   const cfg = exitConditions || {};
   switch (reason) {
     case "REPLY":
-      return cfg.onReply !== false; // default: exit on reply
+      return cfg.onReply !== false;
     case "APPOINTMENT":
-      return cfg.onAppointment !== false; // default: exit on appointment
+      return cfg.onAppointment !== false;
     case "STATUS_CHANGE":
       return !!cfg.onStatusChange && cfg.onStatusChange === newStatus;
     default:
-      return true; // UNSUBSCRIBE, BOUNCE, COMPLAINT, MANUAL, etc.
+      return true;
   }
 }
 
@@ -355,7 +343,6 @@ export const handleCampaignExit = inngest.createFunction(
     const { leadId, reason, newStatus } = event.data;
 
     const result = await step.run("update-enrollments-exited", async () => {
-      // Find all active enrollments for this lead
       const enrollments = await prisma.campaignEnrollment.findMany({
         where: { leadId, status: { in: ["ACTIVE", "PAUSED"] } },
         include: { campaign: true }
@@ -363,7 +350,6 @@ export const handleCampaignExit = inngest.createFunction(
 
       let exited = 0;
       for (const enrollment of enrollments) {
-        // Respect each sequence's configured exit conditions.
         if (!shouldExitCampaign(reason, enrollment.campaign.exitConditions, newStatus)) {
           continue;
         }
@@ -373,7 +359,6 @@ export const handleCampaignExit = inngest.createFunction(
           data: { status: "EXITED", exitedReason: reason },
         });
 
-        // SW-NUR-008: attribute a reply to the step the lead last received.
         if (reason === "REPLY" && enrollment.currentStepPosition > 0) {
           const stepRow = await prisma.campaignStep.findFirst({
             where: { campaignId: enrollment.campaignId, position: enrollment.currentStepPosition },
@@ -395,12 +380,11 @@ export const handleCampaignExit = inngest.createFunction(
           },
         });
 
-        // Check completion
         const activeCount = await prisma.campaignEnrollment.count({
           where: { campaignId: enrollment.campaignId, status: { in: ["ACTIVE", "PAUSED"] } }
         });
         if (activeCount === 0) {
-          await prisma.campaign.update({ where: { id: enrollment.campaignId }, data: { status: "Ready" } });
+          await prisma.campaign.updateMany({ where: { id: enrollment.campaignId, status: "Active" }, data: { status: "Completed" } });
         }
         exited += 1;
       }

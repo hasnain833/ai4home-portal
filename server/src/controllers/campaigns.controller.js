@@ -26,12 +26,12 @@ export const getCampaigns = async (req, res) => {
     // Format metrics matches frontend format
     const formatted = campaigns.map((seq) => {
       const totalLeads = seq.enrollments.length;
-      const convertedLeads = seq.enrollments.filter(e => 
+      const convertedLeads = seq.enrollments.filter(e =>
         e.status === "EXITED" && (e.exitedReason === "REPLY" || e.exitedReason === "APPOINTMENT")
       ).length;
-      
-      const conversionRate = totalLeads > 0 
-        ? ((convertedLeads / totalLeads) * 100).toFixed(1) + "%" 
+
+      const conversionRate = totalLeads > 0
+        ? ((convertedLeads / totalLeads) * 100).toFixed(1) + "%"
         : "0.0%";
 
       return {
@@ -75,7 +75,6 @@ export const getCampaignDetail = async (req, res) => {
       return res.status(404).json({ message: "Campaign not found" });
     }
 
-    // Analytics Calculation
     const enrollments = campaign.enrollments;
     const analytics = {
       enrolled: enrollments.length,
@@ -90,13 +89,11 @@ export const getCampaignDetail = async (req, res) => {
       },
     };
 
-    // Calculate per-step analytics
     const stepAnalytics = {};
     for (const step of campaign.steps) {
       stepAnalytics[step.id] = {
         sent: 0,
         delivered: 0,
-        // Webhook-fed counters live on the step itself (SW-NUR-008).
         opened: step.openedCount || 0,
         clicked: step.clickedCount || 0,
         replied: step.repliedCount || 0,
@@ -105,7 +102,6 @@ export const getCampaignDetail = async (req, res) => {
       };
     }
 
-    // Query timeline events to count sends, etc.
     const timelineEvents = await prisma.leadTimeline.findMany({
       where: {
         leadId: { in: enrollments.map((e) => e.leadId) },
@@ -119,7 +115,6 @@ export const getCampaignDetail = async (req, res) => {
       if (step) {
         if (event.type === "EMAIL_SENT" || event.type === "SMS_SENT") {
           stepAnalytics[step.id].sent++;
-          // Assuming successful send = delivered for MVP, real webhooks would update this
           stepAnalytics[step.id].delivered++;
         }
         if (event.type === "SMS_FAILED") {
@@ -192,14 +187,11 @@ export const updateCampaign = async (req, res) => {
         description: description !== undefined ? description : campaign.description,
         channel: channel || campaign.channel,
         status: status || campaign.status,
-        // SW-NUR-003 / SW-NUR-007
         exitConditions: exitConditions !== undefined ? exitConditions : campaign.exitConditions,
         versionPolicy: versionPolicy !== undefined ? versionPolicy : campaign.versionPolicy,
       },
     });
 
-    // A campaign runs once — launching fires its enrolled leads. There is no "restart"
-    // (relaunch) that resets completed/exited enrollments back to step 0.
     const isLaunching = campaign.status !== "Active" && status === "Active";
 
     if (isLaunching) {
@@ -248,7 +240,6 @@ export const updateCampaignSteps = async (req, res) => {
       return res.status(400).json({ message: "Steps must be an array" });
     }
 
-    // Verify campaign ownership
     const campaign = await prisma.campaign.findFirst({
       where: { id, companyId: req.user.companyId },
     });
@@ -257,7 +248,6 @@ export const updateCampaignSteps = async (req, res) => {
       return res.status(404).json({ message: "Campaign not found" });
     }
 
-    // SW-NUR-001: sequences support 1–50 steps.
     if (steps.length > 50) {
       return res.status(400).json({ message: "A sequence can have at most 50 steps." });
     }
@@ -268,10 +258,6 @@ export const updateCampaignSteps = async (req, res) => {
 
     let targetCampaignId = id;
 
-    // SW-NUR-007: Sequence versioning policy when editing an ACTIVE sequence.
-    //  • FINISH_OLD (default): fork a new version; leads already mid-sequence finish the
-    //    old one and the new version is created as a Draft.
-    //  • MIGRATE: edit steps in place so in-flight leads continue on the updated steps.
     if (campaign.status === "Active" && (campaign.versionPolicy || "FINISH_OLD") === "FINISH_OLD") {
       const newVersion = await prisma.campaign.create({
         data: {
@@ -279,7 +265,7 @@ export const updateCampaignSteps = async (req, res) => {
           name: `${campaign.name} (v2)`,
           description: campaign.description,
           channel: campaign.channel,
-          status: "Draft", // Create as draft, user can activate it
+          status: "Draft",
         }
       });
       targetCampaignId = newVersion.id;
@@ -307,7 +293,6 @@ export const updateCampaignSteps = async (req, res) => {
       return res.json({ newVersion: true, campaign: updatedCampaign });
     }
 
-    // Delete existing steps and insert new steps in transaction for non-active campaigns
     await prisma.$transaction([
       prisma.campaign.update({
         where: { id },
@@ -317,10 +302,10 @@ export const updateCampaignSteps = async (req, res) => {
       prisma.campaignStep.createMany({
         data: steps.map((step, idx) => ({
           campaignId: id,
-          type: step.type, // "EMAIL", "SMS", "DELAY"
+          type: step.type,
           position: idx + 1,
           delayValue: step.delayValue !== undefined ? parseInt(step.delayValue, 10) : null,
-          delayUnit: step.delayUnit || null, // "MINUTES", "HOURS", "DAYS"
+          delayUnit: step.delayUnit || null,
           sendWindowDays: step.sendWindowDays || null,
           sendWindowStart: step.sendWindowStart || null,
           sendWindowEnd: step.sendWindowEnd || null,
@@ -354,8 +339,6 @@ export const enrollCampaign = async (req, res) => {
     let { leadIds } = req.body;
     const { segmentId } = req.body;
 
-    // SW-NUR-002: enroll by saved segment — resolve the segment's filters to lead ids
-    // at enroll time. (Either leadIds or segmentId may be provided.)
     if (segmentId) {
       const segment = await prisma.leadSegment.findFirst({
         where: { id: segmentId, companyId: req.user.companyId },
@@ -380,7 +363,6 @@ export const enrollCampaign = async (req, res) => {
       return res.status(404).json({ message: "Campaign not found" });
     }
 
-    // Fetch the first campaign step to inspect if it starts with a DELAY
     const firstStep = await prisma.campaignStep.findFirst({
       where: { campaignId: id },
       orderBy: { position: "asc" },
@@ -392,27 +374,23 @@ export const enrollCampaign = async (req, res) => {
 
     for (const leadId of leadIds) {
       try {
-        // Verify lead exists and belongs to company
         const lead = await prisma.lead.findFirst({
           where: { id: leadId, companyId: req.user.companyId },
         });
 
         if (!lead) continue;
 
-        // SW-NUR-002: Prevent duplicate enrollment in the same sequence
         const existingEnrollment = await prisma.campaignEnrollment.findUnique({
           where: { leadId_campaignId: { leadId, campaignId: id } }
         });
 
         if (existingEnrollment && (existingEnrollment.status === "ACTIVE" || existingEnrollment.status === "PAUSED")) {
           skippedDuplicates.push(leadId);
-          continue; // skip duplicate enrollment
+          continue;
         }
-
-        // SW-NUR-002: Warn on concurrent enrollment in multiple sequences
         const concurrentEnrollments = await prisma.campaignEnrollment.findFirst({
-          where: { 
-            leadId, 
+          where: {
+            leadId,
             status: { in: ["ACTIVE", "PAUSED"] },
             campaignId: { not: id }
           }
@@ -420,8 +398,6 @@ export const enrollCampaign = async (req, res) => {
         if (concurrentEnrollments) {
           concurrentWarnings.push(leadId);
         }
-
-        // Upsert enrollment to start at step 0 immediately
         const enrollment = await prisma.campaignEnrollment.upsert({
           where: {
             leadId_campaignId: {
@@ -441,8 +417,6 @@ export const enrollCampaign = async (req, res) => {
             exitedReason: null,
           },
         });
-
-        // Fire the Inngest event ONLY if campaign is Active
         if (campaign.status === "Active") {
           console.log(`[Campaign Controller] Sending Inngest event 'campaign.enrollment.started' for lead: ${leadId}`);
           await inngest.send({
@@ -457,8 +431,6 @@ export const enrollCampaign = async (req, res) => {
         } else {
           console.log(`[Campaign Controller] Campaign ${id} is not Active (status: ${campaign.status}). Postponing Inngest event for lead: ${leadId}`);
         }
-
-        // Add timeline record
         await prisma.leadTimeline.create({
           data: {
             leadId,
@@ -473,13 +445,13 @@ export const enrollCampaign = async (req, res) => {
       }
     }
 
-    return res.json({ 
-      success: true, 
-      enrolledCount, 
+    return res.json({
+      success: true,
+      enrolledCount,
       skippedDuplicatesCount: skippedDuplicates.length,
       concurrentWarningsCount: concurrentWarnings.length,
       skippedDuplicates,
-      concurrentWarnings 
+      concurrentWarnings
     });
   } catch (error) {
     console.error("[Campaign Enroll] Error:", error);
@@ -487,7 +459,6 @@ export const enrollCampaign = async (req, res) => {
   }
 };
 
-// SW-NUR-003: manually remove leads from a sequence (exit with reason MANUAL).
 export const unenrollCampaign = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -523,12 +494,11 @@ export const unenrollCampaign = async (req, res) => {
       });
     }
 
-    // Mark the campaign idle again if nobody is left running.
     const activeCount = await prisma.campaignEnrollment.count({
       where: { campaignId: id, status: { in: ["ACTIVE", "PAUSED"] } },
     });
     if (activeCount === 0 && campaign.status === "Active") {
-      await prisma.campaign.update({ where: { id }, data: { status: "Ready" } });
+      await prisma.campaign.update({ where: { id }, data: { status: "Completed" } });
     }
 
     return res.json({ success: true, removed: result.count });
@@ -579,8 +549,6 @@ export const generateCampaignCopy = async (req, res) => {
       return res.status(500).json({ message: "Anthropic API key is not configured" });
     }
 
-    // SW-NUR-005 / SW-KB-006: ground the AI copy in the tenant's structured brand profile
-    // rather than a free-text tone string alone.
     const company = await prisma.company.findUnique({
       where: { id: req.user.companyId },
       select: { name: true, voiceProfile: true, salesBrandProfile: true },
@@ -609,7 +577,6 @@ Rules:
 ${stepType === 'SMS' ? '- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}. No other placeholders.' : '- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do NOT invent other placeholders.'}
 Output your draft clearly.`;
 
-    // Direct fetch to Anthropic API
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {

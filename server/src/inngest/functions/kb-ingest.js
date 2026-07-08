@@ -4,14 +4,12 @@ import mammoth from "mammoth";
 import { createRequire } from "module";
 import { upsertChunks, isVectorStoreConfigured } from "../../services/vector-store.service.js";
 
-// pdf-parse ships as CommonJS; load it lazily via createRequire so importing this
-// module never triggers its debug self-test.
-const require = createRequire(import.meta.url);
 
-const MAX_CHARS = 1000; // ~ target chunk size
+const require = createRequire(import.meta.url);
+const MAX_CHARS = 1000;
 const OVERLAP = 150;
 
-// Split text into overlapping ~1000-char chunks on paragraph/sentence boundaries.
+
 export function chunkText(text) {
   const clean = (text || "").replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
   if (!clean) return [];
@@ -22,17 +20,17 @@ export function chunkText(text) {
   for (const para of paras) {
     if ((buf + "\n\n" + para).length > MAX_CHARS && buf) {
       chunks.push(buf.trim());
-      buf = buf.slice(Math.max(0, buf.length - OVERLAP)); // carry a little context
+      buf = buf.slice(Math.max(0, buf.length - OVERLAP));
     }
     buf = buf ? `${buf}\n\n${para}` : para;
-    // A single huge paragraph: hard-split it.
+
     while (buf.length > MAX_CHARS) {
       chunks.push(buf.slice(0, MAX_CHARS).trim());
       buf = buf.slice(MAX_CHARS - OVERLAP);
     }
   }
   if (buf.trim()) chunks.push(buf.trim());
-  return chunks.filter((c) => c.length > 20); // drop trivial fragments
+  return chunks.filter((c) => c.length > 20);
 }
 
 async function extractText(url, name) {
@@ -42,20 +40,31 @@ async function extractText(url, name) {
   const lower = (name || url).toLowerCase();
 
   if (lower.endsWith(".pdf")) {
-    const pdfParse = require("pdf-parse");
-    const data = await pdfParse(buffer);
-    return data.text || "";
+    const mod = require("pdf-parse");
+
+    if (typeof mod === "function") {
+      const data = await mod(buffer);
+      return data.text || "";
+    }
+    const PDFParse = mod.PDFParse || mod.default?.PDFParse;
+    if (!PDFParse) throw new Error("pdf-parse: no usable parser export found");
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const data = await parser.getText();
+      return data.text || "";
+    } finally {
+      if (typeof parser.destroy === "function") await parser.destroy();
+    }
   }
   if (lower.endsWith(".docx")) {
     const { value } = await mammoth.extractRawText({ buffer });
     return value || "";
   }
-  // .txt / .md / anything else → treat as UTF-8 text.
+
   return buffer.toString("utf-8");
 }
 
-// KB ingestion (SW-KB-002): extract → chunk → embed → upsert into the tenant's
-// Sales vector namespace. Emitted on document upload; re-runnable on update.
+
 export const ingestKbDocument = inngest.createFunction(
   {
     id: "sales-kb-ingest",

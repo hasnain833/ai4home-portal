@@ -216,6 +216,11 @@ export default function ContentCalendarPage() {
                     ))}
                     {Array.from({ length: daysInMonth }).map((_, i) => {
                       const day = i + 1;
+                      const today = new Date();
+                      const isToday =
+                        today.getFullYear() === currentDate.getFullYear() &&
+                        today.getMonth() === currentDate.getMonth() &&
+                        today.getDate() === day;
                       const currentMonthEvents = events.filter(e => {
                         if (!e.scheduledAt) return false;
                         const evtDate = new Date(e.scheduledAt);
@@ -225,8 +230,12 @@ export default function ContentCalendarPage() {
                       });
 
                       return (
-                        <div key={day} className="border-r border-b dark:border-slate-800 p-2 text-left space-y-1.5 flex flex-col justify-between hover:bg-slate-50/20 dark:hover:bg-slate-900/10 transition">
-                          <span className="text-[10px] font-bold text-slate-400">{day}</span>
+                        <div key={day} className={`border-r border-b dark:border-slate-800 p-2 text-left space-y-1.5 flex flex-col justify-between transition ${isToday ? "bg-[#b48c3c]/5 dark:bg-[#b48c3c]/10 ring-1 ring-inset ring-[#b48c3c]/40" : "hover:bg-slate-50/20 dark:hover:bg-slate-900/10"}`}>
+                          {isToday ? (
+                            <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-[#b48c3c] text-white text-[10px] font-bold">{day}</span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400">{day}</span>
+                          )}
                           <div className="space-y-1 flex-1">
                             {currentMonthEvents.map((evt, idx) => {
                               const isDone = evt.isCompleted || evt.status === "Sent" || evt.status === "Published";

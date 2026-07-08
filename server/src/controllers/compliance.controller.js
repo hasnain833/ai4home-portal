@@ -247,7 +247,6 @@ export const processInbound = async (req, res) => {
 
         const { inngest } = await import("../lib/inngest.js");
         await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
-        // Kick off the appointment-scheduling agent for this reply (email or SMS).
         await inngest.send({
           name: "lead.reply.received",
           data: { leadId: lead.id, companyId, channel, body, sender },
@@ -278,11 +277,6 @@ export const processInbound = async (req, res) => {
   }
 };
 
-
-
-// Public, user-facing unsubscribe (the "unsubscribe here" link in emails).
-// Keyed by the lead's own id (a non-sequential cuid, unique per recipient). No auth:
-// leads have no portal account, and opting someone OUT is always a safe action.
 export const unsubscribeByLead = async (req, res) => {
   try {
     const { leadId } = req.params;
@@ -369,7 +363,6 @@ export const unsubscribeWebhook = async (req, res) => {
       return res.status(400).json({ message: "Normalized value is empty." });
     }
 
-    // 1. Add to suppression list
     const suppressionItem = await prisma.suppressionList.upsert({
       where: {
         companyId_value: {
@@ -387,7 +380,6 @@ export const unsubscribeWebhook = async (req, res) => {
       },
     });
 
-    // 2. Find matching leads and update opt-in flags + timeline
     let leadsToUpdate = [];
     if (isEmail) {
       leadsToUpdate = await prisma.lead.findMany({
@@ -433,7 +425,6 @@ export const unsubscribeWebhook = async (req, res) => {
       }
     }
 
-    // Create timeline events for matching leads
     for (const lead of leadsToUpdate) {
       await prisma.leadTimeline.create({
         data: {
@@ -507,8 +498,6 @@ export const processBrevoEmailEvents = async (req, res) => {
   }
 };
 
-// Twilio delivery-status callback. Twilio POSTs one form-encoded event per request
-// (MessageStatus: queued | sending | sent | delivered | undelivered | failed).
 export const processTwilioSmsStatus = async (req, res) => {
   try {
     const companyId = req.query.companyId || req.body?.companyId;
@@ -516,7 +505,6 @@ export const processTwilioSmsStatus = async (req, res) => {
       return res.status(400).json({ message: "companyId is required." });
     }
 
-    // For outbound status, the recipient is the `To` field.
     const phone = req.body.To || req.body.to;
     const status = req.body.MessageStatus || req.body.SmsStatus || req.body.status || "";
     if (!phone || !status) {
@@ -573,8 +561,6 @@ export const processBrevoInboundEmail = async (req, res) => {
       }
 
       const normalizedEmail = fromEmail.trim().toLowerCase();
-
-      // Find matching leads
       const leads = await prisma.lead.findMany({
         where: {
           companyId,
@@ -583,7 +569,6 @@ export const processBrevoInboundEmail = async (req, res) => {
       });
 
       for (const lead of leads) {
-        // Create timeline event REPLY_RECEIVED
         const replyContent = textBody || htmlBody || "No body content";
         await prisma.leadTimeline.create({
           data: {
@@ -597,10 +582,8 @@ export const processBrevoInboundEmail = async (req, res) => {
           },
         });
 
-        // Exit active campaigns with reason REPLY via Inngest
         const { inngest } = await import("../lib/inngest.js");
         await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
-        // Kick off the appointment-scheduling agent for this email reply.
         await inngest.send({
           name: "lead.reply.received",
           data: { leadId: lead.id, companyId, channel: "EMAIL", body: replyContent, sender: normalizedEmail },
@@ -621,7 +604,6 @@ export const processBrevoInboundEmail = async (req, res) => {
   }
 };
 
-// Escape a string for safe inclusion in TwiML (XML) responses.
 function escapeXml(str = "") {
   return String(str)
     .replace(/&/g, "&amp;")
@@ -631,15 +613,11 @@ function escapeXml(str = "") {
     .replace(/'/g, "&apos;");
 }
 
-// Build a TwiML response. When `message` is provided, Twilio sends it back to the
-// sender as an SMS reply; otherwise an empty <Response/> acknowledges with no reply.
 function twiml(message) {
   const inner = message ? `<Message>${escapeXml(message)}</Message>` : "";
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`;
 }
 
-// Twilio inbound-SMS webhook. Twilio POSTs one form-encoded message per request
-// (From, To, Body, MessageSid) and expects a TwiML (text/xml) response.
 export const processTwilioInboundSms = async (req, res) => {
   const sendTwiml = (message) => res.status(200).type("text/xml").send(twiml(message));
 
@@ -651,15 +629,17 @@ export const processTwilioInboundSms = async (req, res) => {
 
     const sender = req.body.From || req.body.from || req.body.sender;
     const body = req.body.Body || req.body.body || req.body.text || "";
+    const toNumber = req.body.To || req.body.to || "";
+
+    console.log(`[SMS IN] ← inbound SMS | company=${companyId} from=${sender || "?"} to=${toNumber || "?"} | body="${(body || "").replace(/\s+/g, " ").slice(0, 160)}"`);
 
     if (!sender || !body) {
-      console.warn("[Twilio SMS Webhook] Missing From/Body, skipping.");
+      console.warn("[SMS IN] Missing From/Body, skipping.");
       return sendTwiml();
     }
 
     const normalizedContact = sender.replace(/\D/g, "");
 
-    // 1. Handle compliance keywords (STOP, UNSUBSCRIBE, START, HELP, etc.)
     const result = await ComplianceService.handleInboundKeyword(
       companyId,
       sender,
@@ -668,17 +648,18 @@ export const processTwilioInboundSms = async (req, res) => {
     );
 
     if (result.isComplianceAction) {
-      // Reply to the sender via TwiML (e.g. opt-out confirmation).
+      console.log(`[SMS IN] compliance keyword handled (${result.action || "opt-out/opt-in"}) — replying via TwiML, no agent trigger.`);
       return sendTwiml(result.replyText);
     }
 
-    // 2. Log the reply on matching lead timelines and fan out to Inngest.
     const leads = await prisma.lead.findMany({
       where: {
         companyId,
         phone: { contains: normalizedContact.slice(-10) },
       },
     });
+
+    console.log(`[SMS IN] matched ${leads.length} lead(s) for ${sender} in company ${companyId}${leads.length === 0 ? " — no lead with this phone, nothing to trigger" : ""}.`);
 
     for (const lead of leads) {
       await prisma.leadTimeline.create({
@@ -697,13 +678,12 @@ export const processTwilioInboundSms = async (req, res) => {
         data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
       });
       await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "SMS" } });
+      console.log(`[SMS IN] → triggered AI agent (lead.reply.received) for lead=${lead.id} (${lead.firstName || ""} ${lead.lastName || ""})`);
     }
 
-    // Acknowledge without an auto-reply (the scheduling agent handles any response).
     return sendTwiml();
   } catch (error) {
     console.error("[Twilio SMS Webhook] Error processing inbound SMS:", error);
-    // Still return valid TwiML so Twilio doesn't retry indefinitely.
     return res.status(200).type("text/xml").send(twiml());
   }
 };

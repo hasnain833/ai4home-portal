@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -171,8 +172,14 @@ export default function SalesKnowledgeBasePage() {
     if (e.dataTransfer.files?.length) uploadFiles(e.dataTransfer.files);
   };
 
+  const confirm = useConfirm();
+
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Remove "${name}" from the knowledge base? It stops being used for AI retrieval.`)) return;
+    if (!(await confirm({
+      title: "Remove from knowledge base?",
+      description: `Remove "${name}"? It stops being used for AI retrieval.`,
+      confirmText: "Remove",
+    }))) return;
     try {
       const res = await fetch(`/api/sales/kb/${id}`, { method: "DELETE" });
       if (res.ok) {

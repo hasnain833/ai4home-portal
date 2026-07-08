@@ -1,6 +1,7 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { triggerAutomation } from "../../lib/automation-events.js";
+import { validateLeadRow } from "../../lib/csv-validation.js";
 
 export const handleCsvImport = inngest.createFunction(
   { id: "handle-csv-import", triggers: [{ event: "csv/import.started" }] },
@@ -8,7 +9,6 @@ export const handleCsvImport = inngest.createFunction(
     const { rows, mergeStrategy, companyId, userId, userRole, userName } = event.data;
 
     const chunkSize = 100;
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const summary = await step.run("process-rows", async () => {
       let createdCount = 0;
       let updatedCount = 0;
@@ -28,13 +28,9 @@ export const handleCsvImport = inngest.createFunction(
           const smsOptIn = Boolean(lead.smsOptIn);
           const tags = Array.isArray(lead.tags) ? lead.tags : [];
 
-          if (!firstName || !lastName) {
-            errors.push({ row: rowNum, reason: "First name and last name are required." });
-            continue;
-          }
-
-          if (email && !emailRegex.test(email)) {
-            errors.push({ row: rowNum, reason: `Invalid email format: ${email}` });
+          const check = validateLeadRow(lead);
+          if (!check.valid) {
+            errors.push({ row: rowNum, reason: check.reason });
             continue;
           }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import {
@@ -159,8 +160,14 @@ export default function IntegrationsPage() {
     }
   };
 
+  const confirm = useConfirm();
+
   const handleDisconnect = async (platform: string) => {
-    if (!confirm(`Remove ${PLATFORM_META[platform]?.label} integration?`)) return;
+    if (!(await confirm({
+      title: "Remove integration?",
+      description: `Remove ${PLATFORM_META[platform]?.label} integration?`,
+      confirmText: "Remove",
+    }))) return;
     setDeleting(platform);
     try {
       const res = await fetch("/api/integrations/credentials", {

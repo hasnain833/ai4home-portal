@@ -242,9 +242,24 @@ export const getCalendarSuggestions = async (req, res) => {
       take: 10
     });
 
-    const dismissedText = dismissedItems.length > 0 
+    const dismissedText = dismissedItems.length > 0
       ? dismissedItems.map(d => `${d.title} (${d.reason || 'No reason'})`).join("\n")
       : "None";
+    const recentNews = await prisma.scrapedNews.findMany({
+      where: {
+        companyId,
+        publishedAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) }
+      },
+      select: { title: true, summary: true, source: true, publishedAt: true },
+      orderBy: { publishedAt: "desc" },
+      take: 8
+    });
+
+    const recentNewsText = recentNews.length > 0
+      ? recentNews
+        .map(n => `${n.publishedAt.toISOString().split('T')[0]} [${n.source}] ${n.title}: ${n.summary}`)
+        .join("\n")
+      : "No recent market news available.";
 
     const anthropic = new Anthropic({ apiKey });
 
@@ -256,6 +271,9 @@ Current date: ${new Date().toISOString()}
 Context:
 Existing upcoming/recent scheduled events:
 ${existingEventsText || "No existing events."}
+
+Recent housing-market news (ground your topics in these current events where relevant):
+${recentNewsText}
 
 Recently Dismissed Topics (DO NOT suggest these):
 ${dismissedText}

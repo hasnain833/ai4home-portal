@@ -86,9 +86,23 @@ model Company {
   availabilitySetting     AvailabilitySetting?
   calendarConnections     CalendarConnection[]
   scrapedNews             ScrapedNews[]
+  csvMappingTemplates     CsvMappingTemplate[]
   appointmentMode         String                  @default("AI")
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
+}
+
+// SW-CSV-002: saved CSV column→field mapping templates, reusable across imports.
+model CsvMappingTemplate {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name      String
+  mapping   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, name])
 }
 
 model Integration {
@@ -402,6 +416,7 @@ model ContentCalendar {
   status        String   @default("Draft")
   content       String   @db.Text
   subject       String?
+  reason        String?  @db.Text
   outline       String?
   isAiSuggested Boolean  @default(false)
   ownerId       String?

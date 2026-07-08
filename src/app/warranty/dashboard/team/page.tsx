@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -140,8 +141,14 @@ export default function TeamManagementPage() {
     }
   };
 
+  const confirm = useConfirm();
+
   const handleDeleteStaff = async (staffId: string, staffName: string) => {
-    if (!confirm(`Are you sure you want to remove ${staffName}'s access?`)) return;
+    if (!(await confirm({
+      title: "Remove access?",
+      description: `Are you sure you want to remove ${staffName}'s access?`,
+      confirmText: "Remove access",
+    }))) return;
 
     try {
       const res = await fetch("/api/admin/staff", {

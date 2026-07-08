@@ -14,7 +14,6 @@ interface ScrapedNews {
   source: string;
   imageUrl?: string;
   publishedAt: string;
-  wasBroadcasted: boolean;
 }
 
 export default function SalesNewsPage() {
@@ -51,7 +50,7 @@ export default function SalesNewsPage() {
                 Housing Market News
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                AI-curated news automatically distributed to your leads.
+                AI-summarized market news that powers your calendar suggestions and blog drafts. Nothing is sent to leads without your approval.
               </p>
             </div>
             <Button className="gap-2" variant="outline" onClick={fetchNews}>
@@ -100,18 +99,9 @@ export default function SalesNewsPage() {
                       </div>
 
                       <div className="mt-auto pt-4 flex items-center justify-between border-t border-border/50">
-                        <div className="text-xs font-medium flex items-center gap-1.5">
-                          {item.wasBroadcasted ? (
-                            <span className="text-green-600 dark:text-green-400 flex items-center gap-1">
-                              <span className="h-1.5 w-1.5 rounded-full bg-green-500"></span>
-                              Sent to Leads
-                            </span>
-                          ) : (
-                            <span className="text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
-                              <span className="h-1.5 w-1.5 rounded-full bg-yellow-500"></span>
-                              Pending Broadcast
-                            </span>
-                          )}
+                        <div className="text-xs font-medium flex items-center gap-1.5 text-muted-foreground">
+                          <Bot className="h-3.5 w-3.5 text-primary" />
+                          Available for calendar &amp; blog
                         </div>
                         <a 
                           href={item.originalUrl} 
