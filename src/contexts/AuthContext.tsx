@@ -93,17 +93,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
-        // Avoid double-fetch: INITIAL_SESSION fires on mount, skip the manual call below
         if (event === "INITIAL_SESSION") initialFetchDone = true;
         fetchUser();
       } else if (event === "SIGNED_OUT") {
-        if (mounted) {
-          setUser(null);
-          setIsLoading(false);
-        }
-        router.push("/login");
+        // Verify if a superadmin session is active before clearing
+        checkSuperadminOrLogout();
       }
     });
+
+    async function checkSuperadminOrLogout() {
+      try {
+        const response = await fetch("/api/auth/me");
+        if (response.ok) {
+          const userData = await response.json();
+          if (userData.isSuperAdmin) {
+            if (mounted) {
+              setUser(userData);
+              setIsLoading(false);
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      if (mounted) {
+        setUser(null);
+        setIsLoading(false);
+      }
+      router.push("/login");
+    }
 
     // Fallback: if onAuthStateChange didn't fire INITIAL_SESSION (older SDK), fetch manually
     setTimeout(() => {
@@ -125,6 +144,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) => {
     setIsLoading(true);
     try {
+      const isSuperAdminEmail = email.toLowerCase() === "admin@gmail.com";
+
       const response = await fetch("/api/auth/superadmin-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -134,9 +155,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const body = await response.json();
         if (body.isSuperAdmin) {
+          const meResponse = await fetch("/api/auth/me");
+          if (meResponse.ok) {
+            const userData = await meResponse.json();
+            setUser(userData);
+          }
           router.push(redirectPath || "/admin");
           return;
         }
+      }
+
+      if (isSuperAdminEmail) {
+        throw new Error("Invalid credentials");
       }
 
       const { error } = await supabaseRef.current.auth.signInWithPassword({

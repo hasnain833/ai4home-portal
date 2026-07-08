@@ -20,6 +20,22 @@ export const getMe = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
+    if (req.user.isSuperAdmin && req.user.id === "env-superadmin") {
+      return res.json({
+        id: "env-superadmin",
+        email: req.user.email,
+        name: req.user.name || "Super Admin",
+        role: "admin",
+        isSuperAdmin: true,
+        hasWarrantyAccess: true,
+        hasSalesAccess: true,
+        companyLogo: null,
+        companyName: "System Administration",
+        avatar: null,
+        online: true,
+      });
+    }
+
     const dbUser = await prisma.user.findUnique({
       where: { email: req.user.email },
       include: { company: true, properties: true },
@@ -188,7 +204,7 @@ export const superadminLogin = async (req, res) => {
         secure: secureCookie,
         sameSite: "lax",
         path: "/",
-        maxAge: 60 * 60 * 24,
+        maxAge: 60 * 60 * 24 * 1000,
       });
 
       return res.json({ message: "Authenticated", isSuperAdmin: true });
@@ -221,7 +237,7 @@ export const superadminLogin = async (req, res) => {
       secure: secureCookie,
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24,
+      maxAge: 60 * 60 * 24 * 1000,
     });
 
     return res.json({ message: "Authenticated", isSuperAdmin: true });

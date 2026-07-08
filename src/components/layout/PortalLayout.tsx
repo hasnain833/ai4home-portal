@@ -88,6 +88,12 @@ export default function PortalLayout({
 
   useEffect(() => setMounted(true), []);
 
+  useEffect(() => {
+    if (mounted && user?.isSuperAdmin) {
+      router.push("/admin");
+    }
+  }, [user, mounted, router]);
+
   const navItems = workspace === "warranty" ? warrantyNavItems : salesNavItems;
   const filteredNav = navItems.filter((item) => user && item.roles.includes(user.role));
   const getInitials = (name: string) =>
