@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { buildPrismaWhereClause } from "./segments.controller.js";
+import { chat, hasLLM } from "../lib/llm.js";
 
 export const getCampaigns = async (req, res) => {
   try {
@@ -533,6 +534,161 @@ export const deleteCampaign = async (req, res) => {
   }
 };
 
+// --- Create a nurture campaign from a scraped news item (SW-NUR-001/005) ---
+
+function parseJsonBlock(text) {
+  try {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start === -1 || end <= start) return null;
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+// Strip a trailing " - Source Name" / " — Source" suffix the scraper appends to
+// headlines, so it doesn't read awkwardly inside marketing copy.
+function cleanNewsTitle(title = "") {
+  const cleaned = title.replace(/\s+[-–—]\s+[^-–—]+$/, "").trim();
+  return cleaned || title.trim();
+}
+
+// A normalized fingerprint used to detect when the summary just repeats the title.
+function fingerprint(s = "") {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50);
+}
+
+function buildFallbackNewsCopy(news) {
+  const title = cleanNewsTitle(news.title || "");
+  const summary = (news.summary || "").trim();
+  // Only include the summary if it actually adds detail beyond the headline —
+  // otherwise the email showed the same sentence twice.
+  const summaryAddsDetail = summary && fingerprint(summary) !== fingerprint(title);
+  const insight = summaryAddsDetail
+    ? summary
+    : "Market conditions are shifting, and it may be a smart moment to revisit your home-buying or selling plans.";
+
+  const emailSubject = `Housing market update: ${title}`.slice(0, 120);
+  const emailBody = `Hi {firstName},
+
+Here's a quick housing-market update from the {companyName} team that may affect your plans:
+
+${title}.
+
+${insight}
+
+If you'd like to talk through what this means for you, we're happy to help — book a time that works for you here: {bookingLink}
+
+Warm regards,
+The {companyName} Team`;
+  const smsBody = `Hi {firstName}, a quick housing update from {companyName}: ${title.slice(0, 90)}. Want to chat about your options? {bookingLink} Reply STOP to opt out.`.slice(0, 320);
+  return { emailSubject, emailBody, smsBody };
+}
+
+async function generateNewsCampaignCopy(news, company) {
+  const fallback = buildFallbackNewsCopy(news);
+
+  if (!hasLLM()) {
+    return { ...fallback, aiGenerated: false };
+  }
+
+  try {
+    const bp = company?.salesBrandProfile || {};
+    const brandLines = [
+      company?.name ? `Company/builder name: ${company.name}` : null,
+      bp.tone || company?.voiceProfile ? `Tone/voice: ${bp.tone || company?.voiceProfile}` : null,
+      bp.markets || bp.communities ? `Markets/communities: ${bp.markets || bp.communities}` : null,
+      bp.signature ? `Signature/sign-off: ${bp.signature}` : null,
+    ].filter(Boolean).join("\n");
+
+    const systemPrompt = `You are an expert real-estate and home-builder marketing copywriter.
+Write a lead-nurture EMAIL and a nurture SMS based on a housing-market news item.
+
+Brand profile (reflect this voice):
+${brandLines || "Professional, warm, and helpful."}
+
+Rules:
+- Ground the copy in the news item. Be specific but do NOT fabricate statistics or quotes.
+- Do NOT repeat the raw headline verbatim more than once; paraphrase it naturally into the message.
+- Email: a compelling subject line (<= 80 chars) and a warm body (~90-160 words) that ties the news to the reader's home-buying/selling journey and ends with a soft call to action to book a chat using {bookingLink}.
+- SMS: <= 160 characters, friendly, referencing the news angle, and include {bookingLink}. End with "Reply STOP to opt out.".
+- You MAY use ONLY these merge tags: {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do not invent other placeholders.
+- Return ONLY valid minified JSON with exactly these keys: {"emailSubject":"...","emailBody":"...","smsBody":"..."}. No markdown, no commentary.`;
+
+    const userPrompt = `News title: ${news.title}\nNews summary: ${news.summary}\nSource: ${news.source}`;
+
+    const text = await chat({ system: systemPrompt, user: userPrompt, maxTokens: 700, json: true });
+    const parsed = parseJsonBlock(text || "");
+    if (parsed && parsed.emailSubject && parsed.emailBody && parsed.smsBody) {
+      return {
+        emailSubject: String(parsed.emailSubject).slice(0, 200),
+        emailBody: String(parsed.emailBody),
+        smsBody: String(parsed.smsBody),
+        aiGenerated: true,
+      };
+    }
+    return { ...fallback, aiGenerated: false };
+  } catch (err) {
+    console.error("[Campaign From News] AI exception:", err);
+    return { ...fallback, aiGenerated: false };
+  }
+}
+
+export const createCampaignFromNews = async (req, res) => {
+  try {
+    if (!req.user || !req.user.companyId) {
+      return res.status(403).json({ message: "No company associated" });
+    }
+
+    const { newsId } = req.body;
+    if (!newsId) {
+      return res.status(400).json({ message: "newsId is required" });
+    }
+
+    const companyId = req.user.companyId;
+
+    const news = await prisma.scrapedNews.findFirst({
+      where: { id: newsId, companyId },
+    });
+    if (!news) {
+      return res.status(404).json({ message: "News article not found" });
+    }
+
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { name: true, voiceProfile: true, salesBrandProfile: true },
+    });
+
+    const copy = await generateNewsCampaignCopy(news, company);
+
+    const shortTitle = news.title.length > 60 ? news.title.slice(0, 57) + "..." : news.title;
+
+    const campaign = await prisma.campaign.create({
+      data: {
+        companyId,
+        name: `News: ${shortTitle}`,
+        description: `Auto-drafted from market news: ${news.title}`,
+        channel: "Email & SMS",
+        status: "Ready", // has steps -> ready to enroll & launch
+        steps: {
+          // Immediate send — no wait between the email and the follow-up SMS.
+          create: [
+            { type: "EMAIL", position: 1, subject: copy.emailSubject, body: copy.emailBody },
+            { type: "SMS", position: 2, body: copy.smsBody },
+          ],
+        },
+      },
+      include: { steps: { orderBy: { position: "asc" } } },
+    });
+
+    return res.status(201).json({ success: true, campaign, aiGenerated: copy.aiGenerated });
+  } catch (error) {
+    console.error("[Campaign From News] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const generateCampaignCopy = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -545,8 +701,8 @@ export const generateCampaignCopy = async (req, res) => {
       return res.status(400).json({ message: "Goal and stepType are required" });
     }
 
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(500).json({ message: "Anthropic API key is not configured" });
+    if (!hasLLM()) {
+      return res.status(500).json({ message: "No AI provider is configured (set ANTHROPIC_API_KEY or a Groq key)." });
     }
 
     const company = await prisma.company.findUnique({
@@ -577,31 +733,15 @@ Rules:
 ${stepType === 'SMS' ? '- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}. No other placeholders.' : '- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do NOT invent other placeholders.'}
 Output your draft clearly.`;
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "claude-3-5-sonnet-20241022",
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: [
-          { role: "user", content: "Please generate the draft copy based on the provided parameters." }
-        ]
-      })
+    const content = await chat({
+      system: systemPrompt,
+      user: "Please generate the draft copy based on the provided parameters.",
+      maxTokens: 500,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("[Anthropic API Error]:", errorText);
+    if (!content) {
       return res.status(500).json({ message: "Failed to generate copy from AI provider" });
     }
-
-    const data = await response.json();
-    const content = data.content[0].text;
 
     return res.json({ success: true, draft: content });
   } catch (error) {

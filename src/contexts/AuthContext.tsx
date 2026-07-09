@@ -39,6 +39,9 @@ export interface User {
   hasWarrantyAccess: boolean;
   hasSalesAccess: boolean;
   lastActiveWorkspace?: string;
+  // Tenant onboarding gate: PENDING | SUBMITTED | VERIFIED
+  verificationStatus?: string;
+  verificationDocUrl?: string | null;
 }
 
 interface AuthContextType {
@@ -53,6 +56,7 @@ interface AuthContextType {
   updateProfile: (data: Partial<User>) => Promise<void>;
   updateAvatar: (avatarUrl: string) => void;
   setOnlineStatus: (status: boolean) => void;
+  refreshUser: () => Promise<User | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -189,8 +193,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) => {
     setIsLoading(true);
     try {
-      const isSuperAdminEmail = email.toLowerCase() === "admin@gmail.com";
-
+      // Super admin is authenticated entirely server-side against SUPERADMIN_EMAIL
+      // in the backend env. The client never hardcodes the address, so the two
+      // can't drift apart — the server is the single source of truth. Any login
+      // that isn't the super admin falls through to normal Supabase auth below.
       const response = await fetch("/api/auth/superadmin-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,10 +214,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           router.push(redirectPath || "/admin");
           return;
         }
-      }
-
-      if (isSuperAdminEmail) {
-        throw new Error("Invalid credentials");
       }
 
       const { error } = await supabaseRef.current.auth.signInWithPassword({
@@ -299,6 +301,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Re-fetch the current user from the server. Used by the verification gate to
+  // detect when the Super Admin has approved the tenant (status -> VERIFIED).
+  const refreshUser = async (): Promise<User | null> => {
+    try {
+      const response = await fetch("/api/auth/me");
+      if (response.ok) {
+        const userData = await response.json();
+        setUser(userData);
+        return userData;
+      }
+    } catch (err) {
+      console.error("Failed to refresh user", err);
+    }
+    return null;
+  };
+
   const setOnlineStatus = (status: boolean) => {
     if (user) {
       setUser({
@@ -319,6 +337,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateProfile,
         updateAvatar,
         setOnlineStatus,
+        refreshUser,
       }}
     >
       {children}

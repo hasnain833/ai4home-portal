@@ -9,6 +9,7 @@ import {
   mapSalesforceRecordToLead,
   DEFAULT_FIELD_MAPPINGS,
 } from "../services/salesforce-service.js";
+import { runIncrementalSync } from "../services/salesforce-sync.js";
 
 export const connectSalesforce = async (req, res) => {
   try {
@@ -205,6 +206,8 @@ export const getSalesforceStatus = async (req, res) => {
         lastSyncAt: true,
         lastSyncStatus: true,
         lastSyncMessage: true,
+        writeBackEnabled: true,
+        lastWriteBackAt: true,
         clientId: true,
         createdAt: true,
         updatedAt: true,
@@ -218,6 +221,7 @@ export const getSalesforceStatus = async (req, res) => {
         syncInterval: 15,
         lastSyncAt: null,
         lastSyncStatus: null,
+        writeBackEnabled: false,
         clientIdMasked: null,
       });
     }
@@ -234,6 +238,8 @@ export const getSalesforceStatus = async (req, res) => {
       lastSyncAt: connection.lastSyncAt,
       lastSyncStatus: connection.lastSyncStatus,
       lastSyncMessage: connection.lastSyncMessage,
+      writeBackEnabled: connection.writeBackEnabled,
+      lastWriteBackAt: connection.lastWriteBackAt,
       clientIdMasked: connection.clientId
         ? `${connection.clientId.slice(0, 8)}••••${connection.clientId.slice(-4)}`
         : null,
@@ -253,11 +259,15 @@ export const updateSalesforceStatus = async (req, res) => {
     }
 
     const companyId = req.user.companyId;
-    const { syncInterval } = req.body;
+    const { syncInterval, writeBackEnabled } = req.body;
 
     const updateData = {};
     if (syncInterval !== undefined) {
       updateData.syncInterval = parseInt(syncInterval, 10);
+    }
+    // SW-CRM-008: per-tenant outbound write-back toggle (off by default).
+    if (writeBackEnabled !== undefined) {
+      updateData.writeBackEnabled = !!writeBackEnabled;
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -423,214 +433,47 @@ export const manualSync = async (req, res) => {
       return res.status(403).json({ message: "No company associated" });
     }
 
-    const companyId = req.user.companyId;
+    // Delegates to the shared incremental-sync core (also used by the cron),
+    // which handles pagination, upserts, deletion→archive reconcile, backoff,
+    // and writing the sync log / connection status.
+    const result = await runIncrementalSync(req.user.companyId);
 
-    const auth = await getAuthenticatedClient(companyId);
-    if (!auth) {
-      return res
-        .status(400)
-        .json({ message: "No active Salesforce connection." });
+    if (!result.ok) {
+      return res.status(400).json({ message: result.message });
     }
-
-    const { client, connection } = auth;
-
-    const mappings = await prisma.salesforceFieldMapping.findMany({
-      where: { companyId, isActive: true },
-    });
-    const activeMappings =
-      mappings.length > 0
-        ? mappings
-        : DEFAULT_FIELD_MAPPINGS.map((m) => ({
-            ...m,
-            isConsentField: m.isConsentField || false,
-          }));
-
-    const sfFields = [
-      "Id",
-      "SystemModstamp",
-      ...activeMappings.map((m) => m.salesforceField),
-    ];
-    const uniqueFields = [...new Set(sfFields)];
-
-    let soql = `SELECT ${uniqueFields.join(", ")} FROM Lead`;
-
-    if (connection.lastSyncAt) {
-      const lastSync = connection.lastSyncAt
-        .toISOString()
-        .replace("Z", "+00:00");
-      soql += ` WHERE SystemModstamp > ${lastSync}`;
-    }
-
-    soql += " ORDER BY SystemModstamp ASC";
-
-    let allRecords = [];
-    let result = await client.query(soql);
-    allRecords = result.records;
-
-    while (!result.done && result.nextRecordsUrl) {
-      result = await client.queryMore(result.nextRecordsUrl);
-      allRecords.push(...result.records);
-    }
-
-    if (allRecords.length === 0) {
-      await prisma.salesforceConnection.update({
-        where: { companyId },
-        data: {
-          lastSyncAt: new Date(),
-          lastSyncStatus: "SUCCESS",
-          lastSyncMessage: "No new or modified records found.",
-        },
-      });
-
-      await prisma.syncLog.create({
-        data: {
-          companyId,
-          direction: "INBOUND",
-          action: "INCREMENTAL_SYNC",
-          status: "SUCCESS",
-          recordCount: 0,
-          message: "No new or modified records found.",
-        },
-      });
-
-      return res.json({
-        success: true,
-        totalProcessed: 0,
-        message: "No new or modified records found.",
-      });
-    }
-
-    let createdCount = 0;
-    let updatedCount = 0;
-    let errorCount = 0;
-    const errors = [];
-
-    for (const sfRecord of allRecords) {
-      try {
-        const leadData = mapSalesforceRecordToLead(
-          sfRecord,
-          activeMappings
-        );
-
-        if (!leadData.firstName || !leadData.lastName) {
-          errorCount++;
-          errors.push(
-            `Missing required fields for record ${sfRecord.Id || "unknown"}`
-          );
-          continue;
-        }
-
-        const externalId = leadData.externalId;
-        delete leadData.externalId;
-
-        const existing = externalId
-          ? await prisma.lead.findFirst({
-              where: { companyId, externalId },
-            })
-          : null;
-
-        if (existing) {
-          await prisma.lead.update({
-            where: { id: existing.id },
-            data: {
-              ...leadData,
-              source: "SALESFORCE",
-              timeline: {
-                create: {
-                  type: "SYNC_UPDATE",
-                  description: "Lead updated via Salesforce incremental sync",
-                },
-              },
-            },
-          });
-          updatedCount++;
-        } else {
-          const createdSfLead = await prisma.lead.create({
-            data: {
-              companyId,
-              source: "SALESFORCE",
-              externalId: externalId || null,
-              firstName: leadData.firstName,
-              lastName: leadData.lastName,
-              email: leadData.email || null,
-              phone: leadData.phone || null,
-              street: leadData.street || null,
-              city: leadData.city || null,
-              state: leadData.state || null,
-              zipCode: leadData.zipCode || null,
-              status: leadData.status || "New",
-              emailOptIn: leadData.emailOptIn ?? false,
-              smsOptIn: leadData.smsOptIn ?? false,
-              consentSource:
-                leadData.emailOptIn || leadData.smsOptIn
-                  ? "Salesforce Sync"
-                  : null,
-              consentTimestamp:
-                leadData.emailOptIn || leadData.smsOptIn
-                  ? new Date()
-                  : null,
-              customFields: leadData.customFields || null,
-              timeline: {
-                create: {
-                  type: "IMPORT",
-                  description: "Lead imported via Salesforce incremental sync",
-                },
-              },
-            },
-          });
-          createdCount++;
-          // SW-AMK: newly synced Salesforce leads can trigger automation rules.
-          await triggerAutomation({ companyId, leadId: createdSfLead.id, event: "CRM_INGEST", context: { source: "SALESFORCE" } });
-        }
-      } catch (recordError) {
-        errorCount++;
-        errors.push(recordError.message || "Unknown error");
-      }
-    }
-
-    const syncStatus =
-      errorCount > 0 && createdCount + updatedCount > 0
-        ? "WARNING"
-        : errorCount > 0
-        ? "ERROR"
-        : "SUCCESS";
-
-    const message = `Incremental sync complete. Created: ${createdCount}, Updated: ${updatedCount}, Errors: ${errorCount}`;
-
-    await prisma.salesforceConnection.update({
-      where: { companyId },
-      data: {
-        lastSyncAt: new Date(),
-        lastSyncStatus: syncStatus,
-        lastSyncMessage: message,
-      },
-    });
-
-    await prisma.syncLog.create({
-      data: {
-        companyId,
-        direction: "INBOUND",
-        action: "INCREMENTAL_SYNC",
-        status: syncStatus,
-        recordCount: createdCount + updatedCount,
-        errorCount,
-        message,
-        metadata:
-          errors.length > 0 ? { errors: errors.slice(0, 50) } : undefined,
-      },
-    });
 
     return res.json({
       success: true,
-      totalProcessed: allRecords.length,
-      createdCount,
-      updatedCount,
-      errorCount,
-      status: syncStatus,
-      message,
+      totalProcessed: result.totalProcessed,
+      createdCount: result.createdCount,
+      updatedCount: result.updatedCount,
+      archivedCount: result.archivedCount,
+      errorCount: result.errorCount,
+      status: result.status,
+      message: result.message,
     });
   } catch (err) {
     console.error("[Salesforce Sync] Error:", err);
+    // Best-effort: record the failure so the UI surfaces it.
+    try {
+      await prisma.salesforceConnection.update({
+        where: { companyId: req.user.companyId },
+        data: {
+          lastSyncStatus: "ERROR",
+          lastSyncMessage: (err.message || "Incremental sync failed").slice(0, 500),
+        },
+      });
+      await prisma.syncLog.create({
+        data: {
+          companyId: req.user.companyId,
+          direction: "INBOUND",
+          action: "INCREMENTAL_SYNC",
+          status: "ERROR",
+          errorCount: 1,
+          message: (err.message || "Incremental sync failed").slice(0, 500),
+        },
+      });
+    } catch { /* ignore logging failure */ }
     return res
       .status(500)
       .json({ message: err.message || "Incremental sync failed" });

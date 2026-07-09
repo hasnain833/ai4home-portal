@@ -76,7 +76,7 @@ export const createTicket = async (req, res) => {
     // Fetch property to get coeDate
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
-      select: { coeDate: true, address: true, homeownerId: true }
+      select: { coeDate: true, address: true, homeownerId: true, homeowner: { select: { companyId: true } } }
     });
 
     if (!property) {
@@ -99,6 +99,7 @@ export const createTicket = async (req, res) => {
         ticketType,
         propertyId,
         homeownerId,
+        companyId: property.homeowner?.companyId ?? null,
         priority: isEmergency ? "URGENT" : (priority || "MEDIUM"),
         isEmergency: !!isEmergency,
         warrantyYear,

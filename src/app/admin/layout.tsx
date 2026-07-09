@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Building2,
   Users,
+  ShieldCheck,
   LogOut,
   Sun,
   Moon,
@@ -17,7 +18,6 @@ import {
   ChevronRight,
   Menu,
   X,
-  ShieldAlert,
   Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import { Separator } from "@/components/ui/separator";
 const adminNavItems = [
   { name: "Overview", href: "/admin", icon: LayoutDashboard },
   { name: "Companies", href: "/admin/companies", icon: Building2 },
+  { name: "Verifications", href: "/admin/verifications", icon: ShieldCheck },
   { name: "Users & Access", href: "/admin/users", icon: Users },
 ];
 
@@ -57,33 +58,34 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   if (!mounted || isLoading) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <Loader2 className="h-8 w-8 animate-spin text-[#c59b4c]" />
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-[#b48c3c]" />
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden">
+    <div className="flex h-screen bg-background overflow-hidden">
       {/* Desktop Sidebar */}
       <motion.aside
         initial={false}
         animate={{ width: sidebarWidth }}
         transition={{ duration: 0.2, ease: "easeInOut" }}
-        className="fixed inset-y-0 left-0 z-50 hidden md:block bg-[#04060a] text-zinc-100 shadow-2xl border-r border-white/5"
+        className="fixed inset-y-0 left-0 z-50 hidden md:block bg-sidebar text-sidebar-foreground shadow-xl border-r border-sidebar-border"
       >
         <div className="flex h-full flex-col">
           {/* Header */}
           <div className="flex h-16 items-center justify-between px-4 mt-2">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#c59b4c]/10 border border-[#c59b4c]/20 text-[#c59b4c]">
-                <ShieldAlert className="h-5 w-5" />
-              </div>
+              <img src="/logo.png" alt="Aiforhomebuilder" className="h-9 w-auto object-contain rounded-md" />
               {sidebarExpanded && (
-                <span className="text-lg font-bold tracking-tight font-serif text-white">Super Admin</span>
+                <div className="flex flex-col leading-tight">
+                  <span className="text-lg font-bold tracking-tight">Aiforhomebuilder</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">Super Admin</span>
+                </div>
               )}
             </div>
-            <Button variant="ghost" size="icon" onClick={toggleSidebar} className="text-zinc-400 hover:text-white hover:bg-white/5">
+            <Button variant="ghost" size="icon" onClick={toggleSidebar} className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-white/5">
               {sidebarExpanded ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </Button>
           </div>
@@ -103,11 +105,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     transition={{ duration: 0.2 }}
                     className={`flex items-center space-x-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
                       isActive
-                        ? "bg-[#c59b4c]/10 border border-[#c59b4c]/20 text-[#c59b4c]"
+                        ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
                         : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200 border border-transparent"
                     }`}
                   >
-                    <item.icon className={`h-5 w-5 shrink-0 ${isActive ? "text-[#c59b4c]" : ""}`} />
+                    <item.icon className={`h-5 w-5 shrink-0 ${isActive ? "text-[#b48c3c]" : ""}`} />
                     {sidebarExpanded && <span>{item.name}</span>}
                   </motion.div>
                 </Link>
@@ -137,7 +139,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     <p className="text-xs font-semibold text-zinc-200 truncate">
                       {user?.name || "System Admin"}
                     </p>
-                    <p className="text-[10px] text-[#c59b4c] uppercase tracking-wider">Root Access</p>
+                    <p className="text-[10px] text-[#b48c3c] uppercase tracking-wider">Root Access</p>
                   </div>
                 )}
               </div>
@@ -154,13 +156,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Main Content Wrapper */}
       <main className={`flex-1 flex flex-col transition-all duration-200 ease-in-out h-full overflow-hidden ${sidebarExpanded ? "md:ml-64" : "md:ml-20"}`}>
         {/* Mobile Header */}
-        <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 md:hidden">
+        <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-border bg-card/80 backdrop-blur-md px-4 md:hidden">
           <Button variant="ghost" size="icon" onClick={() => setMobileSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-[#c59b4c]" />
-            <span className="font-bold font-serif">Super Admin</span>
+            <img src="/logo.png" alt="Aiforhomebuilder" className="h-7 w-auto object-contain rounded-md" />
+            <span className="font-bold">Aiforhomebuilder</span>
           </div>
           <div className="w-9" /> {/* Spacer */}
         </header>
@@ -181,17 +183,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 animate={{ x: 0 }}
                 exit={{ x: "-100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                className="fixed top-0 left-0 z-50 h-full w-72 bg-[#04060a] text-zinc-100 shadow-2xl md:hidden"
+                className="fixed top-0 left-0 z-50 h-full w-72 bg-sidebar text-sidebar-foreground shadow-2xl md:hidden"
               >
                 <div className="flex h-full flex-col">
                   <div className="flex h-16 items-center justify-between px-4 mt-2">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#c59b4c]/10 border border-[#c59b4c]/20 text-[#c59b4c]">
-                        <ShieldAlert className="h-5 w-5" />
+                      <img src="/logo.png" alt="Aiforhomebuilder" className="h-9 w-auto object-contain rounded-md" />
+                      <div className="flex flex-col leading-tight">
+                        <span className="text-lg font-bold tracking-tight">Aiforhomebuilder</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">Super Admin</span>
                       </div>
-                      <span className="text-lg font-bold tracking-tight font-serif text-white">Super Admin</span>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={closeMobileSidebar} className="text-zinc-400 hover:text-white">
+                    <Button variant="ghost" size="icon" onClick={closeMobileSidebar} className="text-sidebar-foreground/60 hover:text-sidebar-foreground">
                       <X className="h-5 w-5" />
                     </Button>
                   </div>
@@ -207,7 +210,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                         <Link key={item.name} href={item.href} onClick={closeMobileSidebar}>
                           <div className={`flex items-center space-x-3 rounded-xl px-3 py-3 text-sm font-medium transition-all ${
                             isActive
-                              ? "bg-[#c59b4c]/10 border border-[#c59b4c]/20 text-[#c59b4c]"
+                              ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
                               : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
                           }`}>
                             <item.icon className="h-5 w-5 shrink-0" />

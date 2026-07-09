@@ -142,7 +142,11 @@ export class SalesforceClient {
 
   // ─── Instance Methods ─────────────────────────────────────────────────────
 
-  async apiRequest(path, options = {}) {
+  // SW-CRM-007: retry transient failures (429 rate-limit, 5xx) with exponential
+  // backoff. Honors a Retry-After header when Salesforce sends one. 4xx (other
+  // than 429) fail fast — they won't succeed on retry.
+  async apiRequest(path, options = {}, attempt = 0) {
+    const MAX_RETRIES = 4;
     const url = `${this.instanceUrl}${path}`;
     const res = await fetch(url, {
       ...options,
@@ -154,6 +158,15 @@ export class SalesforceClient {
     });
 
     if (!res.ok) {
+      const retryable = res.status === 429 || res.status >= 500;
+      if (retryable && attempt < MAX_RETRIES) {
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const backoffMs = Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : Math.min(2 ** attempt * 500, 8000) + Math.floor(Math.random() * 250);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        return this.apiRequest(path, options, attempt + 1);
+      }
       const errorBody = await res.text();
       throw new Error(`Salesforce API error (${res.status}): ${errorBody}`);
     }
@@ -178,6 +191,16 @@ export class SalesforceClient {
    */
   async queryMore(nextRecordsUrl) {
     return this.apiRequest(nextRecordsUrl);
+  }
+
+  /**
+   * SOQL query including deleted/archived records (Recycle Bin) — used to detect
+   * Salesforce deletions (IsDeleted = true) so we can archive the local lead.
+   */
+  async queryAll(soql) {
+    return this.apiRequest(
+      `/services/data/v59.0/queryAll?q=${encodeURIComponent(soql)}`
+    );
   }
 
   /**

@@ -1,5 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { triggerAutomation } from "../lib/automation-events.js";
+import { findDuplicateLead } from "../lib/lead-dedup.js";
+import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 
 export const getLeads = async (req, res) => {
   try {
@@ -9,10 +11,16 @@ export const getLeads = async (req, res) => {
         .json({ message: "User is not associated with a company." });
     }
 
-    const { search = "", status = "all", tag = "all" } = req.query;
+    const { search = "", status = "all", tag = "all", includeArchived } = req.query;
 
     const companyId = req.user.companyId;
     const where = { companyId };
+
+    // SW-CRM-006: hide leads archived by a Salesforce deletion unless explicitly
+    // requested (?includeArchived=true).
+    if (includeArchived !== "true") {
+      where.archived = false;
+    }
 
     // Role-based visibility: homeowners only see their own uploaded leads. Admins/staff see all.
     if (req.user.role.toUpperCase() === "HOMEOWNER") {
@@ -207,21 +215,13 @@ export const importLeads = async (req, res) => {
         continue;
       }
 
-      // Check duplicates safely by trimming and guarding against empty OR lists
-      let duplicateLead = null;
-      const orConditions = [
-        email && email.trim() ? { email: email.trim() } : null,
-        phone && phone.trim() ? { phone: phone.trim() } : null,
-      ].filter(Boolean);
-
-      if (orConditions.length > 0) {
-        duplicateLead = await prisma.lead.findFirst({
-          where: {
-            companyId: req.user.companyId,
-            OR: orConditions,
-          },
-        });
-      }
+      // SW-LEAD-003: normalized duplicate detection (case-insensitive email,
+      // then phone by last-10-digits, ignoring formatting).
+      const duplicateLead = await findDuplicateLead(
+        req.user.companyId,
+        email,
+        phone,
+      );
 
       const optInSource =
         emailOptIn || smsOptIn ? "CSV Import Opt-in Column" : null;
@@ -469,6 +469,18 @@ export const updateLead = async (req, res) => {
         event: "STATUS_CHANGE",
         context: { newStatus: status, previousStatus: lead.status },
       });
+    }
+
+    // SW-CRM-008: write status / consent changes back to Salesforce (gated per
+    // tenant, no-op unless writeBackEnabled + the lead came from Salesforce).
+    const writeBack = {};
+    if (status !== undefined && status !== lead.status) writeBack.status = status;
+    if (emailOptIn !== undefined && !!emailOptIn !== lead.emailOptIn) writeBack.emailOptIn = !!emailOptIn;
+    if (smsOptIn !== undefined && !!smsOptIn !== lead.smsOptIn) writeBack.smsOptIn = !!smsOptIn;
+    if (Object.keys(writeBack).length > 0) {
+      writeBackLeadToSalesforce(req.user.companyId, id, writeBack).catch((e) =>
+        console.error("[Lead Update] Salesforce write-back failed:", e?.message || e),
+      );
     }
 
     return res.json(updatedLead);

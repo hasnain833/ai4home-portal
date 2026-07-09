@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 
+import { requireAuth, requireWorkspace } from "./middlewares/auth.js";
 import authRouter from "./routes/auth.js";
 import leadsRouter from "./routes/leads.js";
 import complianceRouter from "./routes/compliance.js";
@@ -42,6 +43,7 @@ import { scrapeNews } from "./inngest/functions/news-scraper.js";
 import { sendAnnouncement } from "./inngest/functions/announcement.js";
 import { ingestKbDocument } from "./inngest/functions/kb-ingest.js";
 import { runAutomationRules } from "./inngest/functions/automation.js";
+import { salesforceSyncCron } from "./inngest/functions/salesforce-cron.js";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -59,21 +61,29 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Route registrations
 app.use("/api/auth", authRouter);
-app.use("/api/sales/leads", leadsRouter);
+
+// HUB-003 / NFR-S-001: server-side Sales workspace entitlement gate. Fully-private
+// sales routers are wrapped with `requireAuth, requireWorkspace("sales")` at mount.
+// The per-route requireAuth inside each router short-circuits (see auth.js).
+// EXCLUDED here (handled per-route or intentionally open): `compliance` (provider
+// webhooks), and the mixed routers `salesforce` / `appointments` / `scheduling`
+// which expose lead-facing public endpoints — their private routes gate inline.
+const salesGuard = [requireAuth, requireWorkspace("sales")];
+app.use("/api/sales/leads", ...salesGuard, leadsRouter);
 app.use("/api/sales/compliance", complianceRouter);
 app.use("/api/sales/salesforce", salesforceRouter);
-app.use("/api/sales/campaigns", campaignsRouter);
-app.use("/api/sales/calendar", calendarRouter);
-app.use("/api/sales/kb", kbRouter);
+app.use("/api/sales/campaigns", ...salesGuard, campaignsRouter);
+app.use("/api/sales/calendar", ...salesGuard, calendarRouter);
+app.use("/api/sales/kb", ...salesGuard, kbRouter);
 app.use("/api/sales/appointments", appointmentsRouter);
 app.use("/api/sales/scheduling", schedulingRouter);
-app.use("/api/sales/segments", segmentsRouter);
-app.use("/api/sales/csv", csvRouter);
-app.use("/api/sales/dashboard", salesDashboardRouter);
-app.use("/api/sales/settings/messaging", messagingSettingsRouter);
-app.use("/api/sales/news", newsRouter);
-app.use("/api/sales/announcements", announcementsRouter);
-app.use("/api/sales/automations", automationsRouter);
+app.use("/api/sales/segments", ...salesGuard, segmentsRouter);
+app.use("/api/sales/csv", ...salesGuard, csvRouter);
+app.use("/api/sales/dashboard", ...salesGuard, salesDashboardRouter);
+app.use("/api/sales/settings/messaging", ...salesGuard, messagingSettingsRouter);
+app.use("/api/sales/news", ...salesGuard, newsRouter);
+app.use("/api/sales/announcements", ...salesGuard, announcementsRouter);
+app.use("/api/sales/automations", ...salesGuard, automationsRouter);
 
 // Core Warranty Route Mounts
 app.use("/api/dashboard", dashboardRouter);
@@ -90,7 +100,7 @@ app.use("/api/users", usersRouter);
 // Inngest Endpoint
 app.use("/api/inngest", (req, res, next) => {
   next();
-}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders, scheduleCalendarItem, scrapeNews, sendAnnouncement, ingestKbDocument, runAutomationRules] }));
+}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders, scheduleCalendarItem, scrapeNews, sendAnnouncement, ingestKbDocument, runAutomationRules, salesforceSyncCron] }));
 
 // Health Check
 app.get("/api/health", (req, res) => {

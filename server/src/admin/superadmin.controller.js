@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { MailService } from "../services/mail-service.js";
 
 export const getCompanies = async (req, res) => {
   try {
@@ -117,6 +118,76 @@ export const updateCompanyWorkspaces = async (req, res) => {
     return res.json(company);
   } catch (error) {
     console.error("Failed to update company workspace settings:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Super Admin reviews a submitted verification document and approves or rejects
+// the tenant. Approving unlocks (unblurs) their warranty workspace.
+export const verifyCompany = async (req, res) => {
+  try {
+    const session = req.user;
+    if (!session || !session.isSuperAdmin) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const { companyId } = req.params;
+    const { action } = req.body; // "approve" | "reject"
+
+    const existing = await prisma.company.findUnique({ where: { id: companyId } });
+    if (!existing) {
+      return res.status(404).json({ message: "Company not found" });
+    }
+
+    if (action === "reject") {
+      // Send the tenant back to PENDING so they can re-upload a valid document.
+      const company = await prisma.company.update({
+        where: { id: companyId },
+        data: {
+          verificationStatus: "PENDING",
+          verificationDocUrl: null,
+          verificationSubmittedAt: null,
+          verifiedAt: null,
+        },
+      });
+      return res.json(company);
+    }
+
+    // Default: approve.
+    const company = await prisma.company.update({
+      where: { id: companyId },
+      data: {
+        verificationStatus: "VERIFIED",
+        verifiedAt: new Date(),
+        warrantyEnabled: true,
+      },
+    });
+
+    // Best-effort welcome / activation email to the tenant.
+    try {
+      if (company.email) {
+        const portalUrl = `${process.env.NEXT_PUBLIC_URL || ""}/warranty/dashboard`;
+        await MailService.sendEmail({
+          to: company.email,
+          subject: "Your warranty workspace is now active",
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+              <h2 style="color: #0F3B3D;">You're all set, ${company.name}!</h2>
+              <p>Your account has been verified and your <strong>Warranty Care</strong> workspace is now fully unlocked.</p>
+              <div style="text-align: center; margin: 24px 0;">
+                <a href="${portalUrl}" style="background-color: #0F3B3D; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Open Your Workspace</a>
+              </div>
+            </div>
+          `,
+        });
+      }
+    } catch (mailErr) {
+      console.error("[Verification] Failed to send activation email:", mailErr);
+    }
+
+    return res.json(company);
+  } catch (error) {
+    console.error("Failed to verify company:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

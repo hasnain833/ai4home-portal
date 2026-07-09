@@ -29,6 +29,8 @@ export const getMe = async (req, res) => {
         isSuperAdmin: true,
         hasWarrantyAccess: true,
         hasSalesAccess: true,
+        verificationStatus: "VERIFIED",
+        verificationDocUrl: null,
         companyLogo: null,
         companyName: "System Administration",
         avatar: null,
@@ -65,10 +67,19 @@ export const getMe = async (req, res) => {
       ? true
       : (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
 
+    // Warranty workspace is gated behind document verification. Super Admins,
+    // and any account whose company has no verification requirement, are treated
+    // as VERIFIED so they are never locked out.
+    const verificationStatus = isSuperAdmin
+      ? "VERIFIED"
+      : dbUser.company?.verificationStatus || "VERIFIED";
+
     return res.json({
       ...dbUser,
       hasWarrantyAccess,
       hasSalesAccess,
+      verificationStatus,
+      verificationDocUrl: dbUser.company?.verificationDocUrl || null,
       avatar: avatarUrl,
       companyLogo: dbUser.company?.logo || null,
       companyName: dbUser.company?.name || null,
@@ -286,6 +297,12 @@ export const signup = async (req, res) => {
         email: companyEmail,
         phone: companyPhone || null,
         address: companyAddress || null,
+        // New tenants start locked: warranty visible but blurred until the
+        // Super Admin verifies their uploaded document. Sales stays off until
+        // the Super Admin explicitly enables it.
+        warrantyEnabled: true,
+        salesEnabled: false,
+        verificationStatus: "PENDING",
       },
     });
 
@@ -384,6 +401,56 @@ export const signup = async (req, res) => {
         message:
           "Failed to send verification email. Account creation rolled back.",
       });
+    }
+
+    // Notify the Super Admin that a new tenant registered and is awaiting
+    // document verification. Best-effort — never fail the signup over this.
+    try {
+      const superAdminEmail = process.env.SUPERADMIN_EMAIL;
+      if (superAdminEmail && process.env.SMTP_USER && process.env.SMTP_PASS) {
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST,
+          port: Number(process.env.SMTP_PORT) || 587,
+          secure: false,
+          auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+          },
+        });
+
+        const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/verifications`;
+
+        await transporter.sendMail({
+          from: `"Aiforhomebuilder" <${process.env.SENDER_EMAIL}>`,
+          to: superAdminEmail,
+          subject: `New tenant registration: ${companyName}`,
+          text: `A new company "${companyName}" (${companyEmail}) just signed up and is awaiting document verification. Review it at ${adminUrl}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+              <h2 style="color: #b48c3c;">New Tenant Registration</h2>
+              <p>A new company just signed up and is awaiting document verification before their warranty workspace is unlocked.</p>
+              <table style="margin: 16px 0; font-size: 14px; color: #333;">
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Company</td><td>${companyName}</td></tr>
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Email</td><td>${companyEmail}</td></tr>
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Phone</td><td>${companyPhone || "—"}</td></tr>
+              </table>
+              <p>Once the tenant uploads their verification document, review and approve it here:</p>
+              <div style="text-align: center; margin: 24px 0;">
+                <a href="${adminUrl}" style="background-color: #b48c3c; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Open Verifications</a>
+              </div>
+            </div>
+          `,
+        });
+      } else {
+        console.warn(
+          "[Signup] SUPERADMIN_EMAIL or SMTP creds missing — skipping super admin notification.",
+        );
+      }
+    } catch (adminMailError) {
+      console.error(
+        "[Signup] Failed to notify super admin of new registration:",
+        adminMailError,
+      );
     }
 
     return res.json({ message: "Verification email sent successfully" });

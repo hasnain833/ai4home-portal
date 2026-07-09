@@ -4,6 +4,11 @@ import { verifySuperadminSessionToken } from "../lib/superadmin-session.js";
 
 export async function requireAuth(req, res, next) {
   try {
+    // If an earlier guard in the chain already authenticated this request
+    // (e.g. a mount-level `requireAuth, requireWorkspace(...)`), don't re-auth.
+    // req.user is only ever set server-side by this middleware, so this is safe.
+    if (req.user && req.user.id) return next();
+
     let token = "";
     let cookies = {};
 
@@ -155,6 +160,20 @@ export async function requireAuth(req, res, next) {
     }
 
     const isSuperAdmin = dbUser.role === "SUPER_ADMIN";
+    const isAdmin = dbUser.role === "ADMIN" || isSuperAdmin;
+    const isStaff = dbUser.role === "STAFF";
+    const companySalesEnabled = dbUser.company?.salesEnabled ?? true;
+    const companyWarrantyEnabled = dbUser.company?.warrantyEnabled ?? true;
+
+    // Effective workspace access — mirrors getMe (auth.controller.js): admins and
+    // staff implicitly have both workspaces; everyone else needs the per-user flag;
+    // and the tenant's company-level enablement gates it. Super Admin always has both.
+    const hasWarrantyAccess = isSuperAdmin
+      ? true
+      : (isAdmin || isStaff || dbUser.hasWarrantyAccess) && companyWarrantyEnabled;
+    const hasSalesAccess = isSuperAdmin
+      ? true
+      : (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
 
     req.user = {
       id: dbUser.id,
@@ -162,8 +181,8 @@ export async function requireAuth(req, res, next) {
       name: dbUser.name,
       role: isSuperAdmin ? "ADMIN" : dbUser.role,
       companyId: dbUser.companyId,
-      hasWarrantyAccess: dbUser.hasWarrantyAccess,
-      hasSalesAccess: dbUser.hasSalesAccess,
+      hasWarrantyAccess,
+      hasSalesAccess,
       isSuperAdmin,
     };
 
@@ -174,6 +193,27 @@ export async function requireAuth(req, res, next) {
       .status(500)
       .json({ message: "Internal server error during authentication" });
   }
+}
+
+// Workspace entitlement guard (HUB-003 / NFR-S-001). Enforces server-side that
+// the caller actually has access to the given workspace ("sales" | "warranty"),
+// not just hidden in the UI. Must run AFTER requireAuth (which sets req.user with
+// the effective, company-gated access flags). Super Admin bypasses.
+export function requireWorkspace(workspace) {
+  const key = workspace === "warranty" ? "hasWarrantyAccess" : "hasSalesAccess";
+  const label = workspace === "warranty" ? "Warranty" : "Sales";
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    if (req.user.isSuperAdmin) return next();
+    if (!req.user[key]) {
+      return res.status(403).json({
+        message: `Forbidden: your account does not have ${label} workspace access.`,
+      });
+    }
+    next();
+  };
 }
 
 // Role-based verification helper middleware

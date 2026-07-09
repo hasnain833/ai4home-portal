@@ -22,9 +22,11 @@ interface UserRecord {
   email: string;
   role: string;
   isSuperAdmin: boolean;
+  companyId: string | null;
   companyName: string;
-  hasWarrantyAccess: boolean;
-  hasSalesAccess: boolean;
+  // Company-level workspace enablement (tenant purchased the workspace).
+  warrantyEnabled: boolean;
+  salesEnabled: boolean;
   accountStatus: string;
 }
 
@@ -34,34 +36,37 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (user?.isSuperAdmin) fetchUsers();
-  }, [user]);
-
   const fetchUsers = async () => {
     setLoading(true);
     try {
       const response = await fetch("/api/admin/users");
       const data = await response.json();
-      if (response.ok) setUsers(data);
+      // Only tenant admins are managed here — staff and homeowners inherit
+      // access from their company/admin, so they are not shown.
+      if (response.ok) setUsers((data as UserRecord[]).filter((u) => u.role === "ADMIN"));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleToggle = (userId: string, field: "hasWarrantyAccess" | "hasSalesAccess") => {
+  useEffect(() => {
+    if (user?.isSuperAdmin) fetchUsers();
+  }, [user]);
+
+  const toggleCompany = (userId: string, field: "warrantyEnabled" | "salesEnabled") => {
     setUsers(current => current.map(u => u.id === userId ? { ...u, [field]: !u[field] } : u));
   };
 
-  const handleSave = async (userRecord: UserRecord) => {
-    setSavingId(userRecord.id);
+  const handleSave = async (u: UserRecord) => {
+    if (!u.companyId) return;
+    setSavingId(u.id);
     try {
-      await fetch(`/api/admin/users/${userRecord.id}/access`, {
+      await fetch(`/api/admin/companies/${u.companyId}/workspaces`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          hasWarrantyAccess: userRecord.hasWarrantyAccess,
-          hasSalesAccess: userRecord.hasSalesAccess,
+          warrantyEnabled: u.warrantyEnabled,
+          salesEnabled: u.salesEnabled,
         }),
       });
       await fetchUsers();
@@ -70,65 +75,58 @@ export default function AdminUsersPage() {
     }
   };
 
-  const getRoleBadgeColor = (role: string, isSuperAdmin: boolean) => {
-    if (isSuperAdmin) return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
-    if (role === "admin") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
-    if (role === "staff") return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-    return "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300";
-  };
-
   return (
     <div className="space-y-6">
-      <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-        <CardHeader className="border-b border-slate-100 dark:border-slate-800 pb-4">
+      <Card className="bg-card border-border shadow-sm">
+        <CardHeader className="border-b border-border pb-4">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 bg-purple-50 dark:bg-purple-900/20 rounded-lg flex items-center justify-center text-purple-600 dark:text-purple-400">
+            <div className="h-10 w-10 bg-[#b48c3c]/10 rounded-lg flex items-center justify-center text-[#b48c3c]">
               <Users className="h-5 w-5" />
             </div>
             <div>
-              <CardTitle className="text-xl">Users & Access Controls</CardTitle>
-              <p className="text-sm text-slate-500 mt-1">Manage individual workspace permissions across admins, staff, and homeowners.</p>
+              <CardTitle className="text-xl text-foreground">Users &amp; Access Controls</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">Enable the workspaces each tenant has purchased. Staff and homeowners inherit access from their company.</p>
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader className="bg-slate-50 dark:bg-slate-950/50">
+              <TableHeader className="bg-muted/50">
                 <TableRow>
                   <TableHead className="pl-6">User</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Access Level</TableHead>
+                  <TableHead>Workspace Enablement</TableHead>
                   <TableHead className="text-right pr-6">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center text-slate-500">
+                    <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">
                       <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-                      Loading users...
+                      Loading admins...
                     </TableCell>
                   </TableRow>
                 ) : users.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center text-slate-500">No users found.</TableCell>
+                    <TableCell colSpan={6} className="py-12 text-center text-muted-foreground">No tenant admins found.</TableCell>
                   </TableRow>
                 ) : (
                   users.map((u) => (
-                    <TableRow key={u.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
+                    <TableRow key={u.id} className="hover:bg-muted/40">
                       <TableCell className="pl-6">
                         <div className="flex flex-col">
-                          <span className="font-medium text-slate-900 dark:text-slate-100">{u.name || "—"}</span>
-                          <span className="text-xs text-slate-500">{u.email}</span>
+                          <span className="font-medium text-foreground">{u.name || "—"}</span>
+                          <span className="text-xs text-muted-foreground">{u.email}</span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-slate-600 dark:text-slate-300">{u.companyName}</TableCell>
+                      <TableCell className="text-muted-foreground">{u.companyName}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`border-0 uppercase text-[10px] tracking-wider font-bold ${getRoleBadgeColor(u.role, u.isSuperAdmin)}`}>
-                          {u.isSuperAdmin ? "Super Admin" : u.role}
+                        <Badge variant="outline" className="border-0 uppercase text-[10px] tracking-wider font-bold bg-[#b48c3c]/15 text-[#b48c3c]">
+                          {u.role}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -138,19 +136,19 @@ export default function AdminUsersPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-4">
-                          <label className={`flex items-center gap-2 ${u.isSuperAdmin ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
+                          <label className={`flex items-center gap-2 ${u.isSuperAdmin || !u.companyId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
                             <Checkbox
-                              checked={u.hasWarrantyAccess}
-                              disabled={u.isSuperAdmin}
-                              onCheckedChange={() => handleToggle(u.id, "hasWarrantyAccess")}
+                              checked={u.warrantyEnabled}
+                              disabled={u.isSuperAdmin || !u.companyId}
+                              onCheckedChange={() => toggleCompany(u.id, "warrantyEnabled")}
                             />
                             <span className="text-sm font-medium">Warranty</span>
                           </label>
-                          <label className={`flex items-center gap-2 ${u.isSuperAdmin ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
+                          <label className={`flex items-center gap-2 ${u.isSuperAdmin || !u.companyId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}>
                             <Checkbox
-                              checked={u.hasSalesAccess}
-                              disabled={u.isSuperAdmin}
-                              onCheckedChange={() => handleToggle(u.id, "hasSalesAccess")}
+                              checked={u.salesEnabled}
+                              disabled={u.isSuperAdmin || !u.companyId}
+                              onCheckedChange={() => toggleCompany(u.id, "salesEnabled")}
                             />
                             <span className="text-sm font-medium">Sales</span>
                           </label>

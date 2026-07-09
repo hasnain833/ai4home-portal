@@ -2,7 +2,7 @@ import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import mammoth from "mammoth";
 import { createRequire } from "module";
-import { upsertChunks, isVectorStoreConfigured } from "../../services/vector-store.service.js";
+import { upsertChunks } from "../../services/vector-store.service.js";
 
 
 const require = createRequire(import.meta.url);
@@ -65,69 +65,59 @@ async function extractText(url, name) {
 }
 
 
+// Core ingestion: fetch → extract → chunk → store in Postgres, updating the doc's
+// status as it goes. Now that there's no embedding/vector step, this is fast and
+// light enough to run inline (called fire-and-forget from the upload controller),
+// so KB indexing no longer depends on the Inngest dev server being up. Never
+// throws — records FAILED on the document and returns a status object instead.
+export async function runKbIngestion(documentId, companyId) {
+  const doc = await prisma.salesKB.findUnique({ where: { id: documentId } });
+  if (!doc) return { status: "skipped", reason: "document-not-found" };
+
+  await prisma.salesKB.update({
+    where: { id: documentId },
+    data: { status: "INDEXING", error: null },
+  });
+
+  try {
+    const text = await extractText(doc.url, doc.name);
+    const chunks = chunkText(text);
+
+    if (!chunks.length) {
+      await prisma.salesKB.update({
+        where: { id: documentId },
+        data: { status: "FAILED", error: "No extractable text found in document." },
+      });
+      return { status: "empty" };
+    }
+
+    const count = await upsertChunks(companyId, documentId, chunks, {
+      name: doc.name,
+      category: doc.category,
+    });
+
+    await prisma.salesKB.update({
+      where: { id: documentId },
+      data: { status: "READY", chunkCount: count, error: null },
+    });
+
+    return { status: "ready", chunks: count };
+  } catch (err) {
+    await prisma.salesKB.update({
+      where: { id: documentId },
+      data: { status: "FAILED", error: String(err?.message || err).slice(0, 500) },
+    });
+    return { status: "failed", error: String(err?.message || err) };
+  }
+}
+
+// Thin Inngest wrapper — retained so the flow still works if the event is ever
+// dispatched via Inngest, but the primary path is a direct call from the controller.
 export const ingestKbDocument = inngest.createFunction(
   {
     id: "sales-kb-ingest",
     concurrency: [{ key: "event.data.companyId", limit: 2 }],
     triggers: [{ event: "sales.kb.ingest" }],
   },
-  async ({ event, step }) => {
-    const { documentId, companyId } = event.data;
-
-    const doc = await step.run("load-doc", async () => {
-      const d = await prisma.salesKB.findUnique({ where: { id: documentId } });
-      if (d) await prisma.salesKB.update({ where: { id: documentId }, data: { status: "INDEXING", error: null } });
-      return d;
-    });
-
-    if (!doc) return { status: "skipped", reason: "document-not-found" };
-
-    if (!isVectorStoreConfigured()) {
-      await step.run("mark-unconfigured", async () => {
-        await prisma.salesKB.update({
-          where: { id: documentId },
-          data: { status: "FAILED", error: "Vector store not configured (missing OPENAI_API_KEY / PINECONE_API_KEY / PINECONE_INDEX)." },
-        });
-      });
-      return { status: "skipped", reason: "vector-store-unconfigured" };
-    }
-
-    try {
-      const chunks = await step.run("extract-and-chunk", async () => {
-        const text = await extractText(doc.url, doc.name);
-        return chunkText(text);
-      });
-
-      if (!chunks.length) {
-        await step.run("mark-empty", async () => {
-          await prisma.salesKB.update({
-            where: { id: documentId },
-            data: { status: "FAILED", error: "No extractable text found in document." },
-          });
-        });
-        return { status: "empty" };
-      }
-
-      const count = await step.run("embed-and-upsert", async () => {
-        return upsertChunks(companyId, documentId, chunks, { name: doc.name, category: doc.category });
-      });
-
-      await step.run("mark-ready", async () => {
-        await prisma.salesKB.update({
-          where: { id: documentId },
-          data: { status: "READY", chunkCount: count, error: null },
-        });
-      });
-
-      return { status: "ready", chunks: count };
-    } catch (err) {
-      await step.run("mark-failed", async () => {
-        await prisma.salesKB.update({
-          where: { id: documentId },
-          data: { status: "FAILED", error: String(err?.message || err).slice(0, 500) },
-        });
-      });
-      throw err;
-    }
-  }
+  async ({ event }) => runKbIngestion(event.data.documentId, event.data.companyId),
 );

@@ -1,7 +1,8 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { triggerAutomation } from "../../lib/automation-events.js";
-import { validateLeadRow } from "../../lib/csv-validation.js";
+import { validateLeadRow, sanitizeCsvValue } from "../../lib/csv-validation.js";
+import { findDuplicateLead } from "../../lib/lead-dedup.js";
 
 export const handleCsvImport = inngest.createFunction(
   { id: "handle-csv-import", triggers: [{ event: "csv/import.started" }] },
@@ -20,33 +21,27 @@ export const handleCsvImport = inngest.createFunction(
         for (let j = 0; j < chunk.length; j++) {
           const lead = chunk[j];
           const rowNum = i + j + 1;
-          const firstName = lead.firstName;
-          const lastName = lead.lastName;
-          const email = lead.email;
-          const phone = lead.phone;
-          const emailOptIn = Boolean(lead.emailOptIn);
-          const smsOptIn = Boolean(lead.smsOptIn);
-          const tags = Array.isArray(lead.tags) ? lead.tags : [];
 
           const check = validateLeadRow(lead);
           if (!check.valid) {
             errors.push({ row: rowNum, reason: check.reason });
             continue;
           }
+          const firstName = sanitizeCsvValue(lead.firstName);
+          const lastName = sanitizeCsvValue(lead.lastName);
+          const email = lead.email;
+          const phone = lead.phone;
+          const street = sanitizeCsvValue(lead.street);
+          const city = sanitizeCsvValue(lead.city);
+          const state = sanitizeCsvValue(lead.state);
+          const zipCode = sanitizeCsvValue(lead.zipCode);
+          const emailOptIn = Boolean(lead.emailOptIn);
+          const smsOptIn = Boolean(lead.smsOptIn);
+          const tags = (Array.isArray(lead.tags) ? lead.tags : []).map(sanitizeCsvValue);
 
-          let duplicateLead = null;
-          const orConditions = [];
-          if (email && email.trim()) orConditions.push({ email: email.trim() });
-          if (phone && phone.trim()) orConditions.push({ phone: phone.trim() });
-
-          if (orConditions.length > 0) {
-            duplicateLead = await prisma.lead.findFirst({
-              where: {
-                companyId,
-                OR: orConditions,
-              },
-            });
-          }
+          // SW-LEAD-003: normalized dedup (case-insensitive email, then phone
+          // by last-10-digits ignoring formatting).
+          const duplicateLead = await findDuplicateLead(companyId, email, phone);
 
           const optInSource = emailOptIn || smsOptIn ? "CSV Import" : null;
           const optInTimestamp = emailOptIn || smsOptIn ? new Date() : null;
@@ -66,10 +61,10 @@ export const handleCsvImport = inngest.createFunction(
                   lastName,
                   email: email || duplicateLead.email,
                   phone: phone || duplicateLead.phone,
-                  street: lead.street || duplicateLead.street,
-                  city: lead.city || duplicateLead.city,
-                  state: lead.state || duplicateLead.state,
-                  zipCode: lead.zipCode || duplicateLead.zipCode,
+                  street: street || duplicateLead.street,
+                  city: city || duplicateLead.city,
+                  state: state || duplicateLead.state,
+                  zipCode: zipCode || duplicateLead.zipCode,
                   tags: mergedTags,
                   emailOptIn: lead.emailOptIn !== undefined ? emailOptIn : duplicateLead.emailOptIn,
                   smsOptIn: lead.smsOptIn !== undefined ? smsOptIn : duplicateLead.smsOptIn,
@@ -96,10 +91,10 @@ export const handleCsvImport = inngest.createFunction(
               lastName,
               email: email || null,
               phone: phone || null,
-              street: lead.street || null,
-              city: lead.city || null,
-              state: lead.state || null,
-              zipCode: lead.zipCode || null,
+              street: street || null,
+              city: city || null,
+              state: state || null,
+              zipCode: zipCode || null,
               tags: tags,
               status: "New",
               ownerId: userId,

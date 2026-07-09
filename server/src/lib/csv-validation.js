@@ -1,12 +1,5 @@
-// Shared CSV lead-row validation, used by both the pre-commit dry-run
-// (/api/sales/csv/validate) and the background import job so the preview counts
-// always match what the import actually does.
-
 export const CSV_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Validate a single mapped lead row. Returns { valid: boolean, reason?: string }.
-// Mirrors the import job's hard-reject rules: name is required; a present email
-// must be well-formed.
 export function validateLeadRow(lead) {
   const firstName = (lead?.firstName || "").trim();
   const lastName = (lead?.lastName || "").trim();
@@ -20,8 +13,16 @@ export function validateLeadRow(lead) {
   }
   return { valid: true };
 }
+const FORMULA_INJECTION_RE = /^[=+\-@\t\r]/;
 
-// Dedup keys used to detect duplicates (email, and last-10 digits of phone).
+export function sanitizeCsvValue(value) {
+  if (typeof value !== "string") return value;
+  if (FORMULA_INJECTION_RE.test(value.replace(/^\s+/, ""))) {
+    return "'" + value;
+  }
+  return value;
+}
+
 export function leadDedupKeys(lead) {
   const keys = [];
   const email = (lead?.email || "").trim().toLowerCase();

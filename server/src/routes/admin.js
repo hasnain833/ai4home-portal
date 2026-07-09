@@ -11,6 +11,7 @@ import {
   getUsers,
   updateCompanyWorkspaces,
   updateUserAccess,
+  verifyCompany,
 } from "../admin/superadmin.controller.js";
 
 const router = express.Router();
@@ -23,6 +24,7 @@ router.patch(
   updateCompanyWorkspaces,
 );
 router.patch("/users/:userId/access", requireAuth, updateUserAccess);
+router.patch("/companies/:companyId/verify", requireAuth, verifyCompany);
 router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);
 router.put("/staff", requireAuth, updateStaff);
