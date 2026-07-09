@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
 import prisma from "../lib/prisma.js";
+import { createSuperadminSessionToken } from "../lib/superadmin-session.js";
 
 // Initialize Supabase Admin client
 const getSupabaseAdmin = () => {
@@ -19,6 +20,24 @@ export const getMe = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
+    if (req.user.isSuperAdmin && req.user.id === "env-superadmin") {
+      return res.json({
+        id: "env-superadmin",
+        email: req.user.email,
+        name: req.user.name || "Super Admin",
+        role: "admin",
+        isSuperAdmin: true,
+        hasWarrantyAccess: true,
+        hasSalesAccess: true,
+        verificationStatus: "VERIFIED",
+        verificationDocUrl: null,
+        companyLogo: null,
+        companyName: "System Administration",
+        avatar: null,
+        online: true,
+      });
+    }
+
     const dbUser = await prisma.user.findUnique({
       where: { email: req.user.email },
       include: { company: true, properties: true },
@@ -30,24 +49,42 @@ export const getMe = async (req, res) => {
         .json({ message: "User profile not found in local database." });
     }
 
-    const isAdmin = dbUser.role === "ADMIN";
+    const isAdmin = dbUser.role === "ADMIN" || dbUser.role === "SUPER_ADMIN";
+    const isSuperAdmin = dbUser.role === "SUPER_ADMIN";
     const isStaff = dbUser.role === "STAFF";
     const avatarUrl = isAdmin
       ? dbUser.company?.logo || null
       : dbUser.avatar || null;
 
-    const hasWarrantyAccess =
-      isAdmin || isStaff ? true : dbUser.hasWarrantyAccess;
-    const hasSalesAccess = isAdmin || isStaff ? true : dbUser.hasSalesAccess;
+    const companyWarrantyEnabled = dbUser.company?.warrantyEnabled ?? true;
+    const companySalesEnabled = dbUser.company?.salesEnabled ?? true;
+
+    const hasWarrantyAccess = isSuperAdmin
+      ? true
+      : (isAdmin || isStaff || dbUser.hasWarrantyAccess) &&
+        companyWarrantyEnabled;
+    const hasSalesAccess = isSuperAdmin
+      ? true
+      : (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
+
+    // Warranty workspace is gated behind document verification. Super Admins,
+    // and any account whose company has no verification requirement, are treated
+    // as VERIFIED so they are never locked out.
+    const verificationStatus = isSuperAdmin
+      ? "VERIFIED"
+      : dbUser.company?.verificationStatus || "VERIFIED";
 
     return res.json({
       ...dbUser,
       hasWarrantyAccess,
       hasSalesAccess,
+      verificationStatus,
+      verificationDocUrl: dbUser.company?.verificationDocUrl || null,
       avatar: avatarUrl,
       companyLogo: dbUser.company?.logo || null,
       companyName: dbUser.company?.name || null,
-      role: dbUser.role.toLowerCase(),
+      role: isSuperAdmin ? "admin" : dbUser.role.toLowerCase(),
+      isSuperAdmin,
       online: true,
     });
   } catch (error) {
@@ -67,44 +104,55 @@ export const updateProfile = async (req, res) => {
     const updateData = {};
     if (name) updateData.name = name;
     if (avatar !== undefined) updateData.avatar = avatar;
-    if (lastActiveWorkspace) updateData.lastActiveWorkspace = lastActiveWorkspace;
+    if (lastActiveWorkspace)
+      updateData.lastActiveWorkspace = lastActiveWorkspace;
 
     if (email && email.toLowerCase() !== req.user.email.toLowerCase()) {
       const emailLower = email.toLowerCase();
       // 1. Verify email is not already taken in DB
-      const existingUser = await prisma.user.findUnique({ where: { email: emailLower } });
+      const existingUser = await prisma.user.findUnique({
+        where: { email: emailLower },
+      });
       if (existingUser) {
-        return res.status(400).json({ message: "An account with this email already exists" });
+        return res
+          .status(400)
+          .json({ message: "An account with this email already exists" });
       }
 
       // 2. Find corresponding Supabase Auth user
       const supabaseAdmin = getSupabaseAdmin();
-      const { data: usersData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+      const { data: usersData, error: listError } =
+        await supabaseAdmin.auth.admin.listUsers();
       if (listError) {
         console.error("Supabase user list error:", listError);
-        return res.status(500).json({ message: "Failed to verify authentication account" });
+        return res
+          .status(500)
+          .json({ message: "Failed to verify authentication account" });
       }
 
       const supabaseUser = usersData.users.find(
-        (u) => u.email.toLowerCase() === req.user.email.toLowerCase()
+        (u) => u.email.toLowerCase() === req.user.email.toLowerCase(),
       );
 
       if (!supabaseUser) {
-        return res.status(404).json({ message: "Supabase user not found for current email" });
+        return res
+          .status(404)
+          .json({ message: "Supabase user not found for current email" });
       }
 
       // 3. Update Supabase Auth user email and automatically confirm it
-      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
-        supabaseUser.id,
-        {
+      const { error: authError } =
+        await supabaseAdmin.auth.admin.updateUserById(supabaseUser.id, {
           email: emailLower,
           email_confirm: true,
-        }
-      );
+        });
 
       if (authError) {
         console.error("Supabase auth email update error:", authError);
-        return res.status(400).json({ message: authError.message || "Failed to update authentication account" });
+        return res.status(400).json({
+          message:
+            authError.message || "Failed to update authentication account",
+        });
       }
 
       updateData.email = emailLower;
@@ -138,6 +186,88 @@ export const updateProfile = async (req, res) => {
   }
 };
 
+export const superadminLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ message: "Email and password are required" });
+    }
+
+    if (
+      process.env.SUPERADMIN_EMAIL &&
+      process.env.SUPERADMIN_PASSWORD &&
+      email === process.env.SUPERADMIN_EMAIL &&
+      password === process.env.SUPERADMIN_PASSWORD
+    ) {
+      const token = createSuperadminSessionToken({
+        id: "env-superadmin",
+        email: email,
+        name: "Super Admin",
+        role: "SUPER_ADMIN",
+        companyId: null,
+      });
+
+      const secureCookie = process.env.NODE_ENV === "production";
+      res.cookie("superadmin_session", token, {
+        httpOnly: true,
+        secure: secureCookie,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 1000,
+      });
+
+      return res.json({ message: "Authenticated", isSuperAdmin: true });
+    }
+
+    const dbUser = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
+
+    if (!dbUser || dbUser.role !== "SUPER_ADMIN") {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const passwordMatch = await bcrypt.compare(password, dbUser.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const token = createSuperadminSessionToken({
+      id: dbUser.id,
+      email: dbUser.email,
+      name: dbUser.name || "Super Admin",
+      role: dbUser.role,
+      companyId: dbUser.companyId || null,
+    });
+
+    const secureCookie = process.env.NODE_ENV === "production";
+    res.cookie("superadmin_session", token, {
+      httpOnly: true,
+      secure: secureCookie,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 1000,
+    });
+
+    return res.json({ message: "Authenticated", isSuperAdmin: true });
+  } catch (error) {
+    console.error("Superadmin login error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const logout = async (req, res) => {
+  res.clearCookie("superadmin_session", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
+  return res.json({ message: "Logged out" });
+};
+
 export const signup = async (req, res) => {
   try {
     const {
@@ -167,6 +297,12 @@ export const signup = async (req, res) => {
         email: companyEmail,
         phone: companyPhone || null,
         address: companyAddress || null,
+        // New tenants start locked: warranty visible but blurred until the
+        // Super Admin verifies their uploaded document. Sales stays off until
+        // the Super Admin explicitly enables it.
+        warrantyEnabled: true,
+        salesEnabled: false,
+        verificationStatus: "PENDING",
       },
     });
 
@@ -182,7 +318,7 @@ export const signup = async (req, res) => {
 
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
     );
 
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
@@ -248,25 +384,73 @@ export const signup = async (req, res) => {
     } catch (mailError) {
       console.error(
         "Email send failure, rolling back registration:",
-        mailError
+        mailError,
       );
       await prisma.user.delete({ where: { email: companyEmail } });
       await prisma.company.delete({ where: { id: newCompany.id } });
 
       const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
       const supabaseUser = usersData.users.find(
-        (u) => u.email === companyEmail
+        (u) => u.email === companyEmail,
       );
       if (supabaseUser) {
         await supabaseAdmin.auth.admin.deleteUser(supabaseUser.id);
       }
 
-      return res
-        .status(500)
-        .json({
-          message:
-            "Failed to send verification email. Account creation rolled back.",
+      return res.status(500).json({
+        message:
+          "Failed to send verification email. Account creation rolled back.",
+      });
+    }
+
+    // Notify the Super Admin that a new tenant registered and is awaiting
+    // document verification. Best-effort — never fail the signup over this.
+    try {
+      const superAdminEmail = process.env.SUPERADMIN_EMAIL;
+      if (superAdminEmail && process.env.SMTP_USER && process.env.SMTP_PASS) {
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST,
+          port: Number(process.env.SMTP_PORT) || 587,
+          secure: false,
+          auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+          },
         });
+
+        const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/verifications`;
+
+        await transporter.sendMail({
+          from: `"Aiforhomebuilder" <${process.env.SENDER_EMAIL}>`,
+          to: superAdminEmail,
+          subject: `New tenant registration: ${companyName}`,
+          text: `A new company "${companyName}" (${companyEmail}) just signed up and is awaiting document verification. Review it at ${adminUrl}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+              <h2 style="color: #b48c3c;">New Tenant Registration</h2>
+              <p>A new company just signed up and is awaiting document verification before their warranty workspace is unlocked.</p>
+              <table style="margin: 16px 0; font-size: 14px; color: #333;">
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Company</td><td>${companyName}</td></tr>
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Email</td><td>${companyEmail}</td></tr>
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Phone</td><td>${companyPhone || "—"}</td></tr>
+              </table>
+              <p>Once the tenant uploads their verification document, review and approve it here:</p>
+              <div style="text-align: center; margin: 24px 0;">
+                <a href="${adminUrl}" style="background-color: #b48c3c; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Open Verifications</a>
+              </div>
+            </div>
+          `,
+        });
+      } else {
+        console.warn(
+          "[Signup] SUPERADMIN_EMAIL or SMTP creds missing — skipping super admin notification.",
+        );
+      }
+    } catch (adminMailError) {
+      console.error(
+        "[Signup] Failed to notify super admin of new registration:",
+        adminMailError,
+      );
     }
 
     return res.json({ message: "Verification email sent successfully" });
@@ -295,7 +479,7 @@ export const forgotPassword = async (req, res) => {
 
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
     );
 
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({

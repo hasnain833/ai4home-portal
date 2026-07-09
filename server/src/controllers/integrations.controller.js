@@ -274,6 +274,7 @@ export const botpressTicket = async (req, res) => {
         kbReferences: kbReferences && Array.isArray(kbReferences) && kbReferences.length > 0 ? JSON.stringify(kbReferences) : null,
         propertyId: selectedPropertyId || null,
         homeownerId: homeowner.id,
+        companyId: homeowner.companyId ?? null,
         isEmergency: emergencyBool,
         priority: ticketPriority,
         warrantyYear,

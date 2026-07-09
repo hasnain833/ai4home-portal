@@ -34,6 +34,33 @@ const DEFAULT_TIMEZONE = "America/New_York";
 const SMS_WINDOW_START_HOUR = 8;
 const SMS_WINDOW_END_HOUR = 21;
 
+// SW-CAL-002: give the suggestion model an explicit seasonal signal instead of
+// asking it to infer "seasonal events" from the raw date. Maps the current month
+// to a season plus the notable US home-buying / marketing moments around it.
+const SEASONAL_MOMENTS = {
+  0: "New Year fresh-start home goals; MLK weekend",
+  1: "Presidents' Day (major home-sales weekend); Valentine's Day",
+  2: "Start of the spring buying season; tax-refund season",
+  3: "Spring home-buying peak; Earth Day (energy-efficient homes)",
+  4: "Memorial Day weekend; move-in before summer",
+  5: "Summer relocation season; graduations; Father's Day",
+  6: "Independence Day; mid-summer relocation",
+  7: "Back-to-school move-in deadlines; end-of-summer incentives",
+  8: "Fall buying season kickoff; Labor Day sales",
+  9: "Fall promotions; start of year-end tax planning",
+  10: "Veterans Day; holiday incentives; year-end close-outs",
+  11: "Year-end tax-benefit purchases; holiday season; new-year planning",
+};
+
+function getSeasonalContext(now = new Date()) {
+  const month = now.getMonth();
+  const seasons = [
+    "Winter", "Winter", "Spring", "Spring", "Spring", "Summer",
+    "Summer", "Summer", "Fall", "Fall", "Fall", "Winter",
+  ];
+  return `Season: ${seasons[month]}. Notable seasonal / marketing moments around now: ${SEASONAL_MOMENTS[month]}.`;
+}
+
 function getHourInTz(date, tz) {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
@@ -131,7 +158,47 @@ export const getCalendarEvents = async (req, res) => {
     }
 
     const campaignEvents = Object.values(groupedCampaigns);
-    const allEvents = [...manualEvents, ...campaignEvents];
+
+    // SW-CAL-001: surface scheduled/sent announcements as first-class calendar
+    // items alongside manual content and campaign sends.
+    const announcements = await prisma.announcement.findMany({
+      where: {
+        companyId: req.user.companyId,
+        OR: [{ scheduledAt: { not: null } }, { sentAt: { not: null } }],
+      },
+      select: {
+        id: true,
+        title: true,
+        channel: true,
+        status: true,
+        scheduledAt: true,
+        sentAt: true,
+      },
+    });
+
+    const announcementEvents = announcements
+      .map((a) => {
+        const when = a.sentAt || a.scheduledAt;
+        if (!when) return null;
+        const channel =
+          a.channel === "SMS"
+            ? "SMS"
+            : a.channel === "BOTH"
+              ? "Email/SMS"
+              : "Email";
+        return {
+          id: `announcement_${a.id}`,
+          title: a.title,
+          channel,
+          scheduledAt: when,
+          type: "announcement",
+          status: a.status,
+          isCompleted: !!a.sentAt || a.status === "Sent",
+        };
+      })
+      .filter(Boolean);
+
+    const allEvents = [...manualEvents, ...campaignEvents, ...announcementEvents];
 
     allEvents.sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
 
@@ -212,9 +279,36 @@ export const getCalendarSuggestions = async (req, res) => {
 
     const company = await prisma.company.findUnique({
       where: { id: companyId },
+      include: { communities: { select: { name: true } } },
     });
 
     const voiceProfile = company?.voiceProfile || "professional";
+
+    // SW-CAL-002: build an explicit tenant profile (markets / communities /
+    // brand) so the model grounds topics in the builder's actual footprint
+    // instead of just the company name + voice.
+    const communityNames = (company?.communities || [])
+      .map((c) => c.name)
+      .filter(Boolean);
+    let brandText = "";
+    const brand = company?.salesBrandProfile;
+    if (brand && typeof brand === "object") {
+      brandText = Object.entries(brand)
+        .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+        .join("; ");
+    }
+    const tenantProfileText =
+      [
+        company?.address ? `Primary market / location: ${company.address}` : null,
+        communityNames.length
+          ? `Communities / markets served: ${communityNames.join(", ")}`
+          : null,
+        brandText ? `Brand profile: ${brandText}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n") || "No detailed tenant profile on file.";
+
+    const seasonalContextText = getSeasonalContext();
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
     if (!apiKey) {
@@ -269,6 +363,12 @@ Your task is to generate exactly 3 content calendar suggestions for marketing (S
 Current date: ${new Date().toISOString()}
 
 Context:
+Tenant profile (markets, communities, brand — tailor topics to this footprint):
+${tenantProfileText}
+
+Seasonal context (favor timely, season-appropriate angles):
+${seasonalContextText}
+
 Existing upcoming/recent scheduled events:
 ${existingEventsText || "No existing events."}
 
@@ -280,7 +380,7 @@ ${dismissedText}
 
 Requirements:
 - Find schedule gaps and suggest dates (ISO 8601 strings) for the next 2-4 weeks.
-- Suggest topics based on tenant profile, current real estate/mortgage market trends, and seasonal events.
+- Suggest topics grounded in the tenant profile above, current real estate/mortgage market trends from the news, and the seasonal context.
 - Return ONLY a raw JSON array matching this structure:
 [
   {

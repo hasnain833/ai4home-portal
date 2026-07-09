@@ -28,6 +28,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  isSuperAdmin?: boolean;
   avatar?: string;
   companyId?: string;
   companyName?: string;
@@ -38,16 +39,24 @@ export interface User {
   hasWarrantyAccess: boolean;
   hasSalesAccess: boolean;
   lastActiveWorkspace?: string;
+  // Tenant onboarding gate: PENDING | SUBMITTED | VERIFIED
+  verificationStatus?: string;
+  verificationDocUrl?: string | null;
 }
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, password: string, redirectPath?: string) => Promise<void>;
+  login: (
+    email: string,
+    password: string,
+    redirectPath?: string,
+  ) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
   updateAvatar: (avatarUrl: string) => void;
   setOnlineStatus: (status: boolean) => void;
+  refreshUser: () => Promise<User | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -129,21 +138,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event: AuthChangeEvent) => {
-        if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
-          // Avoid double-fetch: INITIAL_SESSION fires on mount, skip the manual call below
-          if (event === "INITIAL_SESSION") initialFetchDone = true;
-          fetchUser();
-        } else if (event === "SIGNED_OUT") {
-          if (mounted) {
-            setUser(null);
-            setIsLoading(false);
-          }
-          router.push("/login");
-        }
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+        if (event === "INITIAL_SESSION") initialFetchDone = true;
+        fetchUser();
+      } else if (event === "SIGNED_OUT") {
+        // Verify if a superadmin session is active before clearing
+        checkSuperadminOrLogout();
       }
-    );
+    });
+
+    async function checkSuperadminOrLogout() {
+      try {
+        const response = await fetch("/api/auth/me");
+        if (response.ok) {
+          const userData = await response.json();
+          if (userData.isSuperAdmin) {
+            if (mounted) {
+              setUser(userData);
+              setIsLoading(false);
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+      if (mounted) {
+        setUser(null);
+        setIsLoading(false);
+      }
+      router.push("/login");
+    }
 
     // Fallback: if onAuthStateChange didn't fire INITIAL_SESSION (older SDK), fetch manually
     setTimeout(() => {
@@ -158,10 +186,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [router]); // router is stable
 
-
-  const login = async (email: string, password: string, redirectPath?: string) => {
+  const login = async (
+    email: string,
+    password: string,
+    redirectPath?: string,
+  ) => {
     setIsLoading(true);
     try {
+      // Super admin is authenticated entirely server-side against SUPERADMIN_EMAIL
+      // in the backend env. The client never hardcodes the address, so the two
+      // can't drift apart — the server is the single source of truth. Any login
+      // that isn't the super admin falls through to normal Supabase auth below.
+      const response = await fetch("/api/auth/superadmin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        const body = await response.json();
+        if (body.isSuperAdmin) {
+          const meResponse = await fetch("/api/auth/me");
+          if (meResponse.ok) {
+            const userData = await meResponse.json();
+            setUser(userData);
+          }
+          router.push(redirectPath || "/admin");
+          return;
+        }
+      }
+
       const { error } = await supabaseRef.current.auth.signInWithPassword({
         email,
         password,
@@ -179,7 +233,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     setLoggingOut(true);
     try {
-      await supabaseRef.current.auth.signOut();
+      if (user?.isSuperAdmin) {
+        await fetch("/api/auth/logout", { method: "POST" });
+      } else {
+        await supabaseRef.current.auth.signOut();
+      }
     } catch (err) {
       console.error("Logout API failed", err);
     }
@@ -205,7 +263,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.message || "Failed to update profile on server");
+          throw new Error(
+            errData.message || "Failed to update profile on server",
+          );
         }
 
         const serverData = await response.json();
@@ -241,6 +301,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Re-fetch the current user from the server. Used by the verification gate to
+  // detect when the Super Admin has approved the tenant (status -> VERIFIED).
+  const refreshUser = async (): Promise<User | null> => {
+    try {
+      const response = await fetch("/api/auth/me");
+      if (response.ok) {
+        const userData = await response.json();
+        setUser(userData);
+        return userData;
+      }
+    } catch (err) {
+      console.error("Failed to refresh user", err);
+    }
+    return null;
+  };
+
   const setOnlineStatus = (status: boolean) => {
     if (user) {
       setUser({
@@ -261,6 +337,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateProfile,
         updateAvatar,
         setOnlineStatus,
+        refreshUser,
       }}
     >
       {children}

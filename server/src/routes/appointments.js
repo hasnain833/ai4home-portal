@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../middlewares/auth.js";
+import { requireAuth, requireWorkspace } from "../middlewares/auth.js";
 import {
   getAppointments,
   bookAppointment,
@@ -9,7 +9,7 @@ import {
 
 const router = Router();
 
-router.get("/", requireAuth, getAppointments);
+router.get("/", requireAuth, requireWorkspace("sales"), getAppointments);
 router.post("/", bookAppointment);
 router.get("/slots", getSlots);
 router.post("/cta-trigger", triggerCta);

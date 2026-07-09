@@ -12,11 +12,10 @@ import {
   leadTimezone,
   getAvailabilitySetting,
 } from "../../services/scheduling-service.js";
-import { query as kbQuery, isVectorStoreConfigured } from "../../services/vector-store.service.js";
+import { query as kbQuery } from "../../services/vector-store.service.js";
 
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 const MAX_TURNS = 8;
-const KB_MIN_SCORE = 0.3;
 
 function brandedEmail(companyName, bodyText) {
   return `
@@ -228,12 +227,12 @@ export const appointmentSchedulingAgent = inngest.createFunction(
 
 
     const kb = await step.run("kb-retrieve", async () => {
-      if (!isVectorStoreConfigured()) return { chunks: [] };
       const q = (body || "").trim();
       if (!q) return { chunks: [] };
       try {
-        const matches = await kbQuery(lead.companyId, q, 5);
-        const chunks = matches.filter((m) => (m.score ?? 0) >= KB_MIN_SCORE);
+        // Postgres full-text search already returns only term-matching rows,
+        // ranked by ts_rank — take the top matches directly.
+        const chunks = await kbQuery(lead.companyId, q, 5);
         return { chunks };
       } catch (e) {
         console.error("[Appointment Agent] KB retrieval failed:", e.message);

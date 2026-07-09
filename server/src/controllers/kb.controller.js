@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
-import { deleteDocument, query, isVectorStoreConfigured } from "../services/vector-store.service.js";
+import { deleteDocument, query } from "../services/vector-store.service.js";
+import { runKbIngestion } from "../inngest/functions/kb-ingest.js";
 
 const SALES_KB_BUCKET = "sales_knowledge_base";
 
@@ -54,12 +55,11 @@ export const addSalesKBDocument = async (req, res) => {
       },
     });
 
-    // Kick off async indexing (SW-KB-002): extract → chunk → embed → upsert.
-    const { inngest } = await import("../lib/inngest.js");
-    await inngest.send({
-      name: "sales.kb.ingest",
-      data: { documentId: document.id, companyId: req.user.companyId },
-    });
+    // Index in the background (extract → chunk → store). Fire-and-forget so the
+    // response is immediate; the doc's status badge tracks INDEXING → READY.
+    runKbIngestion(document.id, req.user.companyId).catch((e) =>
+      console.error("[Sales KB] Ingestion failed:", e?.message || e),
+    );
 
     return res.status(201).json(document);
   } catch (error) {
@@ -120,9 +120,11 @@ export const uploadSalesKBDocument = async (req, res) => {
       },
     });
 
-    // Async: extract → chunk → embed → upsert (SW-KB-002).
-    const { inngest } = await import("../lib/inngest.js");
-    await inngest.send({ name: "sales.kb.ingest", data: { documentId: document.id, companyId } });
+    // Index in the background (extract → chunk → store). Fire-and-forget so the
+    // response is immediate; the doc's status badge tracks INDEXING → READY.
+    runKbIngestion(document.id, companyId).catch((e) =>
+      console.error("[Sales KB] Ingestion failed:", e?.message || e),
+    );
 
     return res.status(201).json(document);
   } catch (error) {
@@ -149,13 +151,11 @@ export const deleteSalesKBDocument = async (req, res) => {
       return res.status(404).json({ message: "Document not found" });
     }
 
-    // Best-effort vector cleanup; still soft-delete even if the vector store is down.
-    if (isVectorStoreConfigured() && document.chunkCount > 0) {
-      try {
-        await deleteDocument(req.user.companyId, document.id, document.chunkCount);
-      } catch (e) {
-        console.error("[Sales KB Delete] vector cleanup failed:", e?.message || e);
-      }
+    // Drop the document's chunks from retrieval; still soft-delete even if this fails.
+    try {
+      await deleteDocument(req.user.companyId, document.id);
+    } catch (e) {
+      console.error("[Sales KB Delete] chunk cleanup failed:", e?.message || e);
     }
 
     await prisma.salesKB.update({
@@ -176,9 +176,6 @@ export const searchSalesKB = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
       return res.status(403).json({ message: "No company associated" });
-    }
-    if (!isVectorStoreConfigured()) {
-      return res.status(503).json({ message: "Knowledge base search is not configured (missing embedding/vector keys)." });
     }
 
     const { q, k = 5, categories = null } = req.body;

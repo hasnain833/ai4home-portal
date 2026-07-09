@@ -5,7 +5,8 @@ import {
   getCompany,
   updateCompany,
   getCompanyBranding,
-  uploadCompanyLogo
+  uploadCompanyLogo,
+  submitVerificationDocument
 } from "../controllers/company.controller.js";
 
 const router = express.Router();
@@ -25,5 +26,11 @@ router.options("/branding", (req, res) => {
 });
 
 router.post("/logo", requireAuth, upload.single("file"), uploadCompanyLogo);
+router.post(
+  "/verification",
+  requireAuth,
+  upload.single("file"),
+  submitVerificationDocument,
+);
 
 export default router;

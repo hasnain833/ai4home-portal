@@ -1,9 +1,49 @@
 import { supabase } from "../lib/supabase.js";
 import prisma from "../lib/prisma.js";
+import { verifySuperadminSessionToken } from "../lib/superadmin-session.js";
 
 export async function requireAuth(req, res, next) {
   try {
+    // If an earlier guard in the chain already authenticated this request
+    // (e.g. a mount-level `requireAuth, requireWorkspace(...)`), don't re-auth.
+    // req.user is only ever set server-side by this middleware, so this is safe.
+    if (req.user && req.user.id) return next();
+
     let token = "";
+    let cookies = {};
+
+    if (req.headers.cookie) {
+      cookies = Object.fromEntries(
+        req.headers.cookie.split(";").map((c) => {
+          const parts = c.trim().split("=");
+          return [parts[0], parts.slice(1).join("=")];
+        }),
+      );
+    }
+
+    // 0. Support direct Super Admin session cookie first
+    const superadminCookie =
+      cookies.superadmin_session || cookies["superadmin-session"];
+    if (superadminCookie) {
+      const payload = verifySuperadminSessionToken(superadminCookie);
+      if (!payload) {
+        return res
+          .status(401)
+          .json({ message: "Unauthorized: Invalid superadmin session" });
+      }
+
+      req.user = {
+        id: payload.id,
+        email: payload.email,
+        name: payload.name,
+        role: "ADMIN",
+        companyId: payload.companyId || null,
+        hasWarrantyAccess: true,
+        hasSalesAccess: true,
+        isSuperAdmin: true,
+      };
+      return next();
+    }
 
     // 1. Check Authorization header
     const authHeader = req.headers.authorization;
@@ -17,12 +57,13 @@ export async function requireAuth(req, res, next) {
         req.headers.cookie.split(";").map((c) => {
           const parts = c.trim().split("=");
           return [parts[0], parts.slice(1).join("=")];
-        })
+        }),
       );
 
       // Look for Supabase auth cookie keys (can be chunked as sb-<ref>-auth-token.0, sb-<ref>-auth-token.1)
-      let tokenKeys = Object.keys(cookies)
-        .filter((k) => k.includes("auth-token") || k.includes("access-token"));
+      let tokenKeys = Object.keys(cookies).filter(
+        (k) => k.includes("auth-token") || k.includes("access-token"),
+      );
 
       // Parse project reference ID from NEXT_PUBLIC_SUPABASE_URL to prevent local dev cookie collisions
       let projectRef = "";
@@ -32,7 +73,10 @@ export async function requireAuth(req, res, next) {
           const urlObj = new URL(supabaseUrl);
           projectRef = urlObj.hostname.split(".")[0];
         } catch (e) {
-          console.error("[Auth Middleware] Error parsing project reference:", e);
+          console.error(
+            "[Auth Middleware] Error parsing project reference:",
+            e,
+          );
         }
       }
 
@@ -58,11 +102,16 @@ export async function requireAuth(req, res, next) {
         if (rawCookieValue.startsWith("base64-")) {
           try {
             const base64Str = rawCookieValue.substring(7);
-            const decodedStr = Buffer.from(base64Str, "base64").toString("utf-8");
+            const decodedStr = Buffer.from(base64Str, "base64").toString(
+              "utf-8",
+            );
             const parsed = JSON.parse(decodedStr);
             token = parsed.access_token || parsed[0] || parsed;
           } catch (e) {
-            console.error("[Auth Middleware] Failed to decode base64 cookie:", e);
+            console.error(
+              "[Auth Middleware] Failed to decode base64 cookie:",
+              e,
+            );
           }
         } else {
           try {
@@ -82,10 +131,17 @@ export async function requireAuth(req, res, next) {
     }
 
     // Verify token with Supabase
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
 
     if (error || !user || !user.email) {
-      console.error("[Auth Middleware] Supabase error / user not found:", error, !!user);
+      console.error(
+        "[Auth Middleware] Supabase error / user not found:",
+        error,
+        !!user,
+      );
       return res
         .status(401)
         .json({ message: "Unauthorized: Invalid token session" });
@@ -103,14 +159,31 @@ export async function requireAuth(req, res, next) {
         .json({ message: "User profile not found in local database." });
     }
 
+    const isSuperAdmin = dbUser.role === "SUPER_ADMIN";
+    const isAdmin = dbUser.role === "ADMIN" || isSuperAdmin;
+    const isStaff = dbUser.role === "STAFF";
+    const companySalesEnabled = dbUser.company?.salesEnabled ?? true;
+    const companyWarrantyEnabled = dbUser.company?.warrantyEnabled ?? true;
+
+    // Effective workspace access — mirrors getMe (auth.controller.js): admins and
+    // staff implicitly have both workspaces; everyone else needs the per-user flag;
+    // and the tenant's company-level enablement gates it. Super Admin always has both.
+    const hasWarrantyAccess = isSuperAdmin
+      ? true
+      : (isAdmin || isStaff || dbUser.hasWarrantyAccess) && companyWarrantyEnabled;
+    const hasSalesAccess = isSuperAdmin
+      ? true
+      : (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
+
     req.user = {
       id: dbUser.id,
       email: dbUser.email,
       name: dbUser.name,
-      role: dbUser.role,
+      role: isSuperAdmin ? "ADMIN" : dbUser.role,
       companyId: dbUser.companyId,
-      hasWarrantyAccess: dbUser.hasWarrantyAccess,
-      hasSalesAccess: dbUser.hasSalesAccess,
+      hasWarrantyAccess,
+      hasSalesAccess,
+      isSuperAdmin,
     };
 
     next();
@@ -122,6 +195,27 @@ export async function requireAuth(req, res, next) {
   }
 }
 
+// Workspace entitlement guard (HUB-003 / NFR-S-001). Enforces server-side that
+// the caller actually has access to the given workspace ("sales" | "warranty"),
+// not just hidden in the UI. Must run AFTER requireAuth (which sets req.user with
+// the effective, company-gated access flags). Super Admin bypasses.
+export function requireWorkspace(workspace) {
+  const key = workspace === "warranty" ? "hasWarrantyAccess" : "hasSalesAccess";
+  const label = workspace === "warranty" ? "Warranty" : "Sales";
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    if (req.user.isSuperAdmin) return next();
+    if (!req.user[key]) {
+      return res.status(403).json({
+        message: `Forbidden: your account does not have ${label} workspace access.`,
+      });
+    }
+    next();
+  };
+}
+
 // Role-based verification helper middleware
 export function requireRoles(allowedRoles) {
   return (req, res, next) => {
@@ -130,10 +224,14 @@ export function requireRoles(allowedRoles) {
     }
 
     const userRole = req.user.role.toUpperCase();
-    const hasRole = allowedRoles.some(role => role.toUpperCase() === userRole);
+    const hasRole = allowedRoles.some(
+      (role) => role.toUpperCase() === userRole,
+    );
 
     if (!hasRole) {
-      return res.status(403).json({ message: "Forbidden: Insufficient privileges" });
+      return res
+        .status(403)
+        .json({ message: "Forbidden: Insufficient privileges" });
     }
 
     next();

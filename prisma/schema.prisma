@@ -47,6 +47,8 @@ model User {
   contentCalendars    ContentCalendar[]
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
+
+  @@index([companyId])
 }
 
 model Company {
@@ -71,8 +73,17 @@ model Company {
   salesBrandProfile       Json?
   maxSmsPerHour           Int                     @default(60)
   complianceOptInRequired Boolean                 @default(true)
-  salesEnabled            Boolean                 @default(true)
+  // New tenants start with sales OFF — the Super Admin turns it on after purchase.
+  salesEnabled            Boolean                 @default(false)
   warrantyEnabled         Boolean                 @default(true)
+  // Tenant onboarding / document verification gate.
+  // PENDING  -> just signed up, warranty workspace is blurred/locked
+  // SUBMITTED -> tenant uploaded a verification document, awaiting Super Admin review
+  // VERIFIED  -> Super Admin approved, warranty workspace unlocked
+  verificationStatus      String                  @default("PENDING")
+  verificationDocUrl      String?
+  verificationSubmittedAt DateTime?
+  verifiedAt              DateTime?
   // SW-AMK-004: automation safety controls
   automationsKillSwitch   Boolean                 @default(false)
   automationDailyCap      Int                     @default(1000)
@@ -87,6 +98,8 @@ model Company {
   calendarConnections     CalendarConnection[]
   scrapedNews             ScrapedNews[]
   csvMappingTemplates     CsvMappingTemplate[]
+  tickets                 Ticket[]
+  properties              Property[]
   appointmentMode         String                  @default("AI")
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
@@ -121,6 +134,8 @@ model Integration {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([companyId])
 }
 
 model Property {
@@ -134,9 +149,14 @@ model Property {
   coverageTerm DateTime?
   homeownerId  String
   homeowner    User      @relation(fields: [homeownerId], references: [id])
+  companyId    String?
+  company      Company?  @relation(fields: [companyId], references: [id])
   tickets      Ticket[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+
+  @@index([homeownerId])
+  @@index([companyId])
 }
 
 model Ticket {
@@ -158,8 +178,15 @@ model Ticket {
   homeowner      User           @relation("HomeownerTickets", fields: [homeownerId], references: [id])
   propertyId     String?
   property       Property?      @relation(fields: [propertyId], references: [id])
+  companyId      String?
+  company        Company?       @relation(fields: [companyId], references: [id])
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+
+  @@index([homeownerId])
+  @@index([propertyId])
+  @@index([companyId, status])
+  @@index([status])
 }
 
 model Community {
@@ -171,6 +198,8 @@ model Community {
   documents KnowledgeBaseDocument[]
   createdAt DateTime                @default(now())
   updatedAt DateTime                @updatedAt
+
+  @@index([companyId])
 }
 
 model KnowledgeBaseDocument {
@@ -184,6 +213,9 @@ model KnowledgeBaseDocument {
   url         String
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+
+  @@index([companyId])
+  @@index([communityId])
 }
 
 enum LeadSource {
@@ -215,12 +247,22 @@ model Lead {
   consentSource           String?
   consentTimestamp        DateTime?
   customFields            Json?
+  // SW-CRM-006: set when the source Salesforce record is deleted (soft-archive;
+  // the local lead is retained for history but hidden from active lists/sends).
+  archived                Boolean                  @default(false)
+  archivedAt              DateTime?
   timeline                LeadTimeline[]
   appointments            SalesAppointment[]
   campaignEnrollments     CampaignEnrollment[]
   schedulingConversations SchedulingConversation[]
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
+
+  @@index([companyId, status])
+  @@index([companyId, email])
+  @@index([companyId, phone])
+  @@index([ownerId])
+  @@index([companyId, archived])
 }
 
 model LeadTimeline {
@@ -231,6 +273,8 @@ model LeadTimeline {
   description String   @db.Text
   metadata    Json?
   createdAt   DateTime @default(now())
+
+  @@index([leadId, createdAt])
 }
 
 model LeadSegment {
@@ -241,6 +285,8 @@ model LeadSegment {
   filters   Json // Dynamic JSON rules
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([companyId])
 }
 
 model SalesAppointment {
@@ -253,8 +299,8 @@ model SalesAppointment {
   durationMinutes Int       @default(30)
   status          String    @default("CONFIRMED")
   locationType    String    @default("VIRTUAL")
-  meetingLink     String? 
-  googleEventId   String? 
+  meetingLink     String?
+  googleEventId   String?
   notes           String?   @db.Text
   leadTimezone    String?
   bookedVia       String    @default("STAFF")
@@ -268,6 +314,8 @@ model SalesAppointment {
   updatedAt       DateTime  @updatedAt
 
   @@unique([agentId, time])
+  @@index([leadId])
+  @@index([status, time])
 }
 
 model SalesforceConnection {
@@ -286,6 +334,9 @@ model SalesforceConnection {
   lastSyncAt      DateTime?
   lastSyncStatus  String?
   lastSyncMessage String?   @db.Text
+  // SW-CRM-008: outbound write-back to Salesforce, off by default (per-tenant gate).
+  writeBackEnabled Boolean  @default(false)
+  lastWriteBackAt DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }
@@ -301,13 +352,15 @@ model SyncLog {
   message     String?  @db.Text
   metadata    Json?
   createdAt   DateTime @default(now())
+
+  @@index([companyId, createdAt])
 }
 
 model SalesforceFieldMapping {
   id              String   @id @default(cuid())
   companyId       String
-  salesforceField String 
-  portalField     String 
+  salesforceField String
+  portalField     String
   description     String?
   isActive        Boolean  @default(true)
   isConsentField  Boolean  @default(false)
@@ -321,8 +374,8 @@ model SuppressionList {
   id        String   @id @default(cuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id])
-  value     String 
-  reason    String 
+  value     String
+  reason    String
   createdAt DateTime @default(now())
 
   @@unique([companyId, value])
@@ -349,6 +402,8 @@ model Campaign {
   enrollments     CampaignEnrollment[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
+
+  @@index([companyId, status])
 }
 
 model CampaignStep {
@@ -375,6 +430,8 @@ model CampaignStep {
   complaintCount  Int            @default(0)
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
+
+  @@index([campaignId])
 }
 
 model CampaignEnrollment {
@@ -391,6 +448,8 @@ model CampaignEnrollment {
   updatedAt           DateTime  @updatedAt
 
   @@unique([leadId, campaignId])
+  @@index([status, nextRunAt])
+  @@index([campaignId, status])
 }
 
 model EmailTemplate {
@@ -404,6 +463,8 @@ model EmailTemplate {
   steps     CampaignStep[]
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
+
+  @@index([companyId])
 }
 
 model ContentCalendar {
@@ -423,6 +484,9 @@ model ContentCalendar {
   owner         User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@index([companyId, scheduledAt])
+  @@index([status, scheduledAt])
 }
 
 model SalesKB {
@@ -440,6 +504,28 @@ model SalesKB {
   deletedAt  DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
+  chunks     SalesKBChunk[]
+
+  @@index([companyId, isDeleted])
+}
+
+// Sales KB text chunks stored in Postgres (Supabase) — retrieved via Postgres
+// full-text search instead of an external vector database. A GIN index on
+// to_tsvector('english', content) is created via raw SQL (Prisma can't express
+// a tsvector expression index); see the migration note in vector-store.service.js.
+model SalesKBChunk {
+  id         String   @id @default(cuid())
+  companyId  String
+  documentId String
+  document   SalesKB  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex Int
+  name       String
+  category   String   @default("General")
+  content    String   @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([companyId])
+  @@index([documentId])
 }
 
 // Automated Marketing Rules (SW-AMK): event-driven "trigger -> conditions -> actions".
@@ -512,7 +598,6 @@ model Announcement {
   @@index([companyId])
 }
 
-
 enum CalendarProvider {
   GOOGLE
   MICROSOFT
@@ -582,4 +667,6 @@ model ScrapedNews {
   wasBroadcasted Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  @@index([companyId, publishedAt])
 }

@@ -32,6 +32,7 @@ import {
   Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import VerificationGate from "@/components/layout/VerificationGate";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -105,6 +106,22 @@ export default function PortalLayout({
       link.href = logoUrl;
     }
   }, [mounted, user]);
+
+  useEffect(() => {
+    if (mounted && user?.isSuperAdmin) {
+      router.push("/admin");
+    }
+  }, [user, mounted, router]);
+
+  // Warranty workspace is gated until the tenant's account is verified by the
+  // Super Admin. While locked, the page content is blurred and a verification
+  // overlay (with the document-upload card) sits on top.
+  const warrantyLocked =
+    workspace === "warranty" &&
+    !!user &&
+    !user.isSuperAdmin &&
+    !!user.verificationStatus &&
+    user.verificationStatus !== "VERIFIED";
 
   const navItems = workspace === "warranty" ? warrantyNavItems : salesNavItems;
   const filteredNav = navItems.filter((item) => user && item.roles.includes(user.role));
@@ -393,7 +410,19 @@ export default function PortalLayout({
         </AnimatePresence>
 
         {/* Page content wrapper with padding */}
-        <div className="flex-1 p-4 md:p-6">{children}</div>
+        <div className="relative flex-1">
+          <div
+            className={`p-4 md:p-6 ${
+              warrantyLocked
+                ? "pointer-events-none select-none blur-[6px]"
+                : ""
+            }`}
+            aria-hidden={warrantyLocked}
+          >
+            {children}
+          </div>
+          {warrantyLocked && <VerificationGate />}
+        </div>
       </main>
     </div>
   );

@@ -170,6 +170,21 @@ export const handleCsvUpload = async (req, res) => {
           message: "Homeowners can upload a maximum of 1000 rows per file.",
         });
       }
+
+      // SW-CSV-006: hard cap of 500 leads TOTAL for a Homeowner account,
+      // enforced against the running total across all imports (not just this
+      // file). This is a conservative upper bound — the actual import may create
+      // fewer rows after dedup, but we never let a submission exceed the cap.
+      const HOMEOWNER_TOTAL_CAP = 500;
+      const existingCount = await prisma.lead.count({
+        where: { companyId: req.user.companyId },
+      });
+      if (existingCount + leadsList.length > HOMEOWNER_TOTAL_CAP) {
+        const remaining = Math.max(0, HOMEOWNER_TOTAL_CAP - existingCount);
+        return res.status(400).json({
+          message: `Homeowner accounts are limited to ${HOMEOWNER_TOTAL_CAP} leads in total. You already have ${existingCount}, so you can import at most ${remaining} more.`,
+        });
+      }
     }
 
     if (leadsList.length > 100000) {

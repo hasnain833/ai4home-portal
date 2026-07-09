@@ -62,6 +62,17 @@ export const createProperty = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
+    // Denormalize companyId for tenant-scoped queries. Homeowners inherit their
+    // own company; staff/admins inherit the target homeowner's company.
+    let companyId = session.companyId ?? null;
+    if (session.role !== "HOMEOWNER" && assignedHomeownerId) {
+      const owner = await prisma.user.findUnique({
+        where: { id: assignedHomeownerId },
+        select: { companyId: true },
+      });
+      companyId = owner?.companyId ?? companyId;
+    }
+
     const property = await prisma.property.create({
       data: {
         address,
@@ -72,6 +83,7 @@ export const createProperty = async (req, res) => {
         coeDate: coeDate ? new Date(coeDate) : null,
         coverageTerm: coverageTerm ? new Date(coverageTerm) : null,
         homeownerId: assignedHomeownerId,
+        companyId,
       },
       include: {
         homeowner: {
