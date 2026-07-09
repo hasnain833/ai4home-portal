@@ -16,8 +16,8 @@ export const getCompanies = async (req, res) => {
   try {
     const session = req.user;
 
-    // Only Admin can fetch all companies
-    if (!session || session.role !== "ADMIN") {
+    // Only Super Admin can fetch all companies
+    if (!session || session.role !== "SUPER_ADMIN") {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
@@ -28,18 +28,52 @@ export const getCompanies = async (req, res) => {
           select: {
             users: true,
             integrations: true,
-          }
-        }
+          },
+        },
       },
       orderBy: {
-        createdAt: 'desc'
-      }
+        createdAt: "desc",
+      },
     });
 
     return res.json(companies);
   } catch (error) {
     console.error("Error fetching companies:", error);
     return res.status(500).json({ message: "Error fetching companies" });
+  }
+};
+
+export const updateCompanyWorkspaces = async (req, res) => {
+  try {
+    const session = req.user;
+    if (!session || session.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const { companyId } = req.params;
+    const { warrantyEnabled, salesEnabled } = req.body;
+
+    if (warrantyEnabled === undefined && salesEnabled === undefined) {
+      return res
+        .status(400)
+        .json({ message: "No workspace settings provided" });
+    }
+
+    const updateData = {};
+    if (typeof warrantyEnabled === "boolean")
+      updateData.warrantyEnabled = warrantyEnabled;
+    if (typeof salesEnabled === "boolean")
+      updateData.salesEnabled = salesEnabled;
+
+    const company = await prisma.company.update({
+      where: { id: companyId },
+      data: updateData,
+    });
+
+    return res.json(company);
+  } catch (error) {
+    console.error("Failed to update company workspace settings:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -83,26 +117,33 @@ export const createStaff = async (req, res) => {
     const { name, email, password } = req.body;
 
     if (!name || !email || !password) {
-      return res.status(400).json({ message: "Name, email, and password are required" });
+      return res
+        .status(400)
+        .json({ message: "Name, email, and password are required" });
     }
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      return res.status(400).json({ message: "An account with this email already exists" });
+      return res
+        .status(400)
+        .json({ message: "An account with this email already exists" });
     }
 
     // 1. Create user in Supabase Auth
     const supabaseAdmin = getSupabaseAdmin();
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { name },
-    });
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { name },
+      });
 
     if (authError) {
       console.error("Supabase auth creation error:", authError);
-      return res.status(400).json({ message: authError.message || "Failed to create authentication account" });
+      return res.status(400).json({
+        message: authError.message || "Failed to create authentication account",
+      });
     }
 
     // 2. Create user in Prisma DB
@@ -142,7 +183,9 @@ export const updateStaff = async (req, res) => {
     const { staffId, name, email, password } = req.body;
 
     if (!staffId || !name || !email) {
-      return res.status(400).json({ message: "Staff ID, name, and email are required" });
+      return res
+        .status(400)
+        .json({ message: "Staff ID, name, and email are required" });
     }
 
     // Verify the staff belongs to the admin's company and has role STAFF
@@ -158,41 +201,49 @@ export const updateStaff = async (req, res) => {
     if (email !== staff.email) {
       const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) {
-        return res.status(400).json({ message: "An account with this email already exists" });
+        return res
+          .status(400)
+          .json({ message: "An account with this email already exists" });
       }
     }
 
     // 1. Find corresponding Supabase Auth user
     const supabaseAdmin = getSupabaseAdmin();
     const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-    const supabaseUser = usersData.users.find(u => u.email === staff.email);
+    const supabaseUser = usersData.users.find((u) => u.email === staff.email);
 
     if (!supabaseUser) {
-      return res.status(404).json({ message: "Supabase user not found for this staff email" });
+      return res
+        .status(404)
+        .json({ message: "Supabase user not found for this staff email" });
     }
 
     // 2. Update Supabase Auth user
     const updateData = {
       email,
       user_metadata: { name },
-      email_confirm: true
+      email_confirm: true,
     };
 
     if (password) {
       if (password.length < 8) {
-        return res.status(400).json({ message: "Password must be at least 8 characters" });
+        return res
+          .status(400)
+          .json({ message: "Password must be at least 8 characters" });
       }
       updateData.password = password;
     }
 
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
       supabaseUser.id,
-      updateData
+      updateData,
     );
 
     if (authError) {
       console.error("Supabase auth update error:", authError);
-      return res.status(400).json({ message: authError.message || "Failed to update authentication account" });
+      return res.status(400).json({
+        message: authError.message || "Failed to update authentication account",
+      });
     }
 
     // 3. Update Prisma DB user
@@ -249,7 +300,7 @@ export const deleteStaff = async (req, res) => {
     // 1. Delete from Supabase Auth
     const supabaseAdmin = getSupabaseAdmin();
     const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-    const supabaseUser = usersData.users.find(u => u.email === staff.email);
+    const supabaseUser = usersData.users.find((u) => u.email === staff.email);
 
     if (supabaseUser) {
       await supabaseAdmin.auth.admin.deleteUser(supabaseUser.id);

@@ -1,9 +1,44 @@
 import { supabase } from "../lib/supabase.js";
 import prisma from "../lib/prisma.js";
+import { verifySuperadminSessionToken } from "../lib/superadmin-session.js";
 
 export async function requireAuth(req, res, next) {
   try {
     let token = "";
+    let cookies = {};
+
+    if (req.headers.cookie) {
+      cookies = Object.fromEntries(
+        req.headers.cookie.split(";").map((c) => {
+          const parts = c.trim().split("=");
+          return [parts[0], parts.slice(1).join("=")];
+        }),
+      );
+    }
+
+    // 0. Support direct Super Admin session cookie first
+    const superadminCookie =
+      cookies.superadmin_session || cookies["superadmin-session"];
+    if (superadminCookie) {
+      const payload = verifySuperadminSessionToken(superadminCookie);
+      if (!payload) {
+        return res
+          .status(401)
+          .json({ message: "Unauthorized: Invalid superadmin session" });
+      }
+
+      req.user = {
+        id: payload.id,
+        email: payload.email,
+        name: payload.name,
+        role: "ADMIN",
+        companyId: payload.companyId || null,
+        hasWarrantyAccess: true,
+        hasSalesAccess: true,
+        isSuperAdmin: true,
+      };
+      return next();
+    }
 
     // 1. Check Authorization header
     const authHeader = req.headers.authorization;
@@ -17,12 +52,13 @@ export async function requireAuth(req, res, next) {
         req.headers.cookie.split(";").map((c) => {
           const parts = c.trim().split("=");
           return [parts[0], parts.slice(1).join("=")];
-        })
+        }),
       );
 
       // Look for Supabase auth cookie keys (can be chunked as sb-<ref>-auth-token.0, sb-<ref>-auth-token.1)
-      let tokenKeys = Object.keys(cookies)
-        .filter((k) => k.includes("auth-token") || k.includes("access-token"));
+      let tokenKeys = Object.keys(cookies).filter(
+        (k) => k.includes("auth-token") || k.includes("access-token"),
+      );
 
       // Parse project reference ID from NEXT_PUBLIC_SUPABASE_URL to prevent local dev cookie collisions
       let projectRef = "";
@@ -32,7 +68,10 @@ export async function requireAuth(req, res, next) {
           const urlObj = new URL(supabaseUrl);
           projectRef = urlObj.hostname.split(".")[0];
         } catch (e) {
-          console.error("[Auth Middleware] Error parsing project reference:", e);
+          console.error(
+            "[Auth Middleware] Error parsing project reference:",
+            e,
+          );
         }
       }
 
@@ -58,11 +97,16 @@ export async function requireAuth(req, res, next) {
         if (rawCookieValue.startsWith("base64-")) {
           try {
             const base64Str = rawCookieValue.substring(7);
-            const decodedStr = Buffer.from(base64Str, "base64").toString("utf-8");
+            const decodedStr = Buffer.from(base64Str, "base64").toString(
+              "utf-8",
+            );
             const parsed = JSON.parse(decodedStr);
             token = parsed.access_token || parsed[0] || parsed;
           } catch (e) {
-            console.error("[Auth Middleware] Failed to decode base64 cookie:", e);
+            console.error(
+              "[Auth Middleware] Failed to decode base64 cookie:",
+              e,
+            );
           }
         } else {
           try {
@@ -82,10 +126,17 @@ export async function requireAuth(req, res, next) {
     }
 
     // Verify token with Supabase
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
 
     if (error || !user || !user.email) {
-      console.error("[Auth Middleware] Supabase error / user not found:", error, !!user);
+      console.error(
+        "[Auth Middleware] Supabase error / user not found:",
+        error,
+        !!user,
+      );
       return res
         .status(401)
         .json({ message: "Unauthorized: Invalid token session" });
@@ -103,14 +154,17 @@ export async function requireAuth(req, res, next) {
         .json({ message: "User profile not found in local database." });
     }
 
+    const isSuperAdmin = dbUser.role === "SUPER_ADMIN";
+
     req.user = {
       id: dbUser.id,
       email: dbUser.email,
       name: dbUser.name,
-      role: dbUser.role,
+      role: isSuperAdmin ? "ADMIN" : dbUser.role,
       companyId: dbUser.companyId,
       hasWarrantyAccess: dbUser.hasWarrantyAccess,
       hasSalesAccess: dbUser.hasSalesAccess,
+      isSuperAdmin,
     };
 
     next();
@@ -130,10 +184,14 @@ export function requireRoles(allowedRoles) {
     }
 
     const userRole = req.user.role.toUpperCase();
-    const hasRole = allowedRoles.some(role => role.toUpperCase() === userRole);
+    const hasRole = allowedRoles.some(
+      (role) => role.toUpperCase() === userRole,
+    );
 
     if (!hasRole) {
-      return res.status(403).json({ message: "Forbidden: Insufficient privileges" });
+      return res
+        .status(403)
+        .json({ message: "Forbidden: Insufficient privileges" });
     }
 
     next();

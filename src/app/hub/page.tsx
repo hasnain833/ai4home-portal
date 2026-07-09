@@ -21,8 +21,12 @@ export default function HubPage() {
   }, []);
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      router.push("/login");
+    if (!isLoading) {
+      if (!user) {
+        router.push("/login");
+      } else if (user.isSuperAdmin) {
+        router.push("/admin");
+      }
     }
   }, [user, isLoading, router]);
 
