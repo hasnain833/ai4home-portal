@@ -97,6 +97,7 @@ model Company {
   availabilitySetting     AvailabilitySetting?
   calendarConnections     CalendarConnection[]
   scrapedNews             ScrapedNews[]
+  blogPosts               BlogPost[]
   csvMappingTemplates     CsvMappingTemplate[]
   tickets                 Ticket[]
   properties              Property[]
@@ -509,10 +510,6 @@ model SalesKB {
   @@index([companyId, isDeleted])
 }
 
-// Sales KB text chunks stored in Postgres (Supabase) — retrieved via Postgres
-// full-text search instead of an external vector database. A GIN index on
-// to_tsvector('english', content) is created via raw SQL (Prisma can't express
-// a tsvector expression index); see the migration note in vector-store.service.js.
 model SalesKBChunk {
   id         String   @id @default(cuid())
   companyId  String
@@ -522,13 +519,13 @@ model SalesKBChunk {
   name       String
   category   String   @default("General")
   content    String   @db.Text
+  embedding  Unsupported("vector(384)")?
   createdAt  DateTime @default(now())
 
   @@index([companyId])
   @@index([documentId])
 }
 
-// Automated Marketing Rules (SW-AMK): event-driven "trigger -> conditions -> actions".
 model MarketingRule {
   id              String             @id @default(cuid())
   companyId       String
@@ -654,6 +651,64 @@ model SchedulingConversation {
   @@index([leadId])
 }
 
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  companyId  String?
+  actorId    String?
+  actorEmail String?
+  action     String
+  targetType String? 
+  targetId   String?
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([action, createdAt])
+}
+
+enum BlogStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+}
+
+model BlogPost {
+  id              String     @id @default(cuid())
+  companyId       String
+  company         Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title           String
+  slug            String?
+  excerpt         String?    @db.Text
+  content         String     @db.Text
+  category        String     @default("Market Trends")
+  tags            String[]   @default([])
+  status          BlogStatus @default(DRAFT)
+  aiAssisted      Boolean    @default(false)
+  metaTitle       String?
+  metaDescription String?    @db.Text
+  headings        String[]   @default([])
+  tone            String?
+  targetAudience  String?
+  citations       Json?
+  sourceNewsIds   String[]   @default([])
+  approvedAt      DateTime?
+  approvedById    String?
+  scheduledAt     DateTime?
+  publishedAt     DateTime?
+  calendarEventId String?
+  authorId        String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@unique([companyId, slug])
+  @@index([companyId, status])
+  @@index([companyId, publishedAt])
+}
+
 model ScrapedNews {
   id             String   @id @default(cuid())
   companyId      String
@@ -664,7 +719,6 @@ model ScrapedNews {
   source         String   @default("Google News RSS")
   imageUrl       String?
   publishedAt    DateTime
-  wasBroadcasted Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

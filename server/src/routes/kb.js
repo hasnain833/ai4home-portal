@@ -9,6 +9,7 @@ import {
   searchSalesKB,
   getBrandProfile,
   updateBrandProfile,
+  reindexSalesKB,
 } from "../controllers/kb.controller.js";
 
 const router = Router();
@@ -23,5 +24,8 @@ router.delete("/:id", requireAuth, requireRoles(["ADMIN", "STAFF"]), deleteSales
 // SW-KB-006 brand/company profile
 router.get("/brand-profile", requireAuth, getBrandProfile);
 router.put("/brand-profile", requireAuth, requireRoles(["ADMIN", "STAFF"]), updateBrandProfile);
+
+// Backfill pgvector embeddings for existing chunks (call repeatedly until remaining=0)
+router.post("/reindex", requireAuth, requireRoles(["ADMIN", "STAFF"]), reindexSalesKB);
 
 export default router;

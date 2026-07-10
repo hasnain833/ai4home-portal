@@ -18,8 +18,8 @@ export const getCampaigns = async (req, res) => {
           },
         },
         enrollments: {
-          select: { status: true, exitedReason: true }
-        }
+          select: { status: true, exitedReason: true },
+        },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -27,13 +27,16 @@ export const getCampaigns = async (req, res) => {
     // Format metrics matches frontend format
     const formatted = campaigns.map((seq) => {
       const totalLeads = seq.enrollments.length;
-      const convertedLeads = seq.enrollments.filter(e =>
-        e.status === "EXITED" && (e.exitedReason === "REPLY" || e.exitedReason === "APPOINTMENT")
+      const convertedLeads = seq.enrollments.filter(
+        (e) =>
+          e.status === "EXITED" &&
+          (e.exitedReason === "REPLY" || e.exitedReason === "APPOINTMENT"),
       ).length;
 
-      const conversionRate = totalLeads > 0
-        ? ((convertedLeads / totalLeads) * 100).toFixed(1) + "%"
-        : "0.0%";
+      const conversionRate =
+        totalLeads > 0
+          ? ((convertedLeads / totalLeads) * 100).toFixed(1) + "%"
+          : "0.0%";
 
       return {
         id: seq.id,
@@ -79,55 +82,45 @@ export const getCampaignDetail = async (req, res) => {
     const enrollments = campaign.enrollments;
     const analytics = {
       enrolled: enrollments.length,
-      active: enrollments.filter((e) => e.status === "ACTIVE" || e.status === "PAUSED").length,
+      active: enrollments.filter(
+        (e) => e.status === "ACTIVE" || e.status === "PAUSED",
+      ).length,
       completed: enrollments.filter((e) => e.status === "COMPLETED").length,
       exited: enrollments.filter((e) => e.status === "EXITED").length,
       exitedByReason: {
-        REPLY: enrollments.filter((e) => e.status === "EXITED" && e.exitedReason === "REPLY").length,
-        APPOINTMENT: enrollments.filter((e) => e.status === "EXITED" && e.exitedReason === "APPOINTMENT").length,
-        UNSUBSCRIBE: enrollments.filter((e) => e.status === "EXITED" && e.exitedReason === "UNSUBSCRIBE").length,
-        SUPPRESSED: enrollments.filter((e) => e.status === "EXITED" && e.exitedReason === "SUPPRESSED").length,
+        REPLY: enrollments.filter(
+          (e) => e.status === "EXITED" && e.exitedReason === "REPLY",
+        ).length,
+        APPOINTMENT: enrollments.filter(
+          (e) => e.status === "EXITED" && e.exitedReason === "APPOINTMENT",
+        ).length,
+        UNSUBSCRIBE: enrollments.filter(
+          (e) => e.status === "EXITED" && e.exitedReason === "UNSUBSCRIBE",
+        ).length,
+        SUPPRESSED: enrollments.filter(
+          (e) => e.status === "EXITED" && e.exitedReason === "SUPPRESSED",
+        ).length,
       },
     };
 
     const stepAnalytics = {};
     for (const step of campaign.steps) {
       stepAnalytics[step.id] = {
-        sent: 0,
-        delivered: 0,
+        sent: step.sentCount || 0,
+        delivered: step.deliveredCount || 0,
         opened: step.openedCount || 0,
         clicked: step.clickedCount || 0,
         replied: step.repliedCount || 0,
-        bounced: 0,
-        unsubscribed: 0
+        bounced: step.bouncedCount || 0,
+        complaint: step.complaintCount || 0,
+        unsubscribed: 0,
       };
     }
-
-    const timelineEvents = await prisma.leadTimeline.findMany({
-      where: {
-        leadId: { in: enrollments.map((e) => e.leadId) },
-        type: { in: ["EMAIL_SENT", "SMS_SENT", "SMS_FAILED"] }
-      }
-    });
-
-    timelineEvents.forEach((event) => {
-      const stepPos = event.metadata?.stepPosition;
-      const step = campaign.steps.find(s => s.position === stepPos);
-      if (step) {
-        if (event.type === "EMAIL_SENT" || event.type === "SMS_SENT") {
-          stepAnalytics[step.id].sent++;
-          stepAnalytics[step.id].delivered++;
-        }
-        if (event.type === "SMS_FAILED") {
-          stepAnalytics[step.id].bounced++;
-        }
-      }
-    });
 
     return res.json({
       ...campaign,
       analytics,
-      stepAnalytics
+      stepAnalytics,
     });
   } catch (error) {
     console.error("[Campaign Detail] Error:", error);
@@ -171,7 +164,14 @@ export const updateCampaign = async (req, res) => {
     }
 
     const { id } = req.params;
-    const { name, description, channel, status, exitConditions, versionPolicy } = req.body;
+    const {
+      name,
+      description,
+      channel,
+      status,
+      exitConditions,
+      versionPolicy,
+    } = req.body;
 
     const campaign = await prisma.campaign.findFirst({
       where: { id, companyId: req.user.companyId },
@@ -185,11 +185,16 @@ export const updateCampaign = async (req, res) => {
       where: { id },
       data: {
         name: name || campaign.name,
-        description: description !== undefined ? description : campaign.description,
+        description:
+          description !== undefined ? description : campaign.description,
         channel: channel || campaign.channel,
         status: status || campaign.status,
-        exitConditions: exitConditions !== undefined ? exitConditions : campaign.exitConditions,
-        versionPolicy: versionPolicy !== undefined ? versionPolicy : campaign.versionPolicy,
+        exitConditions:
+          exitConditions !== undefined
+            ? exitConditions
+            : campaign.exitConditions,
+        versionPolicy:
+          versionPolicy !== undefined ? versionPolicy : campaign.versionPolicy,
       },
     });
 
@@ -205,7 +210,9 @@ export const updateCampaign = async (req, res) => {
 
       if (enrollments.length > 0) {
         const { inngest } = await import("../lib/inngest.js");
-        console.log(`[Campaign Controller] Campaign ${id} launch: sending Inngest events for ${enrollments.length} enrolled leads.`);
+        console.log(
+          `[Campaign Controller] Campaign ${id} launch: sending Inngest events for ${enrollments.length} enrolled leads.`,
+        );
         const events = enrollments.map((enrollment) => ({
           name: "campaign.enrollment.started",
           data: {
@@ -215,9 +222,13 @@ export const updateCampaign = async (req, res) => {
           },
         }));
         await inngest.send(events);
-        console.log(`[Campaign Controller] Sent ${events.length} Inngest events successfully.`);
+        console.log(
+          `[Campaign Controller] Sent ${events.length} Inngest events successfully.`,
+        );
       } else {
-        console.log(`[Campaign Controller] Campaign ${id} launch: no active enrollments found to trigger.`);
+        console.log(
+          `[Campaign Controller] Campaign ${id} launch: no active enrollments found to trigger.`,
+        );
       }
     }
 
@@ -250,16 +261,24 @@ export const updateCampaignSteps = async (req, res) => {
     }
 
     if (steps.length > 50) {
-      return res.status(400).json({ message: "A sequence can have at most 50 steps." });
+      return res
+        .status(400)
+        .json({ message: "A sequence can have at most 50 steps." });
     }
 
-    const finalStatus = (campaign.status === "Draft" || campaign.status === "Ready")
-      ? (steps.length > 0 ? "Ready" : "Draft")
-      : campaign.status;
+    const finalStatus =
+      campaign.status === "Draft" || campaign.status === "Ready"
+        ? steps.length > 0
+          ? "Ready"
+          : "Draft"
+        : campaign.status;
 
     let targetCampaignId = id;
 
-    if (campaign.status === "Active" && (campaign.versionPolicy || "FINISH_OLD") === "FINISH_OLD") {
+    if (
+      campaign.status === "Active" &&
+      (campaign.versionPolicy || "FINISH_OLD") === "FINISH_OLD"
+    ) {
       const newVersion = await prisma.campaign.create({
         data: {
           companyId: req.user.companyId,
@@ -267,7 +286,7 @@ export const updateCampaignSteps = async (req, res) => {
           description: campaign.description,
           channel: campaign.channel,
           status: "Draft",
-        }
+        },
       });
       targetCampaignId = newVersion.id;
 
@@ -276,7 +295,10 @@ export const updateCampaignSteps = async (req, res) => {
           campaignId: targetCampaignId,
           type: step.type,
           position: idx + 1,
-          delayValue: step.delayValue !== undefined ? parseInt(step.delayValue, 10) : null,
+          delayValue:
+            step.delayValue !== undefined
+              ? parseInt(step.delayValue, 10)
+              : null,
           delayUnit: step.delayUnit || null,
           sendWindowDays: step.sendWindowDays || null,
           sendWindowStart: step.sendWindowStart || null,
@@ -297,7 +319,7 @@ export const updateCampaignSteps = async (req, res) => {
     await prisma.$transaction([
       prisma.campaign.update({
         where: { id },
-        data: { status: finalStatus }
+        data: { status: finalStatus },
       }),
       prisma.campaignStep.deleteMany({ where: { campaignId: id } }),
       prisma.campaignStep.createMany({
@@ -305,7 +327,10 @@ export const updateCampaignSteps = async (req, res) => {
           campaignId: id,
           type: step.type,
           position: idx + 1,
-          delayValue: step.delayValue !== undefined ? parseInt(step.delayValue, 10) : null,
+          delayValue:
+            step.delayValue !== undefined
+              ? parseInt(step.delayValue, 10)
+              : null,
           delayUnit: step.delayUnit || null,
           sendWindowDays: step.sendWindowDays || null,
           sendWindowStart: step.sendWindowStart || null,
@@ -348,12 +373,20 @@ export const enrollCampaign = async (req, res) => {
         return res.status(404).json({ message: "Segment not found" });
       }
       const where = buildPrismaWhereClause(segment.filters, req.user.companyId);
-      const segLeads = await prisma.lead.findMany({ where, select: { id: true } });
+      const segLeads = await prisma.lead.findMany({
+        where,
+        select: { id: true },
+      });
       leadIds = segLeads.map((l) => l.id);
     }
 
     if (!Array.isArray(leadIds) || leadIds.length === 0) {
-      return res.status(400).json({ message: "Provide a non-empty leadIds array or a segmentId that matches leads." });
+      return res
+        .status(400)
+        .json({
+          message:
+            "Provide a non-empty leadIds array or a segmentId that matches leads.",
+        });
     }
 
     const campaign = await prisma.campaign.findFirst({
@@ -382,20 +415,26 @@ export const enrollCampaign = async (req, res) => {
         if (!lead) continue;
 
         const existingEnrollment = await prisma.campaignEnrollment.findUnique({
-          where: { leadId_campaignId: { leadId, campaignId: id } }
+          where: { leadId_campaignId: { leadId, campaignId: id } },
         });
 
-        if (existingEnrollment && (existingEnrollment.status === "ACTIVE" || existingEnrollment.status === "PAUSED")) {
+        if (
+          existingEnrollment &&
+          (existingEnrollment.status === "ACTIVE" ||
+            existingEnrollment.status === "PAUSED")
+        ) {
           skippedDuplicates.push(leadId);
           continue;
         }
-        const concurrentEnrollments = await prisma.campaignEnrollment.findFirst({
-          where: {
-            leadId,
-            status: { in: ["ACTIVE", "PAUSED"] },
-            campaignId: { not: id }
-          }
-        });
+        const concurrentEnrollments = await prisma.campaignEnrollment.findFirst(
+          {
+            where: {
+              leadId,
+              status: { in: ["ACTIVE", "PAUSED"] },
+              campaignId: { not: id },
+            },
+          },
+        );
         if (concurrentEnrollments) {
           concurrentWarnings.push(leadId);
         }
@@ -419,7 +458,9 @@ export const enrollCampaign = async (req, res) => {
           },
         });
         if (campaign.status === "Active") {
-          console.log(`[Campaign Controller] Sending Inngest event 'campaign.enrollment.started' for lead: ${leadId}`);
+          console.log(
+            `[Campaign Controller] Sending Inngest event 'campaign.enrollment.started' for lead: ${leadId}`,
+          );
           await inngest.send({
             name: "campaign.enrollment.started",
             data: {
@@ -430,7 +471,9 @@ export const enrollCampaign = async (req, res) => {
           });
           console.log(`[Campaign Controller] Inngest event sent successfully!`);
         } else {
-          console.log(`[Campaign Controller] Campaign ${id} is not Active (status: ${campaign.status}). Postponing Inngest event for lead: ${leadId}`);
+          console.log(
+            `[Campaign Controller] Campaign ${id} is not Active (status: ${campaign.status}). Postponing Inngest event for lead: ${leadId}`,
+          );
         }
         await prisma.leadTimeline.create({
           data: {
@@ -452,7 +495,7 @@ export const enrollCampaign = async (req, res) => {
       skippedDuplicatesCount: skippedDuplicates.length,
       concurrentWarningsCount: concurrentWarnings.length,
       skippedDuplicates,
-      concurrentWarnings
+      concurrentWarnings,
     });
   } catch (error) {
     console.error("[Campaign Enroll] Error:", error);
@@ -480,7 +523,11 @@ export const unenrollCampaign = async (req, res) => {
     }
 
     const result = await prisma.campaignEnrollment.updateMany({
-      where: { campaignId: id, leadId: { in: leadIds }, status: { in: ["ACTIVE", "PAUSED"] } },
+      where: {
+        campaignId: id,
+        leadId: { in: leadIds },
+        status: { in: ["ACTIVE", "PAUSED"] },
+      },
       data: { status: "EXITED", exitedReason: "MANUAL" },
     });
 
@@ -499,7 +546,10 @@ export const unenrollCampaign = async (req, res) => {
       where: { campaignId: id, status: { in: ["ACTIVE", "PAUSED"] } },
     });
     if (activeCount === 0 && campaign.status === "Active") {
-      await prisma.campaign.update({ where: { id }, data: { status: "Completed" } });
+      await prisma.campaign.update({
+        where: { id },
+        data: { status: "Completed" },
+      });
     }
 
     return res.json({ success: true, removed: result.count });
@@ -527,7 +577,10 @@ export const deleteCampaign = async (req, res) => {
 
     await prisma.campaign.delete({ where: { id } });
 
-    return res.json({ success: true, message: "Campaign deleted successfully" });
+    return res.json({
+      success: true,
+      message: "Campaign deleted successfully",
+    });
   } catch (error) {
     console.error("[Campaign Delete] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -556,7 +609,10 @@ function cleanNewsTitle(title = "") {
 
 // A normalized fingerprint used to detect when the summary just repeats the title.
 function fingerprint(s = "") {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 50);
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 50);
 }
 
 function buildFallbackNewsCopy(news) {
@@ -564,7 +620,8 @@ function buildFallbackNewsCopy(news) {
   const summary = (news.summary || "").trim();
   // Only include the summary if it actually adds detail beyond the headline —
   // otherwise the email showed the same sentence twice.
-  const summaryAddsDetail = summary && fingerprint(summary) !== fingerprint(title);
+  const summaryAddsDetail =
+    summary && fingerprint(summary) !== fingerprint(title);
   const insight = summaryAddsDetail
     ? summary
     : "Market conditions are shifting, and it may be a smart moment to revisit your home-buying or selling plans.";
@@ -582,7 +639,11 @@ If you'd like to talk through what this means for you, we're happy to help — b
 
 Warm regards,
 The {companyName} Team`;
-  const smsBody = `Hi {firstName}, a quick housing update from {companyName}: ${title.slice(0, 90)}. Want to chat about your options? {bookingLink} Reply STOP to opt out.`.slice(0, 320);
+  const smsBody =
+    `Hi {firstName}, a quick housing update from {companyName}: ${title.slice(0, 90)}. Want to chat about your options? {bookingLink} Reply STOP to opt out.`.slice(
+      0,
+      320,
+    );
   return { emailSubject, emailBody, smsBody };
 }
 
@@ -597,10 +658,16 @@ async function generateNewsCampaignCopy(news, company) {
     const bp = company?.salesBrandProfile || {};
     const brandLines = [
       company?.name ? `Company/builder name: ${company.name}` : null,
-      bp.tone || company?.voiceProfile ? `Tone/voice: ${bp.tone || company?.voiceProfile}` : null,
-      bp.markets || bp.communities ? `Markets/communities: ${bp.markets || bp.communities}` : null,
+      bp.tone || company?.voiceProfile
+        ? `Tone/voice: ${bp.tone || company?.voiceProfile}`
+        : null,
+      bp.markets || bp.communities
+        ? `Markets/communities: ${bp.markets || bp.communities}`
+        : null,
       bp.signature ? `Signature/sign-off: ${bp.signature}` : null,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const systemPrompt = `You are an expert real-estate and home-builder marketing copywriter.
 Write a lead-nurture EMAIL and a nurture SMS based on a housing-market news item.
@@ -618,7 +685,12 @@ Rules:
 
     const userPrompt = `News title: ${news.title}\nNews summary: ${news.summary}\nSource: ${news.source}`;
 
-    const text = await chat({ system: systemPrompt, user: userPrompt, maxTokens: 700, json: true });
+    const text = await chat({
+      system: systemPrompt,
+      user: userPrompt,
+      maxTokens: 700,
+      json: true,
+    });
     const parsed = parseJsonBlock(text || "");
     if (parsed && parsed.emailSubject && parsed.emailBody && parsed.smsBody) {
       return {
@@ -662,7 +734,8 @@ export const createCampaignFromNews = async (req, res) => {
 
     const copy = await generateNewsCampaignCopy(news, company);
 
-    const shortTitle = news.title.length > 60 ? news.title.slice(0, 57) + "..." : news.title;
+    const shortTitle =
+      news.title.length > 60 ? news.title.slice(0, 57) + "..." : news.title;
 
     const campaign = await prisma.campaign.create({
       data: {
@@ -674,7 +747,12 @@ export const createCampaignFromNews = async (req, res) => {
         steps: {
           // Immediate send — no wait between the email and the follow-up SMS.
           create: [
-            { type: "EMAIL", position: 1, subject: copy.emailSubject, body: copy.emailBody },
+            {
+              type: "EMAIL",
+              position: 1,
+              subject: copy.emailSubject,
+              body: copy.emailBody,
+            },
             { type: "SMS", position: 2, body: copy.smsBody },
           ],
         },
@@ -682,7 +760,9 @@ export const createCampaignFromNews = async (req, res) => {
       include: { steps: { orderBy: { position: "asc" } } },
     });
 
-    return res.status(201).json({ success: true, campaign, aiGenerated: copy.aiGenerated });
+    return res
+      .status(201)
+      .json({ success: true, campaign, aiGenerated: copy.aiGenerated });
   } catch (error) {
     console.error("[Campaign From News] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -698,11 +778,18 @@ export const generateCampaignCopy = async (req, res) => {
     const { goal, audience, brandVoice, stepType, contextInfo } = req.body;
 
     if (!goal || !stepType) {
-      return res.status(400).json({ message: "Goal and stepType are required" });
+      return res
+        .status(400)
+        .json({ message: "Goal and stepType are required" });
     }
 
     if (!hasLLM()) {
-      return res.status(500).json({ message: "No AI provider is configured (set ANTHROPIC_API_KEY or a Groq key)." });
+      return res
+        .status(500)
+        .json({
+          message:
+            "No AI provider is configured (set ANTHROPIC_API_KEY or a Groq key).",
+        });
     }
 
     const company = await prisma.company.findUnique({
@@ -712,25 +799,31 @@ export const generateCampaignCopy = async (req, res) => {
     const bp = company?.salesBrandProfile || {};
     const brandLines = [
       company?.name ? `Company/builder name: ${company.name}` : null,
-      brandVoice || bp.tone || company?.voiceProfile ? `Tone/voice: ${brandVoice || bp.tone || company?.voiceProfile}` : null,
-      bp.markets || bp.communities ? `Markets/communities: ${bp.markets || bp.communities}` : null,
+      brandVoice || bp.tone || company?.voiceProfile
+        ? `Tone/voice: ${brandVoice || bp.tone || company?.voiceProfile}`
+        : null,
+      bp.markets || bp.communities
+        ? `Markets/communities: ${bp.markets || bp.communities}`
+        : null,
       bp.signature ? `Signature/sign-off: ${bp.signature}` : null,
       bp.about ? `About the builder: ${bp.about}` : null,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const systemPrompt = `You are an expert sales copywriter specializing in home builder and warranty care lead nurturing.
-Your task is to write a single ${stepType === 'SMS' ? 'text message' : 'email'} draft.
+Your task is to write a single ${stepType === "SMS" ? "text message" : "email"} draft.
 
 Brand profile (reflect this voice and details):
-${brandLines || 'Professional, warm, and helpful.'}
+${brandLines || "Professional, warm, and helpful."}
 
-Audience: ${audience || 'Homebuyers or existing homeowners'}.
+Audience: ${audience || "Homebuyers or existing homeowners"}.
 Goal of this message: ${goal}.
 
-Additional Context: ${contextInfo || 'None'}
+Additional Context: ${contextInfo || "None"}
 
 Rules:
-${stepType === 'SMS' ? '- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}. No other placeholders.' : '- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do NOT invent other placeholders.'}
+${stepType === "SMS" ? "- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}. No other placeholders." : "- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do NOT invent other placeholders."}
 Output your draft clearly.`;
 
     const content = await chat({
@@ -740,7 +833,9 @@ Output your draft clearly.`;
     });
 
     if (!content) {
-      return res.status(500).json({ message: "Failed to generate copy from AI provider" });
+      return res
+        .status(500)
+        .json({ message: "Failed to generate copy from AI provider" });
     }
 
     return res.json({ success: true, draft: content });

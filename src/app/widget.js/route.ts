@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const portalUrl = process.env.NEXT_PUBLIC_URL || "https://warranty-care-portal.vercel.app";
+  const portalUrl = process.env.NEXT_PUBLIC_URL;
 
   const jsContent = `(function() {
   // Prevent double initialization

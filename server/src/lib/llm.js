@@ -14,6 +14,9 @@ export function hasLLM() {
   return isRealAnthropicKey() || !!getGroqKey();
 }
 
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+
 async function callAnthropic({ system, user, maxTokens }) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -23,7 +26,7 @@ async function callAnthropic({ system, user, maxTokens }) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022",
+      model: ANTHROPIC_MODEL,
       max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content: user }],
@@ -40,7 +43,7 @@ async function callAnthropic({ system, user, maxTokens }) {
 async function callGroq({ system, user, maxTokens, json }) {
   const attempt = async (useJsonMode) => {
     const body = {
-      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      model: GROQ_MODEL,
       max_tokens: maxTokens,
       temperature: 0.3,
       messages: [
@@ -98,6 +101,98 @@ export async function chat({ system, user, maxTokens = 700, json = false }) {
       return await callGroq({ system, user, maxTokens, json });
     } catch (err) {
       console.error("[LLM] Groq exception:", err.message);
+    }
+  }
+  return null;
+}
+
+// ─── Tool / function calling ──────────────────────────────────────────────────
+// Single-tool forced call, provider-agnostic. `tool` uses the Anthropic shape
+// ({ name, description, input_schema }); it's adapted to Groq/OpenAI function
+// calling automatically. `messages` is [{ role: "user"|"assistant", content }].
+// Returns the parsed tool-input object, or null if no provider is available.
+
+async function anthropicToolCall({ system, messages, tool, maxTokens }) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: maxTokens,
+      system,
+      tools: [tool],
+      tool_choice: { type: "tool", name: tool.name },
+      messages,
+    }),
+  });
+  if (!response.ok) {
+    console.error("[LLM] Anthropic tool error:", await response.text());
+    return null;
+  }
+  const data = await response.json();
+  const block = data?.content?.find((b) => b.type === "tool_use" && b.name === tool.name);
+  return block?.input || null;
+}
+
+async function groqToolCall({ system, messages, tool, maxTokens }) {
+  const body = {
+    model: GROQ_MODEL,
+    max_tokens: maxTokens,
+    temperature: 0.3,
+    messages: [{ role: "system", content: system }, ...messages],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.input_schema,
+        },
+      },
+    ],
+    tool_choice: { type: "function", function: { name: tool.name } },
+  };
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getGroqKey()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    console.error("[LLM] Groq tool error:", await response.text());
+    return null;
+  }
+  const data = await response.json();
+  const args = data?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+  if (!args) return null;
+  try {
+    return typeof args === "string" ? JSON.parse(args) : args;
+  } catch (e) {
+    console.error("[LLM] Groq tool args parse failed:", e.message);
+    return null;
+  }
+}
+
+export async function toolCall({ system, messages, tool, maxTokens = 700 }) {
+  if (isRealAnthropicKey()) {
+    try {
+      const out = await anthropicToolCall({ system, messages, tool, maxTokens });
+      if (out) return out;
+    } catch (err) {
+      console.error("[LLM] Anthropic tool exception:", err.message);
+    }
+  }
+  if (getGroqKey()) {
+    try {
+      return await groqToolCall({ system, messages, tool, maxTokens });
+    } catch (err) {
+      console.error("[LLM] Groq tool exception:", err.message);
     }
   }
   return null;

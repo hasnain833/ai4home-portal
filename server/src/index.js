@@ -19,6 +19,8 @@ import schedulingRouter from "./routes/scheduling.js";
 import newsRouter from "./routes/news.js";
 import announcementsRouter from "./routes/announcements.js";
 import automationsRouter from "./routes/automations.js";
+import blogRouter from "./routes/blog.js";
+import publicBlogRouter from "./routes/public-blog.js";
 
 // Core Warranty Routes
 import dashboardRouter from "./routes/dashboard.js";
@@ -35,9 +37,15 @@ import usersRouter from "./routes/users.js";
 
 import { serve } from "inngest/express";
 import { inngest } from "./lib/inngest.js";
-import { runNurtureCampaign, handleCampaignExit } from "./inngest/functions/nurture.js";
+import {
+  runNurtureCampaign,
+  handleCampaignExit,
+} from "./inngest/functions/nurture.js";
 import { handleCsvImport } from "./inngest/functions/csv-import.js";
-import { appointmentSchedulingAgent, appointmentReminders } from "./inngest/functions/appointment.js";
+import {
+  appointmentSchedulingAgent,
+  appointmentReminders,
+} from "./inngest/functions/appointment.js";
 import { scheduleCalendarItem } from "./inngest/functions/calendar.js";
 import { scrapeNews } from "./inngest/functions/news-scraper.js";
 import { sendAnnouncement } from "./inngest/functions/announcement.js";
@@ -53,7 +61,7 @@ app.use(
   cors({
     origin: process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json({ limit: "10mb" }));
@@ -62,12 +70,6 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // Route registrations
 app.use("/api/auth", authRouter);
 
-// HUB-003 / NFR-S-001: server-side Sales workspace entitlement gate. Fully-private
-// sales routers are wrapped with `requireAuth, requireWorkspace("sales")` at mount.
-// The per-route requireAuth inside each router short-circuits (see auth.js).
-// EXCLUDED here (handled per-route or intentionally open): `compliance` (provider
-// webhooks), and the mixed routers `salesforce` / `appointments` / `scheduling`
-// which expose lead-facing public endpoints — their private routes gate inline.
 const salesGuard = [requireAuth, requireWorkspace("sales")];
 app.use("/api/sales/leads", ...salesGuard, leadsRouter);
 app.use("/api/sales/compliance", complianceRouter);
@@ -80,27 +82,53 @@ app.use("/api/sales/scheduling", schedulingRouter);
 app.use("/api/sales/segments", ...salesGuard, segmentsRouter);
 app.use("/api/sales/csv", ...salesGuard, csvRouter);
 app.use("/api/sales/dashboard", ...salesGuard, salesDashboardRouter);
-app.use("/api/sales/settings/messaging", ...salesGuard, messagingSettingsRouter);
+app.use(
+  "/api/sales/settings/messaging",
+  ...salesGuard,
+  messagingSettingsRouter,
+);
 app.use("/api/sales/news", ...salesGuard, newsRouter);
 app.use("/api/sales/announcements", ...salesGuard, announcementsRouter);
 app.use("/api/sales/automations", ...salesGuard, automationsRouter);
+app.use("/api/sales/blog", ...salesGuard, blogRouter);
+// Public tenant-hosted blog reads (SW-BLOG-005) — intentionally unguarded.
+app.use("/api/public/blog", publicBlogRouter);
 
-// Core Warranty Route Mounts
-app.use("/api/dashboard", dashboardRouter);
-app.use("/api/reports", reportsRouter);
-app.use("/api/tickets", ticketsRouter);
-app.use("/api/properties", propertiesRouter);
+const warrantyGuard = [requireAuth, requireWorkspace("warranty")];
+app.use("/api/dashboard", ...warrantyGuard, dashboardRouter);
+app.use("/api/reports", ...warrantyGuard, reportsRouter);
+app.use("/api/tickets", ...warrantyGuard, ticketsRouter);
+app.use("/api/properties", ...warrantyGuard, propertiesRouter);
 app.use("/api/company", companyRouter);
-app.use("/api/knowledge-base", knowledgeBaseRouter);
+app.use("/api/knowledge-base", ...warrantyGuard, knowledgeBaseRouter);
 app.use("/api/integrations", integrationsRouter);
 app.use("/api/admin", adminRouter);
-app.use("/api/communities", communitiesRouter);
-app.use("/api/homeowners", homeownersRouter);
+app.use("/api/communities", ...warrantyGuard, communitiesRouter);
+app.use("/api/homeowners", ...warrantyGuard, homeownersRouter);
 app.use("/api/users", usersRouter);
 // Inngest Endpoint
-app.use("/api/inngest", (req, res, next) => {
-  next();
-}, serve({ client: inngest, functions: [runNurtureCampaign, handleCampaignExit, handleCsvImport, appointmentSchedulingAgent, appointmentReminders, scheduleCalendarItem, scrapeNews, sendAnnouncement, ingestKbDocument, runAutomationRules, salesforceSyncCron] }));
+app.use(
+  "/api/inngest",
+  (req, res, next) => {
+    next();
+  },
+  serve({
+    client: inngest,
+    functions: [
+      runNurtureCampaign,
+      handleCampaignExit,
+      handleCsvImport,
+      appointmentSchedulingAgent,
+      appointmentReminders,
+      scheduleCalendarItem,
+      scrapeNews,
+      sendAnnouncement,
+      ingestKbDocument,
+      runAutomationRules,
+      salesforceSyncCron,
+    ],
+  }),
+);
 
 // Health Check
 app.get("/api/health", (req, res) => {
@@ -109,7 +137,9 @@ app.get("/api/health", (req, res) => {
 
 // Check if running on Vercel or Test
 if (process.env.VERCEL || process.env.NODE_ENV === "test") {
-  console.log("[Server] Running in Vercel/Test environment. Bypassing app.listen().");
+  console.log(
+    "[Server] Running in Vercel/Test environment. Bypassing app.listen().",
+  );
 } else {
   app.listen(port, () => {
     console.log(`[Server] Standalone backend running on port ${port}`);

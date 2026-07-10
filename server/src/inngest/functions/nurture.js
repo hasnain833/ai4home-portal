@@ -55,15 +55,23 @@ export const runNurtureCampaign = inngest.createFunction(
       return { status: "skipped", reason: "Enrollment not active or not found" };
     }
 
-    const steps = campaign.steps;
-    console.log(`[Nurture] Processing ${steps.length} steps. currentStepPosition=${enrollment.currentStepPosition}`);
+    const migrate = (campaign.versionPolicy || "FINISH_OLD") === "MIGRATE";
+    let workingSteps = campaign.steps;
+    console.log(`[Nurture] Processing ${workingSteps.length} steps (versionPolicy=${campaign.versionPolicy || "FINISH_OLD"}). currentStepPosition=${enrollment.currentStepPosition}`);
     let currentPosition = enrollment.currentStepPosition || 1;
 
     // Extract messaging configurations via centralized helper
     const { smtpConfig, smsConfig } = await getMessagingConfig(lead?.companyId);
 
-    for (const currentStep of steps) {
-      if (currentStep.position < currentPosition) continue;
+    while (true) {
+      if (migrate) {
+        workingSteps = await prisma.campaignStep.findMany({
+          where: { campaignId },
+          orderBy: { position: "asc" },
+        });
+      }
+      const currentStep = workingSteps.find((s) => s.position >= currentPosition);
+      if (!currentStep) break;
       console.log(`[Nurture] Executing step position=${currentStep.position}, type=${currentStep.type}`);
 
       if (currentStep.type === "DELAY") {

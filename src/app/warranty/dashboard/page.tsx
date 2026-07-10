@@ -35,9 +35,6 @@ import {
   ArrowRight,
   CheckCircle2,
   Building2,
-  Sparkles,
-  Bot,
-  Plus
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
