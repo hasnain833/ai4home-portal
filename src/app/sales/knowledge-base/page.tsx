@@ -99,6 +99,7 @@ export default function SalesKnowledgeBasePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [matches, setMatches] = useState<Match[] | null>(null);
+  const [searchMethod, setSearchMethod] = useState<string | null>(null);
 
   const loadDocs = useCallback(async () => {
     try {
@@ -198,6 +199,7 @@ export default function SalesKnowledgeBasePage() {
     if (!searchQuery.trim() || searching) return;
     setSearching(true);
     setMatches(null);
+    setSearchMethod(null);
     try {
       const res = await fetch("/api/sales/kb/search", {
         method: "POST",
@@ -207,6 +209,7 @@ export default function SalesKnowledgeBasePage() {
       const data = await res.json();
       if (res.ok) {
         setMatches(data.matches || []);
+        setSearchMethod(data.method || null);
         if ((data.matches || []).length === 0) toast.info("No matching passages found.");
       } else {
         toast.error(data.message || "Search unavailable (KB indexing keys may not be configured).");
@@ -376,6 +379,20 @@ export default function SalesKnowledgeBasePage() {
                   {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}
                 </Button>
               </form>
+
+              {matches && matches.length > 0 && searchMethod && (
+                <div className="mb-3">
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] gap-1 ${searchMethod === "semantic" ? "border-emerald-300 text-emerald-700 dark:text-emerald-400" : "border-amber-300 text-amber-700 dark:text-amber-400"}`}
+                    title={searchMethod === "semantic"
+                      ? "pgvector semantic (embedding) search"
+                      : "Postgres full-text (keyword) search — run pgvector-setup.sql + /reindex to enable semantic"}
+                  >
+                    {searchMethod === "semantic" ? "🧠 Semantic (pgvector)" : "🔤 Keyword (FTS fallback)"}
+                  </Badge>
+                </div>
+              )}
 
               {matches && matches.length > 0 && (
                 <div className="space-y-3">

@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
-import { deleteDocument, query } from "../services/vector-store.service.js";
+import { deleteDocument, queryDetailed, backfillEmbeddings } from "../services/vector-store.service.js";
 import { runKbIngestion } from "../inngest/functions/kb-ingest.js";
 
 const SALES_KB_BUCKET = "sales_knowledge_base";
@@ -183,7 +183,12 @@ export const searchSalesKB = async (req, res) => {
       return res.status(400).json({ message: "Query text 'q' is required" });
     }
 
-    const matches = await query(req.user.companyId, q, Math.min(Number(k) || 5, 20), categories);
+    const { matches, method } = await queryDetailed(
+      req.user.companyId,
+      q,
+      Math.min(Number(k) || 5, 20),
+      categories,
+    ).then((r) => ({ matches: r.results, method: r.method }));
 
     // De-duplicate cited documents for a clean citation list.
     const citations = [];
@@ -195,7 +200,8 @@ export const searchSalesKB = async (req, res) => {
       }
     }
 
-    return res.json({ matches, citations });
+    // `method` tells you whether this was semantic (pgvector) or the FTS fallback.
+    return res.json({ matches, citations, method });
   } catch (error) {
     console.error("[Sales KB Search] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -241,6 +247,31 @@ export const updateBrandProfile = async (req, res) => {
     return res.json({ success: true, voiceProfile: updated.voiceProfile, profile: updated.salesBrandProfile || {} });
   } catch (error) {
     console.error("[Sales KB Brand Profile Update] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Backfill pgvector embeddings for existing KB chunks that were ingested before
+// the pgvector upgrade. Processes in batches; call repeatedly until remaining=0.
+export const reindexSalesKB = async (req, res) => {
+  try {
+    if (!req.user || !req.user.companyId) {
+      return res.status(403).json({ message: "No company associated" });
+    }
+
+    const batchSize = Math.min(Number(req.body.batchSize) || 50, 200);
+    const result = await backfillEmbeddings(req.user.companyId, batchSize);
+
+    return res.json({
+      success: true,
+      processed: result.processed,
+      remaining: result.remaining,
+      message: result.remaining > 0
+        ? `Processed ${result.processed} chunks. ${result.remaining} remaining — call again to continue.`
+        : `Done! All chunks now have embeddings.`,
+    });
+  } catch (error) {
+    console.error("[Sales KB Reindex] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

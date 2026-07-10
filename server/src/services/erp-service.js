@@ -1,14 +1,15 @@
 import prisma from "../lib/prisma.js";
+import { decryptSafe } from "../lib/crypto.js";
 
-/** Fetch credentials from DB for a given company + platform */
+/** Fetch credentials from DB for a given company + platform (decrypted at rest). */
 export async function getERPConfig(companyId, platform) {
   const record = await prisma.integration.findFirst({
     where: { companyId, platform, isActive: true },
   });
   if (!record) return null;
   return {
-    apiKey: record.apiKey,
-    secretKey: record.secretKey || undefined,
+    apiKey: decryptSafe(record.apiKey),
+    secretKey: decryptSafe(record.secretKey) || undefined,
     environment: record.environment,
   };
 }
@@ -59,7 +60,7 @@ class BuiltopiaClient {
       return { success: true, remoteId: data.id || `BT-${ticket.id.slice(0, 8)}` };
     } catch (e) {
       console.error("[Builtopia] syncTicket failed:", e.message);
-      return { success: false, remoteId: "" };
+      return { success: false, remoteId: "", error: e.message };
     }
   }
 }
@@ -109,7 +110,7 @@ class BuildertrendClient {
       return { success: true, remoteId: data.id || `BT2-${ticket.id.slice(0, 8)}` };
     } catch (e) {
       console.error("[Buildertrend] syncTicket failed:", e.message);
-      return { success: false, remoteId: "" };
+      return { success: false, remoteId: "", error: e.message };
     }
   }
 }
@@ -151,7 +152,7 @@ class HyphenClient {
       return { success: true, remoteId: data.id || `HY-${ticket.id.slice(0, 8)}` };
     } catch (e) {
       console.error("[Hyphen] syncTicket failed:", e.message);
-      return { success: false, remoteId: "" };
+      return { success: false, remoteId: "", error: e.message };
     }
   }
 }
@@ -172,7 +173,66 @@ export async function testERPConnection(companyId, platform) {
   }
 }
 
-export async function syncTicketToERP(ticketId) {
+// NFR 6.5: failed ERP writes are retried up to 3× with exponential backoff before
+// the ticket is marked FAILED and an alert row is written. Idempotent — the remote
+// side keys on the ticket id (externalId/externalRef/warrantyRef) so retries and
+// re-syncs upsert rather than duplicate.
+const MAX_ERP_ATTEMPTS = 3;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function makeClient(platform, config) {
+  switch (platform) {
+    case "BUILTOPIA":
+      return new BuiltopiaClient(config);
+    case "BUILDERTREND":
+      return new BuildertrendClient(config);
+    case "HYPHEN":
+      return new HyphenClient(config);
+    default:
+      return null;
+  }
+}
+
+async function syncWithRetry(client, ticket, platform) {
+  let lastError = "sync failed";
+  for (let attempt = 1; attempt <= MAX_ERP_ATTEMPTS; attempt++) {
+    const result = await client.syncTicket(ticket);
+    if (result.success) return result;
+    lastError = result.error || lastError;
+    if (attempt < MAX_ERP_ATTEMPTS) {
+      const backoff = 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 200);
+      console.warn(
+        `[ERP] ${platform} sync attempt ${attempt}/${MAX_ERP_ATTEMPTS} failed for ticket ${ticket.id} (${lastError}); retrying in ${backoff}ms`,
+      );
+      await sleep(backoff);
+    }
+  }
+  return { success: false, error: lastError };
+}
+
+// Best-effort audit/alert row so persistent ERP failures surface in the KPI
+// dashboard (NFR 6.5). Reuses the existing generic SyncLog model — no migration.
+async function logErpSync({ companyId, ticketId, platform, status, message }) {
+  try {
+    await prisma.syncLog.create({
+      data: {
+        companyId,
+        direction: "OUTBOUND",
+        action: `ERP_SYNC:${platform}`,
+        status,
+        recordCount: status === "SUCCESS" ? 1 : 0,
+        errorCount: status === "SUCCESS" ? 0 : 1,
+        message: message || null,
+        metadata: { ticketId },
+      },
+    });
+  } catch (e) {
+    console.error("[ERP] Failed to write SyncLog row:", e.message);
+  }
+}
+
+export async function syncTicketToERP(ticketId, { reason = "manual" } = {}) {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
     include: { homeowner: { include: { company: true } } },
@@ -183,31 +243,42 @@ export async function syncTicketToERP(ticketId) {
   if (!companyId) return false;
 
   const platforms = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
+  let anyConfigured = false;
 
   for (const platform of platforms) {
     const config = await getERPConfig(companyId, platform);
     if (!config) continue;
+    anyConfigured = true;
 
-    let result;
-    switch (platform) {
-      case "BUILTOPIA":
-        result = await new BuiltopiaClient(config).syncTicket(ticket);
-        break;
-      case "BUILDERTREND":
-        result = await new BuildertrendClient(config).syncTicket(ticket);
-        break;
-      case "HYPHEN":
-        result = await new HyphenClient(config).syncTicket(ticket);
-        break;
-    }
+    const client = makeClient(platform, config);
+    const result = await syncWithRetry(client, ticket, platform);
 
     if (result.success) {
       await prisma.ticket.update({
         where: { id: ticketId },
         data: { erpSyncStatus: "SYNCED", erpReferenceId: result.remoteId },
       });
+      await logErpSync({ companyId, ticketId, platform, status: "SUCCESS", message: `Synced (${reason})` });
       return true;
     }
+
+    // This platform failed all attempts — record it and try the next one.
+    await logErpSync({
+      companyId,
+      ticketId,
+      platform,
+      status: "FAILED",
+      message: `${reason}: ${result.error}`,
+    });
+  }
+
+  // Every configured platform failed after retries → mark the ticket so the
+  // failure is visible in the dashboard and can be retried.
+  if (anyConfigured) {
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: { erpSyncStatus: "FAILED" },
+    });
   }
 
   return false;

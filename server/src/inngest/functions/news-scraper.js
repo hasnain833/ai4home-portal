@@ -1,7 +1,7 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import Parser from "rss-parser";
-import { Anthropic } from "@anthropic-ai/sdk";
+import { chat, hasLLM } from "../../lib/llm.js";
 const parser = new Parser();
 import crypto from "crypto";
 
@@ -66,25 +66,17 @@ export const scrapeNews = inngest.createFunction(
       // 3. Summarize with Claude (SW-NEWS-003). Store summaries + links only — never
       // full article text (SW-NEWS-005).
       const summary = await step.run(`summarize-${titleHash}`, async () => {
-        if (!process.env.ANTHROPIC_API_KEY) {
+        if (!hasLLM()) {
           return article.contentSnippet || "No summary available.";
         }
-        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
         try {
-          const response = await anthropic.messages.create({
-            model: "claude-3-haiku-20240307",
-            max_tokens: 300,
+          const text = await chat({
             system:
               "You are an expert real estate content marketer. You rewrite news snippets into engaging, 2-3 sentence summaries that are easy to read for homeowners and leads. Always maintain a professional, helpful tone.",
-            messages: [
-              {
-                role: "user",
-                content: `Title: ${article.title}\nSnippet: ${article.contentSnippet}\n\nPlease write a short, engaging summary of this news.`,
-              },
-            ],
+            user: `Title: ${article.title}\nSnippet: ${article.contentSnippet}\n\nPlease write a short, engaging summary of this news.`,
+            maxTokens: 300,
           });
-          return response.content[0].text;
+          return text || article.contentSnippet || "No summary available.";
         } catch (error) {
           console.error("Summarization failed:", error);
           return article.contentSnippet || "No summary available.";
@@ -109,7 +101,6 @@ export const scrapeNews = inngest.createFunction(
               publishedAt: new Date(article.pubDate || new Date()),
               // Not broadcast automatically — a human approves a calendar item / blog
               // post before anything is sent to leads (SRS Constraint #4).
-              wasBroadcasted: false,
             },
           });
           created += 1;

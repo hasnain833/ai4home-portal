@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { toolCall } from "../../lib/llm.js";
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { MailService } from "../../services/mail-service.js";
@@ -14,7 +14,6 @@ import {
 } from "../../services/scheduling-service.js";
 import { query as kbQuery } from "../../services/vector-store.service.js";
 
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 const MAX_TURNS = 8;
 
 function brandedEmail(companyName, bodyText) {
@@ -108,30 +107,29 @@ export function formatKbContext(chunks) {
 }
 
 export async function runClaudeTurn({ lead, company, channel, transcript, slots, timezone, kbChunks }) {
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
   const slotList = slots.map((s, i) => `${i + 1}. ${s.label}  [iso:${s.iso}]`).join("\n") || "(no slots currently available)";
   const channelGuidance =
     channel === "SMS"
       ? "This is an SMS conversation. Keep replies under 320 characters, plain text, no markdown."
       : "This is an email conversation. Keep replies concise and friendly.";
 
-  const system = `You are the automated sales assistant for ${company.name}, a homebuilder. You are NOT a human and must say so if asked. You have two jobs, in this order of priority based on what the lead needs:
-1. ANSWER the lead's questions about ${company.name} — who we are, our homes and communities, pricing, the buying process, and warranty — using the Company Knowledge Base below. Leads often know nothing about us, so be genuinely helpful.
-2. HELP the lead book a model-home visit or sales consultation when they show interest or ask to meet.
+  const system = `You are the automated customer engagement assistant for ${company.name}, a homebuilder. You are NOT a human and must say so if asked. You help leads who reply to our outreach emails and SMS messages. Your priorities, in order:
+1. ANSWER the lead's question(s) about ${company.name} — our homes and communities, pricing, the buying process, warranty, and anything else the Company Knowledge Base covers. Be genuinely helpful and informative.
+2. When the lead shows interest in visiting or meeting, HELP them book a model-home visit or sales consultation using the available slots below.
+3. If neither applies, be warm and conversational — keep the relationship alive.
 
 Lead: ${lead.firstName} ${lead.lastName}. Times are in ${timezone}.
 
 ${formatKbContext(kbChunks)}
 
-Available visit slots (offer these; NEVER invent times):
+Available visit slots (offer ONLY when the lead wants to meet; NEVER invent times):
 ${slotList}
 
 Rules:
-- If the lead asks a question, answer it first using the Knowledge Base. Set used_kb=true when you relied on it. If the Knowledge Base doesn't cover it and it's a factual question you can't answer, don't guess — say a team member will follow up (use 'escalate' if they clearly need a person).
-- When the lead wants to meet/visit/book, offer 2-4 available slots. If they propose a specific time, match it to the closest AVAILABLE slot; if none matches, say so and offer the nearest alternatives.
-- Book ONLY when the lead clearly confirms one of the available slots. Copy its iso value exactly into slot_iso. Booking uses this lead's own details automatically — you do not need to ask for their name/email.
-- You may answer a question and offer times in the same reply when it's natural to do so.
+- If the lead asks a question, answer it using the Knowledge Base. Set used_kb=true when you relied on it. If the Knowledge Base doesn't cover it and it's a factual question you can't answer, don't guess — say a team member will follow up (use 'escalate' if they clearly need a person).
+- Do NOT proactively offer appointment slots unless the lead mentions wanting to visit, tour, meet, or schedule something. Focus on answering their actual question first.
+- When the lead does want to meet/visit/book, offer 2-4 available slots. If they propose a specific time, match it to the closest AVAILABLE slot; if none matches, say so and offer the nearest alternatives.
+- Book ONLY when the lead clearly confirms one of the available slots. Copy its iso value exactly into slot_iso.
 - Never promise anything the Knowledge Base doesn't support. Be warm, brief, professional.
 - ${channelGuidance}
 
@@ -140,21 +138,12 @@ Always reply by calling the 'respond' tool.`;
   const messages = toAnthropicMessages(transcript);
   if (messages.length === 0) messages.push({ role: "user", content: "(the lead replied to our outreach expressing interest)" });
 
-  const resp = await anthropic.messages.create({
-    model: ANTHROPIC_MODEL,
-    max_tokens: 700,
-    system,
-    tools: [RESPOND_TOOL],
-    tool_choice: { type: "tool", name: "respond" },
-    messages,
-  });
-
-  const toolUse = resp.content.find((b) => b.type === "tool_use" && b.name === "respond");
-  if (!toolUse) {
-    const text = resp.content.find((b) => b.type === "text")?.text;
-    return { action: "reply", message: text || "Could you let me know which time works best for you?" };
+  // Provider-agnostic forced tool call (Anthropic → Groq fallback via llm.js).
+  const input = await toolCall({ system, messages, tool: RESPOND_TOOL, maxTokens: 700 });
+  if (!input || !input.action) {
+    return { action: "reply", message: "Could you let me know which time works best for you?" };
   }
-  return toolUse.input;
+  return input;
 }
 
 
@@ -314,7 +303,11 @@ export const appointmentSchedulingAgent = inngest.createFunction(
     }
 
     await step.run("respond-reply", async () => {
-      const subject = slots.list.length ? "Scheduling your visit" : `Re: your question for ${lead.company?.name || "us"}`;
+      const subject = decision.used_kb
+        ? `Re: your question for ${lead.company?.name || "us"}`
+        : slots.list.length
+          ? "Scheduling your visit"
+          : `A message from ${lead.company?.name || "us"}`;
       const sent = await sendLeadMessage(lead, channel, decision.message, subject);
       const finalTranscript = [...transcript, { role: "agent", content: decision.message, at: new Date().toISOString() }];
       await prisma.schedulingConversation.update({

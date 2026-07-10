@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { Anthropic } from "@anthropic-ai/sdk";
+import { chat, hasLLM } from "../lib/llm.js";
 import { getNextValidSendWindow } from "../lib/timezone.js";
 import { inngest } from "../lib/inngest.js";
 
@@ -34,9 +34,6 @@ const DEFAULT_TIMEZONE = "America/New_York";
 const SMS_WINDOW_START_HOUR = 8;
 const SMS_WINDOW_END_HOUR = 21;
 
-// SW-CAL-002: give the suggestion model an explicit seasonal signal instead of
-// asking it to infer "seasonal events" from the raw date. Maps the current month
-// to a season plus the notable US home-buying / marketing moments around it.
 const SEASONAL_MOMENTS = {
   0: "New Year fresh-start home goals; MLK weekend",
   1: "Presidents' Day (major home-sales weekend); Valentine's Day",
@@ -159,8 +156,6 @@ export const getCalendarEvents = async (req, res) => {
 
     const campaignEvents = Object.values(groupedCampaigns);
 
-    // SW-CAL-001: surface scheduled/sent announcements as first-class calendar
-    // items alongside manual content and campaign sends.
     const announcements = await prisma.announcement.findMany({
       where: {
         companyId: req.user.companyId,
@@ -284,9 +279,6 @@ export const getCalendarSuggestions = async (req, res) => {
 
     const voiceProfile = company?.voiceProfile || "professional";
 
-    // SW-CAL-002: build an explicit tenant profile (markets / communities /
-    // brand) so the model grounds topics in the builder's actual footprint
-    // instead of just the company name + voice.
     const communityNames = (company?.communities || [])
       .map((c) => c.name)
       .filter(Boolean);
@@ -309,10 +301,9 @@ export const getCalendarSuggestions = async (req, res) => {
         .join("\n") || "No detailed tenant profile on file.";
 
     const seasonalContextText = getSeasonalContext();
-    const apiKey = process.env.ANTHROPIC_API_KEY;
 
-    if (!apiKey) {
-      return res.status(500).json({ message: "ANTHROPIC_API_KEY is missing. Please configure it in your environment variables." });
+    if (!hasLLM()) {
+      return res.status(500).json({ message: "No LLM provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY." });
     }
 
     const existingEvents = await prisma.contentCalendar.findMany({
@@ -355,9 +346,7 @@ export const getCalendarSuggestions = async (req, res) => {
         .join("\n")
       : "No recent market news available.";
 
-    const anthropic = new Anthropic({ apiKey });
-
-    const systemPrompt = `You are a Content Assist Agent for a homebuilder company named "${company?.name || 'Homebuilder'}". 
+    const systemPrompt = `You are a Content Assist Agent for a homebuilder company named "${company?.name || 'Homebuilder'}".
 Your voice profile is: "${voiceProfile}".
 Your task is to generate exactly 3 content calendar suggestions for marketing (SMS, Email, Blog, or Announcement).
 Current date: ${new Date().toISOString()}
@@ -392,17 +381,21 @@ Requirements:
   }
 ]`;
 
-    const response = await anthropic.messages.create({
-      model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
-      max_tokens: 1500,
+    const text = await chat({
       system: systemPrompt,
-      messages: [{ role: "user", content: "Generate the suggestions as raw JSON." }],
+      user: "Generate the suggestions as raw JSON.",
+      maxTokens: 1500,
+      json: true,
     });
 
-    const text = response.content[0].text || "";
-    // Clean up potential markdown blocks
+    if (!text) {
+      return res.status(502).json({ message: "The AI provider did not return any suggestions. Please try again." });
+    }
+
+    // Clean up potential markdown blocks, then isolate the JSON array (lenient parse).
     const cleanedText = text.replace(/```json/gi, "").replace(/```/g, "").trim();
-    const suggestionsJson = JSON.parse(cleanedText);
+    const arrayText = cleanedText.slice(cleanedText.indexOf("["), cleanedText.lastIndexOf("]") + 1) || cleanedText;
+    const suggestionsJson = JSON.parse(arrayText);
 
     const createdSuggestions = [];
     for (const s of suggestionsJson) {

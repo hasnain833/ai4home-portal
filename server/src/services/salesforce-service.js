@@ -4,7 +4,19 @@ import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 // ─── Encryption Helpers ───────────────────────────────────────────────────────
 
 const ALGORITHM = "aes-256-gcm";
-const ENCRYPTION_KEY = process.env.SALESFORCE_ENCRYPTION_KEY || "change_me_to_a_32_char_hex_key_00";
+const DEFAULT_ENCRYPTION_KEY = "change_me_to_a_32_char_hex_key_00";
+const ENCRYPTION_KEY = process.env.SALESFORCE_ENCRYPTION_KEY || DEFAULT_ENCRYPTION_KEY;
+
+// Salesforce OAuth tokens/secrets are encrypted at rest with this key. If it is
+// left at the public default, the encryption provides no real protection (anyone
+// with DB access + this well-known key can decrypt). We warn loudly rather than
+// hard-fail so existing connections encrypted with the default key still decrypt;
+// rotate to a strong key and re-encrypt stored tokens before production. (NFR-S-003)
+if (ENCRYPTION_KEY === DEFAULT_ENCRYPTION_KEY) {
+  console.warn(
+    "[salesforce-service] SALESFORCE_ENCRYPTION_KEY is the public default — Salesforce token encryption is NOT secure. Set a strong 32-char key and re-encrypt stored connections before production.",
+  );
+}
 
 function getKeyBuffer() {
   // Ensure key is exactly 32 bytes

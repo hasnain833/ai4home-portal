@@ -42,9 +42,35 @@ export const getAnalytics = async (req, res) => {
         isEmergency: true,
         createdAt: true,
         updatedAt: true,
-        kbReferences: true
+        kbReferences: true,
+        erpSyncStatus: true
       }
     });
+
+    // NFR 6.5: ERP sync health — success rate + recent failure log for the dashboard.
+    const companyId = session.companyId || "demo-company";
+    const erpSyncedCount = tickets.filter((t) => t.erpSyncStatus === "SYNCED").length;
+    const erpFailedCount = tickets.filter((t) => t.erpSyncStatus === "FAILED").length;
+    const erpAttempted = erpSyncedCount + erpFailedCount;
+    const erpSyncSuccessRate = erpAttempted > 0 ? Math.round((erpSyncedCount / erpAttempted) * 100) : 100;
+
+    let erpFailureLog = [];
+    try {
+      const failures = await prisma.syncLog.findMany({
+        where: { companyId, direction: "OUTBOUND", status: "FAILED", createdAt: { gte: sinceDate, lte: untilDate } },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: { action: true, message: true, createdAt: true, metadata: true },
+      });
+      erpFailureLog = failures.map((f) => ({
+        platform: (f.action || "").replace("ERP_SYNC:", ""),
+        message: f.message,
+        ticketId: f.metadata?.ticketId || null,
+        at: f.createdAt,
+      }));
+    } catch (e) {
+      console.error("[Reports] Failed to load ERP failure log:", e.message);
+    }
 
     const totalTickets = tickets.length;
     const resolvedTickets = tickets.filter(t => t.status === "RESOLVED");
@@ -107,7 +133,11 @@ export const getAnalytics = async (req, res) => {
       surveyReadiness,
       predictedTickets,
       predictedRiskArea,
-      escalationRisk
+      escalationRisk,
+      erpSyncSuccessRate,
+      erpSyncedCount,
+      erpFailedCount,
+      erpFailureLog
     });
 
   } catch (error) {

@@ -3,6 +3,7 @@ import { calculateWarrantyYear } from "../lib/utils.js";
 import { generateTicketId } from "../lib/ticket-utils.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { getMessagingConfig } from "../lib/messaging-config.js";
+import { syncTicketToERP } from "../services/erp-service.js";
 
 export const getTickets = async (req, res) => {
   try {
@@ -106,6 +107,14 @@ export const createTicket = async (req, res) => {
         status: isEmergency ? "ESCALATED" : "OPEN",
       },
     });
+
+    // SRS §4.2.7: write claim data to the connected ERP on creation/escalation.
+    // Non-blocking — an ERP outage must not fail ticket creation.
+    try {
+      await syncTicketToERP(ticket.id, { reason: isEmergency ? "escalation" : "creation" });
+    } catch (erpError) {
+      console.error(`[Ticket API] ERP sync on creation failed for #${ticket.id}:`, erpError.message);
+    }
 
     return res.json(ticket);
   } catch (error) {
@@ -213,8 +222,16 @@ export const updateTicket = async (req, res) => {
       data: updatedData,
     });
 
-    // If status changed, send email
+    // If status changed, sync to ERP (escalation/resolution — SRS §4.2.7) and email the homeowner
     if (status && status !== oldTicket.status) {
+      try {
+        const reason =
+          status === "ESCALATED" ? "escalation" : status === "RESOLVED" ? "resolution" : "status-change";
+        await syncTicketToERP(ticket.id, { reason });
+      } catch (erpError) {
+        console.error(`[Ticket API] ERP sync on status change failed for #${ticket.id}:`, erpError.message);
+      }
+
       if (oldTicket.homeowner?.email) {
         try {
           // Extract SMTP config if available
