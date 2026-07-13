@@ -27,15 +27,59 @@ export const updateCompany = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const { id, ...updateData } = req.body;
     const companyId = session.companyId || "demo-company";
+
+    // Whitelist self-service company settings. Spreading the raw request body
+    // would let a STAFF/ADMIN set gating fields (salesEnabled, warrantyEnabled,
+    // verificationStatus, automation caps, ...) via this endpoint — a
+    // mass-assignment privilege escalation. Only these fields are updatable
+    // here; workspace/verification flags are managed by Super-Admin endpoints.
+    const ALLOWED_FIELDS = [
+      "name",
+      "logo",
+      "email",
+      "phone",
+      "address",
+      "warrantyPolicy",
+      "botColor",
+      "defaultLeadOwner",
+      "voiceProfile",
+      "maxSmsPerHour",
+      "complianceOptInRequired",
+      "campaignExitConditions",
+      "campaignVersionPolicy",
+    ];
+    const data = {};
+    for (const key of ALLOWED_FIELDS) {
+      if (req.body[key] !== undefined) data[key] = req.body[key];
+    }
 
     const company = await prisma.company.update({
       where: { id: companyId },
-      data: updateData,
+      data,
     });
 
-    if (session.role === "ADMIN" && updateData.name) {
+    // SW-NUR: campaign behavior is now a company-wide setting. Propagate any
+    // change to every campaign so the running engine (which reads the
+    // campaign-level fields) reflects it immediately.
+    if (
+      data.campaignExitConditions !== undefined ||
+      data.campaignVersionPolicy !== undefined
+    ) {
+      const campaignSync = {};
+      if (data.campaignExitConditions !== undefined) {
+        campaignSync.exitConditions = data.campaignExitConditions;
+      }
+      if (data.campaignVersionPolicy !== undefined) {
+        campaignSync.versionPolicy = data.campaignVersionPolicy;
+      }
+      await prisma.campaign.updateMany({
+        where: { companyId },
+        data: campaignSync,
+      });
+    }
+
+    if (session.role === "ADMIN" && data.name) {
       await prisma.user.updateMany({
         where: { email: session.email },
         data: { name: updateData.name }

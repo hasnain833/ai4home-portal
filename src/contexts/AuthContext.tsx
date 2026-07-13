@@ -67,20 +67,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionExpired, setSessionExpired] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const router = useRouter();
-  const supabase = createClient();
-
-  // Stable ref — createClient() returns a singleton so this is safe
   const supabaseRef = useRef(createClient());
-
-  // Track the latest user without re-installing the fetch interceptor
   const userRef = useRef<User | null>(null);
   useEffect(() => {
     userRef.current = user;
   }, [user]);
 
-  // Global session-expiry interceptor: wrap fetch so that when an authenticated
-  // API call comes back 401 (token invalid/expired), we sign the user out and
-  // show a blurred "session expired" overlay instead of failing silently.
   useEffect(() => {
     const originalFetch = window.fetch;
     window.fetch = async (...args: Parameters<typeof fetch>) => {
@@ -88,13 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url || "";
         const isApiCall = url.includes("/api/") && !url.includes("/api/auth/me");
-        // Only escalate if a user was actually signed in — a 401 during the
-        // initial /api/auth/me probe just means "not logged in yet".
         if (response.status === 401 && isApiCall && userRef.current) {
           setSessionExpired(true);
         }
       } catch {
-        // never let the interceptor break a real request
       }
       return response;
     };
@@ -103,7 +92,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // When the session expires, tear down the local session in the background.
   useEffect(() => {
     if (!sessionExpired) return;
     supabaseRef.current.auth.signOut().catch(() => {});
@@ -145,7 +133,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === "INITIAL_SESSION") initialFetchDone = true;
         fetchUser();
       } else if (event === "SIGNED_OUT") {
-        // Verify if a superadmin session is active before clearing
         checkSuperadminOrLogout();
       }
     });
@@ -173,7 +160,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       router.push("/login");
     }
 
-    // Fallback: if onAuthStateChange didn't fire INITIAL_SESSION (older SDK), fetch manually
     setTimeout(() => {
       if (!initialFetchDone && mounted) {
         fetchUser();
@@ -184,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [router]); // router is stable
+  }, [router]); 
 
   const login = async (
     email: string,
@@ -193,15 +179,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ) => {
     setIsLoading(true);
     try {
-      // Super admin is authenticated entirely server-side against SUPERADMIN_EMAIL
-      // in the backend env. The client never hardcodes the address, so the two
-      // can't drift apart — the server is the single source of truth. Any login
-      // that isn't the super admin falls through to normal Supabase auth below.
-      const response = await fetch("/api/auth/superadmin-login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
+      let response: Response;
+      try {
+        response = await fetch("/api/auth/superadmin-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+      } catch {
+        throw new Error(
+          "We couldn't reach the server. Please make sure the backend is running and try again.",
+        );
+      }
 
       if (response.ok) {
         const body = await response.json();
@@ -211,11 +200,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const userData = await meResponse.json();
             setUser(userData);
           }
-          router.push(redirectPath || "/admin");
+          router.push("/admin");
           return;
         }
+      } else if (response.status !== 401) {
+        throw new Error(
+          "The server is temporarily unavailable. Please try again in a few moments.",
+        );
       }
 
+      // 401 (not a super admin) → normal user: authenticate with Supabase.
       const { error } = await supabaseRef.current.auth.signInWithPassword({
         email,
         password,
@@ -243,8 +237,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUser(null);
     router.push("/login");
-    // Keep the overlay up briefly so the transition to /login feels intentional,
-    // then tear it down (AuthProvider stays mounted at the root).
     setTimeout(() => setLoggingOut(false), 600);
   };
 
@@ -285,9 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateAvatar = async (avatarUrl: string) => {
     if (!user) return;
-    // Optimistically update UI immediately
     setUser({ ...user, avatar: avatarUrl });
-    // Persist to DB (staff/homeowner only — admin avatar = company logo, managed separately)
     if (user.role !== "admin") {
       try {
         await fetch("/api/auth/profile", {
@@ -301,8 +291,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Re-fetch the current user from the server. Used by the verification gate to
-  // detect when the Super Admin has approved the tenant (status -> VERIFIED).
   const refreshUser = async (): Promise<User | null> => {
     try {
       const response = await fetch("/api/auth/me");
@@ -342,7 +330,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     >
       {children}
       {loggingOut && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 backdrop-blur-md">
+        <div className="fixed inset-0 z-110 flex items-center justify-center bg-slate-950/40 backdrop-blur-md">
           <div className="mx-4 flex flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white px-8 py-7 text-center shadow-2xl dark:border-slate-800 dark:bg-slate-900">
             <svg className="h-8 w-8 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -353,7 +341,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         </div>
       )}
       {sessionExpired && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 backdrop-blur-md">
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-slate-950/40 backdrop-blur-md">
           <div className="mx-4 w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-2xl dark:border-slate-800 dark:bg-slate-900">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
               <svg className="h-6 w-6 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">

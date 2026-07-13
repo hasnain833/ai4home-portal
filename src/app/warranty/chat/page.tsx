@@ -14,8 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v3.6/inject.js";
-const CONFIG_URL = process.env.NEXT_PUBLIC_BOTPRESS_CONFIG_URL || "https://files.bpcontent.cloud/2026/06/24/12/20260624123527-XY5YMA41.js";
+const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v0/inject.js";
 
 export default function AIChatPage() {
   const { user, isLoading } = useAuth();
@@ -45,15 +44,9 @@ export default function AIChatPage() {
   }, [user, isLoading]);
 
   useEffect(() => {
-    // Wait until the user data is fully loaded before initializing the chat
     if (isLoading || !user) return;
 
     let cancelled = false;
-
-    // Load Botpress' inject.js, then a same-origin config script (/bp-config) that
-    // has per-company branding + embeddedChatId baked in. We DON'T proxy
-    // window.botpress — doing so breaks Botpress' inline (embedded) mount and forces
-    // the floating widget. Branding is applied server-side instead (see /bp-config).
     const injectScript = document.createElement("script");
     injectScript.src = INJECT_URL;
     injectScript.async = true;
@@ -226,7 +219,7 @@ export default function AIChatPage() {
                         )}
                       </Button>
                     </div>
-                    <div className="relative rounded-xl border border-slate-800 bg-[#020617] p-4 text-xs font-mono text-slate-300 overflow-x-auto max-h-[200px] w-full">
+                    <div className="relative rounded-xl border border-slate-800 bg-[#020617] p-4 text-xs font-mono text-slate-300 overflow-x-auto max-h-50 w-full">
                       <pre className="whitespace-pre">{embedScriptCode}</pre>
                     </div>
                     <div className="bg-[#0F3B3D]/5 dark:bg-[#b48c3c]/5 border border-[#0F3B3D]/25 dark:border-[#b48c3c]/25 rounded-xl p-4 flex items-start gap-3 w-full">

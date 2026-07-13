@@ -127,6 +127,7 @@ export default function UpdatePasswordPage() {
           setError(decodeURIComponent(errorMsg.replace(/\+/g, " ")));
         }
       } catch (err) {
+        console.error("[forgot-password/update]", err);
         setError("Failed to verify authentication session.");
       } finally {
         setCheckingSession(false);

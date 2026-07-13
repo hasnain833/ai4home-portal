@@ -87,6 +87,10 @@ model Company {
   // SW-AMK-004: automation safety controls
   automationsKillSwitch   Boolean                 @default(false)
   automationDailyCap      Int                     @default(1000)
+  // SW-NUR: company-wide campaign behavior (exit conditions + version policy).
+  // Applies to every campaign; edited on the Settings page (was per-campaign).
+  campaignExitConditions  Json?
+  campaignVersionPolicy   String                  @default("FINISH_OLD")
   marketingRules          MarketingRule[]
   suppressionList         SuppressionList[]
   campaigns               Campaign[]

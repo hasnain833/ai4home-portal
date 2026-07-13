@@ -1,8 +1,16 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
+import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import { createSuperadminSessionToken } from "../lib/superadmin-session.js";
+
+const safeEqual = (a, b) => {
+  const ab = Buffer.from(String(a ?? ""), "utf8");
+  const bb = Buffer.from(String(b ?? ""), "utf8");
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+};
 
 // Initialize Supabase Admin client
 const getSupabaseAdmin = () => {
@@ -67,9 +75,6 @@ export const getMe = async (req, res) => {
       ? true
       : (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
 
-    // Warranty workspace is gated behind document verification. Super Admins,
-    // and any account whose company has no verification requirement, are treated
-    // as VERIFIED so they are never locked out.
     const verificationStatus = isSuperAdmin
       ? "VERIFIED"
       : dbUser.company?.verificationStatus || "VERIFIED";
@@ -195,12 +200,13 @@ export const superadminLogin = async (req, res) => {
         .json({ message: "Email and password are required" });
     }
 
-    if (
-      process.env.SUPERADMIN_EMAIL &&
-      process.env.SUPERADMIN_PASSWORD &&
-      email === process.env.SUPERADMIN_EMAIL &&
-      password === process.env.SUPERADMIN_PASSWORD
-    ) {
+    const envEmail = process.env.SUPERADMIN_EMAIL;
+    const envPassword = process.env.SUPERADMIN_PASSWORD;
+    const emailMatches =
+      !!envEmail &&
+      String(email).trim().toLowerCase() === envEmail.trim().toLowerCase();
+
+    if (envEmail && envPassword && emailMatches && safeEqual(password, envPassword)) {
       const token = createSuperadminSessionToken({
         id: "env-superadmin",
         email: email,
@@ -297,9 +303,6 @@ export const signup = async (req, res) => {
         email: companyEmail,
         phone: companyPhone || null,
         address: companyAddress || null,
-        // New tenants start locked: warranty visible but blurred until the
-        // Super Admin verifies their uploaded document. Sales stays off until
-        // the Super Admin explicitly enables it.
         warrantyEnabled: true,
         salesEnabled: false,
         verificationStatus: "PENDING",
@@ -403,8 +406,6 @@ export const signup = async (req, res) => {
       });
     }
 
-    // Notify the Super Admin that a new tenant registered and is awaiting
-    // document verification. Best-effort — never fail the signup over this.
     try {
       const superAdminEmail = process.env.SUPERADMIN_EMAIL;
       if (superAdminEmail && process.env.SMTP_USER && process.env.SMTP_PASS) {

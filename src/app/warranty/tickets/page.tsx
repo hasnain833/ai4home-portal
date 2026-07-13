@@ -35,7 +35,6 @@ import {
   ChevronRight,
   CheckCircle2,
   AlertCircle,
-  Plus,
   RotateCcw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";

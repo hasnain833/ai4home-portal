@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { ComplianceService } from "../services/compliance-service.js";
 import { triggerAutomation } from "../lib/automation-events.js";
+import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 
 export const getSuppressions = async (req, res) => {
   try {
@@ -321,6 +322,14 @@ export const unsubscribeByLead = async (req, res) => {
     // Stop any active sequences for this lead.
     const { inngest } = await import("../lib/inngest.js");
     await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "UNSUBSCRIBE" } });
+
+    // SW-CRM-008: reflect the opt-out back to Salesforce (gated per tenant; no-op
+    // unless writeBackEnabled + the lead is linked to a Salesforce record).
+    writeBackLeadToSalesforce(
+      lead.companyId,
+      lead.id,
+      isEmail ? { emailOptIn: false } : { smsOptIn: false },
+    ).catch((e) => console.error("[Unsubscribe] Salesforce write-back failed:", e?.message || e));
 
     return res.json({
       success: true,

@@ -140,6 +140,13 @@ export const createCampaign = async (req, res) => {
       return res.status(400).json({ message: "Campaign name is required" });
     }
 
+    // SW-NUR: inherit the company-wide campaign behavior (exit conditions +
+    // version policy) so a new campaign starts aligned with the global setting.
+    const company = await prisma.company.findUnique({
+      where: { id: req.user.companyId },
+      select: { campaignExitConditions: true, campaignVersionPolicy: true },
+    });
+
     const campaign = await prisma.campaign.create({
       data: {
         companyId: req.user.companyId,
@@ -147,6 +154,8 @@ export const createCampaign = async (req, res) => {
         description: description || null,
         channel: channel || "Email & SMS",
         status: "Draft",
+        exitConditions: company?.campaignExitConditions ?? undefined,
+        versionPolicy: company?.campaignVersionPolicy || "FINISH_OLD",
       },
     });
 

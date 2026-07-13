@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { triggerAutomation } from "../lib/automation-events.js";
+import { findDuplicateLead } from "../lib/lead-dedup.js";
 import {
   getAuthenticatedClient,
   mapSalesforceRecordToLead,
@@ -89,6 +90,36 @@ export async function runIncrementalSync(companyId) {
         });
         updatedCount++;
       } else {
+        // SW-LEAD-003: cross-source linking. Before creating a new row, check
+        // whether this Salesforce record matches an existing local (CSV/manual)
+        // lead by email/phone. If so — and that lead isn't already tied to a
+        // different Salesforce record — LINK it: Salesforce becomes the
+        // system-of-record for that lead, avoiding a duplicate.
+        const crossMatch = externalId
+          ? await findDuplicateLead(companyId, leadData.email, leadData.phone)
+          : null;
+
+        if (crossMatch && !crossMatch.externalId) {
+          await prisma.lead.update({
+            where: { id: crossMatch.id },
+            data: {
+              ...leadData,
+              source: "SALESFORCE",
+              externalId,
+              archived: false,
+              archivedAt: null,
+              timeline: {
+                create: {
+                  type: "SYNC_LINK",
+                  description: `Linked existing ${crossMatch.source} lead to Salesforce record ${externalId} (Salesforce is now the system-of-record).`,
+                },
+              },
+            },
+          });
+          updatedCount++;
+          continue;
+        }
+
         const created = await prisma.lead.create({
           data: {
             companyId,

@@ -134,3 +134,14 @@
 .text-success {
   color: hsl(var(--success));
 }
+
+/* Hide scrollbars while keeping scroll behavior — used on modals/popups. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chrome/Safari */
+}

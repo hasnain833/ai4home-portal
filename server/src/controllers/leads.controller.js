@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { triggerAutomation } from "../lib/automation-events.js";
-import { findDuplicateLead } from "../lib/lead-dedup.js";
+import { findDuplicateLead, resolveMergedField } from "../lib/lead-dedup.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 
 export const getLeads = async (req, res) => {
@@ -232,15 +232,18 @@ export const importLeads = async (req, res) => {
           skippedCount++;
           continue;
         } else if (mergeStrategy === "update") {
+          // SW-LEAD-003: honor CRM as system-of-record — don't overwrite fields
+          // of a Salesforce-linked lead; only fill the gaps it left.
+          const isCrmOwned = !!duplicateLead.externalId;
           await prisma.lead.update({
             where: { id: duplicateLead.id },
             data: {
-              firstName,
-              lastName,
-              street: street || duplicateLead.street,
-              city: city || duplicateLead.city,
-              state: state || duplicateLead.state,
-              zipCode: zipCode || duplicateLead.zipCode,
+              firstName: resolveMergedField(firstName, duplicateLead.firstName, isCrmOwned),
+              lastName: resolveMergedField(lastName, duplicateLead.lastName, isCrmOwned),
+              street: resolveMergedField(street, duplicateLead.street, isCrmOwned),
+              city: resolveMergedField(city, duplicateLead.city, isCrmOwned),
+              state: resolveMergedField(state, duplicateLead.state, isCrmOwned),
+              zipCode: resolveMergedField(zipCode, duplicateLead.zipCode, isCrmOwned),
               tags: Array.from(
                 new Set([...(duplicateLead.tags || []), ...(tags || [])])
               ),

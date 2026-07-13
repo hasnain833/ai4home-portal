@@ -14,7 +14,7 @@ export function hasLLM() {
   return isRealAnthropicKey() || !!getGroqKey();
 }
 
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 async function callAnthropic({ system, user, maxTokens }) {

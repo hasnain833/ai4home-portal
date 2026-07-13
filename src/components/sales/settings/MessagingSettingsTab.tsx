@@ -5,10 +5,43 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Mail, MessageSquare, Save } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Loader2, Mail, MessageSquare, Save, HelpCircle, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+
+// A copy-able webhook URL row used inside the help dialogs.
+function WebhookUrl({ label, url }: { label: string; url: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Couldn't copy — select the URL and copy manually.");
+    }
+  };
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">{label}</p>
+      <div className="flex items-stretch gap-2">
+        <code className="flex-1 min-w-0 break-all rounded-md border bg-slate-50 dark:bg-slate-900/40 px-2.5 py-2 text-[11px] font-mono text-slate-700 dark:text-slate-300">
+          {url}
+        </code>
+        <Button type="button" variant="outline" size="sm" className="shrink-0 h-auto px-2" onClick={copy}>
+          {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export default function MessagingSettingsTab() {
   const [loading, setLoading] = useState(true);
@@ -35,8 +68,13 @@ export default function MessagingSettingsTab() {
     testPhone: "",
   });
 
+  // Webhook setup help dialogs.
+  const [helpOpen, setHelpOpen] = useState<null | "email" | "sms">(null);
+  const [origin, setOrigin] = useState("https://your-portal-domain");
+
   useEffect(() => {
     fetchSettings();
+    if (typeof window !== "undefined") setOrigin(window.location.origin);
   }, []);
 
   const fetchSettings = async () => {
@@ -164,11 +202,22 @@ export default function MessagingSettingsTab() {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
         <Card className="border-slate-200/60 dark:border-slate-800/60 shadow-lg shadow-slate-200/20 dark:shadow-slate-900/20 h-full flex flex-col">
           <CardHeader className="bg-slate-50/50 dark:bg-slate-900/20 border-b border-slate-100 dark:border-slate-800">
-            <div className="flex items-center space-x-2">
-              <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg">
-                <Mail className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg">
+                  <Mail className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <CardTitle>Email SMTP Configuration</CardTitle>
               </div>
-              <CardTitle>Email SMTP Configuration</CardTitle>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-xs text-muted-foreground shrink-0"
+                onClick={() => setHelpOpen("email")}
+              >
+                <HelpCircle className="h-4 w-4" /> Webhook setup
+              </Button>
             </div>
             <CardDescription>Configure SMTP credentials for sending outbound emails.</CardDescription>
           </CardHeader>
@@ -228,11 +277,22 @@ export default function MessagingSettingsTab() {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}>
         <Card className="border-slate-200/60 dark:border-slate-800/60 shadow-lg shadow-slate-200/20 dark:shadow-slate-900/20 h-full flex flex-col">
           <CardHeader className="bg-slate-50/50 dark:bg-slate-900/20 border-b border-slate-100 dark:border-slate-800">
-            <div className="flex items-center space-x-2">
-              <div className="bg-green-100 dark:bg-green-900/30 p-2 rounded-lg">
-                <MessageSquare className="h-5 w-5 text-green-600 dark:text-green-400" />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <div className="bg-green-100 dark:bg-green-900/30 p-2 rounded-lg">
+                  <MessageSquare className="h-5 w-5 text-green-600 dark:text-green-400" />
+                </div>
+                <CardTitle>SMS API Configuration</CardTitle>
               </div>
-              <CardTitle>SMS API Configuration</CardTitle>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-xs text-muted-foreground shrink-0"
+                onClick={() => setHelpOpen("sms")}
+              >
+                <HelpCircle className="h-4 w-4" /> Webhook setup
+              </Button>
             </div>
             <CardDescription>Configure Twilio credentials for sending and receiving SMS.</CardDescription>
           </CardHeader>
@@ -277,6 +337,86 @@ export default function MessagingSettingsTab() {
           </CardFooter>
         </Card>
       </motion.div>
+
+      {/* Webhook setup help */}
+      <Dialog open={helpOpen !== null} onOpenChange={(open) => !open && setHelpOpen(null)}>
+        <DialogContent className="sm:max-w-2xl">
+          {helpOpen === "email" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-blue-600" /> Set up Brevo webhooks
+                </DialogTitle>
+                <DialogDescription>
+                  These let the portal receive delivery events and replies, so campaign
+                  analytics and automatic unsubscribes stay accurate.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-5 pt-2 text-sm">
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-800 dark:text-slate-100">1. Event webhook (delivered / opened / clicked / bounced / spam)</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    In Brevo go to <strong>Transactional → Settings → Webhook</strong> (or{" "}
+                    <strong>Settings → Webhooks</strong>), add a webhook, paste the URL below,
+                    and enable: delivered, opened, click, hard &amp; soft bounce, spam/complaint,
+                    and unsubscribe.
+                  </p>
+                  <WebhookUrl label="Event webhook URL" url={`${origin}/api/sales/compliance/events/email?token=<INBOUND_WEBHOOK_SECRET>`} />
+                </div>
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-800 dark:text-slate-100">2. Inbound replies</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    In Brevo <strong>Inbound Parsing</strong>, add a route pointing to the URL
+                    below. When a lead replies, they&apos;re exited from active sequences.
+                  </p>
+                  <WebhookUrl label="Inbound email URL" url={`${origin}/api/sales/compliance/inbound/email?token=<INBOUND_WEBHOOK_SECRET>`} />
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900/40 p-3">
+                  Replace <code>&lt;INBOUND_WEBHOOK_SECRET&gt;</code> with the shared webhook token
+                  configured on the server (env <code>INBOUND_WEBHOOK_SECRET</code>). Ask your
+                  administrator if you don&apos;t have it — the token prevents forged webhook calls.
+                </p>
+              </div>
+            </>
+          )}
+          {helpOpen === "sms" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-green-600" /> Set up Twilio webhook
+                </DialogTitle>
+                <DialogDescription>
+                  This lets the portal receive SMS replies and opt-outs (STOP), so leads are
+                  exited and suppressed automatically.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-5 pt-2 text-sm">
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-800 dark:text-slate-100">1. Inbound messages (replies &amp; STOP)</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    In the Twilio Console go to <strong>Phone Numbers → Manage → Active numbers →
+                    [your number]</strong>. Under <strong>Messaging → &quot;A message comes in&quot;</strong>,
+                    set the webhook to <strong>HTTP POST</strong> with the URL below.
+                  </p>
+                  <WebhookUrl label="Inbound SMS URL" url={`${origin}/api/sales/compliance/inbound/sms`} />
+                </div>
+                <div className="space-y-2">
+                  <p className="font-semibold text-slate-800 dark:text-slate-100">2. Delivery status callbacks</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    No manual setup needed — the portal attaches a status callback to every SMS it
+                    sends, so delivered/failed counts update automatically.
+                  </p>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900/40 p-3">
+                  Twilio requests are verified by signature. In production, set{" "}
+                  <code>TWILIO_VALIDATE_SIGNATURE=1</code> on the server so only genuine Twilio
+                  calls are accepted.
+                </p>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

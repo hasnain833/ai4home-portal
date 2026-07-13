@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,7 +30,6 @@ import {
   Plus,
   Search,
   Calendar,
-  ChevronRight,
   CheckCircle2,
   X,
   Loader2,
@@ -138,7 +136,6 @@ export default function PropertiesPage() {
   useEffect(() => {
     fetchProperties();
     if (canManage) fetchHomeowners();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canManage]);
 
   const openAddModal = () => {

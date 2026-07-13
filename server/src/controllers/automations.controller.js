@@ -6,6 +6,7 @@ const TRIGGER_DESCRIPTIONS = {
   STATUS_CHANGE: "Lead status changes",
   MANUAL_CREATION: "A contact is added manually",
   APPOINTMENT_BOOKED: "An appointment is booked",
+  DATE_BASED: "A date-based condition is met (evaluated daily)",
 };
 
 // Map a DB rule to the shape the builder UI expects.

@@ -147,13 +147,14 @@ export default function LeadsPage() {
   const fetchLeads = useCallback(async () => {
     setLoading(true);
     try {
-      let url = `/api/sales/leads?status=${statusFilter}&tag=${tagFilter}&search=${encodeURIComponent(search)}`;
+      const url = `/api/sales/leads?status=${statusFilter}&tag=${tagFilter}&search=${encodeURIComponent(search)}`;
       const res = await fetch(url);
       if (res.ok) {
         setLeads(await res.json());
         setCurrentPage(1); // Reset to page 1 on new fetch
       }
     } catch (error) {
+      console.error("[sales/leads]", error);
       showToast("Error loading leads");
     } finally {
       setLoading(false);
@@ -184,6 +185,7 @@ export default function LeadsPage() {
         showToast(err.message || "Failed to delete lead.");
       }
     } catch (error) {
+      console.error("[sales/leads]", error);
       showToast("Error deleting lead.");
     } finally {
       setLeadToDelete(null);
@@ -426,6 +428,7 @@ export default function LeadsPage() {
         showToast(data.message || "Failed to parse import.");
       }
     } catch (err) {
+      console.error("[sales/leads]", err);
       showToast("Error executing leads import.");
     } finally {
       setImporting(false);
@@ -566,7 +569,7 @@ export default function LeadsPage() {
                 <div className="p-6 space-y-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-40 w-full" /></div>
               ) : leads.length > 0 ? (
                 <>
-                  <Table className="min-w-[1000px]">
+                  <Table className="min-w-250">
                     <TableHeader className="bg-muted/15 border-b border-border/50">
                       <TableRow>
                         <TableHead className="py-3.5 px-4 font-semibold text-xs text-muted-foreground text-left">Prospect Name</TableHead>
@@ -1071,7 +1074,7 @@ export default function LeadsPage() {
                 {importResults.errorsCount > 0 && (
                   <div className="space-y-2">
                     <Label className="text-xs text-rose-500 font-bold">Ingestion error reports ({importResults.errorsCount} rows skipped):</Label>
-                    <div className="max-h-[150px] overflow-y-auto border border-rose-200/50 rounded-lg p-2 bg-rose-50/20 text-[11px] font-mono space-y-1">
+                    <div className="max-h-37.5 overflow-y-auto border border-rose-200/50 rounded-lg p-2 bg-rose-50/20 text-[11px] font-mono space-y-1">
                       {importResults.errors.map((err: any, idx: number) => (
                         <p key={idx} className="text-rose-700 dark:text-rose-400">
                           Row {err.row} ({err.name}): {err.reason}
@@ -1112,7 +1115,7 @@ export default function LeadsPage() {
                   {timelineEvents.map((evt, idx) => (
                     <div key={idx} className="relative">
                       {/* Timeline Dot */}
-                      <span className="absolute left-[-31px] top-1 h-3.5 w-3.5 rounded-full bg-white dark:bg-slate-950 border-2 border-[#b48c3c] flex items-center justify-center">
+                      <span className="absolute left-7.75 top-1 h-3.5 w-3.5 rounded-full bg-white dark:bg-slate-950 border-2 border-[#b48c3c] flex items-center justify-center">
                         <span className="h-1.5 w-1.5 rounded-full bg-[#b48c3c]" />
                       </span>
                       <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">{evt.description}</p>
