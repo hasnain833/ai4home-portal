@@ -2,7 +2,7 @@ import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { triggerAutomation } from "../../lib/automation-events.js";
 import { validateLeadRow, sanitizeCsvValue } from "../../lib/csv-validation.js";
-import { findDuplicateLead } from "../../lib/lead-dedup.js";
+import { findDuplicateLead, resolveMergedField } from "../../lib/lead-dedup.js";
 
 export const handleCsvImport = inngest.createFunction(
   { id: "handle-csv-import", triggers: [{ event: "csv/import.started" }] },
@@ -51,20 +51,26 @@ export const handleCsvImport = inngest.createFunction(
               skippedCount++;
               continue;
             } else if (mergeStrategy === "update") {
-              // Merge tags
+              // Merge tags (union across sources).
               const mergedTags = Array.from(new Set([...duplicateLead.tags, ...tags]));
+
+              // SW-LEAD-003: cross-source linking with CRM as system-of-record.
+              // If the matched lead is owned by Salesforce (has an externalId), a
+              // CSV import must NOT overwrite its authoritative fields — it only
+              // fills gaps the CRM left empty. Otherwise the CSV value wins.
+              const isCrmOwned = !!duplicateLead.externalId;
 
               await prisma.lead.update({
                 where: { id: duplicateLead.id },
                 data: {
-                  firstName,
-                  lastName,
-                  email: email || duplicateLead.email,
-                  phone: phone || duplicateLead.phone,
-                  street: street || duplicateLead.street,
-                  city: city || duplicateLead.city,
-                  state: state || duplicateLead.state,
-                  zipCode: zipCode || duplicateLead.zipCode,
+                  firstName: resolveMergedField(firstName, duplicateLead.firstName, isCrmOwned),
+                  lastName: resolveMergedField(lastName, duplicateLead.lastName, isCrmOwned),
+                  email: resolveMergedField(email, duplicateLead.email, isCrmOwned),
+                  phone: resolveMergedField(phone, duplicateLead.phone, isCrmOwned),
+                  street: resolveMergedField(street, duplicateLead.street, isCrmOwned),
+                  city: resolveMergedField(city, duplicateLead.city, isCrmOwned),
+                  state: resolveMergedField(state, duplicateLead.state, isCrmOwned),
+                  zipCode: resolveMergedField(zipCode, duplicateLead.zipCode, isCrmOwned),
                   tags: mergedTags,
                   emailOptIn: lead.emailOptIn !== undefined ? emailOptIn : duplicateLead.emailOptIn,
                   smsOptIn: lead.smsOptIn !== undefined ? smsOptIn : duplicateLead.smsOptIn,
@@ -73,7 +79,9 @@ export const handleCsvImport = inngest.createFunction(
                   timeline: {
                     create: {
                       type: "SYNC_UPDATE",
-                      description: `Lead details updated via CSV import by ${userName}`,
+                      description: isCrmOwned
+                        ? `CSV import merged into Salesforce-owned lead by ${userName} (CRM fields preserved).`
+                        : `Lead details updated via CSV import by ${userName}.`,
                     },
                   },
                 },

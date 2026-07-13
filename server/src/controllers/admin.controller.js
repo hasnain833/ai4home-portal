@@ -12,70 +12,11 @@ const getSupabaseAdmin = () => {
   return createClient(supabaseUrl, supabaseServiceKey);
 };
 
-export const getCompanies = async (req, res) => {
-  try {
-    const session = req.user;
-
-    // Only Super Admin can fetch all companies
-    if (!session || session.role !== "SUPER_ADMIN") {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    // Fetch all companies along with their user counts and integration counts
-    const companies = await prisma.company.findMany({
-      include: {
-        _count: {
-          select: {
-            users: true,
-            integrations: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
-
-    return res.json(companies);
-  } catch (error) {
-    console.error("Error fetching companies:", error);
-    return res.status(500).json({ message: "Error fetching companies" });
-  }
-};
-
-export const updateCompanyWorkspaces = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || session.role !== "SUPER_ADMIN") {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    const { companyId } = req.params;
-    const { warrantyEnabled, salesEnabled } = req.body;
-
-    if (warrantyEnabled === undefined && salesEnabled === undefined) {
-      return res
-        .status(400)
-        .json({ message: "No workspace settings provided" });
-    }
-
-    const updateData = {};
-    if (typeof warrantyEnabled === "boolean")
-      updateData.warrantyEnabled = warrantyEnabled;
-    if (typeof salesEnabled === "boolean")
-      updateData.salesEnabled = salesEnabled;
-
-    const company = await prisma.company.update({
-      where: { id: companyId },
-      data: updateData,
-    });
-
-    return res.json(company);
-  } catch (error) {
-    console.error("Failed to update company workspace settings:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-};
+// NOTE: getCompanies / updateCompanyWorkspaces used to be duplicated here with a
+// latent role-check bug (they checked role === "SUPER_ADMIN", but requireAuth
+// exposes super admins as role "ADMIN" + isSuperAdmin=true). The live, correct
+// implementations are in ../admin/superadmin.controller.js. The dead copies were
+// removed during the 2026 technical audit — see AUDIT.md.
 
 export const getStaff = async (req, res) => {
   try {

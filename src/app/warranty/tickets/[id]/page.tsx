@@ -22,8 +22,6 @@ import {
   User,
   Calendar,
   RefreshCcw,
-  Send,
-  CheckCircle,
   Loader2,
   Sparkles,
   ThumbsUp,
@@ -34,14 +32,10 @@ import {
   Mail,
   MapPin,
   ShieldCheck,
-  Clock,
-  CheckCircle2,
-  XCircle,
-  Copy,
-  Check,
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch, ApiError } from "@/lib/api";
 import { toast } from "sonner";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "ESCALATED";
@@ -102,37 +96,28 @@ export default function TicketDetail() {
   const [ticket, setTicket] = useState<any>(null);
   const [status, setStatus] = useState<TicketStatus>("OPEN");
   const [priority, setPriority] = useState<TicketPriority>("MEDIUM");
-  const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [draftResponse, setDraftResponse] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
   const [isProcessingDraft, setIsProcessingDraft] = useState(false);
 
-  const [notesList, setNotesList] = useState<Array<{ id: string, text: string, createdAt: Date, author: string }>>([
-    {
-      id: "1",
-      text: "Botpress handoff initiated automatically due to urgent homeowner inquiry.",
-      createdAt: new Date(Date.now() - 3600000),
-      author: "System Bot",
-    }
-  ]);
-
   useEffect(() => {
     const fetchTicket = async () => {
       try {
-        const response = await fetch(`/api/tickets/${id}`);
-        if (response.ok) {
-          const data = await response.json();
-          setTicket(data);
-          setStatus(data.status);
-          setPriority(data.priority);
-          setDraftResponse(data.draftResponse);
-          setDraftText(data.draftResponse || "");
-        }
+        const data = await apiFetch<any>(`/api/tickets/${id}`);
+        setTicket(data);
+        setStatus(data.status);
+        setPriority(data.priority);
+        setDraftResponse(data.draftResponse);
+        setDraftText(data.draftResponse || "");
       } catch (error) {
         console.error("Error fetching ticket:", error);
+        toast.error(
+          error instanceof ApiError
+            ? error.message
+            : "We couldn't load this ticket. Please refresh and try again.",
+        );
       } finally {
         setLoading(false);
       }
@@ -143,87 +128,43 @@ export default function TicketDetail() {
   const handleUpdate = async () => {
     setUpdating(true);
     try {
-      const response = await fetch(`/api/tickets/${id}`, {
+      await apiFetch(`/api/tickets/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status, priority }),
       });
-      if (response.ok) {
-        setTicket((prev: any) => ({ ...prev, status, priority }));
-      }
+      setTicket((prev: any) => ({ ...prev, status, priority }));
     } catch (error) {
       console.error("Error updating ticket:", error);
+      toast.error(
+        error instanceof ApiError
+          ? error.message
+          : "Failed to update the ticket. Please try again.",
+      );
     } finally {
       setUpdating(false);
     }
   };
-
-  const handleAddNote = async () => {
-    if (!note.trim()) return;
-    setUpdating(true);
-    setTimeout(() => {
-      setNotesList(prev => [
-        ...prev,
-        {
-          id: String(Date.now()),
-          text: note,
-          createdAt: new Date(),
-          author: "Staff User",
-        }
-      ]);
-      setNote("");
-      setUpdating(false);
-    }, 400);
-  };
-
-  const handleSyncToERP = async () => {
-    setSyncing(true);
-    try {
-      const response = await fetch("/api/integrations/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId: ticket.id }),
-      });
-      const data = await response.json();
-      if (response.ok && data.success) {
-        const ticketRes = await fetch(`/api/tickets/${id}`);
-        if (ticketRes.ok) {
-          const updatedTicket = await ticketRes.json();
-          setTicket(updatedTicket);
-        }
-      } else {
-        toast.error(data.message || "Failed to sync ticket to ERP");
-      }
-    } catch (error) {
-      console.error("Error syncing ticket:", error);
-      toast.error("Failed to connect to synchronization service.");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
 
   const handleApproveDraft = async () => {
     if (!draftText.trim()) return;
     setIsProcessingDraft(true);
     try {
-      const response = await fetch(`/api/tickets/${id}`, {
+      await apiFetch(`/api/tickets/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "approve", draftResponse: draftText }),
       });
-      if (response.ok) {
-        setDraftResponse(null);
-        setDraftText("");
-        if (ticket) {
-          setTicket({ ...ticket, draftResponse: null });
-        }
-      } else {
-        const errorData = await response.json();
-        toast.error(errorData.message || "Failed to approve draft.");
+      setDraftResponse(null);
+      setDraftText("");
+      if (ticket) {
+        setTicket({ ...ticket, draftResponse: null });
       }
     } catch (error) {
       console.error("Error approving draft:", error);
+      toast.error(
+        error instanceof ApiError ? error.message : "Failed to approve draft.",
+      );
     } finally {
       setIsProcessingDraft(false);
     }
@@ -232,25 +173,21 @@ export default function TicketDetail() {
   const handleRejectDraft = async () => {
     setIsProcessingDraft(true);
     try {
-      const response = await fetch(`/api/tickets/${id}`, {
+      await apiFetch(`/api/tickets/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "reject" }),
       });
-      if (response.ok) {
-        setDraftResponse(null);
-        setDraftText("");
-        if (ticket) {
-          setTicket({
-            ...ticket,
-            draftResponse: null
-          });
-        }
-      } else {
-        toast.error("Failed to reject draft.");
+      setDraftResponse(null);
+      setDraftText("");
+      if (ticket) {
+        setTicket({ ...ticket, draftResponse: null });
       }
     } catch (error) {
       console.error("Error rejecting draft:", error);
+      toast.error(
+        error instanceof ApiError ? error.message : "Failed to reject draft.",
+      );
     } finally {
       setIsProcessingDraft(false);
     }
@@ -465,6 +402,7 @@ export default function TicketDetail() {
                     parsedInfo = parsed;
                   }
                 } catch (e) {
+                  console.error("[warranty/tickets/[id]]", e);
                   // Fallback
                 }
 
@@ -516,7 +454,9 @@ export default function TicketDetail() {
                   if (Array.isArray(parsed)) {
                     parsedRefs = parsed;
                   }
-                } catch (e) { }
+                } catch (e) {
+                  console.warn("Failed to parse ticket.kbReferences JSON:", e);
+                }
 
                 if (parsedRefs.length === 0) return null;
 

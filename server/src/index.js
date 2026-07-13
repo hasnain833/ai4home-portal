@@ -50,7 +50,10 @@ import { scheduleCalendarItem } from "./inngest/functions/calendar.js";
 import { scrapeNews } from "./inngest/functions/news-scraper.js";
 import { sendAnnouncement } from "./inngest/functions/announcement.js";
 import { ingestKbDocument } from "./inngest/functions/kb-ingest.js";
-import { runAutomationRules } from "./inngest/functions/automation.js";
+import {
+  runAutomationRules,
+  automationDateTriggers,
+} from "./inngest/functions/automation.js";
 import { salesforceSyncCron } from "./inngest/functions/salesforce-cron.js";
 
 const app = express();
@@ -125,6 +128,7 @@ app.use(
       sendAnnouncement,
       ingestKbDocument,
       runAutomationRules,
+      automationDateTriggers,
       salesforceSyncCron,
     ],
   }),

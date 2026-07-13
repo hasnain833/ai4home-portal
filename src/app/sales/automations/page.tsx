@@ -37,7 +37,7 @@ import {
   Clock,
 } from "lucide-react";
 import { toast } from "sonner";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 
 interface AutomationRule {
   id: string;
@@ -64,24 +64,41 @@ interface AutomationRule {
   totalRuns: number;
 }
 
-// No seeded rules — the automation engine (SW-AMK) backend is not built yet, so this
-// list starts empty rather than showing fabricated automations with fake run counts.
+interface AutomationAnalytics {
+  totalRuns: number;
+  matchedRuns: number;
+  recent: Array<{
+    id: string;
+    rule: string;
+    triggerEvent: string;
+    matched: boolean;
+    outcome: string | null;
+    createdAt: string;
+  }>;
+}
+
+// Rules load from the API; start empty rather than showing fabricated automations.
 const initialRules: AutomationRule[] = [];
 
 const standardTriggers = [
   { value: "LEAD_REPLIED", label: "Prospect Replied (Email/SMS)", desc: "Triggers when a client responds to outreach." },
   { value: "CRM_INGEST", label: "Salesforce Lead Synchronized", desc: "Triggers when a record imports from CRM." },
   { value: "STATUS_CHANGE", label: "Lead Status Shifted", desc: "Triggers when sales stage changes." },
-  { value: "MANUAL_CREATION", label: "Manual Contact Ingested", desc: "Triggers when contact is added in portal." },
-  { value: "OUTBOUND_SMS_TRIGGERED", label: "Outbound Automated SMS queued", desc: "Intercepts outgoing SMS broadcasts." }
+  { value: "MANUAL_CREATION", label: "Manual Contact Ingested", desc: "Triggers when a contact is added in the portal." },
+  { value: "APPOINTMENT_BOOKED", label: "Appointment Booked", desc: "Triggers when a lead books an appointment." },
+  { value: "DATE_BASED", label: "Date-based condition (daily)", desc: "Evaluated once a day against date conditions (e.g. created over N days ago)." }
 ];
 
 const standardActions = [
-  { value: "PAUSE_CAMPAIGNS", label: "Pause Active Campaigns", params: ["reason"] },
+  { value: "SEND_EMAIL", label: "Send Email to Lead", params: ["subject", "body"] },
+  { value: "SEND_SMS", label: "Send SMS to Lead", params: ["body"] },
+  { value: "CREATE_TASK", label: "Create Follow-up Task", params: ["title", "dueInDays"] },
+  { value: "DRAFT_ANNOUNCEMENT", label: "Draft Announcement", params: ["title", "subject", "body"] },
   { value: "ENROLL_CAMPAIGN", label: "Enroll in Campaign", params: ["campaignId", "campaignName"] },
-  { value: "NOTIFY_OWNER", label: "Send Agent Alert Notification", params: ["channels", "priority"] },
+  { value: "PAUSE_CAMPAIGNS", label: "Pause Active Campaigns", params: ["reason"] },
+  { value: "NOTIFY_OWNER", label: "Send Agent Alert Notification", params: ["message"] },
   { value: "UPDATE_STATUS", label: "Modify Outreach Status", params: ["newStatus"] },
-  { value: "DELAY_DELIVERY", label: "Delay Delivery Until Window", params: ["resumeTime"] }
+  { value: "UPDATE_TAGS", label: "Add Tags", params: ["tags"] }
 ];
 
 const fadeInUp = {
@@ -103,6 +120,7 @@ export default function AutomationsPage() {
   const [saving, setSaving] = useState(false);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [selectedRule, setSelectedRule] = useState<AutomationRule | null>(null);
+  const [analytics, setAnalytics] = useState<AutomationAnalytics | null>(null);
 
   const fetchRules = useCallback(async () => {
     try {
@@ -117,9 +135,19 @@ export default function AutomationsPage() {
     }
   }, []);
 
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sales/automations/analytics");
+      if (res.ok) setAnalytics(await res.json());
+    } catch {
+      // analytics are non-critical — the page still works without them
+    }
+  }, []);
+
   useEffect(() => {
     fetchRules();
-  }, [fetchRules]);
+    fetchAnalytics();
+  }, [fetchRules, fetchAnalytics]);
 
   const toggleKillSwitch = async () => {
     try {
@@ -368,6 +396,69 @@ export default function AutomationsPage() {
               </CardContent>
             </Card>
           </motion.div>
+
+          {/* Analytics panel (SW-AMK-005) */}
+          {analytics && (
+            <motion.div variants={fadeInUp}>
+              <Card className="border border-border/80 shadow-xs">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-bold flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-[#b48c3c]" />
+                    Automation Activity
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Rule evaluations over the last 30 days.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="rounded-lg border border-border/60 p-3">
+                      <p className="text-[11px] text-muted-foreground">Total evaluations</p>
+                      <p className="text-xl font-bold">{analytics.totalRuns}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 p-3">
+                      <p className="text-[11px] text-muted-foreground">Matched &amp; executed</p>
+                      <p className="text-xl font-bold">{analytics.matchedRuns}</p>
+                    </div>
+                    <div className="rounded-lg border border-border/60 p-3">
+                      <p className="text-[11px] text-muted-foreground">Match rate</p>
+                      <p className="text-xl font-bold">
+                        {analytics.totalRuns > 0
+                          ? Math.round((analytics.matchedRuns / analytics.totalRuns) * 100)
+                          : 0}
+                        %
+                      </p>
+                    </div>
+                  </div>
+
+                  {analytics.recent.length > 0 ? (
+                    <div className="rounded-lg border border-border/60 divide-y divide-border/40 max-h-64 overflow-y-auto">
+                      {analytics.recent.slice(0, 15).map((r) => (
+                        <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2 text-xs">
+                          <div className="min-w-0">
+                            <p className="font-semibold truncate">{r.rule}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {r.triggerEvent} · {new Date(r.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={`shrink-0 text-[10px] ${r.matched ? "border-emerald-300 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}`}
+                          >
+                            {r.outcome || (r.matched ? "MATCHED" : "SKIPPED")}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      No automation activity yet. Runs appear here once your rules start firing.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
 
           {/* List of Rules */}
           <motion.div variants={fadeInUp} className="grid grid-cols-1 lg:grid-cols-3 gap-6">

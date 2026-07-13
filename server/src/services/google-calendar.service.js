@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import prisma from "../lib/prisma.js";
+import { encrypt, decryptSafe } from "../lib/crypto.js";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -45,8 +46,11 @@ export async function exchangeCodeAndStore(companyId, code) {
   }
 
   const data = {
-    accessToken: tokens.access_token || "",
-    refreshToken: tokens.refresh_token || undefined, // keep prior refresh token if Google omits it
+    // OAuth tokens are encrypted at rest (AES-256-GCM). decryptSafe() on read
+    // keeps any legacy plaintext rows working and they migrate on next write.
+    accessToken: encrypt(tokens.access_token || ""),
+    // keep prior refresh token if Google omits it (undefined = Prisma no-op)
+    refreshToken: tokens.refresh_token ? encrypt(tokens.refresh_token) : undefined,
     tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
     scope: tokens.scope || SCOPES.join(" "),
     accountEmail,
@@ -66,21 +70,25 @@ export async function getAuthedClient(companyId) {
   });
   if (!conn || !conn.isActive) return null;
 
+  // Decrypt at-rest tokens (decryptSafe passes through legacy plaintext).
+  const accessToken = decryptSafe(conn.accessToken);
+  const refreshToken = conn.refreshToken ? decryptSafe(conn.refreshToken) : undefined;
+
   const client = newOAuthClient();
   client.setCredentials({
-    access_token: conn.accessToken,
-    refresh_token: conn.refreshToken || undefined,
+    access_token: accessToken,
+    refresh_token: refreshToken || undefined,
     expiry_date: conn.tokenExpiresAt ? conn.tokenExpiresAt.getTime() : undefined,
   });
 
-  // Persist tokens whenever googleapis refreshes them.
+  // Persist tokens whenever googleapis refreshes them (re-encrypted on write).
   client.on("tokens", async (tokens) => {
     try {
       await prisma.calendarConnection.update({
         where: { companyId_provider: { companyId, provider: "GOOGLE" } },
         data: {
-          accessToken: tokens.access_token || conn.accessToken,
-          ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
+          accessToken: encrypt(tokens.access_token || accessToken),
+          ...(tokens.refresh_token ? { refreshToken: encrypt(tokens.refresh_token) } : {}),
           ...(tokens.expiry_date ? { tokenExpiresAt: new Date(tokens.expiry_date) } : {}),
         },
       });

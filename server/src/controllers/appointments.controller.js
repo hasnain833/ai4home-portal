@@ -1,4 +1,6 @@
 import prisma from "../lib/prisma.js";
+import { triggerAutomation } from "../lib/automation-events.js";
+import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 
 export const getAppointments = async (req, res) => {
   try {
@@ -96,6 +98,24 @@ export const bookAppointment = async (req, res) => {
         reason: "APPOINTMENT"
       }
     });
+
+    // SW-AMK: fire the APPOINTMENT_BOOKED automation trigger (best-effort).
+    const apptLead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { companyId: true },
+    });
+    if (apptLead?.companyId) {
+      await triggerAutomation({
+        companyId: apptLead.companyId,
+        leadId,
+        event: "APPOINTMENT_BOOKED",
+        context: { appointmentId: appointment.id, bookedVia: "CTA" },
+      });
+      // SW-CRM-008: reflect the new status on the Salesforce record (gated per tenant).
+      writeBackLeadToSalesforce(apptLead.companyId, leadId, { status: "Appointment Set" }).catch((e) =>
+        console.error("[Appointment Book] Salesforce write-back failed:", e?.message || e),
+      );
+    }
 
     return res.status(201).json(appointment);
   } catch (error) {

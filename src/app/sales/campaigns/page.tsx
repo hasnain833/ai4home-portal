@@ -36,9 +36,6 @@ import {
   Pencil,
   Layers,
   Activity,
-  Settings,
-  LogOut,
-  GitBranch
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -68,14 +65,6 @@ export default function CampaignsPage() {
   const [segments, setSegments] = useState<any[]>([]);
   const [enrollMode, setEnrollMode] = useState<"leads" | "segment">("leads");
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>("");
-
-  // Campaign settings panel: exit conditions (SW-NUR-003) + version policy (SW-NUR-007)
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [exitOnReply, setExitOnReply] = useState(true);
-  const [exitOnAppointment, setExitOnAppointment] = useState(true);
-  const [exitOnStatusChange, setExitOnStatusChange] = useState<string>("");
-  const [versionPolicy, setVersionPolicy] = useState<string>("FINISH_OLD");
-  const [savingSettings, setSavingSettings] = useState(false);
 
   const fetchCampaigns = async () => {
     setLoading(true);
@@ -118,49 +107,6 @@ export default function CampaignsPage() {
     fetchDetail();
   }, [activeSeq]);
 
-  // Initialize the settings panel from the loaded campaign. Keyed on the campaign
-  // id (not the whole object) so the 3s poll doesn't overwrite in-progress edits.
-  useEffect(() => {
-    if (!activeSeqDetail) return;
-    const ec = activeSeqDetail.exitConditions || {};
-    setExitOnReply(ec.onReply !== false);
-    setExitOnAppointment(ec.onAppointment !== false);
-    setExitOnStatusChange(ec.onStatusChange || "");
-    setVersionPolicy(activeSeqDetail.versionPolicy || "FINISH_OLD");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSeqDetail?.id]);
-
-  const saveSettings = async () => {
-    if (!activeSeq) return;
-    setSavingSettings(true);
-    try {
-      const res = await fetch(`/api/sales/campaigns/${activeSeq.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          exitConditions: {
-            onReply: exitOnReply,
-            onAppointment: exitOnAppointment,
-            onStatusChange: exitOnStatusChange || null,
-          },
-          versionPolicy,
-        }),
-      });
-      if (res.ok) {
-        toast.success("Campaign settings saved.");
-        setSettingsOpen(false);
-        const rd = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
-        if (rd.ok) setActiveSeqDetail(await rd.json());
-      } else {
-        toast.error("Failed to save settings.");
-      }
-    } catch {
-      toast.error("Error saving settings.");
-    } finally {
-      setSavingSettings(false);
-    }
-  };
-
   // Polling for real-time updates when a campaign is Active or Paused
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -199,6 +145,7 @@ export default function CampaignsPage() {
         toast.error("Failed to create campaign.");
       }
     } catch (error) {
+      console.error("[sales/campaigns]", error);
       toast.error("Error creating campaign.");
     }
   };
@@ -216,6 +163,7 @@ export default function CampaignsPage() {
         toast.error("Failed to delete campaign.");
       }
     } catch (error) {
+      console.error("[sales/campaigns]", error);
       toast.error("Error deleting campaign.");
     }
   };
@@ -223,7 +171,7 @@ export default function CampaignsPage() {
   const confirmAddStep = async () => {
     if (!activeSeq || !activeSeqDetail) return;
 
-    let newSteps = [...(activeSeqDetail.steps || [])];
+    const newSteps = [...(activeSeqDetail.steps || [])];
     if (editingStepIndex !== null) {
       newSteps[editingStepIndex] = { ...newSteps[editingStepIndex], ...newStep };
     } else {
@@ -251,6 +199,7 @@ export default function CampaignsPage() {
         toast.error("Failed to save step.");
       }
     } catch (error) {
+      console.error("[sales/campaigns]", error);
       toast.error("Error saving step.");
     }
   };
@@ -273,6 +222,7 @@ export default function CampaignsPage() {
         toast.error("Failed to delete step.");
       }
     } catch (e) {
+      console.error("[sales/campaigns]", e);
       toast.error("Error deleting step.");
     }
   };
@@ -305,6 +255,7 @@ export default function CampaignsPage() {
         toast.error("Failed to launch campaign.");
       }
     } catch (e) {
+      console.error("[sales/campaigns]", e);
       toast.error("Error launching campaign.");
     }
   };
@@ -326,6 +277,7 @@ export default function CampaignsPage() {
         toast.error("Failed to pause campaign.");
       }
     } catch (e) {
+      console.error("[sales/campaigns]", e);
       toast.error("Error pausing campaign.");
     }
   };
@@ -388,6 +340,7 @@ export default function CampaignsPage() {
         toast.error("Failed to enroll leads.");
       }
     } catch (e) {
+      console.error("[sales/campaigns]", e);
       toast.error("Error enrolling leads.");
     }
   };
@@ -473,9 +426,6 @@ export default function CampaignsPage() {
                       <CardDescription className="text-xs mt-1">Multi-step drip campaign flow settings.</CardDescription>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" className="h-8 text-xs font-semibold" onClick={() => setSettingsOpen(true)}>
-                        <Settings className="h-3.5 w-3.5 mr-1" /> Settings
-                      </Button>
                       {activeSeq.status === "Completed" ? (
                         // A completed campaign is terminal — no re-enroll / re-launch.
                         <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/40">
@@ -519,7 +469,7 @@ export default function CampaignsPage() {
 
                           return (
                             <div key={step.id} className="relative">
-                              <span className={`absolute left-[-41px] top-1.5 h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isFullyCompleted ? "bg-green-500 text-white" : "bg-[#b48c3c] text-white"}`}>
+                              <span className={`absolute left-10.25 top-1.5 h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isFullyCompleted ? "bg-green-500 text-white" : "bg-[#b48c3c] text-white"}`}>
                                 {isFullyCompleted ? <CheckCircle className="h-4 w-4" /> : index + 1}
                               </span>
                               <div className={`relative p-5 border rounded-xl max-w-xl group transition-all duration-300 hover:shadow-md ${isFullyCompleted ? "bg-linear-to-br from-green-50/50 to-white border-green-200 dark:from-green-950/20 dark:to-slate-900" : "bg-linear-to-br from-white to-slate-50 border-slate-200 shadow-sm dark:from-slate-900 dark:to-slate-900/50"}`}>
@@ -692,7 +642,7 @@ export default function CampaignsPage() {
                   <div className="space-y-2">
                     <Label>Message Body</Label>
                     <textarea
-                      className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-[100px]"
+                      className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-25"
                       value={newStep.body}
                       onChange={(e) => setNewStep({ ...newStep, body: e.target.value })}
                       placeholder={`Enter ${newStep.type} message content...`}
@@ -778,7 +728,7 @@ export default function CampaignsPage() {
                       const uniqueStatuses = Array.from(new Set(leadsForEnroll.map(l => l.status).filter(Boolean)));
                       return (
                         <Select value={statusFilter} onValueChange={setStatusFilter}>
-                          <SelectTrigger className="w-[140px]">
+                          <SelectTrigger className="w-35">
                             <SelectValue placeholder="Status" />
                           </SelectTrigger>
                           <SelectContent>
@@ -887,88 +837,6 @@ export default function CampaignsPage() {
                 disabled={enrollMode === "segment" ? !selectedSegmentId : selectedLeadIds.length === 0}
               >
                 {enrollMode === "segment" ? "Enroll Segment" : `Enroll ${selectedLeadIds.length} Leads`}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Campaign Settings: exit conditions (SW-NUR-003) + version policy (SW-NUR-007) */}
-        <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Settings className="h-5 w-5 text-[#b48c3c]" /> Campaign Settings</DialogTitle>
-              <DialogDescription>
-                Control when leads automatically exit "{activeSeq?.name}" and how edits apply to leads already mid-sequence.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-6 py-2">
-              {/* Exit conditions */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  <LogOut className="h-4 w-4 text-[#b48c3c]" /> Exit Conditions
-                </div>
-                <p className="text-xs text-muted-foreground -mt-1">When one of these happens, the lead stops receiving further steps.</p>
-
-                <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
-                  <Checkbox checked={exitOnReply} onCheckedChange={(c) => setExitOnReply(!!c)} />
-                  <div>
-                    <p className="text-sm font-medium">Lead replies</p>
-                    <p className="text-xs text-muted-foreground">Exit when the lead replies to an email or SMS.</p>
-                  </div>
-                </label>
-
-                <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
-                  <Checkbox checked={exitOnAppointment} onCheckedChange={(c) => setExitOnAppointment(!!c)} />
-                  <div>
-                    <p className="text-sm font-medium">Lead books an appointment</p>
-                    <p className="text-xs text-muted-foreground">Exit when the lead books a meeting.</p>
-                  </div>
-                </label>
-
-                <div className="p-3 rounded-lg border space-y-2">
-                  <p className="text-sm font-medium">Lead status changes to</p>
-                  <Select value={exitOnStatusChange || "none"} onValueChange={(v) => setExitOnStatusChange(v === "none" ? "" : v)}>
-                    <SelectTrigger className="h-9"><SelectValue placeholder="No status-based exit" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No status-based exit</SelectItem>
-                      <SelectItem value="Nurturing">Nurturing</SelectItem>
-                      <SelectItem value="Engaged">Engaged</SelectItem>
-                      <SelectItem value="Appointment Set">Appointment Set</SelectItem>
-                      <SelectItem value="Qualified">Qualified</SelectItem>
-                      <SelectItem value="Closed Won">Closed Won</SelectItem>
-                      <SelectItem value="Closed Lost">Closed Lost</SelectItem>
-                      <SelectItem value="Unsubscribed">Unsubscribed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">Unsubscribe always exits a lead regardless of this setting.</p>
-                </div>
-              </div>
-
-              {/* Version policy */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  <GitBranch className="h-4 w-4 text-[#b48c3c]" /> Editing an Active Campaign
-                </div>
-                <Select value={versionPolicy} onValueChange={setVersionPolicy}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="FINISH_OLD">Finish on old version (safe)</SelectItem>
-                    <SelectItem value="MIGRATE">Migrate to new version</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {versionPolicy === "MIGRATE"
-                    ? "Editing steps updates this campaign in place; leads already mid-sequence pick up the new steps at their next step."
-                    : "Editing steps on a running campaign creates a new version (v2) as a draft; leads already enrolled finish the current steps."}
-                </p>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setSettingsOpen(false)} disabled={savingSettings}>Cancel</Button>
-              <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" onClick={saveSettings} disabled={savingSettings}>
-                {savingSettings ? "Saving…" : "Save Settings"}
               </Button>
             </DialogFooter>
           </DialogContent>

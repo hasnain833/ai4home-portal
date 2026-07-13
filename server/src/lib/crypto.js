@@ -11,10 +11,25 @@ const KEY =
   process.env.SALESFORCE_ENCRYPTION_KEY ||
   DEFAULT_KEY;
 
-if (KEY === DEFAULT_KEY) {
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const USING_DEFAULT_KEY = KEY === DEFAULT_KEY;
+
+if (USING_DEFAULT_KEY) {
   console.warn(
     "[crypto] APP_ENCRYPTION_KEY/SALESFORCE_ENCRYPTION_KEY is the public default — at-rest encryption of integration secrets is NOT secure. Set a strong 32-char key.",
   );
+}
+
+// Fail closed: in production we must never encrypt real secrets with the public
+// default key (that is equivalent to storing them in plaintext). Callers wrap
+// their secret writes in try/catch and surface a generic error to the user, so
+// this throws loudly for developers/logs without leaking the key.
+function assertKeyIsSecure() {
+  if (IS_PRODUCTION && USING_DEFAULT_KEY) {
+    throw new Error(
+      "[crypto] Refusing to (de)crypt integration secrets in production with the default encryption key. Set a strong APP_ENCRYPTION_KEY.",
+    );
+  }
 }
 
 const ENC_RE = /^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/i;
@@ -25,6 +40,7 @@ function getKeyBuffer() {
 
 export function encrypt(text) {
   if (text == null || text === "") return text;
+  assertKeyIsSecure();
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALGORITHM, getKeyBuffer(), iv);
   let encrypted = cipher.update(String(text), "utf8", "hex");
@@ -34,6 +50,7 @@ export function encrypt(text) {
 }
 
 export function decrypt(encryptedText) {
+  assertKeyIsSecure();
   const [ivHex, authTagHex, encrypted] = String(encryptedText).split(":");
   const decipher = createDecipheriv(ALGORITHM, getKeyBuffer(), Buffer.from(ivHex, "hex"));
   decipher.setAuthTag(Buffer.from(authTagHex, "hex"));

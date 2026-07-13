@@ -26,3 +26,14 @@ export async function findDuplicateLead(companyId, email, phone) {
   if (!rows.length) return null;
   return prisma.lead.findUnique({ where: { id: rows[0].id } });
 }
+
+// SW-LEAD-003: resolve a single field when merging an incoming import into an
+// existing lead, honoring the system-of-record. When `crmOwned` is true (the
+// existing lead is linked to Salesforce), the CRM value is authoritative and the
+// incoming value only fills a gap; otherwise the incoming value wins (falling
+// back to the existing value). Returns null when both are empty.
+export function resolveMergedField(incoming, existing, crmOwned) {
+  const inc = incoming || null;
+  const exi = existing || null;
+  return (crmOwned ? exi || inc : inc || exi) || null;
+}

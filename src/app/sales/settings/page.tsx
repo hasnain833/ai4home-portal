@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
 import MessagingSettingsTab from "@/components/sales/settings/MessagingSettingsTab";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -48,6 +47,8 @@ import {
   ArrowUpFromLine,
   ExternalLink,
   Loader2,
+  LogOut,
+  GitBranch,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -64,6 +65,7 @@ interface ConnectionStatus {
   clientIdMasked: string | null;
   syncedLeadCount?: number;
   connectedSince?: string;
+  writeBackEnabled?: boolean;
 }
 
 interface FieldMapping {
@@ -150,6 +152,13 @@ function SettingsPageContent() {
   const [voiceProfile, setVoiceProfile] = useState("professional");
   const [maxSmsPerHour, setMaxSmsPerHour] = useState(60);
   const [complianceOptInRequired, setComplianceOptInRequired] = useState(true);
+
+  // ─── Campaign Behavior (company-wide exit conditions + version policy) ──────
+  const [campaignExitOnReply, setCampaignExitOnReply] = useState(true);
+  const [campaignExitOnAppointment, setCampaignExitOnAppointment] = useState(true);
+  const [campaignExitOnStatus, setCampaignExitOnStatus] = useState("");
+  const [campaignVersionPolicy, setCampaignVersionPolicy] = useState("FINISH_OLD");
+  const [savingCampaignBehavior, setSavingCampaignBehavior] = useState(false);
   const [savingOutreach, setSavingOutreach] = useState(false);
   const [suppressionList, setSuppressionList] = useState<{ id: string; value: string; reason: string; createdAt: string }[]>([]);
   const [loadingSuppression, setLoadingSuppression] = useState(false);
@@ -235,6 +244,11 @@ function SettingsPageContent() {
           if (data.voiceProfile) setVoiceProfile(data.voiceProfile);
           if (data.maxSmsPerHour !== undefined) setMaxSmsPerHour(data.maxSmsPerHour);
           if (data.complianceOptInRequired !== undefined) setComplianceOptInRequired(data.complianceOptInRequired);
+          const ec = data.campaignExitConditions || {};
+          setCampaignExitOnReply(ec.onReply !== false);
+          setCampaignExitOnAppointment(ec.onAppointment !== false);
+          setCampaignExitOnStatus(ec.onStatusChange || "");
+          if (data.campaignVersionPolicy) setCampaignVersionPolicy(data.campaignVersionPolicy);
         }
       }
     } catch (error) {
@@ -292,9 +306,41 @@ function SettingsPageContent() {
         showToast(data.message || "Failed to save settings", "error");
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Error saving outreach settings", "error");
     } finally {
       setSavingOutreach(false);
+    }
+  };
+
+  // SW-NUR: save the company-wide campaign behavior. The server also propagates
+  // it to every existing campaign.
+  const handleSaveCampaignBehavior = async () => {
+    setSavingCampaignBehavior(true);
+    try {
+      const res = await fetch("/api/company", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaignExitConditions: {
+            onReply: campaignExitOnReply,
+            onAppointment: campaignExitOnAppointment,
+            onStatusChange: campaignExitOnStatus || null,
+          },
+          campaignVersionPolicy,
+        }),
+      });
+      if (res.ok) {
+        showToast("Campaign behavior saved and applied to all campaigns.");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.message || "Failed to save campaign behavior", "error");
+      }
+    } catch (error) {
+      console.error("[sales/settings] campaign behavior save failed:", error);
+      showToast("Error saving campaign behavior", "error");
+    } finally {
+      setSavingCampaignBehavior(false);
     }
   };
 
@@ -323,6 +369,7 @@ function SettingsPageContent() {
         showToast(data.message || "Failed to add to suppression list", "error");
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Error adding to suppression list", "error");
     } finally {
       setAddingSuppression(false);
@@ -352,6 +399,7 @@ function SettingsPageContent() {
         showToast(data.message || "Failed to delete", "error");
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Error deleting suppression item", "error");
     }
   };
@@ -417,6 +465,7 @@ function SettingsPageContent() {
         showToast(data.message || "Failed to initiate OAuth", "error");
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Failed to connect to Salesforce", "error");
     } finally {
       setConnecting(false);
@@ -443,6 +492,7 @@ function SettingsPageContent() {
         showToast(data.message || "Disconnect failed", "error");
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Disconnect failed", "error");
     } finally {
       setDisconnecting(false);
@@ -468,6 +518,7 @@ function SettingsPageContent() {
         fetchLogs();
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Bulk import failed — check console for details", "error");
     } finally {
       setBulkIngesting(false);
@@ -490,6 +541,7 @@ function SettingsPageContent() {
         fetchLogs();
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Sync failed", "error");
     } finally {
       setSyncingIncremental(false);
@@ -506,6 +558,28 @@ function SettingsPageContent() {
       fetchStatus();
     } catch (error) {
       console.error("Failed to update sync interval:", error);
+    }
+  };
+
+  // SW-CRM-008: toggle outbound write-back (status/consent → Salesforce).
+  const handleWriteBackToggle = async (enabled: boolean) => {
+    // Optimistic update; revert on failure.
+    setConnectionStatus((prev) => (prev ? { ...prev, writeBackEnabled: enabled } : prev));
+    try {
+      const res = await fetch("/api/sales/salesforce/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ writeBackEnabled: enabled }),
+      });
+      if (!res.ok) throw new Error("request failed");
+      showToast(
+        enabled ? "Salesforce write-back enabled." : "Salesforce write-back disabled.",
+      );
+      fetchStatus();
+    } catch (error) {
+      console.error("[sales/settings] write-back toggle failed:", error);
+      setConnectionStatus((prev) => (prev ? { ...prev, writeBackEnabled: !enabled } : prev));
+      showToast("Couldn't update write-back setting. Please try again.", "error");
     }
   };
 
@@ -538,6 +612,7 @@ function SettingsPageContent() {
         showToast(data.message || "Failed to save mapping", "error");
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Failed to save mapping", "error");
     } finally {
       setSavingMapping(false);
@@ -556,6 +631,7 @@ function SettingsPageContent() {
         fetchMappings();
       }
     } catch (error) {
+      console.error("[sales/settings]", error);
       showToast("Failed to delete mapping", "error");
     }
   };
@@ -653,7 +729,7 @@ function SettingsPageContent() {
             <motion.div variants={fadeInUp}>
               <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-4 max-w-2xl h-10">
                 <TabsTrigger value="crm" className="text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
-                <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Consent</TabsTrigger>
+                <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
                 <TabsTrigger value="messaging" className="text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
                 <TabsTrigger value="fields" className="text-xs font-semibold rounded-lg">Custom Fields</TabsTrigger>
               </TabsList>
@@ -751,6 +827,26 @@ function SettingsPageContent() {
                             )}
                           </div>
                         </div>
+                      </div>
+
+                      {/* SW-CRM-008: outbound write-back toggle */}
+                      <div className="flex items-start justify-between gap-4 rounded-lg border border-border/60 p-4">
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Write changes back to Salesforce</p>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed max-w-md">
+                            When enabled, lead status changes, consent/opt-outs, and appointment bookings made in the portal are pushed back to the linked Salesforce record. Off by default.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={!isConnected}
+                          onClick={() => handleWriteBackToggle(!connectionStatus?.writeBackEnabled)}
+                          className={`shrink-0 h-8 text-xs font-semibold ${connectionStatus?.writeBackEnabled ? "border-emerald-300 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}`}
+                        >
+                          {connectionStatus?.writeBackEnabled ? "Enabled" : "Disabled"}
+                        </Button>
                       </div>
 
                       {/* Synced Leads Count */}
@@ -965,7 +1061,8 @@ function SettingsPageContent() {
 
             {/* TAB 2: OUTREACH & COMPLIANCE */}
             <TabsContent value="outreach" className="space-y-6 focus-visible:outline-hidden">
-              <Card className="border border-border/80 shadow-xs max-w-3xl">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              <Card className="border border-border/80 shadow-xs">
                 <CardHeader>
                   <CardTitle className="text-sm font-bold flex items-center gap-2">
                     <Shield className="h-4.5 w-4.5 text-[#b48c3c]" />
@@ -1059,8 +1156,91 @@ function SettingsPageContent() {
                 </CardContent>
               </Card>
 
+              {/* Campaign Behavior Card (SW-NUR — company-wide exit conditions + version policy) */}
+              <Card className="border border-border/80 shadow-xs">
+                <CardHeader>
+                  <CardTitle className="text-sm font-bold flex items-center gap-2">
+                    <SlidersHorizontal className="h-4.5 w-4.5 text-[#b48c3c]" />
+                    Campaign Behavior
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Applies to <strong>every</strong> campaign — controls when leads automatically exit a sequence and how edits to a running campaign roll out.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-5 space-y-6">
+                  {/* Exit conditions */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      <LogOut className="h-4 w-4 text-[#b48c3c]" /> Exit Conditions
+                    </div>
+                    <p className="text-xs text-muted-foreground -mt-1">When one of these happens, the lead stops receiving further steps.</p>
+
+                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
+                      <input type="checkbox" className="h-4 w-4 accent-[#b48c3c]" checked={campaignExitOnReply} onChange={(e) => setCampaignExitOnReply(e.target.checked)} />
+                      <div>
+                        <p className="text-sm font-medium">Lead replies</p>
+                        <p className="text-xs text-muted-foreground">Exit when the lead replies to an email or SMS.</p>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
+                      <input type="checkbox" className="h-4 w-4 accent-[#b48c3c]" checked={campaignExitOnAppointment} onChange={(e) => setCampaignExitOnAppointment(e.target.checked)} />
+                      <div>
+                        <p className="text-sm font-medium">Lead books an appointment</p>
+                        <p className="text-xs text-muted-foreground">Exit when the lead books a meeting.</p>
+                      </div>
+                    </label>
+
+                    <div className="p-3 rounded-lg border space-y-2">
+                      <p className="text-sm font-medium">Lead status changes to</p>
+                      <Select value={campaignExitOnStatus || "none"} onValueChange={(v) => setCampaignExitOnStatus(v === "none" ? "" : v)}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="No status-based exit" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No status-based exit</SelectItem>
+                          <SelectItem value="Nurturing">Nurturing</SelectItem>
+                          <SelectItem value="Engaged">Engaged</SelectItem>
+                          <SelectItem value="Appointment Set">Appointment Set</SelectItem>
+                          <SelectItem value="Qualified">Qualified</SelectItem>
+                          <SelectItem value="Closed Won">Closed Won</SelectItem>
+                          <SelectItem value="Closed Lost">Closed Lost</SelectItem>
+                          <SelectItem value="Unsubscribed">Unsubscribed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Unsubscribe always exits a lead regardless of this setting.</p>
+                    </div>
+                  </div>
+
+                  {/* Version policy */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      <GitBranch className="h-4 w-4 text-[#b48c3c]" /> Editing an Active Campaign
+                    </div>
+                    <Select value={campaignVersionPolicy} onValueChange={setCampaignVersionPolicy}>
+                      <SelectTrigger className="h-9 max-w-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="FINISH_OLD">Finish on old version (safe)</SelectItem>
+                        <SelectItem value="MIGRATE">Migrate to new version</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {campaignVersionPolicy === "MIGRATE"
+                        ? "Editing steps updates a campaign in place; leads already mid-sequence pick up the new steps at their next step."
+                        : "Editing steps on a running campaign creates a new version (v2) as a draft; leads already enrolled finish the current steps."}
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <Button onClick={handleSaveCampaignBehavior} disabled={savingCampaignBehavior} className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 border-none text-xs h-9 px-4">
+                      {savingCampaignBehavior && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+                      Save Campaign Behavior
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+              </div>
+
               {/* Suppression List Card */}
-              <Card className="border border-border/80 shadow-xs max-w-3xl mt-6">
+              <Card className="border border-border/80 shadow-xs mt-6">
                 <CardHeader>
                   <CardTitle className="text-sm font-bold flex items-center gap-2">
                     <Database className="h-4.5 w-4.5 text-red-500" />

@@ -6,6 +6,8 @@ import { MailService } from "./mail-service.js";
 import { sendSms } from "./sms.service.js";
 import { ComplianceService } from "./compliance-service.js";
 import { getMessagingConfig } from "../lib/messaging-config.js";
+import { triggerAutomation } from "../lib/automation-events.js";
+import { writeBackLeadToSalesforce } from "./salesforce-writeback.js";
 
 const DEFAULTS = {
   dayStart: "09:00",
@@ -168,6 +170,19 @@ export async function bookSlot({
 
   await sendConfirmations(lead, appointment, tz).catch((e) =>
     console.error("[Scheduling] confirmation send failed:", e.message)
+  );
+
+  // SW-AMK: fire the APPOINTMENT_BOOKED automation trigger (best-effort).
+  await triggerAutomation({
+    companyId: lead.companyId,
+    leadId,
+    event: "APPOINTMENT_BOOKED",
+    context: { appointmentId: appointment.id, bookedVia },
+  });
+
+  // SW-CRM-008: reflect the new status on the Salesforce record (gated per tenant).
+  writeBackLeadToSalesforce(lead.companyId, leadId, { status: "Appointment Set" }).catch((e) =>
+    console.error("[Scheduling] Salesforce write-back failed:", e?.message || e),
   );
 
   return { success: true, appointment };

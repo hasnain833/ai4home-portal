@@ -163,6 +163,7 @@ export default function CompanyPage() {
         showToast("error", "Failed to save information");
       }
     } catch (error) {
+      console.error("[warranty/company]", error);
       showToast("error", "Error connecting to server");
     } finally {
       setSavingInfo(false);
@@ -188,6 +189,7 @@ export default function CompanyPage() {
         showToast("error", "Failed to save policy");
       }
     } catch (error) {
+      console.error("[warranty/company]", error);
       showToast("error", "Error connecting to server");
     } finally {
       setSavingPolicy(false);
@@ -224,6 +226,7 @@ export default function CompanyPage() {
         showToast("error", err.message || "Failed to upload logo");
       }
     } catch (error) {
+      console.error("[warranty/company]", error);
       showToast("error", "Error connecting to server during upload");
     } finally {
       setUploadingLogo(false);
