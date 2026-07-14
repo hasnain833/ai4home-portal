@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DEFAULT_LEAD_STATUSES, statusColor, resolveLeadStatuses } from "@/lib/lead-statuses";
 import {
   Select,
   SelectContent,
@@ -71,20 +72,11 @@ interface Lead {
   owner?: { name: string; email: string } | null;
 }
 
-const statusColors: Record<string, string> = {
-  New: "bg-blue-50 text-blue-700 border-blue-200/50 dark:bg-blue-900/20 dark:text-blue-300",
-  Nurturing: "bg-slate-50 text-slate-700 border-slate-200/50 dark:bg-slate-900/20 dark:text-slate-300",
-  Engaged: "bg-amber-50 text-amber-700 border-amber-200/50 dark:bg-amber-900/20 dark:text-amber-300",
-  "Appointment Set": "bg-purple-50 text-purple-700 border-purple-200/50 dark:bg-purple-900/20 dark:text-purple-300",
-  Qualified: "bg-emerald-50 text-emerald-700 border-emerald-200/50 dark:bg-emerald-900/20 dark:text-emerald-300",
-  "Closed Won": "bg-green-50 text-green-700 border-green-200/50 dark:bg-green-900/20 dark:text-green-300",
-  "Closed Lost": "bg-rose-50 text-rose-700 border-rose-200/50 dark:bg-rose-900/20 dark:text-rose-300",
-  Unsubscribed: "bg-gray-50 text-gray-700 border-gray-200/50 dark:bg-gray-900/20 dark:text-gray-300"
-};
-
 export default function LeadsPage() {
   const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
+  // SW-LEAD-006: pipeline statuses are tenant-configurable (Company.leadStatuses).
+  const [statuses, setStatuses] = useState<string[]>(DEFAULT_LEAD_STATUSES);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -164,6 +156,14 @@ export default function LeadsPage() {
   useEffect(() => {
     fetchLeads();
   }, [fetchLeads]);
+
+  // Load the tenant's configured lead statuses (falls back to defaults).
+  useEffect(() => {
+    fetch("/api/company")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setStatuses(resolveLeadStatuses(data?.leadStatuses)))
+      .catch(() => {});
+  }, []);
 
   // Unique tags across all leads for dropdown filter
   const uniqueTags = useMemo(() => {
@@ -532,14 +532,9 @@ export default function LeadsPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="New">New</SelectItem>
-                      <SelectItem value="Nurturing">Nurturing</SelectItem>
-                      <SelectItem value="Engaged">Engaged</SelectItem>
-                      <SelectItem value="Appointment Set">Appointment Set</SelectItem>
-                      <SelectItem value="Qualified">Qualified</SelectItem>
-                      <SelectItem value="Closed Won">Closed Won</SelectItem>
-                      <SelectItem value="Closed Lost">Closed Lost</SelectItem>
-                      <SelectItem value="Unsubscribed">Unsubscribed</SelectItem>
+                      {statuses.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -603,7 +598,7 @@ export default function LeadsPage() {
                             {lead.phone || "—"}
                           </TableCell>
                           <TableCell className="py-3 px-4 align-middle">
-                            <Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold border ${statusColors[lead.status]}`}>
+                            <Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold border ${statusColor(lead.status)}`}>
                               {lead.status}
                             </Badge>
                           </TableCell>
@@ -750,11 +745,9 @@ export default function LeadsPage() {
                   <Select value={manualForm.status} onValueChange={(val) => setManualForm(f => ({ ...f, status: val }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="New">New</SelectItem>
-                      <SelectItem value="Nurturing">Nurturing</SelectItem>
-                      <SelectItem value="Engaged">Engaged</SelectItem>
-                      <SelectItem value="Appointment Set">Appointment Set</SelectItem>
-                      <SelectItem value="Qualified">Qualified</SelectItem>
+                      {statuses.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

@@ -73,22 +73,19 @@ model Company {
   salesBrandProfile       Json?
   maxSmsPerHour           Int                     @default(60)
   complianceOptInRequired Boolean                 @default(true)
-  // New tenants start with sales OFF — the Super Admin turns it on after purchase.
+  smsQuietHoursEnabled    Boolean                 @default(true)
+  quietHoursStart         Int                     @default(8)
+  quietHoursEnd           Int                     @default(21)
+  quietHoursTimezone      String?
+  leadStatuses            Json?
   salesEnabled            Boolean                 @default(false)
   warrantyEnabled         Boolean                 @default(true)
-  // Tenant onboarding / document verification gate.
-  // PENDING  -> just signed up, warranty workspace is blurred/locked
-  // SUBMITTED -> tenant uploaded a verification document, awaiting Super Admin review
-  // VERIFIED  -> Super Admin approved, warranty workspace unlocked
   verificationStatus      String                  @default("PENDING")
   verificationDocUrl      String?
   verificationSubmittedAt DateTime?
   verifiedAt              DateTime?
-  // SW-AMK-004: automation safety controls
   automationsKillSwitch   Boolean                 @default(false)
   automationDailyCap      Int                     @default(1000)
-  // SW-NUR: company-wide campaign behavior (exit conditions + version policy).
-  // Applies to every campaign; edited on the Settings page (was per-campaign).
   campaignExitConditions  Json?
   campaignVersionPolicy   String                  @default("FINISH_OLD")
   marketingRules          MarketingRule[]
@@ -252,8 +249,6 @@ model Lead {
   consentSource           String?
   consentTimestamp        DateTime?
   customFields            Json?
-  // SW-CRM-006: set when the source Salesforce record is deleted (soft-archive;
-  // the local lead is retained for history but hidden from active lists/sends).
   archived                Boolean                  @default(false)
   archivedAt              DateTime?
   timeline                LeadTimeline[]
@@ -287,7 +282,7 @@ model LeadSegment {
   companyId String
   company   Company  @relation(fields: [companyId], references: [id])
   name      String
-  filters   Json // Dynamic JSON rules
+  filters   Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -339,7 +334,6 @@ model SalesforceConnection {
   lastSyncAt      DateTime?
   lastSyncStatus  String?
   lastSyncMessage String?   @db.Text
-  // SW-CRM-008: outbound write-back to Salesforce, off by default (per-tenant gate).
   writeBackEnabled Boolean  @default(false)
   lastWriteBackAt DateTime?
   createdAt       DateTime  @default(now())
@@ -536,11 +530,11 @@ model MarketingRule {
   company         Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name            String
   description     String?            @db.Text
-  triggerEvent    String // LEAD_REPLIED | CRM_INGEST | STATUS_CHANGE | MANUAL_CREATION | APPOINTMENT_BOOKED
-  conditions      Json               @default("[]") // [{ field, operator, value }]
-  actions         Json               @default("[]") // [{ type, params }]
+  triggerEvent    String
+  conditions      Json               @default("[]") 
+  actions         Json               @default("[]") 
   isActive        Boolean            @default(false)
-  cooldownHours   Int                @default(24) // SW-AMK-003 loop prevention
+  cooldownHours   Int                @default(24) 
   rateLimitCount  Int                @default(0)
   rateLimitWindow String             @default("DAY")
   runCount        Int                @default(0)
@@ -563,7 +557,7 @@ model MarketingRuleRun {
   triggerEvent String
   matched      Boolean       @default(false)
   actionsTaken Json?
-  outcome      String? // MATCHED | SKIPPED_CONDITIONS | SKIPPED_COOLDOWN | ERROR
+  outcome      String? 
   createdAt    DateTime      @default(now())
 
   @@index([ruleId, leadId, createdAt])

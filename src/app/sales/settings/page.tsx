@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import MessagingSettingsTab from "@/components/sales/settings/MessagingSettingsTab";
+import { DEFAULT_LEAD_STATUSES } from "@/lib/lead-statuses";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -41,14 +42,13 @@ import {
   Trash2,
   Clock,
   Key,
-  AlertTriangle,
   History,
   ArrowDownToLine,
   ArrowUpFromLine,
   ExternalLink,
   Loader2,
-  LogOut,
-  GitBranch,
+  Copy,
+  Check,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -88,13 +88,6 @@ interface SyncLogEntry {
   createdAt: string;
 }
 
-interface CustomField {
-  id: string;
-  name: string;
-  type: "TEXT" | "NUMBER" | "BOOLEAN" | "DATE";
-  isRequired: boolean;
-}
-
 // ─── Animation Variants ───────────────────────────────────────────────────────
 
 const fadeInUp = {
@@ -109,10 +102,6 @@ const staggerContainer = {
     transition: { staggerChildren: 0.05 }
   }
 };
-
-// ─── Custom Fields (local state, preserved from original) ─────────────────────
-
-const initialCustomFields: CustomField[] = [];
 
 function SettingsPageContent() {
   const searchParams = useSearchParams();
@@ -131,6 +120,22 @@ function SettingsPageContent() {
   const [sfClientId, setSfClientId] = useState("");
   const [sfClientSecret, setSfClientSecret] = useState("");
   const [sfEnvironment, setSfEnvironment] = useState<"sandbox" | "production">("sandbox");
+  const [copiedRedirect, setCopiedRedirect] = useState(false);
+
+  // The exact callback URL that must be registered in the Salesforce Connected
+  // App — mirrors the redirect_uri the backend sends (derived from the origin).
+  const redirectUri =
+    typeof window !== "undefined" ? `${window.location.origin}/api/sales/salesforce/callback` : "";
+
+  const copyRedirectUri = async () => {
+    try {
+      await navigator.clipboard.writeText(redirectUri);
+      setCopiedRedirect(true);
+      setTimeout(() => setCopiedRedirect(false), 2000);
+    } catch {
+      showToast("Couldn't copy — copy it manually.", "error");
+    }
+  };
 
   // ─── Field Mappings State ────────────────────────────────────────────────
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
@@ -150,15 +155,19 @@ function SettingsPageContent() {
   const [defaultOwner, setDefaultOwner] = useState("Unassigned");
   const [teamMembers, setTeamMembers] = useState<{ id: string; name: string | null; email: string }[]>([]);
   const [voiceProfile, setVoiceProfile] = useState("professional");
-  const [maxSmsPerHour, setMaxSmsPerHour] = useState(60);
   const [complianceOptInRequired, setComplianceOptInRequired] = useState(true);
 
-  // ─── Campaign Behavior (company-wide exit conditions + version policy) ──────
-  const [campaignExitOnReply, setCampaignExitOnReply] = useState(true);
-  const [campaignExitOnAppointment, setCampaignExitOnAppointment] = useState(true);
-  const [campaignExitOnStatus, setCampaignExitOnStatus] = useState("");
-  const [campaignVersionPolicy, setCampaignVersionPolicy] = useState("FINISH_OLD");
-  const [savingCampaignBehavior, setSavingCampaignBehavior] = useState(false);
+  // ─── SMS Quiet Hours (SW-ANN — tenant-configurable, not hardcoded) ─────────
+  const [smsQuietHoursEnabled, setSmsQuietHoursEnabled] = useState(true);
+  const [quietHoursStart, setQuietHoursStart] = useState(8);
+  const [quietHoursEnd, setQuietHoursEnd] = useState(21);
+  const [quietHoursTimezone, setQuietHoursTimezone] = useState("");
+
+  // ─── Lead Lifecycle Statuses (SW-LEAD-006 — tenant-configurable) ───────────
+  const [leadStatuses, setLeadStatuses] = useState<string[]>([]);
+  const [newStatus, setNewStatus] = useState("");
+  const [savingStatuses, setSavingStatuses] = useState(false);
+
   const [savingOutreach, setSavingOutreach] = useState(false);
   const [suppressionList, setSuppressionList] = useState<{ id: string; value: string; reason: string; createdAt: string }[]>([]);
   const [loadingSuppression, setLoadingSuppression] = useState(false);
@@ -168,12 +177,6 @@ function SettingsPageContent() {
   const [suppressionSearch, setSuppressionSearch] = useState("");
   const [suppressionPage, setSuppressionPage] = useState(1);
   const [suppressionTotalPages, setSuppressionTotalPages] = useState(1);
-
-  // ─── Custom Fields State ──────────────────────────────────────────────────
-  const [customFields, setCustomFields] = useState<CustomField[]>(initialCustomFields);
-  const [newFieldName, setNewFieldName] = useState("");
-  const [newFieldType, setNewFieldType] = useState<CustomField["type"]>("TEXT");
-  const [newFieldRequired, setNewFieldRequired] = useState(false);
 
   // ─── Toast / Notifications ────────────────────────────────────────────────
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -242,13 +245,16 @@ function SettingsPageContent() {
         if (data) {
           if (data.defaultLeadOwner) setDefaultOwner(data.defaultLeadOwner);
           if (data.voiceProfile) setVoiceProfile(data.voiceProfile);
-          if (data.maxSmsPerHour !== undefined) setMaxSmsPerHour(data.maxSmsPerHour);
           if (data.complianceOptInRequired !== undefined) setComplianceOptInRequired(data.complianceOptInRequired);
-          const ec = data.campaignExitConditions || {};
-          setCampaignExitOnReply(ec.onReply !== false);
-          setCampaignExitOnAppointment(ec.onAppointment !== false);
-          setCampaignExitOnStatus(ec.onStatusChange || "");
-          if (data.campaignVersionPolicy) setCampaignVersionPolicy(data.campaignVersionPolicy);
+          if (data.smsQuietHoursEnabled !== undefined) setSmsQuietHoursEnabled(data.smsQuietHoursEnabled);
+          if (data.quietHoursStart !== undefined) setQuietHoursStart(data.quietHoursStart);
+          if (data.quietHoursEnd !== undefined) setQuietHoursEnd(data.quietHoursEnd);
+          if (data.quietHoursTimezone) setQuietHoursTimezone(data.quietHoursTimezone);
+          if (Array.isArray(data.leadStatuses) && data.leadStatuses.length) {
+            setLeadStatuses(data.leadStatuses.map((s: unknown) => String(s)));
+          } else {
+            setLeadStatuses([...DEFAULT_LEAD_STATUSES]);
+          }
         }
       }
     } catch (error) {
@@ -294,8 +300,11 @@ function SettingsPageContent() {
         body: JSON.stringify({
           defaultLeadOwner: defaultOwner,
           voiceProfile,
-          maxSmsPerHour,
           complianceOptInRequired,
+          smsQuietHoursEnabled,
+          quietHoursStart,
+          quietHoursEnd,
+          quietHoursTimezone: quietHoursTimezone || null,
         }),
       });
 
@@ -313,35 +322,57 @@ function SettingsPageContent() {
     }
   };
 
-  // SW-NUR: save the company-wide campaign behavior. The server also propagates
-  // it to every existing campaign.
-  const handleSaveCampaignBehavior = async () => {
-    setSavingCampaignBehavior(true);
+  // SW-LEAD-006: persist the tenant's lead lifecycle status set.
+  const handleSaveLeadStatuses = async () => {
+    const cleaned = leadStatuses.map((s) => s.trim()).filter(Boolean);
+    if (cleaned.length === 0) {
+      showToast("Add at least one lead status", "error");
+      return;
+    }
+    setSavingStatuses(true);
     try {
       const res = await fetch("/api/company", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          campaignExitConditions: {
-            onReply: campaignExitOnReply,
-            onAppointment: campaignExitOnAppointment,
-            onStatusChange: campaignExitOnStatus || null,
-          },
-          campaignVersionPolicy,
-        }),
+        body: JSON.stringify({ leadStatuses: cleaned }),
       });
       if (res.ok) {
-        showToast("Campaign behavior saved and applied to all campaigns.");
+        showToast("Lead statuses saved.");
       } else {
         const data = await res.json().catch(() => ({}));
-        showToast(data.message || "Failed to save campaign behavior", "error");
+        showToast(data.message || "Failed to save lead statuses", "error");
       }
     } catch (error) {
-      console.error("[sales/settings] campaign behavior save failed:", error);
-      showToast("Error saving campaign behavior", "error");
+      console.error("[sales/settings] lead statuses save failed:", error);
+      showToast("Error saving lead statuses", "error");
     } finally {
-      setSavingCampaignBehavior(false);
+      setSavingStatuses(false);
     }
+  };
+
+  const addLeadStatus = () => {
+    const label = newStatus.trim();
+    if (!label) return;
+    if (leadStatuses.some((s) => s.toLowerCase() === label.toLowerCase())) {
+      showToast("That status already exists", "error");
+      return;
+    }
+    setLeadStatuses((prev) => [...prev, label]);
+    setNewStatus("");
+  };
+
+  const removeLeadStatus = (label: string) => {
+    setLeadStatuses((prev) => prev.filter((s) => s !== label));
+  };
+
+  const moveLeadStatus = (index: number, dir: -1 | 1) => {
+    setLeadStatuses((prev) => {
+      const next = [...prev];
+      const target = index + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   };
 
   const handleAddSuppression = async () => {
@@ -636,29 +667,6 @@ function SettingsPageContent() {
     }
   };
 
-  // ─── Custom Fields Handlers (preserved) ───────────────────────────────────
-
-  const handleAddCustomField = () => {
-    if (!newFieldName.trim()) return;
-    const formattedName = newFieldName
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .replace(/^\w/, c => c.toUpperCase());
-
-    const newField: CustomField = {
-      id: `CF-${Math.floor(100 + Math.random() * 900)}`,
-      name: formattedName,
-      type: newFieldType,
-      isRequired: newFieldRequired
-    };
-    setCustomFields(prev => [...prev, newField]);
-    setNewFieldName("");
-    setNewFieldRequired(false);
-  };
-
-  const handleDeleteCustomField = (id: string) => {
-    setCustomFields(prev => prev.filter(f => f.id !== id));
-  };
-
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   const isConnected = connectionStatus?.connected ?? false;
@@ -730,14 +738,121 @@ function SettingsPageContent() {
               <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-4 max-w-2xl h-10">
                 <TabsTrigger value="crm" className="text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
                 <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
+                <TabsTrigger value="pipeline" className="text-xs font-semibold rounded-lg">Lead Pipeline</TabsTrigger>
                 <TabsTrigger value="messaging" className="text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
-                <TabsTrigger value="fields" className="text-xs font-semibold rounded-lg">Custom Fields</TabsTrigger>
               </TabsList>
             </motion.div>
 
             {/* TAB: MESSAGING (EMAIL & SMS) */}
             <TabsContent value="messaging" className="space-y-6 focus-visible:outline-none">
               <MessagingSettingsTab />
+            </TabsContent>
+
+            {/* TAB: LEAD PIPELINE (SW-LEAD-006 — tenant-configurable statuses) */}
+            <TabsContent value="pipeline" className="space-y-6 focus-visible:outline-hidden">
+              <Card className="border border-border/80 shadow-xs max-w-2xl">
+                <CardHeader>
+                  <CardTitle className="text-sm font-bold flex items-center gap-2">
+                    <SlidersHorizontal className="h-4.5 w-4.5 text-[#b48c3c]" />
+                    Lead Lifecycle Statuses
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Define the pipeline stages your team uses. These appear in the lead table, filters, and status dropdowns. Reorder to match your funnel.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-5 space-y-4">
+                  <div className="space-y-2">
+                    {leadStatuses.map((status, idx) => (
+                      <div
+                        key={status}
+                        className="flex items-center gap-2 rounded-lg border p-2 pl-3 bg-slate-50/40 dark:bg-slate-900/20"
+                      >
+                        <span className="flex-1 text-xs font-medium">{status}</span>
+                        <div className="flex items-center gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground"
+                            disabled={idx === 0}
+                            onClick={() => moveLeadStatus(idx, -1)}
+                            title="Move up"
+                          >
+                            <ArrowUpFromLine className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground"
+                            disabled={idx === leadStatuses.length - 1}
+                            onClick={() => moveLeadStatus(idx, 1)}
+                            title="Move down"
+                          >
+                            <ArrowDownToLine className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-red-500 hover:bg-red-500/10"
+                            disabled={leadStatuses.length <= 1}
+                            onClick={() => removeLeadStatus(status)}
+                            title="Remove"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    {leadStatuses.length === 0 && (
+                      <p className="text-xs text-muted-foreground py-4 text-center">No statuses yet — add one below.</p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <Input
+                      value={newStatus}
+                      onChange={(e) => setNewStatus(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addLeadStatus();
+                        }
+                      }}
+                      placeholder="Add a status (e.g. Proposal Sent)"
+                      className="h-9 text-xs"
+                      maxLength={40}
+                    />
+                    <Button
+                      onClick={addLeadStatus}
+                      variant="outline"
+                      className="h-9 text-xs gap-1.5 shrink-0"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-muted-foreground"
+                      onClick={() => setLeadStatuses([...DEFAULT_LEAD_STATUSES])}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Reset to defaults
+                    </Button>
+                    <Button
+                      onClick={handleSaveLeadStatuses}
+                      disabled={savingStatuses}
+                      className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 border-none text-xs h-9 px-4"
+                    >
+                      {savingStatuses && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+                      Save Statuses
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Note: changing labels here doesn&apos;t rewrite statuses already stored on existing leads. Existing values remain valid and are still shown.
+                  </p>
+                </CardContent>
+              </Card>
             </TabsContent>
 
             {/* TAB 1: CRM & SALESFORCE CONNECTOR */}
@@ -1101,45 +1216,88 @@ function SettingsPageContent() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="throttle" className="font-semibold text-xs">Max Outbound SMS Throttle (Per Hour)</Label>
-                      <Input
-                        id="throttle"
-                        type="number"
-                        value={maxSmsPerHour}
-                        onChange={(e) => setMaxSmsPerHour(parseInt(e.target.value) || 0)}
-                        className="h-9 text-xs"
+                  <div className="space-y-1.5">
+                    <Label className="font-semibold text-xs block mb-2">Consent Validation Enforcement</Label>
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="checkbox"
+                        id="consentEnforce"
+                        checked={complianceOptInRequired}
+                        onChange={(e) => setComplianceOptInRequired(e.target.checked)}
+                        className="h-4 w-4 text-[#b48c3c] rounded"
                       />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label className="font-semibold text-xs block mb-2">Consent Validation Enforcement</Label>
-                      <div className="flex items-center gap-2 pt-1">
-                        <input
-                          type="checkbox"
-                          id="consentEnforce"
-                          checked={complianceOptInRequired}
-                          onChange={(e) => setComplianceOptInRequired(e.target.checked)}
-                          className="h-4 w-4 text-[#b48c3c] rounded"
-                        />
-                        <Label htmlFor="consentEnforce" className="text-xs cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                          Block automated SMS if smsOptIn !== true
-                        </Label>
-                      </div>
+                      <Label htmlFor="consentEnforce" className="text-xs cursor-pointer font-medium text-slate-700 dark:text-slate-300">
+                        Block automated SMS if smsOptIn !== true
+                      </Label>
                     </div>
                   </div>
 
                   <Separator />
 
-                  <div className="bg-amber-50 dark:bg-amber-950/20 p-4 border border-amber-200/50 rounded-xl space-y-1 text-slate-800 dark:text-slate-300">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4.5 w-4.5 text-amber-600 shrink-0" />
-                      <h5 className="font-bold text-xs">TCPA / SMS Marketing Compliance Note</h5>
+                  {/* SW-ANN: tenant-configurable SMS quiet hours (no hardcoded window). */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-[#b48c3c]" />
+                        <Label className="font-semibold text-xs">SMS Quiet Hours</Label>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={smsQuietHoursEnabled}
+                          onChange={(e) => setSmsQuietHoursEnabled(e.target.checked)}
+                          className="h-4 w-4 accent-[#b48c3c]"
+                        />
+                        <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                          {smsQuietHoursEnabled ? "Enforced" : "Off (send anytime)"}
+                        </span>
+                      </label>
                     </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed pl-6">
-                      Quiet Hours are strictly locked in accordance with US Federal laws (9 PM to 8 AM local recipient time). Even if a workflow action is triggered, outreach messages will be automatically delayed and scheduled to deliver during the active next window.
-                    </p>
+
+                    {smsQuietHoursEnabled ? (
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-[11px] font-medium text-muted-foreground">Send from (hour)</Label>
+                          <Select value={String(quietHoursStart)} onValueChange={(v) => setQuietHoursStart(parseInt(v))}>
+                            <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Array.from({ length: 24 }, (_, h) => (
+                                <SelectItem key={h} value={String(h)}>{String(h).padStart(2, "0")}:00</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[11px] font-medium text-muted-foreground">Send until (hour)</Label>
+                          <Select value={String(quietHoursEnd)} onValueChange={(v) => setQuietHoursEnd(parseInt(v))}>
+                            <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Array.from({ length: 24 }, (_, h) => (
+                                <SelectItem key={h} value={String(h + 1)}>{String(h + 1).padStart(2, "0")}:00</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-[11px] font-medium text-muted-foreground">Timezone (optional)</Label>
+                          <Input
+                            value={quietHoursTimezone}
+                            onChange={(e) => setQuietHoursTimezone(e.target.value)}
+                            placeholder="e.g. America/New_York"
+                            className="h-9 text-xs"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Quiet-hours filtering is off — messages send whenever they&apos;re queued. Set the exact time yourself using the scheduled send time on each announcement/campaign. You remain responsible for TCPA compliance.
+                      </p>
+                    )}
+                    {smsQuietHoursEnabled && (
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                        SMS outside this window are skipped. Leave the timezone blank to infer it per recipient (state / area code); set one to apply a single timezone to everyone.
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex justify-end pt-4">
@@ -1156,91 +1314,8 @@ function SettingsPageContent() {
                 </CardContent>
               </Card>
 
-              {/* Campaign Behavior Card (SW-NUR — company-wide exit conditions + version policy) */}
-              <Card className="border border-border/80 shadow-xs">
-                <CardHeader>
-                  <CardTitle className="text-sm font-bold flex items-center gap-2">
-                    <SlidersHorizontal className="h-4.5 w-4.5 text-[#b48c3c]" />
-                    Campaign Behavior
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    Applies to <strong>every</strong> campaign — controls when leads automatically exit a sequence and how edits to a running campaign roll out.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-5 space-y-6">
-                  {/* Exit conditions */}
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                      <LogOut className="h-4 w-4 text-[#b48c3c]" /> Exit Conditions
-                    </div>
-                    <p className="text-xs text-muted-foreground -mt-1">When one of these happens, the lead stops receiving further steps.</p>
-
-                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
-                      <input type="checkbox" className="h-4 w-4 accent-[#b48c3c]" checked={campaignExitOnReply} onChange={(e) => setCampaignExitOnReply(e.target.checked)} />
-                      <div>
-                        <p className="text-sm font-medium">Lead replies</p>
-                        <p className="text-xs text-muted-foreground">Exit when the lead replies to an email or SMS.</p>
-                      </div>
-                    </label>
-
-                    <label className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
-                      <input type="checkbox" className="h-4 w-4 accent-[#b48c3c]" checked={campaignExitOnAppointment} onChange={(e) => setCampaignExitOnAppointment(e.target.checked)} />
-                      <div>
-                        <p className="text-sm font-medium">Lead books an appointment</p>
-                        <p className="text-xs text-muted-foreground">Exit when the lead books a meeting.</p>
-                      </div>
-                    </label>
-
-                    <div className="p-3 rounded-lg border space-y-2">
-                      <p className="text-sm font-medium">Lead status changes to</p>
-                      <Select value={campaignExitOnStatus || "none"} onValueChange={(v) => setCampaignExitOnStatus(v === "none" ? "" : v)}>
-                        <SelectTrigger className="h-9"><SelectValue placeholder="No status-based exit" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No status-based exit</SelectItem>
-                          <SelectItem value="Nurturing">Nurturing</SelectItem>
-                          <SelectItem value="Engaged">Engaged</SelectItem>
-                          <SelectItem value="Appointment Set">Appointment Set</SelectItem>
-                          <SelectItem value="Qualified">Qualified</SelectItem>
-                          <SelectItem value="Closed Won">Closed Won</SelectItem>
-                          <SelectItem value="Closed Lost">Closed Lost</SelectItem>
-                          <SelectItem value="Unsubscribed">Unsubscribed</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">Unsubscribe always exits a lead regardless of this setting.</p>
-                    </div>
-                  </div>
-
-                  {/* Version policy */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                      <GitBranch className="h-4 w-4 text-[#b48c3c]" /> Editing an Active Campaign
-                    </div>
-                    <Select value={campaignVersionPolicy} onValueChange={setCampaignVersionPolicy}>
-                      <SelectTrigger className="h-9 max-w-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="FINISH_OLD">Finish on old version (safe)</SelectItem>
-                        <SelectItem value="MIGRATE">Migrate to new version</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      {campaignVersionPolicy === "MIGRATE"
-                        ? "Editing steps updates a campaign in place; leads already mid-sequence pick up the new steps at their next step."
-                        : "Editing steps on a running campaign creates a new version (v2) as a draft; leads already enrolled finish the current steps."}
-                    </p>
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <Button onClick={handleSaveCampaignBehavior} disabled={savingCampaignBehavior} className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 border-none text-xs h-9 px-4">
-                      {savingCampaignBehavior && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-                      Save Campaign Behavior
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-              </div>
-
               {/* Suppression List Card */}
-              <Card className="border border-border/80 shadow-xs mt-6">
+              <Card className="border border-border/80 shadow-xs">
                 <CardHeader>
                   <CardTitle className="text-sm font-bold flex items-center gap-2">
                     <Database className="h-4.5 w-4.5 text-red-500" />
@@ -1376,120 +1451,6 @@ function SettingsPageContent() {
                   )}
                 </CardContent>
               </Card>
-            </TabsContent>
-
-            {/* TAB 3: CUSTOM LEAD FIELDS */}
-            <TabsContent value="fields" className="space-y-6 focus-visible:outline-hidden">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-                {/* Custom Fields List */}
-                <div className="lg:col-span-2 space-y-6">
-                  <Card className="border border-border/80 shadow-xs">
-                    <CardHeader>
-                      <CardTitle className="text-sm font-bold flex items-center gap-2">
-                        <SlidersHorizontal className="h-4.5 w-4.5 text-[#b48c3c]" />
-                        Active Custom Lead Fields
-                      </CardTitle>
-                      <CardDescription className="text-xs">Define key-value schema additions for Lead records inside customFields JSON.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="p-0 overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-slate-50 dark:bg-slate-900/40 border-b border-border/50">
-                            <th className="py-2.5 px-4 font-semibold text-muted-foreground pl-6">Field Variable Name</th>
-                            <th className="py-2.5 px-4 font-semibold text-muted-foreground">Data Type</th>
-                            <th className="py-2.5 px-4 font-semibold text-muted-foreground">Required on Manual Creation</th>
-                            <th className="py-2.5 px-4 font-semibold text-muted-foreground text-right pr-6">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {customFields.map((field) => (
-                            <tr key={field.id} className="border-b border-border/30 hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
-                              <td className="py-2.5 px-4 pl-6 font-mono font-bold text-slate-800 dark:text-slate-200">{field.name}</td>
-                              <td className="py-2.5 px-4">
-                                <Badge variant="secondary" className="text-[10px] font-mono px-2 py-0">
-                                  {field.type}
-                                </Badge>
-                              </td>
-                              <td className="py-2.5 px-4">
-                                {field.isRequired ? (
-                                  <span className="text-red-500 font-semibold">Yes</span>
-                                ) : (
-                                  <span className="text-muted-foreground">Optional</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-4 text-right pr-6">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleDeleteCustomField(field.id)}
-                                  className="h-7 w-7 text-red-500 hover:bg-red-500/10"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Add Custom Field Form */}
-                <div className="space-y-6">
-                  <Card className="border border-border/80 shadow-xs">
-                    <CardHeader>
-                      <CardTitle className="text-sm font-bold">Add Custom Field</CardTitle>
-                      <CardDescription className="text-xs">Create custom tags or properties to track during buyer onboarding.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-
-                      <div className="space-y-1.5">
-                        <Label htmlFor="fieldName" className="font-semibold text-xs">Variable Name *</Label>
-                        <Input
-                          id="fieldName"
-                          placeholder="e.g. PreferredBuilder"
-                          value={newFieldName}
-                          onChange={(e) => setNewFieldName(e.target.value)}
-                          className="h-9 text-xs"
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label htmlFor="fieldType" className="font-semibold text-xs">Data Format</Label>
-                        <Select value={newFieldType} onValueChange={(val: any) => setNewFieldType(val)}>
-                          <SelectTrigger id="fieldType" className="h-9 text-xs"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="TEXT">Alphanumeric Text</SelectItem>
-                            <SelectItem value="NUMBER">Numeric Float</SelectItem>
-                            <SelectItem value="BOOLEAN">Checkbox / Boolean</SelectItem>
-                            <SelectItem value="DATE">ISO Date</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="flex items-center gap-2 pt-2">
-                        <input
-                          type="checkbox"
-                          id="fieldReq"
-                          checked={newFieldRequired}
-                          onChange={(e) => setNewFieldRequired(e.target.checked)}
-                          className="h-4 w-4 text-[#b48c3c] rounded"
-                        />
-                        <Label htmlFor="fieldReq" className="text-xs cursor-pointer font-medium">
-                          Force inputs on manual creation
-                        </Label>
-                      </div>
-
-                      <Button onClick={handleAddCustomField} className="w-full bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90 h-9 text-xs">
-                        Add Custom Field Schema
-                      </Button>
-
-                    </CardContent>
-                  </Card>
-                </div>
-
               </div>
             </TabsContent>
 
@@ -1551,17 +1512,45 @@ function SettingsPageContent() {
                 </div>
               )}
 
-              <div className="bg-sky-50 dark:bg-sky-950/20 p-3 rounded-lg border border-sky-100/50 text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
+              <div className="bg-sky-50 dark:bg-sky-950/20 p-3 rounded-lg border border-sky-100/50 text-[11px] text-slate-600 dark:text-slate-400 space-y-1.5">
                 <p className="font-semibold flex items-center gap-1.5">
                   <ExternalLink className="h-3 w-3" />
                   OAuth Redirect URI
                 </p>
-                <code className="block text-[10px] font-mono bg-white dark:bg-slate-900 px-2 py-1 rounded border text-sky-700 dark:text-sky-400">
-                  {typeof window !== "undefined" ? window.location.origin : ""}/api/sales/salesforce/callback
-                </code>
+                <div className="flex items-stretch gap-1.5">
+                  <code className="flex-1 min-w-0 truncate text-[10px] font-mono bg-white dark:bg-slate-900 px-2 py-1.5 rounded border text-sky-700 dark:text-sky-400">
+                    {redirectUri}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={copyRedirectUri}
+                    className="h-auto shrink-0 px-2 text-[10px] font-semibold gap-1"
+                    title="Copy redirect URI"
+                  >
+                    {copiedRedirect ? (
+                      <><Check className="h-3 w-3 text-emerald-600" /> Copied</>
+                    ) : (
+                      <><Copy className="h-3 w-3" /> Copy</>
+                    )}
+                  </Button>
+                </div>
                 <p className="text-[10px] text-muted-foreground">
-                  Add this URI to your Salesforce Connected App callback URLs.
+                  Add this URI <strong>exactly</strong> (no trailing slash) to your Salesforce Connected App&apos;s Callback URLs.
                 </p>
+                <div className="flex items-start gap-1.5 pt-1.5 mt-1 border-t border-sky-100/60 dark:border-sky-900/40 text-[10px] text-amber-700 dark:text-amber-400">
+                  <AlertCircle className="h-3 w-3 mt-px shrink-0" />
+                  <span>
+                    The Connected App must live in your{" "}
+                    <strong>{sfEnvironment === "production" ? "Production" : "Sandbox"}</strong>{" "}
+                    org — matching the environment selected above (
+                    <span className="font-mono">
+                      {sfEnvironment === "production" ? "login.salesforce.com" : "test.salesforce.com"}
+                    </span>
+                    ). PKCE is supported, so you can safely keep &ldquo;Require Proof Key for Code Exchange&rdquo; enabled.
+                  </span>
+                </div>
               </div>
             </div>
 

@@ -1,8 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { resolveAnnouncementAudience } from "../inngest/functions/announcement.js";
+import { sanitizeAnnouncementHtml } from "../lib/sanitize-html.js";
 
-// Announcements target email, SMS, or both (SRS SW-ANN-002). Unknown values fall
-// back to EMAIL.
 function normalizeChannel(channel) {
   const c = String(channel || "EMAIL").toUpperCase();
   return c === "SMS" || c === "BOTH" ? c : "EMAIL";
@@ -81,7 +80,6 @@ export const getAnnouncementDetail = async (req, res) => {
   }
 };
 
-// Preview the recipient count for a given audience config without creating anything.
 export const previewAudience = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -101,11 +99,6 @@ export const previewAudience = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
-// Create an announcement. `action` controls what happens next:
-//   "draft"    -> saved as Draft (default)
-//   "send"     -> saved and immediately fanned out via Inngest
-//   "schedule" -> saved with scheduledAt; the send function holds until that time
 export const createAnnouncement = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -140,8 +133,6 @@ export const createAnnouncement = async (req, res) => {
       return res.status(400).json({ message: "scheduledAt must be a valid future date" });
     }
 
-    // "Queued" (not "Sending") — the Inngest function flips it to "Sending" when it
-    // actually starts. Setting "Sending" here would make the function skip itself.
     let status = "Draft";
     if (action === "send") status = "Queued";
     else if (wantsSchedule) status = "Scheduled";
@@ -151,7 +142,7 @@ export const createAnnouncement = async (req, res) => {
         companyId: req.user.companyId,
         title,
         subject: subject || title,
-        body,
+        body: sanitizeAnnouncementHtml(body),
         ctaLink: ctaLink || null,
         channel: resolvedChannel,
         audienceType: audienceType === "SEGMENT" ? "SEGMENT" : "ALL",
@@ -163,8 +154,6 @@ export const createAnnouncement = async (req, res) => {
       },
     });
 
-    // Whenever an announcement is meant to go out, dispatch it to leads as an
-    // email campaign via the Inngest batch pipeline (SW-ANN-002).
     if (action === "send" || wantsSchedule) {
       const { inngest } = await import("../lib/inngest.js");
       await inngest.send({
@@ -202,7 +191,7 @@ export const updateAnnouncement = async (req, res) => {
       data: {
         title: title ?? existing.title,
         subject: subject ?? existing.subject,
-        body: body ?? existing.body,
+        body: body !== undefined ? sanitizeAnnouncementHtml(body) : existing.body,
         ctaLink: ctaLink !== undefined ? ctaLink : existing.ctaLink,
         audienceType: audienceType ? (audienceType === "SEGMENT" ? "SEGMENT" : "ALL") : existing.audienceType,
         segmentId: audienceType === "SEGMENT" ? (segmentId ?? existing.segmentId) : audienceType === "ALL" ? null : existing.segmentId,
@@ -318,6 +307,94 @@ export const deleteAnnouncement = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("[Announcement Delete] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getAnnouncementFailures = async (req, res) => {
+  try {
+    if (!req.user || !req.user.companyId) {
+      return res.status(403).json({ message: "No company associated" });
+    }
+    const { id } = req.params;
+    const announcement = await prisma.announcement.findFirst({
+      where: { id, companyId: req.user.companyId },
+    });
+    if (!announcement) {
+      return res.status(404).json({ message: "Announcement not found" });
+    }
+
+    const rows = await prisma.leadTimeline.findMany({
+      where: {
+        type: { in: ["EMAIL_FAILED", "SMS_FAILED"] },
+        metadata: { path: ["announcementId"], equals: id },
+        lead: { companyId: req.user.companyId },
+      },
+      include: { lead: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+
+    const failures = rows.map((r) => {
+      const meta = r.metadata || {};
+      const channel = meta.channel || (r.type === "SMS_FAILED" ? "SMS" : "EMAIL");
+      return {
+        id: r.id,
+        leadId: r.leadId,
+        name: r.lead ? `${r.lead.firstName || ""} ${r.lead.lastName || ""}`.trim() : "(deleted lead)",
+        contact: channel === "SMS" ? r.lead?.phone || "—" : r.lead?.email || "—",
+        channel,
+        error: meta.error || r.description || "Unknown error",
+        failedAt: r.createdAt,
+      };
+    });
+
+    return res.json({
+      announcementId: id,
+      failedCount: announcement.failedCount,
+      status: announcement.status,
+      failures,
+    });
+  } catch (error) {
+    console.error("[Announcement Failures] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+export const retryAnnouncement = async (req, res) => {
+  try {
+    if (!req.user || !req.user.companyId) {
+      return res.status(403).json({ message: "No company associated" });
+    }
+    const { id } = req.params;
+    const announcement = await prisma.announcement.findFirst({
+      where: { id, companyId: req.user.companyId },
+    });
+    if (!announcement) {
+      return res.status(404).json({ message: "Announcement not found" });
+    }
+    if (!["Sent", "Failed"].includes(announcement.status)) {
+      return res.status(400).json({
+        message: `Can only retry an announcement that has finished sending (currently ${announcement.status}).`,
+      });
+    }
+    if (!announcement.failedCount) {
+      return res.status(400).json({ message: "This announcement has no failed sends to retry." });
+    }
+
+    await prisma.announcement.update({
+      where: { id },
+      data: { status: "Queued", scheduledAt: null, failedCount: 0 },
+    });
+
+    const { inngest } = await import("../lib/inngest.js");
+    await inngest.send({
+      name: "announcement.send",
+      data: { announcementId: id, companyId: req.user.companyId },
+    });
+
+    return res.json({ success: true, message: "Retrying failed sends." });
+  } catch (error) {
+    console.error("[Announcement Retry] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

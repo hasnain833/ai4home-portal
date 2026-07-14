@@ -5,6 +5,7 @@ import {
   getAuthenticatedClient,
   mapSalesforceRecordToLead,
   DEFAULT_FIELD_MAPPINGS,
+  filterQueryableFields,
 } from "./salesforce-service.js";
 
 export async function runIncrementalSync(companyId) {
@@ -35,11 +36,15 @@ export async function runIncrementalSync(companyId) {
     ...activeMappings.map((m) => m.salesforceField),
   ];
   const uniqueFields = [...new Set(sfFields)];
+  const { fields: queryableFields, skipped } = await filterQueryableFields(client, "Lead", uniqueFields);
+  if (skipped.length) {
+    console.warn(`[Salesforce Sync] Skipping fields not present on Lead in this org: ${skipped.join(", ")}`);
+  }
   const lastSyncIso = connection.lastSyncAt
     ? connection.lastSyncAt.toISOString().replace("Z", "+00:00")
     : null;
 
-  let soql = `SELECT ${uniqueFields.join(", ")} FROM Lead`;
+  let soql = `SELECT ${queryableFields.join(", ")} FROM Lead`;
   if (lastSyncIso) soql += ` WHERE SystemModstamp > ${lastSyncIso}`;
   soql += " ORDER BY SystemModstamp ASC";
 
@@ -77,7 +82,6 @@ export async function runIncrementalSync(companyId) {
           data: {
             ...leadData,
             source: "SALESFORCE",
-            // A record that reappears in Salesforce is no longer deleted.
             archived: false,
             archivedAt: null,
             timeline: {
@@ -90,11 +94,6 @@ export async function runIncrementalSync(companyId) {
         });
         updatedCount++;
       } else {
-        // SW-LEAD-003: cross-source linking. Before creating a new row, check
-        // whether this Salesforce record matches an existing local (CSV/manual)
-        // lead by email/phone. If so — and that lead isn't already tied to a
-        // different Salesforce record — LINK it: Salesforce becomes the
-        // system-of-record for that lead, avoiding a duplicate.
         const crossMatch = externalId
           ? await findDuplicateLead(companyId, leadData.email, leadData.phone)
           : null;
@@ -134,9 +133,6 @@ export async function runIncrementalSync(companyId) {
             state: leadData.state || null,
             zipCode: leadData.zipCode || null,
             status: leadData.status || "New",
-            // SW-CRM-009: imported leads default to "consent unknown" (opt-ins
-            // false) unless Salesforce explicitly maps a consent field, so they
-            // are excluded from opt-in-required SMS/email by the compliance gate.
             emailOptIn: leadData.emailOptIn ?? false,
             smsOptIn: leadData.smsOptIn ?? false,
             consentSource:
@@ -168,7 +164,6 @@ export async function runIncrementalSync(companyId) {
     }
   }
 
-  // SW-CRM-006: reconcile Salesforce deletions → archive the local lead.
   let archivedCount = 0;
   try {
     if (lastSyncIso) {

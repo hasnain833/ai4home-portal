@@ -9,6 +9,8 @@ import {
   sendAnnouncement,
   cancelAnnouncement,
   deleteAnnouncement,
+  getAnnouncementFailures,
+  retryAnnouncement,
 } from "../controllers/announcements.controller.js";
 
 const router = Router();
@@ -21,6 +23,9 @@ router.get("/:id", requireAuth, requireRoles(["ADMIN", "STAFF"]), getAnnouncemen
 router.patch("/:id", requireAuth, requireRoles(["ADMIN", "STAFF"]), updateAnnouncement);
 router.post("/:id/send", requireAuth, requireRoles(["ADMIN", "STAFF"]), sendAnnouncement);
 router.post("/:id/cancel", requireAuth, requireRoles(["ADMIN", "STAFF"]), cancelAnnouncement);
+// SW-ANN: dead-letter queue — inspect failed recipients and retry them.
+router.get("/:id/failures", requireAuth, requireRoles(["ADMIN", "STAFF"]), getAnnouncementFailures);
+router.post("/:id/retry", requireAuth, requireRoles(["ADMIN", "STAFF"]), retryAnnouncement);
 router.delete("/:id", requireAuth, requireRoles(["ADMIN", "STAFF"]), deleteAnnouncement);
 
 export default router;

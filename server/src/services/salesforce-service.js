@@ -1,17 +1,18 @@
 import prisma from "../lib/prisma.js";
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import { createCipheriv, createDecipheriv, randomBytes, createHash } from "crypto";
 
-// ─── Encryption Helpers ───────────────────────────────────────────────────────
+export function generateCodeVerifier() {
+  return randomBytes(32).toString("base64url");
+}
+
+export function codeChallengeFromVerifier(verifier) {
+  return createHash("sha256").update(verifier).digest("base64url");
+}
 
 const ALGORITHM = "aes-256-gcm";
 const DEFAULT_ENCRYPTION_KEY = "change_me_to_a_32_char_hex_key_00";
 const ENCRYPTION_KEY = process.env.SALESFORCE_ENCRYPTION_KEY || DEFAULT_ENCRYPTION_KEY;
 
-// Salesforce OAuth tokens/secrets are encrypted at rest with this key. If it is
-// left at the public default, the encryption provides no real protection (anyone
-// with DB access + this well-known key can decrypt). We warn loudly rather than
-// hard-fail so existing connections encrypted with the default key still decrypt;
-// rotate to a strong key and re-encrypt stored tokens before production. (NFR-S-003)
 if (ENCRYPTION_KEY === DEFAULT_ENCRYPTION_KEY) {
   console.warn(
     "[salesforce-service] SALESFORCE_ENCRYPTION_KEY is the public default — Salesforce token encryption is NOT secure. Set a strong 32-char key and re-encrypt stored connections before production.",
@@ -19,7 +20,6 @@ if (ENCRYPTION_KEY === DEFAULT_ENCRYPTION_KEY) {
 }
 
 function getKeyBuffer() {
-  // Ensure key is exactly 32 bytes
   const key = ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32);
   return Buffer.from(key, "utf-8");
 }
@@ -36,19 +36,16 @@ export function encrypt(text) {
 export function decrypt(encryptedText) {
   try {
     const [ivHex, authTagHex, encrypted] = encryptedText.split(":");
-    if (!ivHex || !authTagHex || !encrypted) return encryptedText; // Not encrypted, return as-is
+    if (!ivHex || !authTagHex || !encrypted) return encryptedText; 
     const decipher = createDecipheriv(ALGORITHM, getKeyBuffer(), Buffer.from(ivHex, "hex"));
     decipher.setAuthTag(Buffer.from(authTagHex, "hex"));
     let decrypted = decipher.update(encrypted, "hex", "utf8");
     decrypted += decipher.final("utf8");
     return decrypted;
   } catch {
-    // If decryption fails, return the raw value (migration safety)
     return encryptedText;
   }
 }
-
-// ─── Default Field Mappings ───────────────────────────────────────────────────
 
 export const DEFAULT_FIELD_MAPPINGS = [
   { salesforceField: "FirstName", portalField: "firstName", description: "First name of the lead" },
@@ -63,17 +60,12 @@ export const DEFAULT_FIELD_MAPPINGS = [
   { salesforceField: "SMSConsentOptIn__c", portalField: "smsOptIn", description: "Custom SMS consent field", isConsentField: true },
 ];
 
-// ─── Salesforce Client ────────────────────────────────────────────────────────
-
 export class SalesforceClient {
   constructor(instanceUrl, accessToken) {
     this.instanceUrl = instanceUrl;
     this.accessToken = accessToken;
   }
 
-  /**
-   * Generate the OAuth 2.0 authorization URL for the Salesforce login page.
-   */
   static getAuthorizationUrl(params) {
     const baseUrl =
       params.environment === "production"
@@ -86,14 +78,14 @@ export class SalesforceClient {
       redirect_uri: params.redirectUri,
       scope: "api refresh_token",
       ...(params.state ? { state: params.state } : {}),
+      ...(params.codeChallenge
+        ? { code_challenge: params.codeChallenge, code_challenge_method: "S256" }
+        : {}),
     });
 
     return `${baseUrl}/services/oauth2/authorize?${queryParams.toString()}`;
   }
 
-  /**
-   * Exchange an authorization code for access + refresh tokens.
-   */
   static async exchangeCodeForTokens(params) {
     const baseUrl =
       params.environment === "production"
@@ -106,6 +98,7 @@ export class SalesforceClient {
       client_id: params.clientId,
       client_secret: params.clientSecret,
       redirect_uri: params.redirectUri,
+      ...(params.codeVerifier ? { code_verifier: params.codeVerifier } : {}),
     });
 
     const res = await fetch(`${baseUrl}/services/oauth2/token`, {
@@ -122,9 +115,6 @@ export class SalesforceClient {
     return res.json();
   }
 
-  /**
-   * Refresh an expired access token using the refresh token.
-   */
   static async refreshAccessToken(params) {
     const baseUrl =
       params.environment === "production"
@@ -152,11 +142,6 @@ export class SalesforceClient {
     return res.json();
   }
 
-  // ─── Instance Methods ─────────────────────────────────────────────────────
-
-  // SW-CRM-007: retry transient failures (429 rate-limit, 5xx) with exponential
-  // backoff. Honors a Retry-After header when Salesforce sends one. 4xx (other
-  // than 429) fail fast — they won't succeed on retry.
   async apiRequest(path, options = {}, attempt = 0) {
     const MAX_RETRIES = 4;
     const url = `${this.instanceUrl}${path}`;
@@ -183,41 +168,38 @@ export class SalesforceClient {
       throw new Error(`Salesforce API error (${res.status}): ${errorBody}`);
     }
 
-    // Handle 204 No Content responses
     if (res.status === 204) return {};
 
     return res.json();
   }
 
-  /**
-   * Execute a SOQL query via REST API.
-   */
   async query(soql) {
     return this.apiRequest(
       `/services/data/v59.0/query?q=${encodeURIComponent(soql)}`
     );
   }
 
-  /**
-   * Fetch next page of query results.
-   */
   async queryMore(nextRecordsUrl) {
     return this.apiRequest(nextRecordsUrl);
   }
 
-  /**
-   * SOQL query including deleted/archived records (Recycle Bin) — used to detect
-   * Salesforce deletions (IsDeleted = true) so we can archive the local lead.
-   */
   async queryAll(soql) {
     return this.apiRequest(
       `/services/data/v59.0/queryAll?q=${encodeURIComponent(soql)}`
     );
   }
 
-  /**
-   * Create a Bulk API 2.0 query job.
-   */
+  async describeSObjectFields(sObjectType) {
+    const describe = await this.apiRequest(
+      `/services/data/v59.0/sobjects/${sObjectType}/describe`
+    );
+    const names = new Set();
+    for (const f of describe.fields || []) {
+      if (f?.name) names.add(f.name.toLowerCase());
+    }
+    return names;
+  }
+
   async createBulkQueryJob(soql) {
     return this.apiRequest("/services/data/v59.0/jobs/query", {
       method: "POST",
@@ -228,16 +210,10 @@ export class SalesforceClient {
     });
   }
 
-  /**
-   * Check the status of a Bulk API 2.0 job.
-   */
   async getBulkJobStatus(jobId) {
     return this.apiRequest(`/services/data/v59.0/jobs/query/${jobId}`);
   }
 
-  /**
-   * Get results of a completed Bulk API 2.0 query job as CSV text.
-   */
   async getBulkQueryResults(jobId) {
     const url = `${this.instanceUrl}/services/data/v59.0/jobs/query/${jobId}/results`;
     const res = await fetch(url, {
@@ -254,9 +230,6 @@ export class SalesforceClient {
     return res.text();
   }
 
-  /**
-   * Update a record in Salesforce (for write-back).
-   */
   async updateRecord(sObjectType, recordId, data) {
     await this.apiRequest(`/services/data/v59.0/sobjects/${sObjectType}/${recordId}`, {
       method: "PATCH",
@@ -264,9 +237,6 @@ export class SalesforceClient {
     });
   }
 
-  /**
-   * Test the connection by querying the user identity.
-   */
   async testConnection() {
     try {
       const result = await this.apiRequest(
@@ -283,7 +253,6 @@ export class SalesforceClient {
   }
 }
 
-// ─── Helper: Get authenticated client from DB ─────────────────────────────────
 
 export async function getAuthenticatedClient(companyId) {
   const connection = await prisma.salesforceConnection.findUnique({
@@ -295,14 +264,11 @@ export async function getAuthenticatedClient(companyId) {
   let accessToken = decrypt(connection.accessToken);
   const refreshToken = decrypt(connection.refreshToken);
   const clientSecret = decrypt(connection.clientSecret);
-
-  // Check if token is expired (with a 5 minute buffer)
   const tokenExpiry = new Date(connection.tokenExpiresAt);
   const now = new Date();
   const bufferMs = 5 * 60 * 1000;
 
   if (now.getTime() > tokenExpiry.getTime() - bufferMs) {
-    // Token is expired or about to expire — refresh it
     try {
       const refreshResult = await SalesforceClient.refreshAccessToken({
         refreshToken,
@@ -313,13 +279,12 @@ export async function getAuthenticatedClient(companyId) {
 
       accessToken = refreshResult.access_token;
 
-      // Update the stored tokens
       await prisma.salesforceConnection.update({
         where: { companyId },
         data: {
           accessToken: encrypt(accessToken),
           instanceUrl: refreshResult.instance_url || connection.instanceUrl,
-          tokenExpiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // SF tokens last ~2 hours
+          tokenExpiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000), 
         },
       });
     } catch (error) {
@@ -334,7 +299,6 @@ export async function getAuthenticatedClient(companyId) {
   };
 }
 
-// ─── Field Mapping Transformation ─────────────────────────────────────────────
 
 export function mapSalesforceRecordToLead(sfRecord, mappings) {
   const lead = {};
@@ -352,10 +316,8 @@ export function mapSalesforceRecordToLead(sfRecord, mappings) {
 
     const portalField = mapping.portalField;
 
-    // Handle consent field inversions
     if (mapping.isConsentField) {
       if (portalField === "emailOptIn") {
-        // Salesforce HasOptedOutOfEmail is inverted — true means opted OUT
         lead.emailOptIn = !rawValue;
       } else if (portalField === "smsOptIn") {
         lead.smsOptIn = !!rawValue;
@@ -366,12 +328,10 @@ export function mapSalesforceRecordToLead(sfRecord, mappings) {
     if (LEAD_FIELDS.has(portalField)) {
       lead[portalField] = rawValue;
     } else {
-      // Store in customFields JSON
       customFields[portalField] = rawValue;
     }
   }
 
-  // Include Salesforce record ID as externalId
   if (sfRecord.Id) {
     lead.externalId = sfRecord.Id;
   }
@@ -383,7 +343,27 @@ export function mapSalesforceRecordToLead(sfRecord, mappings) {
   return lead;
 }
 
-// ─── Bulk CSV Parser ──────────────────────────────────────────────────────────
+export async function filterQueryableFields(client, sObjectType, fields) {
+  try {
+    const existing = await client.describeSObjectFields(sObjectType);
+    if (!existing || existing.size === 0) return { fields, skipped: [] };
+    const kept = [];
+    const skipped = [];
+    for (const f of fields) {
+      if (existing.has(String(f).toLowerCase())) kept.push(f);
+      else skipped.push(f);
+    }
+    if (kept.length === 0) return { fields, skipped: [] };
+    return { fields: kept, skipped };
+  } catch (e) {
+    console.warn(
+      `[Salesforce] describe(${sObjectType}) failed; querying unfiltered fields:`,
+      e?.message || e,
+    );
+    return { fields, skipped: [] };
+  }
+}
+
 
 export function parseBulkCSV(csvText) {
   const lines = csvText.trim().split("\n");
@@ -414,7 +394,7 @@ function parseCSVLine(line) {
     if (char === '"') {
       if (inQuotes && line[i + 1] === '"') {
         current += '"';
-        i++; // Skip escaped quote
+        i++;
       } else {
         inQuotes = !inQuotes;
       }
@@ -429,7 +409,6 @@ function parseCSVLine(line) {
   return result;
 }
 
-// ─── Seed Default Mappings ────────────────────────────────────────────────────
 
 export async function seedDefaultMappings(companyId) {
   for (const mapping of DEFAULT_FIELD_MAPPINGS) {

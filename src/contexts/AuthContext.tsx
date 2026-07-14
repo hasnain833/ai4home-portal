@@ -200,6 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const userData = await meResponse.json();
             setUser(userData);
           }
+          setIsLoading(false);
           router.push("/admin");
           return;
         }

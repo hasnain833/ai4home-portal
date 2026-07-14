@@ -8,6 +8,9 @@ import {
   getAuthenticatedClient,
   mapSalesforceRecordToLead,
   DEFAULT_FIELD_MAPPINGS,
+  generateCodeVerifier,
+  codeChallengeFromVerifier,
+  filterQueryableFields,
 } from "../services/salesforce-service.js";
 import { runIncrementalSync } from "../services/salesforce-sync.js";
 
@@ -29,6 +32,8 @@ export const connectSalesforce = async (req, res) => {
     const env = environment === "production" ? "production" : "sandbox";
     const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
     const redirectUri = `${baseUrl}/api/sales/salesforce/callback`;
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = codeChallengeFromVerifier(codeVerifier);
 
     // Encode credentials + companyId into state payload
     const statePayload = JSON.stringify({
@@ -36,6 +41,7 @@ export const connectSalesforce = async (req, res) => {
       clientId,
       clientSecret: encrypt(clientSecret),
       environment: env,
+      codeVerifier: encrypt(codeVerifier),
     });
     const state = Buffer.from(statePayload).toString("base64url");
 
@@ -44,6 +50,7 @@ export const connectSalesforce = async (req, res) => {
       redirectUri,
       environment: env,
       state,
+      codeChallenge,
     });
 
     return res.json({ authUrl });
@@ -82,8 +89,17 @@ export const salesforceCallback = async (req, res) => {
       return res.redirect(`${baseUrl}/sales/settings?sf_error=invalid_state`);
     }
 
-    const { companyId, clientId, clientSecret: encryptedSecret, environment } = stateData;
+    const {
+      companyId,
+      clientId,
+      clientSecret: encryptedSecret,
+      environment,
+      codeVerifier: encryptedVerifier,
+    } = stateData;
     const clientSecret = decrypt(encryptedSecret);
+    // PKCE: recover the verifier that pairs with the challenge we sent earlier.
+    // Older in-flight states (pre-PKCE) simply won't have it.
+    const codeVerifier = encryptedVerifier ? decrypt(encryptedVerifier) : undefined;
     const redirectUri = `${baseUrl}/api/sales/salesforce/callback`;
 
     // Exchange the authorization code for tokens
@@ -93,6 +109,7 @@ export const salesforceCallback = async (req, res) => {
       clientSecret,
       redirectUri,
       environment,
+      codeVerifier,
     });
 
     const tokenExpiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000);
@@ -432,10 +449,6 @@ export const manualSync = async (req, res) => {
     if (!req.user || !req.user.companyId) {
       return res.status(403).json({ message: "No company associated" });
     }
-
-    // Delegates to the shared incremental-sync core (also used by the cron),
-    // which handles pagination, upserts, deletion→archive reconcile, backoff,
-    // and writing the sync log / connection status.
     const result = await runIncrementalSync(req.user.companyId);
 
     if (!result.ok) {
@@ -506,7 +519,13 @@ export const bulkImport = async (req, res) => {
 
     const sfFields = ["Id", ...activeMappings.map(m => m.salesforceField)];
     const uniqueFields = [...new Set(sfFields)];
-    const soql = `SELECT ${uniqueFields.join(", ")} FROM Lead`;
+    // Drop any mapped fields that don't exist on Lead in this org (e.g.
+    // MobilePhone or custom fields) so the query doesn't fail with INVALID_FIELD.
+    const { fields: queryableFields, skipped } = await filterQueryableFields(client, "Lead", uniqueFields);
+    if (skipped.length) {
+      console.warn(`[Salesforce Bulk Import] Skipping fields not present on Lead in this org: ${skipped.join(", ")}`);
+    }
+    const soql = `SELECT ${queryableFields.join(", ")} FROM Lead`;
 
     let allRecords = [];
     let usedBulkApi = false;

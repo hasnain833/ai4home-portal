@@ -15,6 +15,8 @@ import {
   Mail,
   X,
   Loader2,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -24,6 +26,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import RichTextEditor from "@/components/sales/RichTextEditor";
 
 type Announcement = {
   id: string;
@@ -47,6 +57,16 @@ type Announcement = {
 
 type Segment = { id: string; name: string };
 
+type Failure = {
+  id: string;
+  leadId: string;
+  name: string;
+  contact: string;
+  channel: string;
+  error: string;
+  failedAt: string;
+};
+
 const statusStyles: Record<string, string> = {
   Sent: "bg-green-50 text-green-700 border-green-200/50 dark:bg-green-950/20 dark:text-green-400",
   Queued: "bg-amber-50 text-amber-700 border-amber-200/50 dark:bg-amber-950/20 dark:text-amber-400",
@@ -63,6 +83,13 @@ export default function AnnouncementsPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<"past" | "create">("past");
+
+  // SW-ANN dead-letter queue: inspect + retry failed recipients.
+  const [failuresOpen, setFailuresOpen] = useState(false);
+  const [failuresFor, setFailuresFor] = useState<Announcement | null>(null);
+  const [failures, setFailures] = useState<Failure[]>([]);
+  const [loadingFailures, setLoadingFailures] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const [form, setForm] = useState({
     title: "",
@@ -96,6 +123,14 @@ export default function AnnouncementsPage() {
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
+
+    // Rich-text body: validate on the stripped text, not the HTML markup.
+    const bodyText = form.body.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").trim();
+    if (!bodyText) {
+      toast.error("Message body is required");
+      return;
+    }
+
     setSubmitting(true);
 
     const scheduling = !!form.scheduleDate;
@@ -149,6 +184,46 @@ export default function AnnouncementsPage() {
       }
     } catch {
       toast.error("Network error");
+    }
+  };
+
+  const openFailures = async (a: Announcement) => {
+    setFailuresFor(a);
+    setFailures([]);
+    setFailuresOpen(true);
+    setLoadingFailures(true);
+    try {
+      const res = await fetch(`/api/sales/announcements/${a.id}/failures`);
+      if (res.ok) {
+        const data = await res.json();
+        setFailures(Array.isArray(data.failures) ? data.failures : []);
+      } else {
+        toast.error("Could not load failed sends");
+      }
+    } catch {
+      toast.error("Network error loading failures");
+    } finally {
+      setLoadingFailures(false);
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!failuresFor) return;
+    setRetrying(true);
+    try {
+      const res = await fetch(`/api/sales/announcements/${failuresFor.id}/retry`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success("Retrying failed sends — check back shortly.");
+        setFailuresOpen(false);
+        loadAnnouncements();
+      } else {
+        toast.error(data.message || "Could not retry");
+      }
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -269,7 +344,21 @@ export default function AnnouncementsPage() {
                               </td>
                               <td className="py-3.5 px-4 text-xs font-medium">{a.audienceCount || "—"}</td>
                               <td className="py-3.5 px-4 text-xs font-semibold">{a.sentCount}</td>
-                              <td className="py-3.5 px-4 text-xs text-red-500 font-medium">{a.failedCount || "—"}</td>
+                              <td className="py-3.5 px-4 text-xs">
+                                {a.failedCount > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openFailures(a)}
+                                    className="inline-flex items-center gap-1 font-semibold text-red-500 hover:text-red-600 hover:underline"
+                                    title="View failed sends"
+                                  >
+                                    <AlertTriangle className="h-3 w-3" />
+                                    {a.failedCount}
+                                  </button>
+                                ) : (
+                                  <span className="text-red-500 font-medium">—</span>
+                                )}
+                              </td>
                               <td className="py-3.5 px-4 text-xs text-green-600 font-bold">{a.clickedCount || "—"}</td>
                               <td className="py-3.5 px-6 text-xs text-slate-400">
                                 {a.sentAt
@@ -362,15 +451,15 @@ export default function AnnouncementsPage() {
 
                   <div className="space-y-1.5">
                     <Label htmlFor="body" className="font-semibold">Message Body</Label>
-                    <textarea
+                    <RichTextEditor
                       id="body"
-                      rows={6}
-                      placeholder="Input message content here. Merge tags like {firstName} or {companyName} are supported."
                       value={form.body}
-                      onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                      required
-                      className="w-full bg-background border p-4 text-xs rounded-xl focus:ring-1 focus:ring-[#b48c3c]"
+                      onChange={(html) => setForm((f) => ({ ...f, body: html }))}
+                      placeholder="Input message content here. Merge tags like {firstName} or {companyName} are supported."
                     />
+                    <p className="text-[10px] text-muted-foreground">
+                      Formatting is used for email. SMS recipients receive a plain-text version automatically.
+                    </p>
                   </div>
 
                   <div className="space-y-1.5">
@@ -412,6 +501,72 @@ export default function AnnouncementsPage() {
             </Card>
           )}
         </div>
+
+        {/* SW-ANN dead-letter queue dialog */}
+        <Dialog open={failuresOpen} onOpenChange={setFailuresOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <AlertTriangle className="h-4 w-4 text-red-500" />
+                Failed Sends
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                {failuresFor
+                  ? `Recipients that could not be reached for "${failuresFor.title}". Retrying re-attempts only these — anyone already delivered is skipped.`
+                  : ""}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-80 overflow-y-auto rounded-lg border">
+              {loadingFailures ? (
+                <div className="py-12 flex justify-center text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+              ) : failures.length === 0 ? (
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  No failed-send records found for this broadcast.
+                </div>
+              ) : (
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900">
+                    <tr className="border-b text-[11px] font-semibold text-slate-400">
+                      <th className="py-2 px-3">Recipient</th>
+                      <th className="py-2 px-3">Channel</th>
+                      <th className="py-2 px-3">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {failures.map((f) => (
+                      <tr key={f.id} className="border-b last:border-0 dark:border-slate-800">
+                        <td className="py-2 px-3">
+                          <div className="font-medium">{f.name || "—"}</div>
+                          <div className="text-[10px] text-slate-400">{f.contact}</div>
+                        </td>
+                        <td className="py-2 px-3">
+                          <Badge variant="secondary" className="text-[9px] px-1.5 py-0">{f.channel}</Badge>
+                        </td>
+                        <td className="py-2 px-3 text-red-500 max-w-xs truncate" title={f.error}>{f.error}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setFailuresOpen(false)}>Close</Button>
+              <Button
+                size="sm"
+                onClick={handleRetry}
+                disabled={retrying || loadingFailures || failures.length === 0}
+                className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90"
+              >
+                {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+                Retry failed sends
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </PortalLayout>
     </ProtectedRoute>
   );
