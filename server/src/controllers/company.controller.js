@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
 import { MailService } from "../services/mail-service.js";
+import { normalizeLeadStatuses } from "../lib/lead-statuses.js";
 
 export const getCompany = async (req, res) => {
   try {
@@ -28,12 +29,6 @@ export const updateCompany = async (req, res) => {
     }
 
     const companyId = session.companyId || "demo-company";
-
-    // Whitelist self-service company settings. Spreading the raw request body
-    // would let a STAFF/ADMIN set gating fields (salesEnabled, warrantyEnabled,
-    // verificationStatus, automation caps, ...) via this endpoint — a
-    // mass-assignment privilege escalation. Only these fields are updatable
-    // here; workspace/verification flags are managed by Super-Admin endpoints.
     const ALLOWED_FIELDS = [
       "name",
       "logo",
@@ -44,14 +39,35 @@ export const updateCompany = async (req, res) => {
       "botColor",
       "defaultLeadOwner",
       "voiceProfile",
-      "maxSmsPerHour",
       "complianceOptInRequired",
       "campaignExitConditions",
       "campaignVersionPolicy",
+      "smsQuietHoursEnabled",
+      "quietHoursStart",
+      "quietHoursEnd",
+      "quietHoursTimezone",
+      "leadStatuses",
     ];
     const data = {};
     for (const key of ALLOWED_FIELDS) {
       if (req.body[key] !== undefined) data[key] = req.body[key];
+    }
+
+    if (data.leadStatuses !== undefined) {
+      data.leadStatuses = normalizeLeadStatuses(data.leadStatuses);
+    }
+
+    // SW-ANN: clamp quiet-hours bounds to a valid 0–24 hour range.
+    const clampHour = (v, fallback) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.min(24, Math.max(0, Math.round(n))) : fallback;
+    };
+    if (data.quietHoursStart !== undefined) data.quietHoursStart = clampHour(data.quietHoursStart, 8);
+    if (data.quietHoursEnd !== undefined) data.quietHoursEnd = clampHour(data.quietHoursEnd, 21);
+    if (data.smsQuietHoursEnabled !== undefined) data.smsQuietHoursEnabled = !!data.smsQuietHoursEnabled;
+    if (data.quietHoursTimezone !== undefined) {
+      const tz = String(data.quietHoursTimezone || "").trim();
+      data.quietHoursTimezone = tz || null;
     }
 
     const company = await prisma.company.update({
@@ -59,9 +75,6 @@ export const updateCompany = async (req, res) => {
       data,
     });
 
-    // SW-NUR: campaign behavior is now a company-wide setting. Propagate any
-    // change to every campaign so the running engine (which reads the
-    // campaign-level fields) reflects it immediately.
     if (
       data.campaignExitConditions !== undefined ||
       data.campaignVersionPolicy !== undefined
@@ -82,7 +95,7 @@ export const updateCompany = async (req, res) => {
     if (session.role === "ADMIN" && data.name) {
       await prisma.user.updateMany({
         where: { email: session.email },
-        data: { name: updateData.name }
+        data: { name: data.name }
       });
     }
 
@@ -114,11 +127,9 @@ export const getCompanyBranding = async (req, res) => {
       return res.status(404).json({ message: "Company not found" });
     }
 
-    // Enable CORS so external sites can fetch this branding
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    // Cache branding for 5 minutes, serve stale for 10 minutes while revalidating
     res.setHeader("Cache-Control", "public, max-age=300, stale-while-revalidate=600");
 
     return res.json(company);
@@ -128,14 +139,10 @@ export const getCompanyBranding = async (req, res) => {
   }
 };
 
-// Tenant onboarding: the company admin uploads a verification document (an
-// image of an invoice / ID / business doc). This flips the company's
-// verificationStatus to SUBMITTED so the Super Admin can review and approve it.
 export const submitVerificationDocument = async (req, res) => {
   try {
     const session = req.user;
 
-    // Only the tenant company admin can submit their verification document.
     if (!session || session.role !== "ADMIN") {
       return res.status(403).json({ message: "Unauthorized" });
     }

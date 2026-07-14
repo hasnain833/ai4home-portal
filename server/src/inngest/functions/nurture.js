@@ -337,7 +337,9 @@ function shouldExitCampaign(reason, exitConditions, newStatus) {
     case "REPLY":
       return cfg.onReply !== false;
     case "APPOINTMENT":
-      return cfg.onAppointment !== false;
+      // Hardcoded rule: a lead always exits its campaign once it books an
+      // appointment — this is not tenant-configurable.
+      return true;
     case "STATUS_CHANGE":
       return !!cfg.onStatusChange && cfg.onStatusChange === newStatus;
     default:

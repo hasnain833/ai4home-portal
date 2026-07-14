@@ -5,6 +5,7 @@ import { sendSms } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { buildPrismaWhereClause } from "../../controllers/segments.controller.js";
+import { htmlToText, looksLikeHtml } from "../../lib/sanitize-html.js";
 
 const CHUNK_SIZE = 50;
 
@@ -75,7 +76,7 @@ function buildEmailHtml(announcement, lead, body) {
         <h1 style="color:#ffffff;margin:0;font-size:24px;font-weight:600;letter-spacing:0.5px;">${lead.companyName || "Warranty Care & Sales Portal"}</h1>
       </div>
       <div style="padding:40px;color:#334155;line-height:1.8;font-size:16px;">
-        ${body.replace(/\n/g, "<br />")}
+        ${looksLikeHtml(body) ? body : body.replace(/\n/g, "<br />")}
         ${cta}
       </div>
     </div>`;
@@ -211,7 +212,9 @@ export const sendAnnouncement = inngest.createFunction(
               if (!compliance.allowed) {
                 skipped += 1;
               } else {
-                const base = renderText(announcement.body, lead);
+                // SMS is plain text — flatten any rich-text HTML from the editor.
+                const rendered = renderText(announcement.body, lead);
+                const base = looksLikeHtml(rendered) ? htmlToText(rendered) : rendered;
                 const withCta = announcement.ctaLink ? `${base} ${announcement.ctaLink}` : base;
                 const smsBody = ComplianceService.addSmsOptOutSuffix(withCta);
                 try {

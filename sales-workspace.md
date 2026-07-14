@@ -8,7 +8,7 @@ Only remaining tasks are listed here. For completed features see the
 code-level technical audit see [`AUDIT.md`](./AUDIT.md); for the warranty side
 see [`warranty-workspace.md`](./warranty-workspace.md).
 
-_Last updated: 2026-07-13._
+_Last updated: 2026-07-14._
 
 > **Runtime note** — Per SRS §11.4, the Sales AI features run on the native
 > **Claude + Inngest** runtime. Botpress is the Warranty-workspace bot engine
@@ -22,75 +22,14 @@ _Last updated: 2026-07-13._
 
 ---
 
-## 🧱 Foundation — Hub & Lead Model
-
-**Lead deduplication** — `SW-LEAD-003` · ✅ Completed 2026-07-13
-
-Cross-source linking implemented: a Salesforce record matching an existing
-CSV/manual lead now links to it (Salesforce becomes system-of-record) instead of
-creating a duplicate, and CSV/manual imports no longer overwrite Salesforce-owned
-fields — they only fill the gaps. Verified with unit tests.
-
-**Lead lifecycle statuses** — `SW-LEAD-006` · 🟡 Partial
-
-The status set works, but it's hardcoded — not yet tenant-configurable.
-
-**Notification routing** — `HUB-007` · 🔴 Open
-
-No shared, workspace-tagged notification center with deep links. Several other
-items below depend on this.
-
----
-
-## 🔔 Announcements Agent — `SW-ANN`
-
-🔴 Open · deferred to v2:
-
-- Rich-text / image editor for announcement content.
-- Radius (geo) targeting.
-- Dead-letter queue surfaced in the UI.
-- Per-timezone SMS quiet-hours deferral — SMS blocked by quiet hours are
-  currently **skipped**, not requeued for later.
-
----
-
 ## 🔄 CRM Sync Agent — `SW-CRM`
-
-**Write-back coverage** — `SW-CRM-008` (extend) · ✅ Completed 2026-07-13
-
-- ✅ Appointment-booked (status → "Appointment Set") now writes back from both
-  booking paths; unsubscribe now writes the consent/opt-out back to Salesforce.
-- ✅ Settings UI toggle for `writeBackEnabled` added (Salesforce card).
 
 **Persistent-failure alerting** — `SW-CRM-007` (extend) · 🔴 Open
 
 Repeated sync / write-back failures are only written to `SyncLog`. Surface them
-as an admin notification. _Depends on the notification center (`HUB-007`)._
-
----
-
-## 📰 News Scraping Agent — `SW-NEWS`
-
-**News auto-share pipeline** — 🟡 Partial
-
-News already feeds the Market News feed and calendar suggestions. The blog
-drafter backend it was waiting on is now built (see
-[Recently completed](#-recently-completed)), so the remaining work is to wire
-the **Nurture Agent auto-share** of news / mortgage-rate / home-pricing updates
-(also listed under [Client requests](#-additional-client-requests)).
-
----
-
-## 🤝 Automated Marketing Rules Agent — `SW-AMK` · ✅ Completed 2026-07-13
-
-- ✅ New actions wired: `SEND_EMAIL`, `SEND_SMS` (compliance-gated), `CREATE_TASK`
-  (lead-timeline task), `DRAFT_ANNOUNCEMENT`. Merge fields are injection-safe.
-- ✅ `APPOINTMENT_BOOKED` fires from both booking paths; `DATE_BASED` triggers run
-  via a daily cron with new `OLDER_THAN_DAYS` / `NEWER_THAN_DAYS` operators.
-- ✅ Daily send cap enforced — a shared budget skips further sends once
-  `automationDailyCap` is reached.
-- ✅ Analytics UI panel surfaced on the automations page.
-- ✅ Verified with unit tests (conditions, merge-fields, cap accounting).
+to admins — e.g. an email digest reusing the existing complaint-rate alert
+mailer (`ComplianceService.sendComplaintRateAlert`), since the shared
+notification center was dropped from scope.
 
 ---
 
@@ -190,11 +129,6 @@ decide with the client whether real invoicing is still required.
 
 No Terms of Service or Privacy Policy pages exist under `src/app`.
 
-**Nurture Agent auto-share** — 🔴 Open
-
-Auto-share news, mortgage rates, and home-pricing updates using blog-scraper
-content. Now unblocked (the SW-BLOG backend is built).
-
 ---
 
 ## ⚙️ Operational steps (code done — run once per environment)
@@ -202,7 +136,8 @@ content. Now unblocked (the SW-BLOG backend is built).
 These aren't coding tasks; they activate finished features on a live database /
 environment:
 
-- **`prisma db push`** — applies pending additive schema changes (e.g. the
+- **`prisma db push`** — applies pending additive schema changes (the new
+  `Company` columns for tenant-configurable lead statuses + SMS quiet hours; the
   `BlogPost` table; drops the removed `ScrapedNews.wasBroadcasted` column; the
   `AuditLog` table).
 - **`prisma/pgvector-setup.sql`** then **`POST /api/sales/kb/reindex`** — enables
@@ -217,10 +152,23 @@ environment:
 
 For reference — these were delivered and verified, most recent first:
 
+- **Lead lifecycle statuses** (`SW-LEAD-006`) — pipeline statuses are now
+  tenant-configurable (`Company.leadStatuses`, edited on Settings → Lead
+  Pipeline); the leads table, filters and dropdowns render from the config, with
+  a safe default set.
+- **Announcements Agent polish** (`SW-ANN`) — rich-text (bold/italic/lists/links,
+  no images) body editor with server-side allowlist sanitization; a dead-letter
+  queue in the UI (inspect failed recipients + one-click retry that re-attempts
+  only the failures); and tenant-configurable SMS quiet hours (window +
+  timezone, or off so staff set the send time manually) replacing the hardcoded
+  8–21 window.
 - **Blog Drafting Agent** (`SW-BLOG-001…006`) — full backend (`BlogPost` model,
   14 endpoints) + real UI + public tenant-hosted reader.
 - **Sales KB semantic search** (`SW-KB-002`) — pgvector cosine over local
   MiniLM embeddings, with FTS fallback; no paid embedding provider.
+- **Automated Marketing Rules** (`SW-AMK`) — `SEND_EMAIL` / `SEND_SMS` /
+  `CREATE_TASK` / `DRAFT_ANNOUNCEMENT` actions, date-based triggers, shared daily
+  send cap, and an analytics panel.
 - **Nurture Agent polish** (`SW-NUR-002/003/007/008`) — segment enrollment,
   campaign settings UI, live Brevo delivered/opened/clicked, mid-run MIGRATE.
 - **CRM Sync Agent** (`SW-CRM-006…009`) — scheduled sync + deletion archive,
@@ -231,3 +179,14 @@ For reference — these were delivered and verified, most recent first:
   guard on every private `/api/sales/*` route (403, not just a hidden UI).
 - **Unified LLM provider** — all AI features route through `lib/llm.js`
   (Anthropic `claude-sonnet-5`, Groq fallback).
+
+---
+
+## 🗒️ De-scoped (per client, not building)
+
+- **News / Nurture auto-share** — no auto-campaign. The manual flow (create a
+  campaign, then launch it) is already built and is the intended process.
+- **Shared notification center** (`HUB-007`) — not required.
+- **Announcement image editor & radius/geo targeting** — not required.
+- **Per-timezone quiet-hours auto-requeue** — replaced by tenant-configurable
+  quiet hours + admin-set send time (above).

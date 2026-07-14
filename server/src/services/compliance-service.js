@@ -3,15 +3,17 @@ import { getLeadTimezone } from "../lib/timezone.js";
 
 export class ComplianceService {
 
-  static checkSendingHours(timeZone) {
+  static checkSendingHours(timeZone, startHour = 8, endHour = 21) {
     try {
       const formatter = new Intl.DateTimeFormat("en-US", {
         timeZone,
         hour: "numeric",
         hour12: false,
       });
-      const hour = parseInt(formatter.format(new Date()), 10);
-      return hour >= 8 && hour < 21;
+      const hour = parseInt(formatter.format(new Date()), 10) % 24;
+      const start = Math.min(24, Math.max(0, startHour));
+      const end = Math.min(24, Math.max(0, endHour));
+      return start <= end ? hour >= start && hour < end : hour >= start || hour < end;
     } catch (error) {
       console.error(
         `[Compliance Service] Timezone check failed for ${timeZone}:`,
@@ -87,14 +89,16 @@ export class ComplianceService {
       }
     }
 
-    // 3. Check quiet hours (SMS only)
-    if (channel === "SMS") {
-      const tz = getLeadTimezone(lead.state, lead.phone);
-      const isWithinHours = this.checkSendingHours(tz);
+    if (channel === "SMS" && company.smsQuietHoursEnabled !== false) {
+      const start = company.quietHoursStart ?? 8;
+      const end = company.quietHoursEnd ?? 21;
+      const tz = company.quietHoursTimezone || getLeadTimezone(lead.state, lead.phone);
+      const isWithinHours = this.checkSendingHours(tz, start, end);
       if (!isWithinHours) {
+        const fmt = (h) => `${String(h % 24).padStart(2, "0")}:00`;
         return {
           allowed: false,
-          reason: `Quiet Hours active in recipient timezone (${tz}). Re-try between 8 AM and 9 PM.`,
+          reason: `Quiet Hours active in timezone (${tz}). Sending allowed between ${fmt(start)} and ${fmt(end)}.`,
         };
       }
     }
@@ -412,8 +416,6 @@ export class ComplianceService {
     }
 
     if (metadata.tag) {
-      // Announcement sends are tagged `ann_<id>` so their per-announcement metrics
-      // (SW-ANN-005) can be updated from provider webhooks, distinct from campaign steps.
       if (metadata.tag.startsWith("ann_")) {
         const annFieldMap = {
           DELIVERED: "deliveredCount",
