@@ -17,7 +17,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Clock, Save, RefreshCw, CheckCircle2, Link2, XCircle, Video } from "lucide-react";
+import { Clock, Save, RefreshCw, CheckCircle2, Link2, XCircle, Video, CalendarCheck } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -56,6 +56,43 @@ type Appointment = {
   agent?: { name?: string; email?: string };
 };
 
+
+function formatSlotTime(iso: string, tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(new Date(iso));
+  } catch {
+    return new Date(iso).toLocaleTimeString();
+  }
+}
+
+function formatSlotDay(iso: string, tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    }).format(new Date(iso));
+  } catch {
+    return new Date(iso).toDateString();
+  }
+}
+
+function groupSlotsByDay(slots: Slot[], tz = "America/New_York"): [string, Slot[]][] {
+  const map = new Map<string, Slot[]>();
+  for (const slot of slots) {
+    const day = formatSlotDay(slot.iso, tz);
+    if (!map.has(day)) map.set(day, []);
+    map.get(day)!.push(slot);
+  }
+  return [...map.entries()];
+}
+
 export default function AppointmentsPage() {
   const [activeTab, setActiveTab] = useState<"list" | "settings">("list");
 
@@ -70,6 +107,22 @@ export default function AppointmentsPage() {
   });
   const [google, setGoogle] = useState({ connected: false, accountEmail: "", configured: false });
   const [savingSettings, setSavingSettings] = useState(false);
+  const [slotPreview, setSlotPreview] = useState<{ loading: boolean; slots: Slot[] }>({
+    loading: true,
+    slots: [],
+  });
+
+  const fetchSlotPreview = useCallback(async () => {
+    setSlotPreview((s) => ({ ...s, loading: true }));
+    try {
+      const res = await fetch("/api/sales/scheduling/slots?days=14&limit=60");
+      if (!res.ok) throw new Error("failed");
+      const data = await res.json();
+      setSlotPreview({ loading: false, slots: data.slots || [] });
+    } catch {
+      setSlotPreview({ loading: false, slots: [] });
+    }
+  }, []);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loadingAppts, setLoadingAppts] = useState(true);
@@ -124,6 +177,7 @@ export default function AppointmentsPage() {
   useEffect(() => {
     loadSettings();
     loadAppointments();
+    fetchSlotPreview();
     // Surface the Google OAuth round-trip result and land on the settings tab.
     const params = new URLSearchParams(window.location.search);
     if (params.get("tab") === "settings") setActiveTab("settings");
@@ -163,6 +217,8 @@ export default function AppointmentsPage() {
       });
       if (!res.ok) throw new Error((await res.json()).message || "Save failed");
       toast.success("Availability settings saved");
+      // Reflect the new rules in the preview immediately.
+      fetchSlotPreview();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -394,7 +450,8 @@ export default function AppointmentsPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="max-w-xl border border-border/80 shadow-xs">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <Card className="border border-border/80 shadow-xs">
               <CardHeader className="border-b">
                 <CardTitle className="text-sm font-bold">Define Work Hours & Time Zones</CardTitle>
                 <CardDescription className="text-xs">
@@ -574,6 +631,76 @@ export default function AppointmentsPage() {
                 </form>
               </CardContent>
             </Card>
+
+            <Card className="border border-border/80 shadow-xs">
+              <CardHeader className="border-b">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-sm font-bold flex items-center gap-1.5">
+                      <CalendarCheck className="h-4 w-4 text-[#b48c3c]" /> Available Slots
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Next 14 days, with booked and Google Calendar time already removed.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={fetchSlotPreview}
+                    disabled={slotPreview.loading}
+                    className="h-8 gap-1.5 text-xs shrink-0"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${slotPreview.loading ? "animate-spin" : ""}`} />
+                    Refresh
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-4">
+                {slotPreview.loading ? (
+                  <p className="text-sm text-muted-foreground py-10 text-center animate-pulse">
+                    Calculating slots…
+                  </p>
+                ) : slotPreview.slots.length === 0 ? (
+                  <div className="text-center py-10 px-4 border border-dashed rounded-lg">
+                    <Clock className="h-8 w-8 mx-auto text-slate-300 dark:text-slate-700" />
+                    <p className="text-sm font-semibold mt-3">No slots available</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Save your work hours and working days — if they are already set, every slot in
+                      the next 14 days is booked out.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      <span className="font-semibold text-foreground">{slotPreview.slots.length}</span>{" "}
+                      slot{slotPreview.slots.length === 1 ? "" : "s"} open ·{" "}
+                      {settings.slotDuration} min each
+                    </p>
+                    <div className="max-h-96 overflow-y-auto space-y-4 pr-1">
+                      {groupSlotsByDay(slotPreview.slots, settings.timezone).map(([day, slots]) => (
+                        <div key={day}>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 sticky top-0 bg-card py-1">
+                            {day}
+                          </p>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {slots.map((slot) => (
+                              <span
+                                key={slot.iso}
+                                className="px-2 py-1.5 rounded-md text-[11px] font-medium text-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40"
+                              >
+                                {formatSlotTime(slot.iso, settings.timezone)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+            </div>
           )}
         </div>
 

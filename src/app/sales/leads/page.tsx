@@ -47,8 +47,24 @@ import {
   Trash2,
   Download,
   Save,
-  AlertTriangle
+  AlertTriangle,
+  Filter,
+  X
 } from "lucide-react";
+
+/** Mirrors the filter shape read by buildPrismaWhereClause() on the server. */
+type SegmentFilter = {
+  field: string;
+  operator: "equals" | "contains" | "startsWith" | "in" | "true" | "false";
+  value: string | string[];
+};
+
+interface Segment {
+  id: string;
+  name: string;
+  filters: SegmentFilter[];
+  createdAt: string;
+}
 
 interface Lead {
   id: string;
@@ -81,6 +97,92 @@ export default function LeadsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
+
+  // ─── Saved segments (SW-NUR-002) ────────────────────────────────────────────
+  // A segment is the current Status + Tag filters, saved by name. Campaigns
+  // target these from the Enroll dialog. Filter shape must match
+  // buildPrismaWhereClause() in server/src/controllers/segments.controller.js:
+  //   [{ field, operator, value }] -- ANDed together.
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [segmentCounts, setSegmentCounts] = useState<Record<string, number>>({});
+  const [saveSegmentOpen, setSaveSegmentOpen] = useState(false);
+  const [segmentName, setSegmentName] = useState("");
+  const [savingSegment, setSavingSegment] = useState(false);
+
+  // Free-text search is deliberately excluded: the leads list ORs it across
+  // name/email/phone, but the segment evaluator only builds single-field AND
+  // conditions, so including it would change what the segment matches.
+  const activeSegmentFilters = useMemo(() => {
+    const filters: SegmentFilter[] = [];
+    if (statusFilter !== "all") filters.push({ field: "status", operator: "equals", value: statusFilter });
+    if (tagFilter !== "all") filters.push({ field: "tags", operator: "contains", value: tagFilter });
+    return filters;
+  }, [statusFilter, tagFilter]);
+
+  const fetchSegments = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sales/segments");
+      if (!res.ok) return;
+      const data: Segment[] = await res.json();
+      setSegments(data);
+      // Counts are per-segment; evaluate in parallel and ignore individual failures.
+      const entries = await Promise.all(
+        data.map(async (seg) => {
+          try {
+            const r = await fetch(`/api/sales/segments/${seg.id}/evaluate`);
+            if (!r.ok) return [seg.id, -1] as const;
+            return [seg.id, (await r.json()).count as number] as const;
+          } catch {
+            return [seg.id, -1] as const;
+          }
+        }),
+      );
+      setSegmentCounts(Object.fromEntries(entries));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const saveSegment = async () => {
+    if (!segmentName.trim() || activeSegmentFilters.length === 0) return;
+    setSavingSegment(true);
+    try {
+      const res = await fetch("/api/sales/segments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: segmentName.trim(), filters: activeSegmentFilters }),
+      });
+      if (!res.ok) throw new Error((await res.json()).message || "Failed to save segment");
+      toast.success(`Segment "${segmentName.trim()}" saved`);
+      setSaveSegmentOpen(false);
+      setSegmentName("");
+      fetchSegments();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save segment");
+    } finally {
+      setSavingSegment(false);
+    }
+  };
+
+  const deleteSegment = async (seg: Segment) => {
+    try {
+      const res = await fetch(`/api/sales/segments/${seg.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete segment");
+      toast.success(`Segment "${seg.name}" deleted`);
+      fetchSegments();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete segment");
+    }
+  };
+
+  /** Apply a saved segment's filters back onto the list. */
+  const applySegment = (seg: Segment) => {
+    const status = seg.filters?.find((f) => f.field === "status")?.value;
+    const tag = seg.filters?.find((f) => f.field === "tags")?.value;
+    setStatusFilter(typeof status === "string" ? status : "all");
+    setTagFilter(typeof tag === "string" ? tag : "all");
+    setSearch("");
+  };
 
   // Manual Lead Modal state
   const [manualModalOpen, setManualModalOpen] = useState(false);
@@ -156,6 +258,10 @@ export default function LeadsPage() {
   useEffect(() => {
     fetchLeads();
   }, [fetchLeads]);
+
+  useEffect(() => {
+    fetchSegments();
+  }, [fetchSegments]);
 
   // Load the tenant's configured lead statuses (falls back to defaults).
   useEffect(() => {
@@ -554,8 +660,141 @@ export default function LeadsPage() {
                   </Select>
                 </div>
               </div>
+
+              {/* ─── Saved segments ─────────────────────────────────────────── */}
+              <div className="mt-4 pt-4 border-t border-border/60">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-3.5 w-3.5 text-[#b48c3c]" />
+                    <span className="text-xs font-semibold">Saved Segments</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Reusable audiences you can target from a campaign.
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5"
+                    disabled={activeSegmentFilters.length === 0}
+                    onClick={() => setSaveSegmentOpen(true)}
+                    title={
+                      activeSegmentFilters.length === 0
+                        ? "Pick a status or tag filter first"
+                        : "Save the current filters as a segment"
+                    }
+                  >
+                    <Save className="h-3.5 w-3.5" /> Save current filters
+                  </Button>
+                </div>
+
+                {segments.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground mt-2.5">
+                    No segments yet. Filter by status or tag above, then save it as a segment to
+                    target it from a campaign.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {segments.map((seg) => {
+                      const count = segmentCounts[seg.id];
+                      return (
+                        <span
+                          key={seg.id}
+                          className="group inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-white dark:bg-slate-900 pl-3 pr-1.5 py-1 text-xs shadow-xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => applySegment(seg)}
+                            className="font-semibold hover:text-[#b48c3c] transition-colors"
+                            title="Apply this segment's filters"
+                          >
+                            {seg.name}
+                          </button>
+                          <span className="text-[10px] font-semibold text-muted-foreground bg-slate-100 dark:bg-slate-800 rounded-full px-1.5 py-0.5">
+                            {count === undefined ? "…" : count < 0 ? "—" : count}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => deleteSegment(seg)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-500 rounded-full p-0.5"
+                            title={`Delete segment "${seg.name}"`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
+
+          {/* Save-segment dialog */}
+          <Dialog open={saveSegmentOpen} onOpenChange={setSaveSegmentOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Save segment</DialogTitle>
+                <DialogDescription>
+                  Segments are evaluated live — a campaign targeting this segment enrolls whoever
+                  matches at that moment, not a frozen list.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Segment name</Label>
+                  <Input
+                    autoFocus
+                    placeholder="e.g. New leads tagged VIP"
+                    value={segmentName}
+                    onChange={(e) => setSegmentName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveSegment();
+                    }}
+                  />
+                </div>
+
+                <div className="rounded-lg border border-border/70 bg-slate-50 dark:bg-slate-900/40 p-3">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                    Matches leads where
+                  </p>
+                  <ul className="space-y-1">
+                    {activeSegmentFilters.map((f) => (
+                      <li key={f.field} className="text-xs">
+                        <span className="text-muted-foreground">
+                          {f.field === "tags" ? "Tag" : "Status"}
+                        </span>{" "}
+                        <span className="text-muted-foreground">
+                          {f.field === "tags" ? "includes" : "is"}
+                        </span>{" "}
+                        <span className="font-semibold">{String(f.value)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {search.trim() !== "" && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-500 flex items-start gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
+                    Your search text is not saved — segments match on status and tag only.
+                  </p>
+                )}
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setSaveSegmentOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={saveSegment}
+                  disabled={!segmentName.trim() || savingSegment}
+                  className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90"
+                >
+                  {savingSegment ? "Saving…" : "Save segment"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Leads Table */}
           <Card className="overflow-hidden border border-border/80 shadow-xs">

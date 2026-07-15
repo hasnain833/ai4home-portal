@@ -469,7 +469,7 @@ export default function CampaignsPage() {
 
                           return (
                             <div key={step.id} className="relative">
-                              <span className={`absolute left-10.25 top-1.5 h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isFullyCompleted ? "bg-green-500 text-white" : "bg-[#b48c3c] text-white"}`}>
+                              <span className={`absolute -left-11.25 top-1.5 z-10 h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold ring-4 ring-white dark:ring-slate-900 ${isFullyCompleted ? "bg-green-500 text-white" : "bg-[#b48c3c] text-white"}`}>
                                 {isFullyCompleted ? <CheckCircle className="h-4 w-4" /> : index + 1}
                               </span>
                               <div className={`relative p-5 border rounded-xl max-w-xl group transition-all duration-300 hover:shadow-md ${isFullyCompleted ? "bg-linear-to-br from-green-50/50 to-white border-green-200 dark:from-green-950/20 dark:to-slate-900" : "bg-linear-to-br from-white to-slate-50 border-slate-200 shadow-sm dark:from-slate-900 dark:to-slate-900/50"}`}>

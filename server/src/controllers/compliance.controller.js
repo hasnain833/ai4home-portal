@@ -319,12 +319,14 @@ export const unsubscribeByLead = async (req, res) => {
       },
     });
 
-    // Stop any active sequences for this lead.
-    const { inngest } = await import("../lib/inngest.js");
-    await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "UNSUBSCRIBE" } });
+    import("../lib/inngest.js")
+      .then(({ inngest }) =>
+        inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "UNSUBSCRIBE" } }),
+      )
+      .catch((e) =>
+        console.error("[Unsubscribe] campaign.exit dispatch failed:", e?.message || e),
+      );
 
-    // SW-CRM-008: reflect the opt-out back to Salesforce (gated per tenant; no-op
-    // unless writeBackEnabled + the lead is linked to a Salesforce record).
     writeBackLeadToSalesforce(
       lead.companyId,
       lead.id,
@@ -444,8 +446,13 @@ export const unsubscribeWebhook = async (req, res) => {
         },
       });
 
-      const { inngest } = await import("../lib/inngest.js");
-      await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "UNSUBSCRIBE" } });
+      import("../lib/inngest.js")
+        .then(({ inngest }) =>
+          inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "UNSUBSCRIBE" } }),
+        )
+        .catch((e) =>
+          console.error("[Unsubscribe Webhook] campaign.exit dispatch failed:", e?.message || e),
+        );
     }
 
     return res.json({

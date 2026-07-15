@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -17,6 +18,9 @@ import {
   Loader2,
   AlertTriangle,
   RefreshCw,
+  Save,
+  Pencil,
+  Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -67,6 +71,12 @@ type Failure = {
   failedAt: string;
 };
 
+/** Mirrors normalizeChannel/channelIncludesEmail in the announcements controller. */
+function channelIncludesEmail(channel: string): boolean {
+  const c = String(channel || "EMAIL").toUpperCase();
+  return c === "EMAIL" || c === "BOTH";
+}
+
 const statusStyles: Record<string, string> = {
   Sent: "bg-green-50 text-green-700 border-green-200/50 dark:bg-green-950/20 dark:text-green-400",
   Queued: "bg-amber-50 text-amber-700 border-amber-200/50 dark:bg-amber-950/20 dark:text-amber-400",
@@ -82,7 +92,12 @@ export default function AnnouncementsPage() {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState<"past" | "create">("past");
+
+  // Set when the composer is editing an existing Draft/Scheduled announcement
+  // rather than authoring a new one.
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // SW-ANN dead-letter queue: inspect + retry failed recipients.
   const [failuresOpen, setFailuresOpen] = useState(false);
@@ -120,8 +135,40 @@ export default function AnnouncementsPage() {
       .catch(() => {});
   }, [loadAnnouncements]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const resetForm = () => {
+    setForm({ title: "", subject: "", channel: "EMAIL", segment: "all", body: "", ctaLink: "", scheduleDate: "" });
+    setEditingId(null);
+  };
+
+  /** Load an existing Draft/Scheduled announcement back into the composer. */
+  const handleEdit = async (a: Announcement) => {
+    try {
+      const res = await fetch(`/api/sales/announcements/${a.id}`);
+      if (!res.ok) throw new Error("Could not load announcement");
+      const full = await res.json();
+      setForm({
+        title: full.title || "",
+        subject: full.subject || "",
+        channel: full.channel || "EMAIL",
+        segment: full.audienceType === "SEGMENT" && full.segmentId ? full.segmentId : "all",
+        body: full.body || "",
+        ctaLink: full.ctaLink || "",
+        scheduleDate: full.scheduledAt
+          ? new Date(full.scheduledAt).toISOString().slice(0, 16)
+          : "",
+      });
+      setEditingId(a.id);
+      setActiveTab("create");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not load announcement");
+    }
+  };
+
+  /**
+   * Saving and sending are deliberately separate. "save" creates/updates a Draft
+   * and never contacts a lead; "send"/"schedule" is the only path that dispatches.
+   */
+  const submitAnnouncement = async (mode: "save" | "send") => {
     if (submitting) return;
 
     // Rich-text body: validate on the stripped text, not the HTML markup.
@@ -130,11 +177,19 @@ export default function AnnouncementsPage() {
       toast.error("Message body is required");
       return;
     }
-
-    setSubmitting(true);
+    if (!form.title.trim()) {
+      toast.error("Title is required");
+      return;
+    }
 
     const scheduling = !!form.scheduleDate;
-    const payload = {
+    if (mode === "send" && channelIncludesEmail(form.channel) && !form.subject.trim()) {
+      toast.error("Subject is required to send an email announcement");
+      return;
+    }
+
+    setSubmitting(true);
+    const core = {
       title: form.title,
       subject: form.subject,
       channel: form.channel,
@@ -142,33 +197,106 @@ export default function AnnouncementsPage() {
       ctaLink: form.ctaLink || null,
       audienceType: form.segment === "all" ? "ALL" : "SEGMENT",
       segmentId: form.segment === "all" ? null : form.segment,
-      action: scheduling ? "schedule" : "send",
-      scheduledAt: scheduling ? new Date(form.scheduleDate).toISOString() : null,
     };
 
     try {
+      // Editing an existing draft -> PATCH first so the saved copy is current.
+      if (editingId) {
+        const patch = await fetch(`/api/sales/announcements/${editingId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(core),
+        });
+        if (!patch.ok) {
+          toast.error((await patch.json()).message || "Failed to save changes");
+          return;
+        }
+        if (mode === "save") {
+          toast.success("Draft saved. Nothing has been sent.");
+          resetForm();
+          setActiveTab("past");
+          loadAnnouncements();
+          return;
+        }
+        // Explicit send of the draft we just saved.
+        const send = await fetch(`/api/sales/announcements/${editingId}/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: scheduling ? "schedule" : "send",
+            scheduledAt: scheduling ? new Date(form.scheduleDate).toISOString() : null,
+          }),
+        });
+        if (!send.ok) {
+          toast.error((await send.json()).message || "Failed to send announcement");
+          return;
+        }
+        toast.success(
+          scheduling
+            ? "Announcement scheduled — it will be sent at the set time."
+            : "Announcement queued — fanning out to your leads now.",
+        );
+        resetForm();
+        setActiveTab("past");
+        loadAnnouncements();
+        return;
+      }
+
+      // New announcement.
       const res = await fetch("/api/sales/announcements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...core,
+          action: mode === "save" ? "draft" : scheduling ? "schedule" : "send",
+          scheduledAt: mode === "send" && scheduling ? new Date(form.scheduleDate).toISOString() : null,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.message || "Failed to queue announcement");
+        toast.error(data.message || "Failed to save announcement");
         return;
       }
       toast.success(
-        scheduling
-          ? "Announcement scheduled — it will be sent to your leads at the set time."
-          : "Announcement queued — fanning out to your leads now."
+        mode === "save"
+          ? "Draft saved. Edit it any time, then send when you're ready."
+          : scheduling
+          ? "Announcement scheduled — it will be sent at the set time."
+          : "Announcement queued — fanning out to your leads now.",
       );
-      setForm({ title: "", subject: "", channel: "EMAIL", segment: "all", body: "", ctaLink: "", scheduleDate: "" });
+      resetForm();
       setActiveTab("past");
       loadAnnouncements();
     } catch {
-      toast.error("Network error while sending announcement");
+      toast.error("Network error while saving announcement");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /** Send an existing Draft straight from the list. */
+  const handleSendDraft = async (a: Announcement) => {
+    const ok = await confirm({
+      title: `Send "${a.title}"?`,
+      description:
+        "This dispatches the announcement to every targeted lead right now. It cannot be unsent.",
+      confirmText: "Send now",
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/sales/announcements/${a.id}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send" }),
+      });
+      if (!res.ok) {
+        toast.error((await res.json()).message || "Failed to send announcement");
+        return;
+      }
+      toast.success("Announcement queued — fanning out to your leads now.");
+      loadAnnouncements();
+    } catch {
+      toast.error("Network error while sending announcement");
     }
   };
 
@@ -368,16 +496,40 @@ export default function AnnouncementsPage() {
                                   : new Date(a.createdAt).toLocaleDateString()}
                               </td>
                               <td className="py-3.5 px-4">
-                                {a.status === "Scheduled" && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 text-[11px] text-red-500 hover:text-red-600"
-                                    onClick={() => handleCancel(a.id)}
-                                  >
-                                    <X className="h-3 w-3 mr-1" /> Cancel
-                                  </Button>
-                                )}
+                                <div className="flex items-center gap-0.5">
+                                  {/* Editable only while nothing has gone out --
+                                      matches updateAnnouncement's Draft/Scheduled guard. */}
+                                  {(a.status === "Draft" || a.status === "Scheduled") && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 text-[11px] text-slate-500 hover:text-[#b48c3c]"
+                                      onClick={() => handleEdit(a)}
+                                    >
+                                      <Pencil className="h-3 w-3 mr-1" /> Edit
+                                    </Button>
+                                  )}
+                                  {a.status === "Draft" && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 text-[11px] text-green-600 hover:text-green-700"
+                                      onClick={() => handleSendDraft(a)}
+                                    >
+                                      <Send className="h-3 w-3 mr-1" /> Send
+                                    </Button>
+                                  )}
+                                  {a.status === "Scheduled" && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 text-[11px] text-red-500 hover:text-red-600"
+                                      onClick={() => handleCancel(a.id)}
+                                    >
+                                      <X className="h-3 w-3 mr-1" /> Cancel
+                                    </Button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -391,13 +543,39 @@ export default function AnnouncementsPage() {
           ) : (
             <Card className="max-w-2xl border border-border/80 shadow-xs">
               <CardHeader className="border-b">
-                <CardTitle className="text-sm font-bold">Author New Broadcast Announcement</CardTitle>
-                <CardDescription className="text-xs">
-                  Broadcast to every targeted lead by email and/or SMS. Opted-out, suppressed, and (for SMS) quiet-hours contacts are skipped automatically by the compliance layer.
-                </CardDescription>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-sm font-bold">
+                      {editingId ? "Edit Draft Announcement" : "Author New Broadcast Announcement"}
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Broadcast to every targeted lead by email and/or SMS. Opted-out, suppressed, and (for SMS) quiet-hours contacts are skipped automatically by the compliance layer.
+                    </CardDescription>
+                  </div>
+                  {editingId && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-[11px] shrink-0"
+                      onClick={() => {
+                        resetForm();
+                        setActiveTab("past");
+                      }}
+                    >
+                      <X className="h-3 w-3 mr-1" /> Discard edit
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="p-6">
-                <form onSubmit={handleSend} className="space-y-4">
+                <form
+                  onSubmit={(e) => {
+                    // Nothing sends on a bare submit (e.g. Enter in a text field);
+                    // dispatching requires the explicit Send button.
+                    e.preventDefault();
+                  }}
+                  className="space-y-2"
+                >
                   <div className="space-y-1.5">
                     <Label htmlFor="title" className="font-semibold">Title / Internal Name</Label>
                     <Input
@@ -483,19 +661,38 @@ export default function AnnouncementsPage() {
                     <p className="text-[10px] text-muted-foreground">Leave blank to send immediately.</p>
                   </div>
 
-                  <Button
-                    type="submit"
-                    disabled={submitting}
-                    className="w-full bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90"
-                  >
-                    {submitting ? (
-                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Queuing…</>
-                    ) : form.scheduleDate ? (
-                      "Schedule Broadcast"
-                    ) : (
-                      "Send Broadcast Now"
-                    )}
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={submitting}
+                      onClick={() => submitAnnouncement("save")}
+                      className="flex-1"
+                    >
+                      {submitting ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving…</>
+                      ) : (
+                        <><Save className="h-4 w-4 mr-2" /> {editingId ? "Save changes" : "Save as draft"}</>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => submitAnnouncement("send")}
+                      className="flex-1 bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90"
+                    >
+                      {submitting ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Queuing…</>
+                      ) : form.scheduleDate ? (
+                        <><Clock className="h-4 w-4 mr-2" /> Schedule broadcast</>
+                      ) : (
+                        <><Send className="h-4 w-4 mr-2" /> Send broadcast now</>
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground text-center">
+                    Saving a draft never contacts a lead — you can edit it and send later.
+                  </p>
                 </form>
               </CardContent>
             </Card>
