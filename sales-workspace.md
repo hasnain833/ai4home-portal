@@ -148,39 +148,7 @@ environment:
 
 ---
 
-## ✅ Recently completed
 
-For reference — these were delivered and verified, most recent first:
-
-- **Lead lifecycle statuses** (`SW-LEAD-006`) — pipeline statuses are now
-  tenant-configurable (`Company.leadStatuses`, edited on Settings → Lead
-  Pipeline); the leads table, filters and dropdowns render from the config, with
-  a safe default set.
-- **Announcements Agent polish** (`SW-ANN`) — rich-text (bold/italic/lists/links,
-  no images) body editor with server-side allowlist sanitization; a dead-letter
-  queue in the UI (inspect failed recipients + one-click retry that re-attempts
-  only the failures); and tenant-configurable SMS quiet hours (window +
-  timezone, or off so staff set the send time manually) replacing the hardcoded
-  8–21 window.
-- **Blog Drafting Agent** (`SW-BLOG-001…006`) — full backend (`BlogPost` model,
-  14 endpoints) + real UI + public tenant-hosted reader.
-- **Sales KB semantic search** (`SW-KB-002`) — pgvector cosine over local
-  MiniLM embeddings, with FTS fallback; no paid embedding provider.
-- **Automated Marketing Rules** (`SW-AMK`) — `SEND_EMAIL` / `SEND_SMS` /
-  `CREATE_TASK` / `DRAFT_ANNOUNCEMENT` actions, date-based triggers, shared daily
-  send cap, and an analytics panel.
-- **Nurture Agent polish** (`SW-NUR-002/003/007/008`) — segment enrollment,
-  campaign settings UI, live Brevo delivered/opened/clicked, mid-run MIGRATE.
-- **CRM Sync Agent** (`SW-CRM-006…009`) — scheduled sync + deletion archive,
-  rate-limit/backoff, opt-in write-back, consent-on-import.
-- **AI Content Calendar** — month/week/list views, drag-and-drop reschedule,
-  announcements + scheduled blog posts as items.
-- **Workspace entitlements** (`HUB-003/009`) — server-side `requireWorkspace`
-  guard on every private `/api/sales/*` route (403, not just a hidden UI).
-- **Unified LLM provider** — all AI features route through `lib/llm.js`
-  (Anthropic `claude-sonnet-5`, Groq fallback).
-
----
 
 ## 🗒️ De-scoped (per client, not building)
 
@@ -190,3 +158,8 @@ For reference — these were delivered and verified, most recent first:
 - **Announcement image editor & radius/geo targeting** — not required.
 - **Per-timezone quiet-hours auto-requeue** — replaced by tenant-configurable
   quiet hours + admin-set send time (above).
+
+
+3. Claude Api or Another api we are using in the env should be sent to frontend as every company will put there own.
+4. News Page is stricted to google api, so it will be same for every comapny, so every company will senf the same news, doesn't feel good, we should give options in the setting to put api and use their own per company right..
+5. blogs has been made and created but where it will be displayed.. we sould provide something that the comapny can use that to integerate our blog feature so that blogs will shown on their own website, just like  strapi.

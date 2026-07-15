@@ -132,7 +132,12 @@ export async function runIncrementalSync(companyId) {
             city: leadData.city || null,
             state: leadData.state || null,
             zipCode: leadData.zipCode || null,
-            status: leadData.status || "New",
+            // Newly synced leads always enter the portal pipeline at "New".
+            // Salesforce's own status vocabulary ("Open - Not Contacted", ...)
+            // is not the portal's (see src/lib/lead-statuses.ts), so carrying it
+            // over on create injects statuses that match no filter option.
+            // Subsequent status changes still flow through the field mapping.
+            status: "New",
             emailOptIn: leadData.emailOptIn ?? false,
             smsOptIn: leadData.smsOptIn ?? false,
             consentSource:

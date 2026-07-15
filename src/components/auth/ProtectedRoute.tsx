@@ -32,7 +32,7 @@ export function ProtectedRoute({
     }
 
     if (allowedKey && !allowedKey.split(",").includes(user.role.toLowerCase())) {
-      routerRef.current.push("/dashboard");
+      routerRef.current.push("/hub");
     }
   }, [user, isLoading, allowedKey]);
 

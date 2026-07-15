@@ -615,7 +615,8 @@ export const bulkImport = async (req, res) => {
               city: leadData.city || null,
               state: leadData.state || null,
               zipCode: leadData.zipCode || null,
-              status: leadData.status || "New",
+              // Always enter the portal pipeline at "New" -- see salesforce-sync.js.
+              status: "New",
               emailOptIn: leadData.emailOptIn ?? false,
               smsOptIn: leadData.smsOptIn ?? false,
               consentSource: leadData.emailOptIn || leadData.smsOptIn ? "Salesforce Sync" : null,
