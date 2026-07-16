@@ -50,8 +50,8 @@ const warrantyNavItems = [
   { name: "AI Assistant", href: "/warranty/chat", icon: Bot, roles: ["admin", "staff", "homeowner"] },
   { name: "Properties", href: "/warranty/properties", icon: Building2, roles: ["admin", "staff", "homeowner"] },
   { name: "Tickets", href: "/warranty/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
-  { name: "Team", href: "/warranty/dashboard/team", icon: Users, roles: ["admin"] },
-  { name: "Homeowners", href: "/warranty/dashboard/homeowners", icon: User, roles: ["admin", "staff"] },
+  { name: "Team", href: "/warranty/team", icon: Users, roles: ["admin"] },
+  { name: "Homeowners", href: "/warranty/homeowners", icon: User, roles: ["admin", "staff"] },
   // { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
   { name: "Knowledge Base", href: "/warranty/knowledge-base", icon: Database, roles: ["admin", "staff"] },
   { name: "Company", href: "/warranty/company", icon: Building2, roles: ["admin", "staff"] },
@@ -113,9 +113,6 @@ export default function PortalLayout({
     }
   }, [user, mounted, router]);
 
-  // Warranty workspace is gated until the tenant's account is verified by the
-  // Super Admin. While locked, the page content is blurred and a verification
-  // overlay (with the document-upload card) sits on top.
   const warrantyLocked =
     workspace === "warranty" &&
     !!user &&

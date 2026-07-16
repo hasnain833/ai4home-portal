@@ -78,6 +78,7 @@ model Company {
   quietHoursEnd           Int                     @default(21)
   quietHoursTimezone      String?
   leadStatuses            Json?
+  newsSources             Json?
   salesEnabled            Boolean                 @default(false)
   warrantyEnabled         Boolean                 @default(true)
   verificationStatus      String                  @default("PENDING")
