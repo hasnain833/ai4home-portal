@@ -2,6 +2,7 @@ import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
 import { MailService } from "../services/mail-service.js";
 import { normalizeLeadStatuses } from "../lib/lead-statuses.js";
+import { normalizeNewsSources } from "../lib/news-sources.js";
 
 export const getCompany = async (req, res) => {
   try {
@@ -47,6 +48,7 @@ export const updateCompany = async (req, res) => {
       "quietHoursEnd",
       "quietHoursTimezone",
       "leadStatuses",
+      "newsSources",
     ];
     const data = {};
     for (const key of ALLOWED_FIELDS) {
@@ -55,6 +57,11 @@ export const updateCompany = async (req, res) => {
 
     if (data.leadStatuses !== undefined) {
       data.leadStatuses = normalizeLeadStatuses(data.leadStatuses);
+    }
+
+    // SW-NEWS-001: validate + normalize the tenant's news source list.
+    if (data.newsSources !== undefined) {
+      data.newsSources = normalizeNewsSources(data.newsSources);
     }
 
     // SW-ANN: clamp quiet-hours bounds to a valid 0–24 hour range.

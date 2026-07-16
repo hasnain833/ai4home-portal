@@ -26,6 +26,7 @@ export default function SalesNewsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [creatingId, setCreatingId] = useState<string | null>(null);
+  const [fetchingLatest, setFetchingLatest] = useState(false);
 
   const fetchNews = async () => {
     setIsLoading(true);
@@ -46,6 +47,30 @@ export default function SalesNewsPage() {
   useEffect(() => {
     fetchNews();
   }, []);
+
+  // SW-NEWS-001: pull immediately from this tenant's configured sources,
+  // then reload the stored feed.
+  const fetchLatest = async () => {
+    setFetchingLatest(true);
+    try {
+      const res = await fetch("/api/sales/news/refresh", { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(
+          json.saved > 0
+            ? `Fetched ${json.saved} new article${json.saved === 1 ? "" : "s"}.`
+            : "No new articles — your feed is up to date."
+        );
+        await fetchNews();
+      } else {
+        toast.error(json.error || "Failed to fetch latest news.");
+      }
+    } catch {
+      toast.error("Error fetching latest news.");
+    } finally {
+      setFetchingLatest(false);
+    }
+  };
 
   const createCampaignFromNews = async (item: ScrapedNews) => {
     setCreatingId(item.id);
@@ -89,10 +114,16 @@ export default function SalesNewsPage() {
                 AI-summarized market news that powers your calendar suggestions and blog drafts. Nothing is sent to leads without your approval.
               </p>
             </div>
-            <Button className="gap-2" variant="outline" onClick={fetchNews}>
-              <RefreshCcw className="h-4 w-4" />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button className="gap-2" variant="outline" onClick={fetchNews}>
+                <RefreshCcw className="h-4 w-4" />
+                Refresh
+              </Button>
+              <Button className="gap-2" onClick={fetchLatest} disabled={fetchingLatest}>
+                {fetchingLatest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Newspaper className="h-4 w-4" />}
+                Fetch latest
+              </Button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-auto pr-2">

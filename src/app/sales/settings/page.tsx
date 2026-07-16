@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import MessagingSettingsTab from "@/components/sales/settings/MessagingSettingsTab";
+import NewsSourcesTab from "@/components/sales/settings/NewsSourcesTab";
 import { DEFAULT_LEAD_STATUSES } from "@/lib/lead-statuses";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -735,17 +736,23 @@ function SettingsPageContent() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <motion.div variants={fadeInUp}>
-              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-4 max-w-2xl h-10">
+              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-5 max-w-3xl h-10">
                 <TabsTrigger value="crm" className="text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
                 <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
                 <TabsTrigger value="pipeline" className="text-xs font-semibold rounded-lg">Lead Pipeline</TabsTrigger>
                 <TabsTrigger value="messaging" className="text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
+                <TabsTrigger value="news" className="text-xs font-semibold rounded-lg">News Sources</TabsTrigger>
               </TabsList>
             </motion.div>
 
             {/* TAB: MESSAGING (EMAIL & SMS) */}
             <TabsContent value="messaging" className="space-y-6 focus-visible:outline-none">
               <MessagingSettingsTab />
+            </TabsContent>
+
+            {/* TAB: NEWS SOURCES (SW-NEWS-001 — per-tenant configurable feeds) */}
+            <TabsContent value="news" className="space-y-6 focus-visible:outline-none">
+              <NewsSourcesTab />
             </TabsContent>
 
             {/* TAB: LEAD PIPELINE (SW-LEAD-006 — tenant-configurable statuses) */}

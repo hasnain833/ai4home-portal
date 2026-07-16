@@ -11,6 +11,9 @@ const publicRoutes = [
   "/bp-config",
   "/book",
   "/unsubscribe",
+  "/terms",
+  "/privacy",
+  "/blog",
 ];
 
 export async function middleware(request: NextRequest) {
