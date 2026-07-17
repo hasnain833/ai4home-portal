@@ -1,14 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { getAuthenticatedClient } from "./salesforce-service.js";
+import { maybeAlertOnSyncFailure } from "../lib/sync-alerts.js";
 
-// SW-CRM-008: push local lead changes back to Salesforce. OFF by default — only
-// runs when the tenant has `writeBackEnabled` on their connection. Best-effort:
-// never throws to the caller (a CRM hiccup must not fail the portal action); it
-// logs an OUTBOUND SyncLog on success/failure.
-//
-// `changedFields` is an object of portal field → new value, e.g.
-//   { status: "Qualified" }, { smsOptIn: false, emailOptIn: false }.
-// Only fields that have an active Salesforce field mapping are pushed.
 export async function writeBackLeadToSalesforce(companyId, leadId, changedFields) {
   try {
     if (!changedFields || Object.keys(changedFields).length === 0) return;
@@ -23,7 +16,6 @@ export async function writeBackLeadToSalesforce(companyId, leadId, changedFields
       where: { id: leadId, companyId },
       select: { externalId: true },
     });
-    // Only leads that originated from (or are linked to) Salesforce can be written back.
     if (!lead || !lead.externalId) return;
 
     const mappings = await prisma.salesforceFieldMapping.findMany({
@@ -39,7 +31,6 @@ export async function writeBackLeadToSalesforce(companyId, leadId, changedFields
       if (!mapping) continue;
 
       if (mapping.isConsentField) {
-        // Salesforce HasOptedOutOfEmail is inverted vs our emailOptIn.
         if (portalField === "emailOptIn") {
           sfPayload[mapping.salesforceField] = !value;
         } else {
@@ -85,6 +76,8 @@ export async function writeBackLeadToSalesforce(companyId, leadId, changedFields
           message: (err?.message || "Write-back failed").slice(0, 500),
         },
       });
+      // SW-CRM-007: repeated write-back failures are as invisible as sync ones.
+      await maybeAlertOnSyncFailure(companyId, { action: "write-back" });
     } catch { /* ignore logging failure */ }
   }
 }

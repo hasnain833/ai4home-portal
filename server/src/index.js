@@ -34,6 +34,7 @@ import adminRouter from "./routes/admin.js";
 import communitiesRouter from "./routes/communities.js";
 import homeownersRouter from "./routes/homeowners.js";
 import usersRouter from "./routes/users.js";
+import deadLetterRouter from "./routes/dead-letter.js";
 
 import { serve } from "inngest/express";
 import { inngest } from "./lib/inngest.js";
@@ -92,6 +93,7 @@ app.use(
 );
 app.use("/api/sales/news", ...salesGuard, newsRouter);
 app.use("/api/sales/announcements", ...salesGuard, announcementsRouter);
+app.use("/api/sales/dead-letters", ...salesGuard, deadLetterRouter);
 app.use("/api/sales/automations", ...salesGuard, automationsRouter);
 app.use("/api/sales/blog", ...salesGuard, blogRouter);
 // Public tenant-hosted blog reads (SW-BLOG-005) — intentionally unguarded.

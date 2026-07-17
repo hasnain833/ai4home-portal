@@ -12,6 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import MessagingSettingsTab from "@/components/sales/settings/MessagingSettingsTab";
 import NewsSourcesTab from "@/components/sales/settings/NewsSourcesTab";
+import MappingHistoryDialog from "@/components/sales/settings/MappingHistoryDialog";
+import DeadLetterTab from "@/components/sales/settings/DeadLetterTab";
 import { DEFAULT_LEAD_STATUSES } from "@/lib/lead-statuses";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -147,6 +149,8 @@ function SettingsPageContent() {
   const [newDescription, setNewDescription] = useState("");
   const [newIsConsent, setNewIsConsent] = useState(false);
   const [savingMapping, setSavingMapping] = useState(false);
+  // SW-CRM-004: mapping version history / rollback.
+  const [mappingHistoryOpen, setMappingHistoryOpen] = useState(false);
 
   // ─── Sync Logs State ─────────────────────────────────────────────────────
   const [syncLogs, setSyncLogs] = useState<SyncLogEntry[]>([]);
@@ -736,12 +740,13 @@ function SettingsPageContent() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <motion.div variants={fadeInUp}>
-              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-5 max-w-3xl h-10">
+              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-6 max-w-4xl h-10">
                 <TabsTrigger value="crm" className="text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
                 <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
                 <TabsTrigger value="pipeline" className="text-xs font-semibold rounded-lg">Lead Pipeline</TabsTrigger>
                 <TabsTrigger value="messaging" className="text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
                 <TabsTrigger value="news" className="text-xs font-semibold rounded-lg">News Sources</TabsTrigger>
+                <TabsTrigger value="failed" className="text-xs font-semibold rounded-lg">Failed Sends</TabsTrigger>
               </TabsList>
             </motion.div>
 
@@ -753,6 +758,11 @@ function SettingsPageContent() {
             {/* TAB: NEWS SOURCES (SW-NEWS-001 — per-tenant configurable feeds) */}
             <TabsContent value="news" className="space-y-6 focus-visible:outline-none">
               <NewsSourcesTab />
+            </TabsContent>
+
+            {/* SW-ANN-002: dead-letter queue — permanently failed sends. */}
+            <TabsContent value="failed" className="space-y-6 focus-visible:outline-none">
+              <DeadLetterTab />
             </TabsContent>
 
             {/* TAB: LEAD PIPELINE (SW-LEAD-006 — tenant-configurable statuses) */}
@@ -1031,17 +1041,31 @@ function SettingsPageContent() {
                           </CardTitle>
                           <CardDescription className="text-xs">Align Lead fields in the care portal database with Salesforce API field paths.</CardDescription>
                         </div>
-                        {isConnected && (
+                        <div className="flex items-center gap-2">
+                          {/* SW-CRM-004: history is readable even when disconnected —
+                              past mappings are exactly what you want to look at while
+                              reconnecting a broken integration. */}
                           <Button
-                            variant="outline"
+                            variant="ghost"
                             size="sm"
-                            onClick={() => setAddMappingOpen(true)}
-                            className="gap-1.5 h-8 text-xs"
+                            onClick={() => setMappingHistoryOpen(true)}
+                            className="gap-1.5 h-8 text-xs text-muted-foreground"
                           >
-                            <Plus className="h-3.5 w-3.5" />
-                            Add Mapping
+                            <History className="h-3.5 w-3.5" />
+                            History
                           </Button>
-                        )}
+                          {isConnected && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setAddMappingOpen(true)}
+                              className="gap-1.5 h-8 text-xs"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              Add Mapping
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="p-0 overflow-x-auto">
@@ -1570,6 +1594,13 @@ function SettingsPageContent() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* SW-CRM-004: mapping version history + rollback */}
+        <MappingHistoryDialog
+          open={mappingHistoryOpen}
+          onOpenChange={setMappingHistoryOpen}
+          onRolledBack={fetchMappings}
+        />
 
         {/* Add Field Mapping Modal */}
         <Dialog open={addMappingOpen} onOpenChange={setAddMappingOpen}>

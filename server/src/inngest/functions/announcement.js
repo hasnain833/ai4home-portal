@@ -6,18 +6,15 @@ import { ComplianceService } from "../../services/compliance-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { buildPrismaWhereClause } from "../../controllers/segments.controller.js";
 import { htmlToText, looksLikeHtml } from "../../lib/sanitize-html.js";
+import { withActiveLeadFilter } from "../../lib/lead-audience.js";
+import { deadLetter } from "../../lib/dead-letter.js";
 
 const CHUNK_SIZE = 50;
 
-// Which contact channels an announcement targets (SW-ANN-002: email, SMS, or both).
 function channelsFor(channel) {
   const c = (channel || "EMAIL").toUpperCase();
   return { email: c === "EMAIL" || c === "BOTH", sms: c === "SMS" || c === "BOTH" };
 }
-
-// Resolve the live audience at send time (SW-ANN-002 snapshot). A lead is included
-// only if it has at least one contact point for a targeted channel; the per-lead
-// compliance gate (consent, suppression, quiet hours) is still applied before each send.
 export async function resolveAnnouncementAudience(announcement) {
   const { email: wantEmail, sms: wantSms } = channelsFor(announcement.channel);
 
@@ -36,10 +33,10 @@ export async function resolveAnnouncementAudience(announcement) {
     }
   }
 
+  where = withActiveLeadFilter(where);
+
   const andParts = [...(where.AND || [])];
   if (contactOr.length) andParts.push({ OR: contactOr });
-
-  // SW-ANN-004 geographic targeting: state / city / zip list (OR across provided dims).
   const geo = announcement.geoFilter || {};
   const geoOr = [];
   if (Array.isArray(geo.states) && geo.states.length) geoOr.push({ state: { in: geo.states } });
@@ -140,8 +137,6 @@ export const sendAnnouncement = inngest.createFunction(
     const { smtpConfig, smsConfig } = await getMessagingConfig(announcement.companyId);
     const tag = `ann_${announcementId}`;
 
-    // Fan out in chunks. Each chunk is a durable, memoized step; a per-lead+channel
-    // timeline guard makes retries safe (at-least-once w/ practical idempotency).
     const totals = { sent: 0, failed: 0, skipped: 0 };
     for (let i = 0; i < audience.length; i += CHUNK_SIZE) {
       const chunk = audience.slice(i, i + CHUNK_SIZE);
@@ -196,14 +191,20 @@ export const sendAnnouncement = inngest.createFunction(
                       metadata: { announcementId, channel: "EMAIL", subject, error: result.error },
                     },
                   });
+                  await deadLetter({
+                    companyId: announcement.companyId,
+                    source: "ANNOUNCEMENT",
+                    channel: "EMAIL",
+                    leadId: lead.id,
+                    refId: announcementId,
+                    payload: { to: lead.email, subject, html: finalHtml, fromName: lead.companyName || null },
+                    error: result.error,
+                  });
                 }
               }
             }
           }
 
-          // ── SMS ────────────────────────────────────────────────────────────
-          // Passes the same compliance gate as nurture (SW-ANN-007), which enforces
-          // SMS consent, suppression, and TCPA quiet hours; blocked leads are skipped.
           if (wants.sms && lead.phone) {
             if (await alreadySent(lead.id, announcementId, "SMS")) {
               skipped += 1;
@@ -237,6 +238,16 @@ export const sendAnnouncement = inngest.createFunction(
                       description: `Failed announcement SMS: ${smsError.message || "Unknown error"}`,
                       metadata: { announcementId, channel: "SMS", error: smsError.message || "Unknown error" },
                     },
+                  });
+                  // SW-ANN-002: park the failed SMS for inspection/replay.
+                  await deadLetter({
+                    companyId: announcement.companyId,
+                    source: "ANNOUNCEMENT",
+                    channel: "SMS",
+                    leadId: lead.id,
+                    refId: announcementId,
+                    payload: { to: lead.phone, body: smsBody },
+                    error: smsError.message || "Unknown error",
                   });
                 }
               }

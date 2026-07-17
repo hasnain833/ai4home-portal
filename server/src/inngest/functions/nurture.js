@@ -5,6 +5,7 @@ import { sendSms } from "../../services/sms.service.js";
 import { getLeadTimezone, getNextValidSendWindow } from "../../lib/timezone.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
+import { deadLetter } from "../../lib/dead-letter.js";
 
 // Helper function to calculate delay
 const calculateDelayTime = (value, unit) => {
@@ -217,6 +218,27 @@ export const runNurtureCampaign = inngest.createFunction(
             headers: { "X-Mailin-Tag": currentStep.id },
           });
 
+          // SW-ANN-002: park a permanently-failed step send. Recorded here rather
+          // than in record-step because only this scope still has `finalHtml` —
+          // the step result carries the plain-text body, which wouldn't replay
+          // the message the lead was actually meant to receive.
+          if (!emailResult.success) {
+            await deadLetter({
+              companyId: lead.companyId,
+              source: "CAMPAIGN",
+              channel: "EMAIL",
+              leadId: lead.id,
+              refId: campaign.id,
+              payload: {
+                to: lead.email,
+                subject,
+                html: finalHtml,
+                fromName: lead.company?.name || null,
+              },
+              error: emailResult.error || "Unknown error",
+            });
+          }
+
           return {
             channel: "EMAIL",
             attempted: true,
@@ -237,6 +259,16 @@ export const runNurtureCampaign = inngest.createFunction(
             return { channel: "SMS", attempted: true, success: true, error: null, body: finalBody };
           } catch (smsError) {
             console.error(`[Nurture] Step ${currentStep.position}: sendSms failed with error:`, smsError);
+            // SW-ANN-002: park the failed step SMS for inspection/replay.
+            await deadLetter({
+              companyId: lead.companyId,
+              source: "CAMPAIGN",
+              channel: "SMS",
+              leadId: lead.id,
+              refId: campaign.id,
+              payload: { to: lead.phone, body: finalBody },
+              error: smsError.message || "Unknown error",
+            });
             return { channel: "SMS", attempted: true, success: false, error: smsError.message || "Unknown error", body: finalBody };
           }
         }

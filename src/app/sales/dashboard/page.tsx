@@ -9,12 +9,20 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import {
   Users,
   Calendar,
   Layers,
   TrendingUp,
   FileSpreadsheet,
   RefreshCw,
+  CalendarClock,
+  ChevronDown,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -42,6 +50,47 @@ const staggerContainer = {
 
 type Appointment = { id: string; leadName: string; type: string; time: string; status: string };
 
+// SW-DSH-001: shapes returned by /api/sales/dashboard.
+type CampaignMetrics = {
+  id: string;
+  name: string;
+  channel: string;
+  enrolled: number;
+  active: number;
+  converted: number;
+  conversionRate: number;
+  sent: number;
+  opened: number;
+  clicked: number;
+  replied: number;
+};
+
+type CalendarItem = {
+  id: string;
+  title: string;
+  channel: string;
+  scheduledAt: string;
+  status: string;
+  isAiSuggested: boolean;
+};
+
+// SW-DSH-002: every reporting view is exportable. Values match the EXPORTERS keys
+// in sales-dashboard.controller.js.
+const EXPORTS: { type: string; label: string }[] = [
+  { type: "leads", label: "Leads" },
+  { type: "campaigns", label: "Campaigns" },
+  { type: "campaign-steps", label: "Campaign steps" },
+  { type: "announcements", label: "Announcements" },
+  { type: "automations", label: "Automations" },
+  { type: "failed-sends", label: "Failed sends" },
+];
+
+const CALENDAR_STATUS_COLORS: Record<string, string> = {
+  Draft: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  Approved: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+  Scheduled: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
+};
+
 function formatRelative(iso: string | null): string {
   if (!iso) return "Never synced";
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -57,7 +106,8 @@ export default function SalesDashboardPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [leads, setLeads] = useState<any[]>([]);
-  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignMetrics[]>([]);
+  const [calendarItems, setCalendarItems] = useState<CalendarItem[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [stats, setStats] = useState({ totalLeads: 0, activeCampaigns: 0, totalEnrolled: 0, appointmentRate: 0 });
   const [syncing, setSyncing] = useState(false);
@@ -65,10 +115,12 @@ export default function SalesDashboardPage() {
 
   async function fetchData() {
     try {
-      const [dashboardRes, leadsRes, campaignsRes] = await Promise.all([
+      // SW-DSH-001: campaign metrics now come from the dashboard endpoint, which
+      // aggregates them in the database. The page used to fetch /api/sales/campaigns
+      // — every campaign with every enrollment row — just to sum them client-side.
+      const [dashboardRes, leadsRes] = await Promise.all([
         fetch("/api/sales/dashboard"),
         fetch("/api/sales/leads"),
-        fetch("/api/sales/campaigns")
       ]);
 
       if (dashboardRes.ok) {
@@ -79,8 +131,11 @@ export default function SalesDashboardPage() {
           ...s,
           totalLeads: total,
           activeCampaigns: data.campaigns?.activeCount || 0,
+          totalEnrolled: data.campaigns?.totalEnrolled || 0,
           appointmentRate: total > 0 ? Math.round((appointmentSet / total) * 1000) / 10 : 0,
         }));
+        setCampaigns(data.campaigns?.active || []);
+        setCalendarItems(data.upcomingCalendarItems || []);
         setAppointments(
           (data.upcomingAppointments || []).map((a: any) => ({
             id: a.id,
@@ -107,24 +162,6 @@ export default function SalesDashboardPage() {
         })));
       }
 
-      if (campaignsRes.ok) {
-        const campaignsData = await campaignsRes.json();
-        let enrolledCamps = 0;
-        const mappedCamps = campaignsData.map((c: any) => {
-          const totalEnrollments = c.totalLeads ?? (c.enrollments?.length || 0);
-          const activeEnrollments = c.enrollments?.filter((e: any) => e.status === "ACTIVE").length ?? 0;
-          enrolledCamps += totalEnrollments;
-          return {
-            name: c.name,
-            channel: c.channel || "Email & SMS",
-            enrolled: totalEnrollments,
-            active: activeEnrollments,
-            conversionRate: typeof c.conversionRate === "string" ? parseFloat(c.conversionRate) : (c.conversionRate || 0)
-          };
-        });
-        setCampaigns(mappedCamps);
-        setStats(s => ({ ...s, totalEnrolled: enrolledCamps }));
-      }
     } catch (err) {
       console.error("Error fetching dashboard data:", err);
     } finally {
@@ -154,8 +191,8 @@ export default function SalesDashboardPage() {
     }
   };
 
-  const handleExportCSV = () => {
-    window.open("/api/sales/dashboard/export?type=leads", "_blank");
+  const handleExportCSV = (type: string) => {
+    window.open(`/api/sales/dashboard/export?type=${type}`, "_blank");
   };
 
   return (
@@ -191,15 +228,31 @@ export default function SalesDashboardPage() {
                 <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
                 {syncing ? "Syncing CRM..." : "Sync Salesforce"}
               </Button>
-              <Button
-                onClick={handleExportCSV}
-                variant="outline"
-                size="sm"
-                className="gap-2 h-9 font-medium border-dashed border-[#b48c3c]/50 text-[#b48c3c] hover:bg-[#b48c3c]/10"
-              >
-                <FileSpreadsheet className="h-4 w-4" />
-                Export CSV
-              </Button>
+              {/* SW-DSH-002: every reporting view is exportable, not just leads. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 h-9 font-medium border-dashed border-[#b48c3c]/50 text-[#b48c3c] hover:bg-[#b48c3c]/10"
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Export CSV
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  {EXPORTS.map((e) => (
+                    <DropdownMenuItem
+                      key={e.type}
+                      onClick={() => handleExportCSV(e.type)}
+                      className="text-xs cursor-pointer"
+                    >
+                      {e.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </motion.div>
 
@@ -349,31 +402,101 @@ export default function SalesDashboardPage() {
                 </CardContent>
               </Card>
 
-              {/* Nurture Campaigns Overview */}
+              {/* SW-DSH-001: active campaigns with key metrics */}
               <Card className="border border-border/80 shadow-xs">
                 <CardHeader>
                   <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
                     <Layers className="h-4.5 w-4.5 text-[#0F3B3D]" />
-                    Nurture Campaigns
+                    Active Campaigns
                   </CardTitle>
+                  <CardDescription className="text-xs">
+                    Live sequences and how they&apos;re performing.
+                  </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3.5">
+                <CardContent className="space-y-4">
                   {campaigns.length === 0 && !loading ? (
-                    <div className="text-xs text-muted-foreground py-4 text-center">No active campaigns found.</div>
+                    <div className="text-xs text-muted-foreground py-4 text-center">No active campaigns.</div>
                   ) : (
-                    campaigns.slice(0, 2).map((seq, i) => (
-                      <div key={i} className="space-y-1.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="font-semibold truncate max-w-[200px]" title={seq.name}>{seq.name}</span>
-                          <span className="text-[10px] font-mono text-muted-foreground">{seq.channel}</span>
+                    campaigns.map((seq) => (
+                      <div key={seq.id} className="space-y-1.5">
+                        <div className="flex justify-between text-xs gap-2">
+                          <span className="font-semibold truncate" title={seq.name}>{seq.name}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground shrink-0">{seq.channel}</span>
                         </div>
                         <div className="flex justify-between items-center text-[10px] text-muted-foreground">
                           <span>Active: <strong className="text-foreground">{seq.active}</strong> / {seq.enrolled}</span>
                           <span className="text-green-600 font-semibold">{seq.conversionRate}% conv</span>
                         </div>
                         <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                          <div className="bg-[#b48c3c] h-full rounded-full" style={{ width: `${seq.enrolled > 0 ? (seq.active / seq.enrolled) * 100 : 0}%` }} />
+                          <div
+                            className="bg-[#b48c3c] h-full rounded-full"
+                            style={{ width: `${seq.enrolled > 0 ? (seq.active / seq.enrolled) * 100 : 0}%` }}
+                          />
                         </div>
+                        {/* Step-level totals (SW-NUR-008). Only meaningful once
+                            something has actually gone out. */}
+                        {seq.sent > 0 && (
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-0.5">
+                            <span>Sent <strong className="text-foreground">{seq.sent}</strong></span>
+                            <span>Opened <strong className="text-foreground">{seq.opened}</strong></span>
+                            <span>Clicked <strong className="text-foreground">{seq.clicked}</strong></span>
+                            <span>Replied <strong className="text-foreground">{seq.replied}</strong></span>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* SW-DSH-001: upcoming calendar items */}
+              <Card className="border border-border/80 shadow-xs">
+                <CardHeader>
+                  <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    <CalendarClock className="h-4.5 w-4.5 text-[#0F3B3D]" />
+                    Upcoming Content
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Scheduled and drafted calendar items.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {calendarItems.length === 0 && !loading ? (
+                    <div className="text-xs text-muted-foreground py-4 text-center">
+                      Nothing scheduled ahead.
+                    </div>
+                  ) : (
+                    calendarItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="border-l-2 border-[#b48c3c]/40 pl-3 py-0.5"
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="text-xs font-semibold truncate" title={item.title}>
+                            {item.title}
+                          </span>
+                          <Badge
+                            className={`text-[9px] border-none shrink-0 ${
+                              CALENDAR_STATUS_COLORS[item.status] || "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {item.status}
+                          </Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5">
+                          <Calendar className="h-3 w-3" />
+                          {new Date(item.scheduledAt).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                          <span className="opacity-60">· {item.channel}</span>
+                          {/* NFR-U-002: AI-generated content must be labelled. */}
+                          {item.isAiSuggested && (
+                            <span className="text-[#b48c3c] font-semibold">· AI</span>
+                          )}
+                        </p>
                       </div>
                     ))
                   )}

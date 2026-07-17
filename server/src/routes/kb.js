@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { requireAuth, requireRoles } from "../middlewares/auth.js";
+import { requireAuth, requireRoles, requirePermission } from "../middlewares/auth.js";
 import {
   getSalesKB,
   addSalesKBDocument,
@@ -15,17 +15,25 @@ import {
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-router.get("/", requireAuth, getSalesKB);
-router.post("/", requireAuth, requireRoles(["ADMIN", "STAFF"]), addSalesKBDocument);
-router.post("/upload", requireAuth, requireRoles(["ADMIN", "STAFF"]), upload.single("file"), uploadSalesKBDocument);
-router.post("/search", requireAuth, searchSalesKB);
-router.delete("/:id", requireAuth, requireRoles(["ADMIN", "STAFF"]), deleteSalesKBDocument);
+// §4.12: "Knowledge base / brand profile" is "Per permission" for a Builder
+// Member, "No" for a Homeowner. Reads and the retrieval-test search stay on the
+// role guard; the grant gates changing what the AI features are grounded in.
+const staff = requireRoles(["ADMIN", "STAFF"]);
+const canManage = requirePermission("kb.manage");
 
-// SW-KB-006 brand/company profile
+router.get("/", requireAuth, getSalesKB);
+router.post("/search", requireAuth, searchSalesKB);
+
+router.post("/", requireAuth, staff, canManage, addSalesKBDocument);
+router.post("/upload", requireAuth, staff, canManage, upload.single("file"), uploadSalesKBDocument);
+router.delete("/:id", requireAuth, staff, canManage, deleteSalesKBDocument);
+
+// SW-KB-006 brand/company profile — feeds every AI prompt, so editing it is
+// squarely "configure the knowledge base".
 router.get("/brand-profile", requireAuth, getBrandProfile);
-router.put("/brand-profile", requireAuth, requireRoles(["ADMIN", "STAFF"]), updateBrandProfile);
+router.put("/brand-profile", requireAuth, staff, canManage, updateBrandProfile);
 
 // Backfill pgvector embeddings for existing chunks (call repeatedly until remaining=0)
-router.post("/reindex", requireAuth, requireRoles(["ADMIN", "STAFF"]), reindexSalesKB);
+router.post("/reindex", requireAuth, staff, canManage, reindexSalesKB);
 
 export default router;

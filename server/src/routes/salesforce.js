@@ -9,6 +9,8 @@ import {
   getMappings,
   saveMapping,
   deleteMapping,
+  getMappingVersions,
+  rollbackMappingVersion,
   getLogs,
   manualSync,
   bulkImport
@@ -30,6 +32,10 @@ router.patch("/status", requireAuth, sales, requireRoles(["ADMIN"]), updateSales
 router.get("/mappings", requireAuth, sales, requireRoles(["ADMIN", "STAFF"]), getMappings);
 router.post("/mappings", requireAuth, sales, requireRoles(["ADMIN"]), saveMapping);
 router.delete("/mappings", requireAuth, sales, requireRoles(["ADMIN"]), deleteMapping);
+
+// SW-CRM-004: mapping version history + rollback.
+router.get("/mappings/versions", requireAuth, sales, requireRoles(["ADMIN", "STAFF"]), getMappingVersions);
+router.post("/mappings/rollback", requireAuth, sales, requireRoles(["ADMIN"]), rollbackMappingVersion);
 
 router.get("/logs", requireAuth, sales, requireRoles(["ADMIN", "STAFF"]), getLogs);
 router.post("/sync", requireAuth, sales, requireRoles(["ADMIN", "STAFF"]), manualSync);

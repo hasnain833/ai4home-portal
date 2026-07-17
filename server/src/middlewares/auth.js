@@ -1,12 +1,10 @@
 import { supabase } from "../lib/supabase.js";
 import prisma from "../lib/prisma.js";
 import { verifySuperadminSessionToken } from "../lib/superadmin-session.js";
+import { hasSalesPermission, SALES_PERMISSIONS } from "../lib/permissions.js";
 
 export async function requireAuth(req, res, next) {
   try {
-    // If an earlier guard in the chain already authenticated this request
-    // (e.g. a mount-level `requireAuth, requireWorkspace(...)`), don't re-auth.
-    // req.user is only ever set server-side by this middleware, so this is safe.
     if (req.user && req.user.id) return next();
 
     let token = "";
@@ -21,7 +19,6 @@ export async function requireAuth(req, res, next) {
       );
     }
 
-    // 0. Support direct Super Admin session cookie first
     const superadminCookie =
       cookies.superadmin_session || cookies["superadmin-session"];
     if (superadminCookie) {
@@ -45,13 +42,11 @@ export async function requireAuth(req, res, next) {
       return next();
     }
 
-    // 1. Check Authorization header
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
       token = authHeader.split(" ")[1];
     }
 
-    // 2. Check Cookie (sb-access-token)
     if (!token && req.headers.cookie) {
       const cookies = Object.fromEntries(
         req.headers.cookie.split(";").map((c) => {
@@ -60,12 +55,10 @@ export async function requireAuth(req, res, next) {
         }),
       );
 
-      // Look for Supabase auth cookie keys (can be chunked as sb-<ref>-auth-token.0, sb-<ref>-auth-token.1)
       let tokenKeys = Object.keys(cookies).filter(
         (k) => k.includes("auth-token") || k.includes("access-token"),
       );
 
-      // Parse project reference ID from NEXT_PUBLIC_SUPABASE_URL to prevent local dev cookie collisions
       let projectRef = "";
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
       if (supabaseUrl) {
@@ -147,7 +140,6 @@ export async function requireAuth(req, res, next) {
         .json({ message: "Unauthorized: Invalid token session" });
     }
 
-    // Find the user in database by email
     const dbUser = await prisma.user.findUnique({
       where: { email: user.email },
       include: { company: true },
@@ -165,12 +157,10 @@ export async function requireAuth(req, res, next) {
     const companySalesEnabled = dbUser.company?.salesEnabled ?? true;
     const companyWarrantyEnabled = dbUser.company?.warrantyEnabled ?? true;
 
-    // Effective workspace access — mirrors getMe (auth.controller.js): admins and
-    // staff implicitly have both workspaces; everyone else needs the per-user flag;
-    // and the tenant's company-level enablement gates it. Super Admin always has both.
     const hasWarrantyAccess = isSuperAdmin
       ? true
-      : (isAdmin || isStaff || dbUser.hasWarrantyAccess) && companyWarrantyEnabled;
+      : (isAdmin || isStaff || dbUser.hasWarrantyAccess) &&
+        companyWarrantyEnabled;
     const hasSalesAccess = isSuperAdmin
       ? true
       : (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
@@ -184,6 +174,9 @@ export async function requireAuth(req, res, next) {
       hasWarrantyAccess,
       hasSalesAccess,
       isSuperAdmin,
+      salesPermissions: Array.isArray(dbUser.salesPermissions)
+        ? dbUser.salesPermissions
+        : [],
     };
 
     next();
@@ -195,10 +188,6 @@ export async function requireAuth(req, res, next) {
   }
 }
 
-// Workspace entitlement guard (HUB-003 / NFR-S-001). Enforces server-side that
-// the caller actually has access to the given workspace ("sales" | "warranty"),
-// not just hidden in the UI. Must run AFTER requireAuth (which sets req.user with
-// the effective, company-gated access flags). Super Admin bypasses.
 export function requireWorkspace(workspace) {
   const key = workspace === "warranty" ? "hasWarrantyAccess" : "hasSalesAccess";
   const label = workspace === "warranty" ? "Warranty" : "Sales";
@@ -216,7 +205,6 @@ export function requireWorkspace(workspace) {
   };
 }
 
-// Role-based verification helper middleware
 export function requireRoles(allowedRoles) {
   return (req, res, next) => {
     if (!req.user) {
@@ -235,5 +223,21 @@ export function requireRoles(allowedRoles) {
     }
 
     next();
+  };
+}
+
+export function requirePermission(permission) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (hasSalesPermission(req.user, permission)) return next();
+
+    const label = SALES_PERMISSIONS[permission]?.label || permission;
+    return res.status(403).json({
+      message: `Forbidden: you don't have permission to ${label.toLowerCase()}. Ask a company admin to grant it.`,
+      missingPermission: permission,
+    });
   };
 }

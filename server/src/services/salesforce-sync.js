@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { findDuplicateLead } from "../lib/lead-dedup.js";
+import { maybeAlertOnSyncFailure } from "../lib/sync-alerts.js";
 import {
   getAuthenticatedClient,
   mapSalesforceRecordToLead,
@@ -11,6 +12,29 @@ import {
 export async function runIncrementalSync(companyId) {
   const auth = await getAuthenticatedClient(companyId);
   if (!auth) {
+    const connection = await prisma.salesforceConnection.findUnique({
+      where: { companyId },
+      select: { isActive: true },
+    });
+
+    if (connection?.isActive) {
+      const message =
+        "Salesforce authentication failed — the access token could not be refreshed. The connection likely needs to be reauthorized.";
+      await prisma.syncLog.create({
+        data: {
+          companyId,
+          direction: "INBOUND",
+          action: "INCREMENTAL_SYNC",
+          status: "ERROR",
+          errorCount: 1,
+          message,
+          metadata: { errors: [message], reason: "auth-refresh-failed" },
+        },
+      });
+      await maybeAlertOnSyncFailure(companyId, { action: "incremental sync" });
+      return { ok: false, reason: "auth-failed", message };
+    }
+
     return {
       ok: false,
       reason: "no-connection",
@@ -132,11 +156,6 @@ export async function runIncrementalSync(companyId) {
             city: leadData.city || null,
             state: leadData.state || null,
             zipCode: leadData.zipCode || null,
-            // Newly synced leads always enter the portal pipeline at "New".
-            // Salesforce's own status vocabulary ("Open - Not Contacted", ...)
-            // is not the portal's (see src/lib/lead-statuses.ts), so carrying it
-            // over on create injects statuses that match no filter option.
-            // Subsequent status changes still flow through the field mapping.
             status: "New",
             emailOptIn: leadData.emailOptIn ?? false,
             smsOptIn: leadData.smsOptIn ?? false,
@@ -214,6 +233,10 @@ export async function runIncrementalSync(companyId) {
       metadata: errors.length > 0 ? { errors: errors.slice(0, 50) } : undefined,
     },
   });
+
+  if (syncStatus === "ERROR") {
+    await maybeAlertOnSyncFailure(companyId, { action: "incremental sync" });
+  }
 
   return {
     ok: true,

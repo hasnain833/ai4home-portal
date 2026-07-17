@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { buildPrismaWhereClause } from "./segments.controller.js";
 import { chat, hasLLM } from "../lib/llm.js";
+import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
 
 export const getCampaigns = async (req, res) => {
   try {
@@ -381,7 +382,10 @@ export const enrollCampaign = async (req, res) => {
       if (!segment) {
         return res.status(404).json({ message: "Segment not found" });
       }
-      const where = buildPrismaWhereClause(segment.filters, req.user.companyId);
+      // SW-ANN-001: a segment resolves to active leads only.
+      const where = withActiveLeadFilter(
+        buildPrismaWhereClause(segment.filters, req.user.companyId),
+      );
       const segLeads = await prisma.lead.findMany({
         where,
         select: { id: true },
@@ -390,12 +394,10 @@ export const enrollCampaign = async (req, res) => {
     }
 
     if (!Array.isArray(leadIds) || leadIds.length === 0) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Provide a non-empty leadIds array or a segmentId that matches leads.",
-        });
+      return res.status(400).json({
+        message:
+          "Provide a non-empty leadIds array or a segmentId that matches leads.",
+      });
     }
 
     const campaign = await prisma.campaign.findFirst({
@@ -413,6 +415,7 @@ export const enrollCampaign = async (req, res) => {
 
     let enrolledCount = 0;
     const skippedDuplicates = [];
+    const skippedInactive = [];
     const concurrentWarnings = [];
 
     for (const leadId of leadIds) {
@@ -422,6 +425,13 @@ export const enrollCampaign = async (req, res) => {
         });
 
         if (!lead) continue;
+
+        // SW-ANN-001: explicit leadIds bypass the segment query above, so re-check
+        // here — this is the path a bulk "select all" in the UI takes.
+        if (!isActiveLead(lead)) {
+          skippedInactive.push(leadId);
+          continue;
+        }
 
         const existingEnrollment = await prisma.campaignEnrollment.findUnique({
           where: { leadId_campaignId: { leadId, campaignId: id } },
@@ -502,8 +512,11 @@ export const enrollCampaign = async (req, res) => {
       success: true,
       enrolledCount,
       skippedDuplicatesCount: skippedDuplicates.length,
+      // SW-ANN-001: archived or closed/unsubscribed leads dropped from this enroll.
+      skippedInactiveCount: skippedInactive.length,
       concurrentWarningsCount: concurrentWarnings.length,
       skippedDuplicates,
+      skippedInactive,
       concurrentWarnings,
     });
   } catch (error) {
@@ -793,12 +806,10 @@ export const generateCampaignCopy = async (req, res) => {
     }
 
     if (!hasLLM()) {
-      return res
-        .status(500)
-        .json({
-          message:
-            "No AI provider is configured (set ANTHROPIC_API_KEY or a Groq key).",
-        });
+      return res.status(500).json({
+        message:
+          "No AI provider is configured (set ANTHROPIC_API_KEY or a Groq key).",
+      });
     }
 
     const company = await prisma.company.findUnique({

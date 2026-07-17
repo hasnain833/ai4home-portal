@@ -1,6 +1,10 @@
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
+import {
+  SALES_PERMISSIONS,
+  normalizeSalesPermissions,
+} from "../lib/permissions.js";
 
 // Initialize Supabase Admin client
 const getSupabaseAdmin = () => {
@@ -37,11 +41,15 @@ export const getStaff = async (req, res) => {
         role: true,
         createdAt: true,
         avatar: true,
+        // SRS §4.12: the member's granted Sales permissions.
+        salesPermissions: true,
       },
       orderBy: { createdAt: "desc" },
     });
 
-    return res.json(staff);
+    // Ship the catalogue alongside the list so the UI renders whatever the server
+    // actually recognises, instead of keeping its own copy that can drift.
+    return res.json({ staff, permissionCatalogue: SALES_PERMISSIONS });
   } catch (error) {
     console.error("Failed to list staff:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -121,7 +129,7 @@ export const updateStaff = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const { staffId, name, email, password } = req.body;
+    const { staffId, name, email, password, salesPermissions } = req.body;
 
     if (!staffId || !name || !email) {
       return res
@@ -197,6 +205,13 @@ export const updateStaff = async (req, res) => {
       dbUpdateData.password = await bcrypt.hash(password, 10);
     }
 
+    // SRS §4.12: the Builder Admin grants a member their permissions. Only applied
+    // when the caller sends the field, so an edit that only changes a name can't
+    // silently wipe someone's grants. Unknown keys are dropped by normalize().
+    if (salesPermissions !== undefined) {
+      dbUpdateData.salesPermissions = normalizeSalesPermissions(salesPermissions);
+    }
+
     const updatedStaff = await prisma.user.update({
       where: { id: staffId },
       data: dbUpdateData,
@@ -207,6 +222,7 @@ export const updateStaff = async (req, res) => {
         role: true,
         createdAt: true,
         avatar: true,
+        salesPermissions: true,
       },
     });
 

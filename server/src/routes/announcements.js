@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { requireAuth, requireRoles } from "../middlewares/auth.js";
+import {
+  requireAuth,
+  requireRoles,
+  requirePermission,
+} from "../middlewares/auth.js";
 import {
   getAnnouncements,
   getAnnouncementDetail,
@@ -15,17 +19,32 @@ import {
 
 const router = Router();
 
-// SW-ANN-006: only Builder Admin / authorized staff may author or publish.
-router.get("/", requireAuth, requireRoles(["ADMIN", "STAFF"]), getAnnouncements);
-router.post("/preview", requireAuth, requireRoles(["ADMIN", "STAFF"]), previewAudience);
-router.post("/", requireAuth, requireRoles(["ADMIN", "STAFF"]), createAnnouncement);
-router.get("/:id", requireAuth, requireRoles(["ADMIN", "STAFF"]), getAnnouncementDetail);
-router.patch("/:id", requireAuth, requireRoles(["ADMIN", "STAFF"]), updateAnnouncement);
-router.post("/:id/send", requireAuth, requireRoles(["ADMIN", "STAFF"]), sendAnnouncement);
-router.post("/:id/cancel", requireAuth, requireRoles(["ADMIN", "STAFF"]), cancelAnnouncement);
-// SW-ANN: dead-letter queue — inspect failed recipients and retry them.
-router.get("/:id/failures", requireAuth, requireRoles(["ADMIN", "STAFF"]), getAnnouncementFailures);
-router.post("/:id/retry", requireAuth, requireRoles(["ADMIN", "STAFF"]), retryAnnouncement);
-router.delete("/:id", requireAuth, requireRoles(["ADMIN", "STAFF"]), deleteAnnouncement);
+const staffOnly = requireRoles(["ADMIN", "STAFF"]);
+const canPublish = requirePermission("announcements.publish");
+
+router.get("/", requireAuth, staffOnly, getAnnouncements);
+router.get("/:id", requireAuth, staffOnly, getAnnouncementDetail);
+router.post("/preview", requireAuth, staffOnly, previewAudience);
+
+router.post("/", requireAuth, staffOnly, canPublish, createAnnouncement);
+router.patch("/:id", requireAuth, staffOnly, canPublish, updateAnnouncement);
+router.post("/:id/send", requireAuth, staffOnly, canPublish, sendAnnouncement);
+router.post(
+  "/:id/cancel",
+  requireAuth,
+  staffOnly,
+  canPublish,
+  cancelAnnouncement,
+);
+router.delete("/:id", requireAuth, staffOnly, canPublish, deleteAnnouncement);
+
+router.get("/:id/failures", requireAuth, staffOnly, getAnnouncementFailures);
+router.post(
+  "/:id/retry",
+  requireAuth,
+  staffOnly,
+  canPublish,
+  retryAnnouncement,
+);
 
 export default router;

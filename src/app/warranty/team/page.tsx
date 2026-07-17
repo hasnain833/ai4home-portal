@@ -49,12 +49,19 @@ interface StaffMember {
   role: string;
   createdAt: string;
   avatar?: string | null;
+  // SRS §4.12: Sales permissions granted to this Builder Member.
+  salesPermissions?: string[];
 }
+
+// Shape of the permission catalogue the server ships alongside the staff list, so
+// the UI never keeps its own copy of the keys.
+type PermissionCatalogue = Record<string, { label: string; description: string }>;
 
 export default function TeamManagementPage() {
   const { user } = useAuth();
   const router = useRouter();
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
+  const [permissionCatalogue, setPermissionCatalogue] = useState<PermissionCatalogue>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
@@ -76,6 +83,8 @@ export default function TeamManagementPage() {
     name: "",
     email: "",
     password: "",
+    // SRS §4.12: which Sales features this member is authorized for.
+    salesPermissions: [] as string[],
   });
   const [editFormError, setEditFormError] = useState("");
   const [showEditPassword, setShowEditPassword] = useState(false);
@@ -95,7 +104,15 @@ export default function TeamManagementPage() {
       const res = await fetch("/api/admin/staff");
       if (!res.ok) throw new Error("Failed to load staff");
       const data = await res.json();
-      setStaffList(data);
+      // The endpoint used to return a bare array and now returns
+      // { staff, permissionCatalogue }. Accept both so a stale cached bundle
+      // against a new server (or vice versa) still renders the team list.
+      if (Array.isArray(data)) {
+        setStaffList(data);
+      } else {
+        setStaffList(data.staff || []);
+        setPermissionCatalogue(data.permissionCatalogue || {});
+      }
     } catch {
       setError("Could not load team members.");
     } finally {
@@ -171,6 +188,7 @@ export default function TeamManagementPage() {
       name: staff.name || "",
       email: staff.email || "",
       password: "", // empty by default
+      salesPermissions: staff.salesPermissions || [],
     });
     setEditFormError("");
     setShowEditPassword(false);
@@ -202,6 +220,7 @@ export default function TeamManagementPage() {
           name: editForm.name,
           email: editForm.email,
           password: editForm.password || undefined,
+          salesPermissions: editForm.salesPermissions,
         }),
       });
 
@@ -550,6 +569,53 @@ export default function TeamManagementPage() {
                       Only enter a password if you want to reset it for them.
                     </p>
                   </div>
+
+                  {/* SRS §4.12 / §2.2: a Builder Member operates "per permissions
+                      granted by the Builder Admin". Everything not ticked here is
+                      refused server-side, not merely hidden. */}
+                  {Object.keys(permissionCatalogue).length > 0 && (
+                    <div className="space-y-2 border-t pt-4">
+                      <Label>Sales permissions</Label>
+                      <p className="text-xs text-muted-foreground -mt-1">
+                        What this member may do in the Sales workspace. Leads,
+                        calendar and scheduling are always available.
+                      </p>
+                      <div className="space-y-2 pt-1">
+                        {Object.entries(permissionCatalogue).map(([key, meta]) => {
+                          const checked = editForm.salesPermissions.includes(key);
+                          return (
+                            <label
+                              key={key}
+                              className="flex items-start gap-2.5 cursor-pointer rounded-md p-2 -mx-2 hover:bg-muted/50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) =>
+                                  setEditForm((f) => ({
+                                    ...f,
+                                    salesPermissions: e.target.checked
+                                      ? [...f.salesPermissions, key]
+                                      : f.salesPermissions.filter((p) => p !== key),
+                                  }))
+                                }
+                                className="mt-0.5 h-4 w-4 accent-[#0F3B3D] shrink-0"
+                              />
+                              <span className="min-w-0">
+                                <span className="block text-sm font-medium leading-tight">
+                                  {meta.label}
+                                </span>
+                                <span className="block text-xs text-muted-foreground mt-0.5">
+                                  {meta.description}
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   <DialogFooter>
                     <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
                       Cancel

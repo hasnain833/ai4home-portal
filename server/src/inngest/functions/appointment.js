@@ -14,7 +14,15 @@ import {
 } from "../../services/scheduling-service.js";
 import { query as kbQuery } from "../../services/vector-store.service.js";
 
-const MAX_TURNS = 8;
+const DEFAULT_MAX_TURNS = 4;
+const MIN_MAX_TURNS = 1;
+const MAX_MAX_TURNS = 20;
+
+export function clampMaxTurns(value) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_TURNS;
+  return Math.min(MAX_MAX_TURNS, Math.max(MIN_MAX_TURNS, n));
+}
 
 function brandedEmail(companyName, bodyText) {
   return `
@@ -49,22 +57,33 @@ async function sendLeadMessage(lead, channel, text, subject) {
   return { channel, body: text, skipped: true };
 }
 
-async function resolveMode(lead, campaignId) {
+async function resolveFlowConfig(lead, campaignId) {
+  const campaignSelect = { appointmentMode: true, agentMaxTurns: true };
+
   let campaign = null;
   if (campaignId) {
-    campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { appointmentMode: true } });
+    campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: campaignSelect });
   } else {
     const enr = await prisma.campaignEnrollment.findFirst({
       where: { leadId: lead.id },
       orderBy: { updatedAt: "desc" },
-      include: { campaign: { select: { appointmentMode: true } } },
+      include: { campaign: { select: campaignSelect } },
     });
     campaign = enr?.campaign || null;
   }
-  const company = await prisma.company.findUnique({ where: { id: lead.companyId }, select: { appointmentMode: true } });
+
+  const company = await prisma.company.findUnique({
+    where: { id: lead.companyId },
+    select: { appointmentMode: true, agentMaxTurns: true },
+  });
+
   const companyMode = company?.appointmentMode || "AI";
-  if (!campaign || campaign.appointmentMode === "INHERIT") return companyMode;
-  return campaign.appointmentMode;
+  const mode =
+    !campaign || campaign.appointmentMode === "INHERIT" ? companyMode : campaign.appointmentMode;
+  const rawMaxTurns =
+    campaign?.agentMaxTurns ?? company?.agentMaxTurns ?? DEFAULT_MAX_TURNS;
+
+  return { mode, maxTurns: clampMaxTurns(rawMaxTurns) };
 }
 
 function toAnthropicMessages(transcript) {
@@ -82,7 +101,7 @@ function toAnthropicMessages(transcript) {
 const RESPOND_TOOL = {
   name: "respond",
   description:
-    "Produce your reply to the lead and the action to take. Use 'book' ONLY when the lead has clearly agreed to one of the available slots (slot_iso MUST be one of the provided slot ISO values). Use 'escalate' if the lead genuinely needs a human (a complaint, a demand you cannot satisfy, or a factual question the knowledge base does not answer). Otherwise use 'reply' to answer the lead's question(s) and/or offer/confirm visit times.",
+    "Produce your reply to the lead and the action to take. Use 'book' ONLY when the lead has clearly agreed to one of the available slots (slot_iso MUST be one of the provided slot ISO values). Use 'escalate' when the lead needs a human — a complaint, a demand you cannot satisfy, or ANY question that isn't about scheduling their visit. Otherwise use 'reply' to offer, adjust, or confirm visit times.",
   input_schema: {
     type: "object",
     properties: {
@@ -98,12 +117,12 @@ const RESPOND_TOOL = {
 
 export function formatKbContext(chunks) {
   if (!chunks || chunks.length === 0) {
-    return "No knowledge-base context was retrieved for this message. Answer only from what you are certain of; if you don't know, offer to have a team member follow up.";
+    return "No knowledge-base context was retrieved. If the lead asks anything beyond picking a time, say a team member will follow up.";
   }
   const body = chunks
     .map((c, i) => `[${i + 1}] Source: ${c.name || "Company document"}${c.category ? ` (${c.category})` : ""}\n${c.text}`)
     .join("\n\n");
-  return `Company Knowledge Base — use ONLY this to answer factual questions about the company, homes, communities, pricing, process, and warranty. Do not invent facts beyond it:\n\n${body}`;
+  return `Company Knowledge Base — reference material. Use it ONLY for practical questions about the visit itself (location, directions, how long it takes, what to bring, who they'll meet). Do NOT use it to answer sales questions such as pricing, availability, financing or warranty — those go to a human even if the text below covers them. Never invent facts beyond it:\n\n${body}`;
 }
 
 export async function runClaudeTurn({ lead, company, channel, transcript, slots, timezone, kbChunks }) {
@@ -113,24 +132,23 @@ export async function runClaudeTurn({ lead, company, channel, transcript, slots,
       ? "This is an SMS conversation. Keep replies under 320 characters, plain text, no markdown."
       : "This is an email conversation. Keep replies concise and friendly.";
 
-  const system = `You are the automated customer engagement assistant for ${company.name}, a homebuilder. You are NOT a human and must say so if asked. You help leads who reply to our outreach emails and SMS messages. Your priorities, in order:
-1. ANSWER the lead's question(s) about ${company.name} — our homes and communities, pricing, the buying process, warranty, and anything else the Company Knowledge Base covers. Be genuinely helpful and informative.
-2. When the lead shows interest in visiting or meeting, HELP them book a model-home visit or sales consultation using the available slots below.
-3. If neither applies, be warm and conversational — keep the relationship alive.
+  const system = `You are the automated scheduling assistant for ${company.name}, a homebuilder. You are NOT a human and must say so if asked.
+
+Your ONLY job is to schedule a model-home visit or sales consultation for leads who reply to our outreach. You do one thing:
+1. Offer available visit times, handle counter-proposals, and book when the lead agrees.
 
 Lead: ${lead.firstName} ${lead.lastName}. Times are in ${timezone}.
 
 ${formatKbContext(kbChunks)}
 
-Available visit slots (offer ONLY when the lead wants to meet; NEVER invent times):
+Available visit slots (NEVER invent times — only ever offer from this list):
 ${slotList}
 
 Rules:
-- If the lead asks a question, answer it using the Knowledge Base. Set used_kb=true when you relied on it. If the Knowledge Base doesn't cover it and it's a factual question you can't answer, don't guess — say a team member will follow up (use 'escalate' if they clearly need a person).
-- Do NOT proactively offer appointment slots unless the lead mentions wanting to visit, tour, meet, or schedule something. Focus on answering their actual question first.
-- When the lead does want to meet/visit/book, offer 2-4 available slots. If they propose a specific time, match it to the closest AVAILABLE slot; if none matches, say so and offer the nearest alternatives.
+- STAY ON SCHEDULING. If the lead asks about anything else — pricing, homes, communities, the buying process, warranty, financing, HOA, or any other topic — do NOT answer it, even if the Knowledge Base above appears to contain the answer. Say warmly that a team member will follow up on that, and steer back to finding a time to visit. If they press, or clearly want a person rather than a time, use 'escalate'.
+- Offer 2-4 available slots. If they propose a specific time, match it to the closest AVAILABLE slot; if none matches, say so and offer the nearest alternatives.
 - Book ONLY when the lead clearly confirms one of the available slots. Copy its iso value exactly into slot_iso.
-- Never promise anything the Knowledge Base doesn't support. Be warm, brief, professional.
+- Never promise anything. Be warm, brief, professional.
 - ${channelGuidance}
 
 Always reply by calling the 'respond' tool.`;
@@ -160,7 +178,7 @@ export const appointmentSchedulingAgent = inngest.createFunction(
       const lead = await prisma.lead.findUnique({ where: { id: leadId }, include: { company: true } });
       if (!lead) return { stop: "lead-not-found" };
 
-      const mode = await resolveMode(lead, campaignId);
+      const { mode, maxTurns } = await resolveFlowConfig(lead, campaignId);
       if (mode === "OFF") return { stop: "mode-off" };
 
       let convo = await prisma.schedulingConversation.findFirst({
@@ -172,11 +190,11 @@ export const appointmentSchedulingAgent = inngest.createFunction(
           data: { leadId, channel, mode, status: "ACTIVE", transcript: [], campaignId: campaignId || null },
         });
       }
-      return { lead, mode, convoId: convo.id, transcript: convo.transcript || [], turnCount: convo.turnCount || 0 };
+      return { lead, mode, maxTurns, convoId: convo.id, transcript: convo.transcript || [], turnCount: convo.turnCount || 0 };
     });
 
     if (ctx.stop) return { status: "skipped", reason: ctx.stop };
-    const { lead, mode, convoId } = ctx;
+    const { lead, mode, maxTurns, convoId } = ctx;
 
     if (mode === "SIMPLE") {
       await step.run("send-booking-link", async () => {
@@ -199,11 +217,17 @@ export const appointmentSchedulingAgent = inngest.createFunction(
 
     const transcript = [...ctx.transcript, { role: "lead", content: body, at: new Date().toISOString() }];
 
-    if (ctx.turnCount >= MAX_TURNS) {
+    if (ctx.turnCount >= maxTurns) {
       await step.run("escalate-max-turns", async () => {
-        await escalate(lead, channel, convoId, transcript, "Reached maximum automated turns without booking.");
+        await escalate(
+          lead,
+          channel,
+          convoId,
+          transcript,
+          `Reached the ${maxTurns}-turn automated limit without booking.`,
+        );
       });
-      return { status: "escalated", reason: "max-turns" };
+      return { status: "escalated", reason: "max-turns", maxTurns };
     }
 
     const slots = await step.run("compute-slots", async () => {
@@ -219,8 +243,6 @@ export const appointmentSchedulingAgent = inngest.createFunction(
       const q = (body || "").trim();
       if (!q) return { chunks: [] };
       try {
-        // Postgres full-text search already returns only term-matching rows,
-        // ranked by ts_rank — take the top matches directly.
         const chunks = await kbQuery(lead.companyId, q, 5);
         return { chunks };
       } catch (e) {

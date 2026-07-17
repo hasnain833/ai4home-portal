@@ -1,6 +1,11 @@
 import prisma from "../lib/prisma.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import {
+  snapshotMappings,
+  listVersions,
+  rollbackToVersion,
+} from "../lib/mapping-versions.js";
+import {
   SalesforceClient,
   encrypt,
   decrypt,
@@ -141,6 +146,14 @@ export const salesforceCallback = async (req, res) => {
     });
 
     await seedDefaultMappings(companyId);
+
+    // SW-CRM-004: record the seeded defaults as the baseline version, so the
+    // history has a v1 to roll back to rather than starting at the first edit.
+    await snapshotMappings(companyId, {
+      changeType: "SAVE",
+      note: "Seeded default field mappings on connect",
+      userId: req.user?.id || null,
+    });
 
     await prisma.syncLog.create({
       data: {
@@ -338,6 +351,11 @@ export const saveMapping = async (req, res) => {
         .json({ message: "salesforceField and portalField are required" });
     }
 
+    const existing = await prisma.salesforceFieldMapping.findUnique({
+      where: { companyId_salesforceField: { companyId, salesforceField } },
+      select: { id: true },
+    });
+
     const mapping = await prisma.salesforceFieldMapping.upsert({
       where: {
         companyId_salesforceField: {
@@ -361,7 +379,14 @@ export const saveMapping = async (req, res) => {
       },
     });
 
-    return res.json(mapping);
+    // SW-CRM-004: record the resulting set as a new version. Never fails the save.
+    const version = await snapshotMappings(companyId, {
+      changeType: "SAVE",
+      note: `${existing ? "Updated" : "Added"} mapping ${salesforceField} → ${portalField}`,
+      userId: req.user.id || null,
+    });
+
+    return res.json({ ...mapping, version: version?.version ?? null });
   } catch (error) {
     console.error("[Salesforce Mappings] POST Error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -393,9 +418,65 @@ export const deleteMapping = async (req, res) => {
       where: { id },
     });
 
-    return res.json({ success: true });
+    // SW-CRM-004: snapshot after the delete so the version history can restore it.
+    const version = await snapshotMappings(companyId, {
+      changeType: "DELETE",
+      note: `Removed mapping ${mapping.salesforceField} → ${mapping.portalField}`,
+      userId: req.user.id || null,
+    });
+
+    return res.json({ success: true, version: version?.version ?? null });
   } catch (error) {
     console.error("[Salesforce Mappings] DELETE Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// SW-CRM-004: mapping version history — what changed, when, and by whom.
+export const getMappingVersions = async (req, res) => {
+  try {
+    if (!req.user || !req.user.companyId) {
+      return res.status(403).json({ message: "No company associated" });
+    }
+
+    const versions = await listVersions(req.user.companyId, req.query.limit);
+    return res.json(versions);
+  } catch (error) {
+    console.error("[Salesforce Mapping Versions] GET Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// SW-CRM-004: restore a past mapping version. Takes effect on subsequent syncs —
+// an in-flight sync already snapshotted its mappings at the start of its run.
+export const rollbackMappingVersion = async (req, res) => {
+  try {
+    if (!req.user || !req.user.companyId) {
+      return res.status(403).json({ message: "No company associated" });
+    }
+
+    const { version } = req.body;
+    if (version === undefined || version === null || Number.isNaN(Number(version))) {
+      return res.status(400).json({ message: "A numeric 'version' is required" });
+    }
+
+    const result = await rollbackToVersion(
+      req.user.companyId,
+      Number(version),
+      req.user.id || null,
+    );
+
+    if (!result.success) {
+      return res.status(404).json({ message: result.reason || "Rollback failed" });
+    }
+
+    return res.json({
+      success: true,
+      ...result,
+      message: `Restored mapping version ${result.restoredFrom}. Applies to subsequent syncs.`,
+    });
+  } catch (error) {
+    console.error("[Salesforce Mapping Rollback] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
