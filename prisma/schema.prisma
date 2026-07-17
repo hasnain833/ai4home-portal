@@ -41,6 +41,11 @@ model User {
   knowledgeBaseId     String?
   hasWarrantyAccess   Boolean            @default(true)
   hasSalesAccess      Boolean            @default(false)
+  // SRS §4.12 / §2.2: a Builder Member "operates campaigns and leads per
+  // permissions granted by the Builder Admin". Only meaningful for role STAFF —
+  // ADMIN and SUPER_ADMIN are implicitly granted everything, HOMEOWNER is governed
+  // by its own scoping rules (own leads). See server/src/lib/permissions.js.
+  salesPermissions    String[]           @default([])
   lastActiveWorkspace String?            @default("warranty")
   ownedLeads          Lead[]             @relation("LeadOwner")
   agentAppointments   SalesAppointment[] @relation("AgentAppointments")
@@ -101,9 +106,11 @@ model Company {
   scrapedNews             ScrapedNews[]
   blogPosts               BlogPost[]
   csvMappingTemplates     CsvMappingTemplate[]
+  deadLetters             DeadLetter[]
   tickets                 Ticket[]
   properties              Property[]
   appointmentMode         String                  @default("AI")
+  agentMaxTurns           Int                     @default(4)
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
 }
@@ -370,6 +377,49 @@ model SalesforceFieldMapping {
   @@unique([companyId, salesforceField])
 }
 
+model SalesforceMappingVersion {
+  id          String   @id @default(cuid())
+  companyId   String
+  version     Int
+  // Snapshot array: [{ salesforceField, portalField, description, isActive, isConsentField }]
+  mappings    Json
+  // What produced this version: SAVE | DELETE | ROLLBACK
+  changeType  String
+  // Human-readable summary of the change, e.g. 'Updated mapping Email → email'.
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@unique([companyId, version])
+  @@index([companyId, createdAt])
+}
+
+model DeadLetter {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  // What produced it: ANNOUNCEMENT | CAMPAIGN | AUTOMATION
+  source    String
+  // EMAIL | SMS
+  channel   String
+  leadId    String?
+  // The announcement / campaign id this send belonged to.
+  refId     String?
+  // { to, subject?, body/html } — everything needed to replay the send.
+  payload   Json
+  error     String  @db.Text
+  attempts  Int     @default(1)
+  // PENDING | REPLAYED | DISCARDED
+  status    String  @default("PENDING")
+
+  replayedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([companyId, status, createdAt])
+  @@index([companyId, refId])
+}
+
 model SuppressionList {
   id        String   @id @default(cuid())
   companyId String
@@ -396,6 +446,7 @@ model Campaign {
   status          String               @default("Draft")
   channel         String               @default("Email & SMS")
   appointmentMode String               @default("INHERIT")
+  agentMaxTurns   Int?
   exitConditions  Json?
   versionPolicy   String               @default("FINISH_OLD")
   steps           CampaignStep[]

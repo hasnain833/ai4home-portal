@@ -10,6 +10,9 @@ import {
   leadTimezone,
   AVAILABILITY_DEFAULTS,
 } from "../services/scheduling-service.js";
+// SW-APT-006: one clamp shared with the agent, so the value the UI saves and the
+// value the agent enforces can't drift apart.
+import { clampMaxTurns } from "../inngest/functions/appointment.js";
 
 const TIME_RE = /^\d{1,2}:\d{2}$/;
 
@@ -23,7 +26,7 @@ export const getSettings = async (req, res) => {
     const setting = await getAvailabilitySetting(companyId);
     const company = await prisma.company.findUnique({
       where: { id: companyId },
-      select: { appointmentMode: true },
+      select: { appointmentMode: true, agentMaxTurns: true },
     });
     const googleConn = await prisma.calendarConnection.findUnique({
       where: { companyId_provider: { companyId, provider: "GOOGLE" } },
@@ -33,6 +36,8 @@ export const getSettings = async (req, res) => {
     return res.json({
       setting,
       appointmentMode: company?.appointmentMode || "AI",
+      // SW-APT-006: automated turns before human handoff.
+      agentMaxTurns: company?.agentMaxTurns ?? 4,
       googleConfigured: GoogleCalendar.isGoogleConfigured(),
       integrations: {
         google: { connected: !!googleConn?.isActive, accountEmail: googleConn?.accountEmail || null },
@@ -49,7 +54,7 @@ export const updateSettings = async (req, res) => {
   try {
     if (!req.user?.companyId) return res.status(403).json({ message: "No company associated" });
     const companyId = req.user.companyId;
-    const { dayStart, dayEnd, bufferMinutes, slotDuration, workingDays, timezone, reminderHours, appointmentMode } = req.body;
+    const { dayStart, dayEnd, bufferMinutes, slotDuration, workingDays, timezone, reminderHours, appointmentMode, agentMaxTurns } = req.body;
 
     if (dayStart && !TIME_RE.test(dayStart)) return res.status(400).json({ message: "dayStart must be HH:mm" });
     if (dayEnd && !TIME_RE.test(dayEnd)) return res.status(400).json({ message: "dayEnd must be HH:mm" });
@@ -69,11 +74,24 @@ export const updateSettings = async (req, res) => {
       update: data,
     });
 
+    // SW-APT-006: mode + turn limit both live on Company; write them together so a
+    // save that changes only one doesn't clobber the other.
+    const companyData = {};
     if (appointmentMode && ["OFF", "SIMPLE", "AI"].includes(appointmentMode)) {
-      await prisma.company.update({ where: { id: companyId }, data: { appointmentMode } });
+      companyData.appointmentMode = appointmentMode;
+    }
+    if (agentMaxTurns !== undefined) {
+      companyData.agentMaxTurns = clampMaxTurns(agentMaxTurns);
+    }
+    if (Object.keys(companyData).length > 0) {
+      await prisma.company.update({ where: { id: companyId }, data: companyData });
     }
 
-    return res.json({ setting, appointmentMode: appointmentMode || undefined });
+    return res.json({
+      setting,
+      appointmentMode: companyData.appointmentMode,
+      agentMaxTurns: companyData.agentMaxTurns,
+    });
   } catch (error) {
     console.error("[Scheduling updateSettings] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
