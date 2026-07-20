@@ -10,6 +10,9 @@ import {
   getBrandProfile,
   updateBrandProfile,
   reindexSalesKB,
+  getBrandProfileVersions,
+  rollbackBrandProfileVersion,
+  previewAiOutput,
 } from "../controllers/kb.controller.js";
 
 const router = Router();
@@ -32,6 +35,12 @@ router.delete("/:id", requireAuth, staff, canManage, deleteSalesKBDocument);
 // squarely "configure the knowledge base".
 router.get("/brand-profile", requireAuth, getBrandProfile);
 router.put("/brand-profile", requireAuth, staff, canManage, updateBrandProfile);
+
+// SW-KB-007: config version history + rollback, and a preview/sandbox that tests
+// AI output against a candidate config without persisting or sending.
+router.get("/brand-profile/versions", requireAuth, staff, canManage, getBrandProfileVersions);
+router.post("/brand-profile/versions/:version/rollback", requireAuth, staff, canManage, rollbackBrandProfileVersion);
+router.post("/preview", requireAuth, staff, canManage, previewAiOutput);
 
 // Backfill pgvector embeddings for existing chunks (call repeatedly until remaining=0)
 router.post("/reindex", requireAuth, staff, canManage, reindexSalesKB);

@@ -2,6 +2,8 @@ import prisma from "../lib/prisma.js";
 import { chat, hasLLM } from "../lib/llm.js";
 import { getNextValidSendWindow } from "../lib/timezone.js";
 import { inngest } from "../lib/inngest.js";
+import { query as kbQuery } from "../services/vector-store.service.js";
+import { KB_SCOPES, parseLlmJson } from "../lib/sales-ai.js";
 
 const VALID_STATUSES = [
   "Suggested",
@@ -306,6 +308,18 @@ export const getCalendarSuggestions = async (req, res) => {
       return res.status(500).json({ message: "No LLM provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY." });
     }
 
+    // SW-KB-002: ground topic suggestions in the tenant KB (brand voice / product),
+    // scoped per SW-KB-004. Query off the tenant footprint so retrieval reflects
+    // the builder's own communities and positioning.
+    const kbQueryText = [company?.name, communityNames.join(" "), brandText]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 400) || "brand voice communities products";
+    const kbChunks = await kbQuery(companyId, kbQueryText, 4, KB_SCOPES.calendar).catch(() => []);
+    const kbContextText = kbChunks.length
+      ? kbChunks.map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`).join("\n\n")
+      : "No knowledge-base context available.";
+
     const existingEvents = await prisma.contentCalendar.findMany({
       where: {
         companyId,
@@ -355,6 +369,9 @@ Context:
 Tenant profile (markets, communities, brand — tailor topics to this footprint):
 ${tenantProfileText}
 
+Company knowledge base (brand voice / product info — ground topic angles and copy in this; do not invent facts, prices, or policies not present here):
+${kbContextText}
+
 Seasonal context (favor timely, season-appropriate angles):
 ${seasonalContextText}
 
@@ -392,10 +409,10 @@ Requirements:
       return res.status(502).json({ message: "The AI provider did not return any suggestions. Please try again." });
     }
 
-    // Clean up potential markdown blocks, then isolate the JSON array (lenient parse).
-    const cleanedText = text.replace(/```json/gi, "").replace(/```/g, "").trim();
-    const arrayText = cleanedText.slice(cleanedText.indexOf("["), cleanedText.lastIndexOf("]") + 1) || cleanedText;
-    const suggestionsJson = JSON.parse(arrayText);
+    const suggestionsJson = parseLlmJson(text, { array: true });
+    if (!Array.isArray(suggestionsJson)) {
+      return res.status(502).json({ message: "The AI suggestions could not be parsed. Please try again." });
+    }
 
     const createdSuggestions = [];
     for (const s of suggestionsJson) {

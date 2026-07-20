@@ -2,6 +2,8 @@ import prisma from "../lib/prisma.js";
 import { buildPrismaWhereClause } from "./segments.controller.js";
 import { chat, hasLLM } from "../lib/llm.js";
 import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
+import { query as kbQuery } from "../services/vector-store.service.js";
+import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
 
 export const getCampaigns = async (req, res) => {
   try {
@@ -612,14 +614,7 @@ export const deleteCampaign = async (req, res) => {
 // --- Create a nurture campaign from a scraped news item (SW-NUR-001/005) ---
 
 function parseJsonBlock(text) {
-  try {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start === -1 || end <= start) return null;
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
-  }
+  return parseLlmJson(text);
 }
 
 // Strip a trailing " - Source Name" / " — Source" suffix the scraper appends to
@@ -816,26 +811,25 @@ export const generateCampaignCopy = async (req, res) => {
       where: { id: req.user.companyId },
       select: { name: true, voiceProfile: true, salesBrandProfile: true },
     });
-    const bp = company?.salesBrandProfile || {};
-    const brandLines = [
-      company?.name ? `Company/builder name: ${company.name}` : null,
-      brandVoice || bp.tone || company?.voiceProfile
-        ? `Tone/voice: ${brandVoice || bp.tone || company?.voiceProfile}`
-        : null,
-      bp.markets || bp.communities
-        ? `Markets/communities: ${bp.markets || bp.communities}`
-        : null,
-      bp.signature ? `Signature/sign-off: ${bp.signature}` : null,
-      bp.about ? `About the builder: ${bp.about}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const brandLines = buildBrandContext(company, { brandVoice });
+
+    // SW-KB-002: ground nurture copy in the tenant KB (brand voice / product / FAQ),
+    // scoped per SW-KB-004. SW-KB-005: capture which docs were referenced.
+    const kbQueryText = [goal, audience, contextInfo].filter(Boolean).join(" ");
+    const kbChunks = await kbQuery(req.user.companyId, kbQueryText, 5, KB_SCOPES.nurture).catch(() => []);
+    const kbContext = kbChunks.length
+      ? kbChunks.map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`).join("\n\n")
+      : "No knowledge-base context available.";
+    const kbCitations = dedupeKbCitations(kbChunks);
 
     const systemPrompt = `You are an expert sales copywriter specializing in home builder and warranty care lead nurturing.
 Your task is to write a single ${stepType === "SMS" ? "text message" : "email"} draft.
 
 Brand profile (reflect this voice and details):
 ${brandLines || "Professional, warm, and helpful."}
+
+Company knowledge base (ground factual claims in this; never invent facts, prices, or policies not present here):
+${kbContext}
 
 Audience: ${audience || "Homebuyers or existing homeowners"}.
 Goal of this message: ${goal}.
@@ -858,7 +852,7 @@ Output your draft clearly.`;
         .json({ message: "Failed to generate copy from AI provider" });
     }
 
-    return res.json({ success: true, draft: content });
+    return res.json({ success: true, draft: content, kbCitations });
   } catch (error) {
     console.error("[Generate Copy] Error:", error);
     return res.status(500).json({ message: "Internal server error" });

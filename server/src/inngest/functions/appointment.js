@@ -13,6 +13,7 @@ import {
   getAvailabilitySetting,
 } from "../../services/scheduling-service.js";
 import { query as kbQuery } from "../../services/vector-store.service.js";
+import { KB_SCOPES } from "../../lib/sales-ai.js";
 
 const DEFAULT_MAX_TURNS = 4;
 const MIN_MAX_TURNS = 1;
@@ -243,7 +244,8 @@ export const appointmentSchedulingAgent = inngest.createFunction(
       const q = (body || "").trim();
       if (!q) return { chunks: [] };
       try {
-        const chunks = await kbQuery(lead.companyId, q, 5);
+        // SW-KB-004: scope the scheduling agent to FAQs/policy/community docs.
+        const chunks = await kbQuery(lead.companyId, q, 5, KB_SCOPES.scheduling);
         return { chunks };
       } catch (e) {
         console.error("[Appointment Agent] KB retrieval failed:", e.message);
@@ -363,11 +365,22 @@ export const appointmentReminders = inngest.createFunction(
         include: { lead: { include: { company: true } } },
       });
 
+      // Hoist the module import and memoize availability settings per company so a
+      // batch of reminders for the same tenant doesn't refetch settings each time.
+      const { formatSlotLabel } = await import("../../lib/scheduling.js");
+      const settingsByCompany = new Map();
+      const settingFor = async (companyId) => {
+        if (!settingsByCompany.has(companyId)) {
+          settingsByCompany.set(companyId, await getAvailabilitySetting(companyId));
+        }
+        return settingsByCompany.get(companyId);
+      };
+
       let sent = 0;
       for (const appt of upcoming) {
         const msToStart = appt.time.getTime() - now;
         const hours = msToStart / (60 * 60 * 1000);
-        const setting = await getAvailabilitySetting(appt.lead.companyId);
+        const setting = await settingFor(appt.lead.companyId);
         const reminderHours = setting.reminderHours || [24, 1];
         const tz = appt.leadTimezone || setting.timezone;
 
@@ -376,7 +389,6 @@ export const appointmentReminders = inngest.createFunction(
         else if (reminderHours.includes(1) && !appt.reminder1Sent && hours <= 1 && hours > 0) window = "1h";
         if (!window) continue;
 
-        const { formatSlotLabel } = await import("../../lib/scheduling.js");
         const when = formatSlotLabel(appt.time, tz);
         const meet = appt.meetingLink ? ` Join: ${appt.meetingLink}` : "";
         const text = `Reminder: your ${appt.title} is ${window === "1h" ? "in about an hour" : "tomorrow"} — ${when}.${meet}`;

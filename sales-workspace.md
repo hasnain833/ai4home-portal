@@ -4,7 +4,8 @@ Tracks the **open** work for the Sales Workspace against the **Ai.Lumen Sales
 Workspace SRS v1.1** (`sales-workspace-srs.pdf`). For the warranty side see
 [`warranty-workspace.md`](./warranty-workspace.md).
 
-_Last updated: 2026-07-17 (full SRS-vs-code re-audit)._
+_Last updated: 2026-07-20 (SW-KB/SW-AGT shipped + schema pushed; homeowner audit,
+Sales-AI helper consolidation, and first performance pass recorded below)._
 
 > **Runtime note** — Per SRS §11.4, the Sales AI features run on the native
 > **Claude + Inngest** runtime. Botpress is the Warranty-workspace bot engine
@@ -17,55 +18,25 @@ _Last updated: 2026-07-17 (full SRS-vs-code re-audit)._
 
 ---
 
-## 📚 Sales KB & Brand Voice — `SW-KB` / `SW-AGT`
-
-- [ ] 🟡 **`SW-KB-002` — RAG coverage: 2 of the 5 SRS-named AI features use the
-      KB.** SRS §4.10 names _nurture content assist, calendar suggestions, the
-      scheduling agent, the news summarizer, and the blog drafter_ as KB consumers
-      ("Indexed content shall be retrievable by the Sales AI features at generation
-      time"). `vector-store.service.js` is imported in only four files — `blog.controller.js`,
-      `appointment.js`, `kb.controller.js` (the admin/search endpoint) and
-      `kb-ingest.js`. So only the **blog drafter** and **scheduling agent** are
-      grounded. Not wired:
-  - [ ] **Nurture content assist** — `generateCampaignCopy`
-        (`campaigns.controller.js:781`) injects the brand profile but never calls
-        `kbQuery`; drafts are ungrounded.
-  - [ ] **Calendar suggestions** — `getCalendarSuggestions`
-        (`calendar.controller.js:267`) is grounded in tenant profile + news +
-        seasonality only, no KB.
-  - [ ] News summarizer — arguably fine ungrounded; confirm intent and either
-        wire it or record the de-scope.
-- [ ] 🔴 **`SW-KB-004` — Category scoping is never applied.** Documents are
-      taggable, and `queryDetailed(companyId, q, k, categories)`
-      (`vector-store.service.js:71`) supports the filter — but **no caller passes
-      it**: `appointment.js:224` and `blog.controller.js:218` both call
-      `kbQuery(companyId, q, 5)`. Every feature therefore searches the whole
-      collection. SRS wants the scheduling agent scoped to FAQs/policy and the blog
-      drafter to brand voice/product info. The plumbing exists; only the call sites
-      need the argument.
-- [ ] 🟡 **`SW-KB-005` — Blog drafts don't record KB citations.** The scheduling
-      agent does (`appointment.js:317-321` → `kbCitations` on the timeline). The blog
-      drafter builds `citations` from **`ScrapedNews` only** (`blog.controller.js:224-229`);
-      `kbChunks` are fed into the prompt at line 218 but never recorded, so a draft
-      grounded in KB docs shows no KB provenance. SRS requires citation capture for
-      "blog drafts, scheduling-agent answers, nurture content".
-- [ ] 🟡 **`SW-AGT-001` — Agent runtime abstraction.** Retrieval is a clean,
-      reusable service (`vector-store.service.js`). Remaining work is wiring the
-      unwired consumers above, plus any new ones.
-- [ ] 🔴 **`SW-KB-007` — Config safety.** Prompt-affecting config (brand profile,
-      agent toggles) is **not versioned with rollback**, and there is **no
-      preview/sandbox mode** to test AI behaviour before it affects live sends.
-
----
-
-
----
-
 ## 🧩 Cross-cutting SRS Coverage
   - [ ] 🟡 **Still open: Homeowner "limited templates"** (matrix: nurture sequences
         = "Yes (limited templates)"). The SRS never defines what limits a template, so
         there's nothing to implement against. Needs a product definition before it can
         be built — deliberately not invented here.
+  - [ ] 🟡 **Homeowner role — Sales matrix gaps (audited 2026-07-20).** The permission
+        layer (`server/src/lib/permissions.js`) matches §4.12: CSV import + nurture are
+        homeowner-allowed; announcements/blog/automations/KB are denied; leads are
+        scoped to `ownerId=self`. Two matrix rights are **not** wired:
+    - [ ] **Content calendar "view own items":** `getCalendarEvents`
+          (`calendar.controller.js`) returns all company events with no owner filter
+          for homeowners; create/update/transition aren't owner-scoped either.
+    - [ ] **Appointment scheduling "own availability":** every `/scheduling/*` route is
+          `requireRoles(["ADMIN","STAFF"])`, so a homeowner can't reach their own
+          availability. Possibly an intended de-scope per assumption #7 (homeowner lead
+          use is a lightweight subset) — needs a sign-off either way.
+    - _Warranty-side homeowner touchpoints (report issue / DIY / claim + ticket # /
+      status reminders) are delivered by the Botpress agent, not portal code — no
+      portal gap there by design._
   - [ ] 🟡 **Still open: Platform-Admin views.** `SUPER_ADMIN` exists and bypasses
         `requireWorkspace`; `/admin` covers companies/users/verification. Not yet mapped
         against the matrix's Platform-Admin column: "CRM connect/manage → **View
@@ -146,6 +117,27 @@ re-raised as bugs:**
 
 ---
 
+## ⚡ Performance & code quality (NFR-P / reusability)
+
+- [ ] 🔴 **`NFR-P-002` — `getLeads` has no pagination.** `leads.controller.js` loads
+      every matching lead and the leads page paginates client-side; this breaks the
+      "<1s at 100k leads" target and ships large payloads. Needs server-side pagination
+      + a leads-page pager. **Highest-impact perf item.**
+- [ ] 🟡 **Reusable `requireCompany` guard.** The `if (!req.user?.companyId) return
+      403` check is duplicated ~73× across controllers — fold into one middleware.
+- [ ] 🟡 **Reminder-cron index.** `SalesAppointment` has no `(status, time)` index for
+      the 15-min reminder query; add via `CREATE INDEX CONCURRENTLY` (not `db push`, to
+      avoid a table lock).
+- [ ] 🟡 **News summarization is sequential.** `news-service.js` awaits one LLM call
+      per item in a loop; bounded-concurrency parallelization would cut scrape latency
+      (mind provider rate limits).
+- [ ] 🟡 **Frontend fetch waterfalls (`NFR-P-001`).** ~23 `useEffect` fetches across
+      the sales/warranty pages; consider SWR/React Query or parallelizing initial loads.
+- [ ] 🟡 **Surface retrieval `method` on the KB admin page** (see the Vector-store
+      deviation note above) so a silent semantic→FTS fallback is visible.
+
+---
+
 ## 🏢 Additional Client Requests (beyond the SRS)
 
 - [ ] 🔴 **Literal payment / invoice gating.** Upload invoice, "clear invoices to
@@ -157,43 +149,11 @@ re-raised as bugs:**
 
 ---
 
-## 📰 News & Blog distribution
-
-- [x] ✅ **`SW-NEWS-001` — Per-tenant news sources** ⚙️ _(code done 2026-07-16;
-      needs `prisma db push` — see Operational steps)._ The old scraper fetched **one
-      hard-coded Google News RSS feed** and cloned identical articles to every
-      sales-enabled company. Now tenant-configurable:
-  - [x] `Company.newsSources` field + validation/normalization
-        (`server/src/lib/news-sources.js`).
-  - [x] Scraper iterates each tenant's sources with per-source failure isolation
-        (`SW-NEWS-006`) and a platform-default fallback
-        (`server/src/services/news-service.js`, `news-scraper.js`).
-  - [x] Settings UI to manage feeds (`NewsSourcesTab` in `/sales/settings`).
-  - [x] On-demand "fetch latest" refresh (`POST /api/sales/news/refresh`) on the
-        settings tab and the News page.
-- [x] ✅ **`SW-BLOG-005` — Blog output targets** _(verified 2026-07-16)._
-      Everything the SRS literally requires is done: publish to the workspace-hosted
-      per-tenant blog page (`/blog/[companyId]`, reads via `/api/public/blog/...`;
-      `/blog` is now on the middleware public-route allowlist so anonymous readers
-      can reach it) and export as **HTML/Markdown**. Sample data seeder:
-      `server/scripts/seed-blog.mjs`.
-  - De-scoped per client (2026-07-16): Strapi-style embeddable widget /
-    CORS-enabled headless content API, and the SRS "should-have" **direct
-    WordPress integration** — not building these.
-
----
-
 ## ⚙️ Operational steps (code done — run once per environment)
 
 Not coding tasks; these activate finished features on a live database /
 environment.
 
-- [ ] **`prisma db push`** — applies pending additive schema changes: new
-      `Company` columns for tenant-configurable lead statuses + SMS quiet hours +
-      **per-tenant `newsSources` (`SW-NEWS-001`)**; the `BlogPost` table; drops the
-      removed `ScrapedNews.wasBroadcasted` column; the `AuditLog` table; and (added
-      2026-07-17) the **`SalesforceMappingVersion`** (`SW-CRM-004`) and **`DeadLetter`**
-      (`SW-ANN-002`) tables.
 - [ ] 🚨 **Run the permissions backfill — in this order, or staff lose access.**
       `User.salesPermissions` defaults to `[]`, and a STAFF user with `[]` is denied all
       six gated features. **This is not theoretical:** this database has a live staff
@@ -232,17 +192,6 @@ environment.
 - [ ] **Set a strong `APP_ENCRYPTION_KEY`** in production. Fail-closed is now
       active, so production refuses to store integration secrets under the default
       key.
-
----
-
-## 🗒️ De-scoped (per client, not building)
-
-- [x] **News / Nurture auto-share** — no auto-campaign; the manual flow (create a
-      campaign, then launch it) is built and is the intended process.
-- [x] **Shared notification center** (`HUB-007`) — not required.
-- [x] **Announcement image editor & radius/geo targeting** — not required.
-- [x] **Per-timezone quiet-hours auto-requeue** — replaced by tenant-configurable
-      quiet hours + admin-set send time.
 
 ---
 

@@ -13,6 +13,8 @@ import {
 // SW-APT-006: one clamp shared with the agent, so the value the UI saves and the
 // value the agent enforces can't drift apart.
 import { clampMaxTurns } from "../inngest/functions/appointment.js";
+// SW-KB-007: agent toggles are prompt-affecting config — version them for rollback.
+import { snapshotSalesConfig } from "../services/sales-config-version.service.js";
 
 const TIME_RE = /^\d{1,2}:\d{2}$/;
 
@@ -85,6 +87,12 @@ export const updateSettings = async (req, res) => {
     }
     if (Object.keys(companyData).length > 0) {
       await prisma.company.update({ where: { id: companyId }, data: companyData });
+      // SW-KB-007: snapshot the updated agent toggles for rollback.
+      await snapshotSalesConfig(companyId, {
+        changeType: "SAVE",
+        note: "Agent behavior toggles updated",
+        userId: req.user.id,
+      });
     }
 
     return res.json({
