@@ -59,9 +59,6 @@ function validateForActivation(rule) {
 
 export const getAutomations = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const [rules, company] = await Promise.all([
       prisma.marketingRule.findMany({ where: { companyId: req.user.companyId }, orderBy: { createdAt: "desc" } }),
       prisma.company.findUnique({ where: { id: req.user.companyId }, select: { automationsKillSwitch: true, automationDailyCap: true } }),
@@ -79,9 +76,6 @@ export const getAutomations = async (req, res) => {
 
 export const createAutomation = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const input = normalizeInput(req.body);
     if (!input.name || !input.triggerEvent) {
       return res.status(400).json({ message: "Name and trigger are required." });
@@ -110,9 +104,6 @@ export const createAutomation = async (req, res) => {
 
 export const updateAutomation = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const existing = await prisma.marketingRule.findFirst({ where: { id, companyId: req.user.companyId } });
     if (!existing) return res.status(404).json({ message: "Automation not found" });
@@ -150,9 +141,6 @@ export const updateAutomation = async (req, res) => {
 // Toggle active/paused (SW-AMK-002 validation on activate).
 export const toggleAutomation = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const rule = await prisma.marketingRule.findFirst({ where: { id, companyId: req.user.companyId } });
     if (!rule) return res.status(404).json({ message: "Automation not found" });
@@ -172,9 +160,6 @@ export const toggleAutomation = async (req, res) => {
 
 export const deleteAutomation = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const rule = await prisma.marketingRule.findFirst({ where: { id, companyId: req.user.companyId } });
     if (!rule) return res.status(404).json({ message: "Automation not found" });
@@ -189,9 +174,6 @@ export const deleteAutomation = async (req, res) => {
 // SW-AMK-004: kill switch + daily cap.
 export const setKillSwitch = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { killSwitch, dailyCap } = req.body;
     const updated = await prisma.company.update({
       where: { id: req.user.companyId },
@@ -211,9 +193,6 @@ export const setKillSwitch = async (req, res) => {
 // SW-AMK-005: aggregate analytics.
 export const getAutomationAnalytics = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const companyId = req.user.companyId;
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
     const [totalRuns, matchedRuns, recentRuns] = await Promise.all([

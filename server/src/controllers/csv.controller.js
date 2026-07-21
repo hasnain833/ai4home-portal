@@ -2,19 +2,9 @@ import { inngest } from "../lib/inngest.js";
 import prisma from "../lib/prisma.js";
 import { validateLeadRow, leadDedupKeys } from "../lib/csv-validation.js";
 
-// We don't need multer anymore because the frontend pre-maps the CSV
-// and sends it as a JSON array (leadsList).
 export const uploadCsvMiddleware = (req, res, next) => next();
-
-// SW-CSV-003: pre-commit dry run. Given the mapped rows, report how many would
-// be created (valid), merged/skipped (duplicate), or rejected (invalid) — WITHOUT
-// writing anything — plus the rejected rows so the UI can offer a download.
 export const validateCsvImport = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
     const { leadsList } = req.body;
     if (!leadsList || !Array.isArray(leadsList) || leadsList.length === 0) {
       return res.status(400).json({ message: "No rows to validate." });
@@ -89,9 +79,6 @@ export const validateCsvImport = async (req, res) => {
 // ── SW-CSV-002: saved column-mapping templates ──────────────────────────────
 export const getMappingTemplates = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
     const templates = await prisma.csvMappingTemplate.findMany({
       where: { companyId: req.user.companyId },
       orderBy: { updatedAt: "desc" },
@@ -105,9 +92,6 @@ export const getMappingTemplates = async (req, res) => {
 
 export const saveMappingTemplate = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
     const { name, mapping } = req.body;
     if (!name || typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ message: "Template name is required." });
@@ -129,9 +113,6 @@ export const saveMappingTemplate = async (req, res) => {
 
 export const deleteMappingTemplate = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
     const { id } = req.params;
     const existing = await prisma.csvMappingTemplate.findUnique({ where: { id } });
     if (!existing || existing.companyId !== req.user.companyId) {
@@ -147,10 +128,6 @@ export const deleteMappingTemplate = async (req, res) => {
 
 export const handleCsvUpload = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
     const { leadsList, attested, mergeStrategy = "update" } = req.body;
 
     if (!leadsList || !Array.isArray(leadsList) || leadsList.length === 0) {
@@ -170,11 +147,6 @@ export const handleCsvUpload = async (req, res) => {
           message: "Homeowners can upload a maximum of 1000 rows per file.",
         });
       }
-
-      // SW-CSV-006: hard cap of 500 leads TOTAL for a Homeowner account,
-      // enforced against the running total across all imports (not just this
-      // file). This is a conservative upper bound — the actual import may create
-      // fewer rows after dedup, but we never let a submission exceed the cap.
       const HOMEOWNER_TOTAL_CAP = 500;
       const existingCount = await prisma.lead.count({
         where: { companyId: req.user.companyId },

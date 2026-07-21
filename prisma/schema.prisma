@@ -717,6 +717,11 @@ model SchedulingConversation {
   @@index([leadId])
 }
 
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
 
 model AuditLog {
   id         String   @id @default(cuid())

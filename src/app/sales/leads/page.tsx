@@ -52,7 +52,6 @@ import {
   X
 } from "lucide-react";
 
-/** Mirrors the filter shape read by buildPrismaWhereClause() on the server. */
 type SegmentFilter = {
   field: string;
   operator: "equals" | "contains" | "startsWith" | "in" | "true" | "false";
@@ -88,30 +87,23 @@ interface Lead {
   owner?: { name: string; email: string } | null;
 }
 
+// NFR-P-002: page size for the server-side lead pager.
+const ITEMS_PER_PAGE = 25;
+
 export default function LeadsPage() {
   const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
-  // SW-LEAD-006: pipeline statuses are tenant-configurable (Company.leadStatuses).
   const [statuses, setStatuses] = useState<string[]>(DEFAULT_LEAD_STATUSES);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
-
-  // ─── Saved segments (SW-NUR-002) ────────────────────────────────────────────
-  // A segment is the current Status + Tag filters, saved by name. Campaigns
-  // target these from the Enroll dialog. Filter shape must match
-  // buildPrismaWhereClause() in server/src/controllers/segments.controller.js:
-  //   [{ field, operator, value }] -- ANDed together.
   const [segments, setSegments] = useState<Segment[]>([]);
   const [segmentCounts, setSegmentCounts] = useState<Record<string, number>>({});
   const [saveSegmentOpen, setSaveSegmentOpen] = useState(false);
   const [segmentName, setSegmentName] = useState("");
   const [savingSegment, setSavingSegment] = useState(false);
 
-  // Free-text search is deliberately excluded: the leads list ORs it across
-  // name/email/phone, but the segment evaluator only builds single-field AND
-  // conditions, so including it would change what the segment matches.
   const activeSegmentFilters = useMemo(() => {
     const filters: SegmentFilter[] = [];
     if (statusFilter !== "all") filters.push({ field: "status", operator: "equals", value: statusFilter });
@@ -125,7 +117,6 @@ export default function LeadsPage() {
       if (!res.ok) return;
       const data: Segment[] = await res.json();
       setSegments(data);
-      // Counts are per-segment; evaluate in parallel and ignore individual failures.
       const entries = await Promise.all(
         data.map(async (seg) => {
           try {
@@ -175,13 +166,13 @@ export default function LeadsPage() {
     }
   };
 
-  /** Apply a saved segment's filters back onto the list. */
   const applySegment = (seg: Segment) => {
     const status = seg.filters?.find((f) => f.field === "status")?.value;
     const tag = seg.filters?.find((f) => f.field === "tags")?.value;
     setStatusFilter(typeof status === "string" ? status : "all");
     setTagFilter(typeof tag === "string" ? tag : "all");
     setSearch("");
+    setCurrentPage(1);
   };
 
   // Manual Lead Modal state
@@ -202,9 +193,8 @@ export default function LeadsPage() {
     smsOptIn: false,
   });
 
-  // CSV Wizard Modal state
   const [csvModalOpen, setCsvModalOpen] = useState(false);
-  const [csvStep, setCsvStep] = useState(1); // 1: Select, 2: Map, 3: Preview, 4: Consent & Execute, 5: Done
+  const [csvStep, setCsvStep] = useState(1);
   const [csvRawText, setCsvRawText] = useState("");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvRows, setCsvRows] = useState<string[][]>([]);
@@ -213,20 +203,19 @@ export default function LeadsPage() {
   const [consentAttested, setConsentAttested] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<any>(null);
-  // SW-CSV-003 validation preview + SW-CSV-002 mapping templates
   const [validation, setValidation] = useState<any>(null);
   const [validating, setValidating] = useState(false);
   const [csvTemplates, setCsvTemplates] = useState<any[]>([]);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
 
-  // Timeline dialog
   const [timelineLead, setTimelineLead] = useState<Lead | null>(null);
   const [timelineEvents, setTimelineEvents] = useState<any[]>([]);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
-
   const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 10;
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [serverTags, setServerTags] = useState<string[]>([]);
 
   const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
 
@@ -241,11 +230,23 @@ export default function LeadsPage() {
   const fetchLeads = useCallback(async () => {
     setLoading(true);
     try {
-      const url = `/api/sales/leads?status=${statusFilter}&tag=${tagFilter}&search=${encodeURIComponent(search)}`;
-      const res = await fetch(url);
+      const params = new URLSearchParams({
+        status: statusFilter,
+        tag: tagFilter,
+        search,
+        page: String(currentPage),
+        pageSize: String(ITEMS_PER_PAGE),
+      });
+      const res = await fetch(`/api/sales/leads?${params.toString()}`);
       if (res.ok) {
-        setLeads(await res.json());
-        setCurrentPage(1); // Reset to page 1 on new fetch
+        const data = await res.json();
+        setLeads(data.leads || []);
+        setTotalLeads(data.total || 0);
+        setTotalPages(data.totalPages || 1);
+        setServerTags(data.availableTags || []);
+        if (data.total > 0 && currentPage > (data.totalPages || 1)) {
+          setCurrentPage(data.totalPages || 1);
+        }
       }
     } catch (error) {
       console.error("[sales/leads]", error);
@@ -253,7 +254,11 @@ export default function LeadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, tagFilter]);
+  }, [search, statusFilter, tagFilter, currentPage]);
+
+  const changeSearch = (value: string) => { setSearch(value); setCurrentPage(1); };
+  const changeStatusFilter = (value: string) => { setStatusFilter(value); setCurrentPage(1); };
+  const changeTagFilter = (value: string) => { setTagFilter(value); setCurrentPage(1); };
 
   useEffect(() => {
     fetchLeads();
@@ -263,7 +268,6 @@ export default function LeadsPage() {
     fetchSegments();
   }, [fetchSegments]);
 
-  // Load the tenant's configured lead statuses (falls back to defaults).
   useEffect(() => {
     fetch("/api/company")
       .then((r) => (r.ok ? r.json() : null))
@@ -271,12 +275,12 @@ export default function LeadsPage() {
       .catch(() => {});
   }, []);
 
-  // Unique tags across all leads for dropdown filter
   const uniqueTags = useMemo(() => {
+    if (serverTags.length > 0) return serverTags;
     const tagsSet = new Set<string>();
     leads.forEach(l => l.tags?.forEach(t => tagsSet.add(t)));
     return Array.from(tagsSet).sort();
-  }, [leads]);
+  }, [serverTags, leads]);
 
   // Handle Delete Lead
   const confirmDeleteLead = async () => {
@@ -396,10 +400,9 @@ export default function LeadsPage() {
     });
 
     setCsvMapping(initialMapping);
-    setCsvStep(2); // Map Columns Step
+    setCsvStep(2);
   };
 
-  // Build the mapped leads list from parsed rows + current column mapping.
   const buildLeadsList = () => {
     return csvRows.map(row => {
       const leadObj: any = {};
@@ -421,7 +424,6 @@ export default function LeadsPage() {
     });
   };
 
-  // SW-CSV-003: pre-commit dry run — fetch valid/invalid/duplicate counts.
   const runValidation = async () => {
     setValidating(true);
     setValidation(null);
@@ -441,7 +443,6 @@ export default function LeadsPage() {
     }
   };
 
-  // Download the rejected (invalid) rows as a CSV report.
   const downloadRejected = () => {
     const rejected = validation?.rejected || [];
     if (!rejected.length) return;
@@ -460,12 +461,13 @@ export default function LeadsPage() {
     URL.revokeObjectURL(url);
   };
 
-  // SW-CSV-002: mapping templates
   const fetchCsvTemplates = async () => {
     try {
       const res = await fetch("/api/sales/csv/templates");
       if (res.ok) setCsvTemplates(await res.json());
-    } catch { /* non-fatal */ }
+    } catch {
+      /* ignore */
+    }
   };
 
   const saveCsvTemplate = async () => {
@@ -493,7 +495,6 @@ export default function LeadsPage() {
   const applyCsvTemplate = (templateId: string) => {
     const tpl = csvTemplates.find(t => t.id === templateId);
     if (!tpl) return;
-    // Only apply mappings for headers present in this file.
     const applied: Record<string, string> = {};
     csvHeaders.forEach(h => { applied[h] = tpl.mapping?.[h] || ""; });
     setCsvMapping(applied);
@@ -504,17 +505,15 @@ export default function LeadsPage() {
     try {
       const res = await fetch(`/api/sales/csv/templates/${id}`, { method: "DELETE" });
       if (res.ok) fetchCsvTemplates();
-    } catch { /* non-fatal */ }
+    } catch {
+      /* ignore */
+    } 
   };
 
-  // Run Import Request
   const handleCSVImportExecute = async () => {
     setImporting(true);
     try {
-      // 1. Build leads list from row parsing + column mapping
       const leadsList = buildLeadsList();
-
-      // 2. Call API
       const res = await fetch("/api/sales/csv/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -528,7 +527,7 @@ export default function LeadsPage() {
       const data = await res.json();
       if (res.ok) {
         setImportResults(data);
-        setCsvStep(5); // Completion step
+        setCsvStep(5);
         fetchLeads();
       } else {
         showToast(data.message || "Failed to parse import.");
@@ -541,7 +540,6 @@ export default function LeadsPage() {
     }
   };
 
-  // Reset CSV Wizard
   const closeCSVWizard = () => {
     setCsvModalOpen(false);
     setCsvStep(1);
@@ -555,18 +553,14 @@ export default function LeadsPage() {
     setNewTemplateName("");
   };
 
-  // Load saved mapping templates whenever the CSV wizard opens.
   useEffect(() => {
     if (csvModalOpen) fetchCsvTemplates();
   }, [csvModalOpen]);
 
-  // Run the pre-commit dry run whenever the user reaches the Preview step.
   useEffect(() => {
     if (csvStep === 3 && csvRows.length > 0) runValidation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [csvStep]);
 
-  // Open timeline previewer
   const openTimeline = async (lead: Lead) => {
     setTimelineLead(lead);
     setTimelineEvents([]);
@@ -625,14 +619,14 @@ export default function LeadsPage() {
                       placeholder="Search by name, email, or telephone..."
                       className="pl-9 h-9"
                       value={search}
-                      onChange={(e) => setSearch(e.target.value)}
+                      onChange={(e) => changeSearch(e.target.value)}
                     />
                   </div>
                 </div>
 
                 <div>
                   <Label className="text-xs font-semibold text-muted-foreground mb-1 block">Lead Status</Label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <Select value={statusFilter} onValueChange={changeStatusFilter}>
                     <SelectTrigger className="h-9">
                       <SelectValue placeholder="All Statuses" />
                     </SelectTrigger>
@@ -647,7 +641,7 @@ export default function LeadsPage() {
 
                 <div>
                   <Label className="text-xs font-semibold text-muted-foreground mb-1 block">Lead Tag</Label>
-                  <Select value={tagFilter} onValueChange={setTagFilter}>
+                  <Select value={tagFilter} onValueChange={changeTagFilter}>
                     <SelectTrigger className="h-9">
                       <SelectValue placeholder="All Tags" />
                     </SelectTrigger>
@@ -816,7 +810,8 @@ export default function LeadsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {leads.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE).map((lead) => (
+                      {/* `leads` is already exactly one page from the server. */}
+                      {leads.map((lead) => (
                         <TableRow key={lead.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition border-b border-border/30">
                           <TableCell className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200 align-middle">
                             <div>
@@ -861,17 +856,21 @@ export default function LeadsPage() {
                     </TableBody>
                   </Table>
 
-                  {leads.length > ITEMS_PER_PAGE && (
+                  {/* Totals come from the server response — `leads` is one page. */}
+                  {totalPages > 1 && (
                     <div className="flex items-center justify-between px-6 py-4 border-t border-border/50 bg-slate-50/30 dark:bg-slate-900/10">
                       <div className="text-xs text-muted-foreground">
-                        Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, leads.length)} of {leads.length} prospects
+                        Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min((currentPage - 1) * ITEMS_PER_PAGE + leads.length, totalLeads)} of {totalLeads} prospects
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground mr-1">
+                          Page {currentPage} of {totalPages}
+                        </span>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                          disabled={currentPage === 1}
+                          disabled={currentPage === 1 || loading}
                           className="h-8 text-xs"
                         >
                           Previous
@@ -879,8 +878,8 @@ export default function LeadsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => setCurrentPage(p => Math.min(Math.ceil(leads.length / ITEMS_PER_PAGE), p + 1))}
-                          disabled={currentPage >= Math.ceil(leads.length / ITEMS_PER_PAGE)}
+                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                          disabled={currentPage >= totalPages || loading}
                           className="h-8 text-xs"
                         >
                           Next

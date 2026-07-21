@@ -3,9 +3,16 @@ import prisma from "../../lib/prisma.js";
 import { triggerAutomation } from "../../lib/automation-events.js";
 import { validateLeadRow, sanitizeCsvValue } from "../../lib/csv-validation.js";
 import { findDuplicateLead, resolveMergedField } from "../../lib/lead-dedup.js";
+import { deadLetterJob } from "../../lib/dead-letter.js";
 
 export const handleCsvImport = inngest.createFunction(
-  { id: "handle-csv-import", triggers: [{ event: "csv/import.started" }] },
+  {
+    id: "handle-csv-import",
+    concurrency: [{ key: "event.data.companyId", limit: 1 }],
+    triggers: [{ event: "csv/import.started" }],
+    onFailure: async ({ event, error }) =>
+      deadLetterJob({ functionId: "handle-csv-import", event, error }),
+  },
   async ({ event, step }) => {
     const { rows, mergeStrategy, companyId, userId, userRole, userName } = event.data;
 
@@ -38,9 +45,6 @@ export const handleCsvImport = inngest.createFunction(
           const emailOptIn = Boolean(lead.emailOptIn);
           const smsOptIn = Boolean(lead.smsOptIn);
           const tags = (Array.isArray(lead.tags) ? lead.tags : []).map(sanitizeCsvValue);
-
-          // SW-LEAD-003: normalized dedup (case-insensitive email, then phone
-          // by last-10-digits ignoring formatting).
           const duplicateLead = await findDuplicateLead(companyId, email, phone);
 
           const optInSource = emailOptIn || smsOptIn ? "CSV Import" : null;
@@ -51,13 +55,7 @@ export const handleCsvImport = inngest.createFunction(
               skippedCount++;
               continue;
             } else if (mergeStrategy === "update") {
-              // Merge tags (union across sources).
               const mergedTags = Array.from(new Set([...duplicateLead.tags, ...tags]));
-
-              // SW-LEAD-003: cross-source linking with CRM as system-of-record.
-              // If the matched lead is owned by Salesforce (has an externalId), a
-              // CSV import must NOT overwrite its authoritative fields — it only
-              // fills gaps the CRM left empty. Otherwise the CSV value wins.
               const isCrmOwned = !!duplicateLead.externalId;
 
               await prisma.lead.update({
@@ -119,7 +117,6 @@ export const handleCsvImport = inngest.createFunction(
             },
           });
           createdCount++;
-          // SW-AMK: newly imported leads can trigger automation rules.
           await triggerAutomation({ companyId, leadId: createdLead.id, event: "CRM_INGEST", context: { source: "CSV" } });
         }
       }

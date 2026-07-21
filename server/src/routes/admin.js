@@ -13,6 +13,13 @@ import {
   updateUserAccess,
   verifyCompany,
 } from "../admin/superadmin.controller.js";
+import {
+  getCrmHealth,
+  getDefaultNewsSources,
+  updateDefaultNewsSources,
+  getSupportLeads,
+  getSupportAccessLog,
+} from "../admin/platform.controller.js";
 
 const router = express.Router();
 
@@ -25,6 +32,12 @@ router.patch(
 );
 router.patch("/users/:userId/access", requireAuth, updateUserAccess);
 router.patch("/companies/:companyId/verify", requireAuth, verifyCompany);
+router.get("/crm-health", requireAuth, getCrmHealth);
+router.get("/news-defaults", requireAuth, getDefaultNewsSources);
+router.put("/news-defaults", requireAuth, updateDefaultNewsSources);
+router.get("/support/leads/:companyId", requireAuth, getSupportLeads);
+router.get("/support/access-log", requireAuth, getSupportAccessLog);
+
 router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);
 router.put("/staff", requireAuth, updateStaff);

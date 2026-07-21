@@ -3,38 +3,17 @@ import prisma from "../../lib/prisma.js";
 import { MailService } from "../../services/mail-service.js";
 import { MessagingService } from "../../services/messaging-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
+import { deadLetterJob } from "../../lib/dead-letter.js";
+import { renderMergeFields, leadMergeVars } from "../../lib/utils.js";
 
-// ─── Merge-field rendering (safe) ─────────────────────────────────────────────
-// Replaces {{token}} with lead values. Unknown tokens render empty and, in HTML
-// contexts, values are escaped — so a lead field can't inject markup (NFR-S-008).
-function escapeHtml(s) {
-  return String(s).replace(
-    /[&<>"']/g,
-    (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
-  );
-}
 
 export function mergeFields(template, lead, html = false) {
-  if (!template) return "";
-  const map = {
-    firstName: lead?.firstName,
-    lastName: lead?.lastName,
-    fullName: [lead?.firstName, lead?.lastName].filter(Boolean).join(" "),
-    email: lead?.email,
-    phone: lead?.phone,
-    city: lead?.city,
-    state: lead?.state,
-    status: lead?.status,
-  };
-  return String(template).replace(/\{\{\s*(\w+)\s*\}\}/g, (_m, key) => {
-    const v = map[key];
-    if (v == null) return "";
-    return html ? escapeHtml(String(v)) : String(v);
+  return renderMergeFields(template, leadMergeVars(lead), {
+    html,
+    blankUnknown: true,
   });
 }
 
-// ─── Condition evaluation (SW-AMK-001) ────────────────────────────────────────
 function leadFieldValue(lead, field) {
   if (!lead) return undefined;
   return lead[field];
@@ -85,10 +64,6 @@ export function evaluateConditions(lead, conditions) {
   return conditions.every((c) => evaluateCondition(lead, c));
 }
 
-// ─── Action execution (SW-AMK-001) ────────────────────────────────────────────
-// `ctx.sendBudget` (optional) is a shared { remaining } counter used to enforce
-// the per-tenant automation daily send cap (SW-AMK-004): outbound SEND_EMAIL /
-// SEND_SMS actions are skipped once it reaches 0.
 export async function executeAction(action, lead, ctx = {}) {
   const type = String(action?.type || "").toUpperCase();
   const params = action?.params || {};
@@ -134,8 +109,6 @@ export async function executeAction(action, lead, ctx = {}) {
     case "UPDATE_STATUS": {
       const newStatus = params.newStatus || params.status;
       if (!newStatus) return { type, error: "missing status" };
-      // Direct DB write (NOT via the leads controller) so this does not re-emit a
-      // STATUS_CHANGE trigger — prevents automation loops (SW-AMK-003).
       await prisma.lead.update({ where: { id: lead.id }, data: { status: newStatus } });
       return { type, status: newStatus };
     }
@@ -169,7 +142,6 @@ export async function executeAction(action, lead, ctx = {}) {
       return { type, notified: to };
     }
 
-    // SW-AMK: send a single email to the lead (compliance-gated via MessagingService).
     case "SEND_EMAIL": {
       if (!lead.email) return { type, skipped: "no email" };
       const optInRequired = lead.company?.complianceOptInRequired ?? true;
@@ -184,7 +156,6 @@ export async function executeAction(action, lead, ctx = {}) {
       return { type, sent: true, to: lead.email };
     }
 
-    // SW-AMK: send a single SMS to the lead (runtime consent + compliance gate).
     case "SEND_SMS": {
       if (!lead.phone) return { type, skipped: "no phone" };
       if (!lead.smsOptIn) return { type, skipped: "no sms opt-in" };
@@ -197,10 +168,6 @@ export async function executeAction(action, lead, ctx = {}) {
       if (budget) budget.remaining -= 1;
       return { type, sent: true, to: lead.phone };
     }
-
-    // SW-AMK: create a follow-up task. There is no dedicated Task model, so this
-    // records a TASK entry on the lead timeline (visible in the lead history),
-    // optionally with a due date and the owner it's assigned to.
     case "CREATE_TASK": {
       const title = mergeFields(params.title || params.message || "Follow up with lead", lead, false);
       const dueInDays = Number(params.dueInDays);
@@ -218,8 +185,6 @@ export async function executeAction(action, lead, ctx = {}) {
       return { type, task: true };
     }
 
-    // SW-AMK: draft (do NOT send) an announcement for the tenant — a human
-    // reviews and sends it from the Announcements workspace.
     case "DRAFT_ANNOUNCEMENT": {
       const ann = await prisma.announcement.create({
         data: {
@@ -239,8 +204,6 @@ export async function executeAction(action, lead, ctx = {}) {
   }
 }
 
-// Count outbound automation sends (SEND_EMAIL/SEND_SMS with sent:true) recorded
-// since `since` — used to enforce the per-tenant daily cap (SW-AMK-004).
 export function countSentActions(runs) {
   let n = 0;
   for (const r of runs || []) {
@@ -250,14 +213,11 @@ export function countSentActions(runs) {
   return n;
 }
 
-// ─── Engine core (SW-AMK-003 execution semantics) ─────────────────────────────
-// Extracted so it can be unit/integration tested without the Inngest runtime.
 export async function evaluateRulesForTrigger({ companyId, leadId, triggerEvent }) {
   const company = await prisma.company.findUnique({
     where: { id: companyId },
     select: { automationsKillSwitch: true, automationDailyCap: true },
   });
-  // SW-AMK-004: kill switch pauses ALL automations for the tenant.
   if (!company || company.automationsKillSwitch) {
     return { status: "skipped", reason: "kill-switch-or-no-company" };
   }
@@ -271,7 +231,6 @@ export async function evaluateRulesForTrigger({ companyId, leadId, triggerEvent 
     ? await prisma.lead.findUnique({ where: { id: leadId }, include: { company: true } })
     : null;
 
-  // SW-AMK-004: daily send cap — shared budget across all rules in this evaluation.
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const cap = company.automationDailyCap ?? 1000;
@@ -284,8 +243,6 @@ export async function evaluateRulesForTrigger({ companyId, leadId, triggerEvent 
 
   let executed = 0;
   for (const rule of rules) {
-    // SW-AMK-003: loop prevention — skip if this rule already ran for this lead
-    // within its cooldown window.
     if (leadId) {
       const since = new Date(Date.now() - (rule.cooldownHours || 24) * 3600 * 1000);
       const recent = await prisma.marketingRuleRun.findFirst({
@@ -339,6 +296,8 @@ export const runAutomationRules = inngest.createFunction(
     id: "run-automation-rules",
     concurrency: [{ key: "event.data.companyId", limit: 5 }],
     triggers: [{ event: "automation.trigger" }],
+    onFailure: async ({ event, error }) =>
+      deadLetterJob({ functionId: "run-automation-rules", event, error }),
   },
   async ({ event, step }) => {
     const { companyId, leadId, event: triggerEvent } = event.data;
@@ -348,11 +307,6 @@ export const runAutomationRules = inngest.createFunction(
   }
 );
 
-// ─── Date-based triggers (SW-AMK) ─────────────────────────────────────────────
-// Runs daily; for every active DATE_BASED rule it evaluates the rule's date
-// conditions (e.g. { field: "createdAt", operator: "OLDER_THAN_DAYS", value: 7 })
-// against the tenant's active leads and enqueues a per-lead automation.trigger.
-// The main engine then applies cooldown + daily-cap as usual.
 export const automationDateTriggers = inngest.createFunction(
   { id: "automation-date-based-triggers", triggers: [{ cron: "0 13 * * *" }] },
   async ({ step }) => {

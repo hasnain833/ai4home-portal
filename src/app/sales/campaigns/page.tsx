@@ -289,7 +289,7 @@ export default function CampaignsPage() {
     setLoadingLeads(true);
     try {
       const [leadsRes, segRes] = await Promise.all([
-        fetch("/api/sales/leads?limit=50"),
+        fetch("/api/sales/leads?pageSize=50"),
         fetch("/api/sales/segments"),
       ]);
       if (leadsRes.ok) {
@@ -460,8 +460,6 @@ export default function CampaignsPage() {
                         </div>
                       ) : activeSeqDetail?.steps?.length > 0 ? (
                         activeSeqDetail.steps.map((step: any, index: number) => {
-                          // Treat a finished campaign like a running one for the step
-                          // visualization so completed steps still render as done.
                           const isRunning = activeSeq.status === "Active" || activeSeq.status === "Paused" || activeSeq.status === "Completed";
                           const totalEnrollments = activeSeqDetail?.enrollments?.length || 0;
                           const completedCount = activeSeqDetail?.enrollments?.filter((e: any) => e.currentStepPosition >= step.position).length || 0;

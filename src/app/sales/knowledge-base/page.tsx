@@ -101,6 +101,24 @@ export default function SalesKnowledgeBasePage() {
   const [matches, setMatches] = useState<Match[] | null>(null);
   const [searchMethod, setSearchMethod] = useState<string | null>(null);
 
+  // Always-on retrieval health. The Test Retrieval badge only appears after a
+  // search that returned rows, so a broken semantic index could look fine.
+  const [retrieval, setRetrieval] = useState<{
+    status: string;
+    totalChunks: number;
+    embeddedChunks: number;
+    coverage: number;
+  } | null>(null);
+
+  const loadRetrievalStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sales/kb/retrieval-status");
+      if (res.ok) setRetrieval(await res.json());
+    } catch {
+      /* non-critical */
+    }
+  }, []);
+
   const loadDocs = useCallback(async () => {
     try {
       const res = await fetch("/api/sales/kb");
@@ -114,7 +132,8 @@ export default function SalesKnowledgeBasePage() {
 
   useEffect(() => {
     loadDocs();
-  }, [loadDocs]);
+    loadRetrievalStatus();
+  }, [loadDocs, loadRetrievalStatus]);
 
   // Auto-refresh while any document is still indexing so status flips to Indexed live.
   useEffect(() => {
@@ -367,6 +386,39 @@ export default function SalesKnowledgeBasePage() {
             <CardHeader className="border-b">
               <CardTitle className="text-sm font-bold flex items-center gap-2"><Search className="h-4 w-4 text-[#b48c3c]" /> Test Retrieval</CardTitle>
               <CardDescription className="text-xs">Ask a question to see which indexed passages the AI would retrieve and cite.</CardDescription>
+
+              {/* Always-on health — every AI feature grounded in this KB (blog
+                  drafts, the scheduling agent, calendar topics) degrades to
+                  keyword search when this isn't green. */}
+              {retrieval && retrieval.status !== "EMPTY" && (
+                <div
+                  className={`mt-3 flex items-start gap-2 rounded-lg border p-2.5 text-[11px] ${
+                    retrieval.status === "SEMANTIC"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-400"
+                      : "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-400"
+                  }`}
+                >
+                  <span className="shrink-0">{retrieval.status === "SEMANTIC" ? "🧠" : "⚠️"}</span>
+                  <span>
+                    {retrieval.status === "SEMANTIC" && (
+                      <>Semantic search active — all {retrieval.totalChunks} passages are indexed with embeddings.</>
+                    )}
+                    {retrieval.status === "PARTIAL" && (
+                      <>
+                        Only {retrieval.embeddedChunks} of {retrieval.totalChunks} passages ({retrieval.coverage}%)
+                        have embeddings. The rest fall back to keyword search — run <strong>Reindex</strong> to finish.
+                      </>
+                    )}
+                    {retrieval.status === "UNAVAILABLE" && (
+                      <>
+                        <strong>Semantic search is not working.</strong> Every AI feature grounded in this
+                        knowledge base is silently using keyword search instead. Run the pgvector setup SQL,
+                        then <strong>Reindex</strong>.
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
             </CardHeader>
             <CardContent className="p-6 space-y-4">
               <form onSubmit={runSearch} className="flex gap-2">

@@ -155,8 +155,6 @@ export const updateBlogPost = async (req, res) => {
     if (metaDescription !== undefined) data.metaDescription = metaDescription;
     if (headings !== undefined) data.headings = Array.isArray(headings) ? headings : [];
 
-    // Editing an approved/published/scheduled post sends it back to review
-    // (SW-BLOG-004: content must be re-approved before it can be re-published).
     const contentChanged = data.title !== undefined || data.content !== undefined || data.excerpt !== undefined;
     if (contentChanged && ["APPROVED", "SCHEDULED", "PUBLISHED"].includes(existing.status)) {
       data.status = "PENDING_REVIEW";
@@ -177,7 +175,6 @@ export const deleteBlogPost = async (req, res) => {
     const { companyId } = req.user;
     const existing = await prisma.blogPost.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.companyId !== companyId) return res.status(404).json({ message: "Post not found" });
-    // Clean up any linked calendar item.
     if (existing.calendarEventId) {
       await prisma.contentCalendar.deleteMany({ where: { id: existing.calendarEventId, companyId } });
     }
@@ -189,7 +186,6 @@ export const deleteBlogPost = async (req, res) => {
   }
 };
 
-// ─── AI generation (SW-BLOG-001 / 002) ─────────────────────────────────────────
 
 export const generateBlogDraft = async (req, res) => {
   try {
@@ -201,19 +197,13 @@ export const generateBlogDraft = async (req, res) => {
     if (!topic || !topic.trim()) return res.status(400).json({ message: "A topic prompt is required." });
 
     const company = await prisma.company.findUnique({ where: { id: companyId } });
-
-    // SW-BLOG-002: brand voice + KB RAG grounding.
     const keywordStr = Array.isArray(keywords) ? keywords.join(", ") : keywords || "";
-    // SW-KB-004: scope the blog drafter to brand-voice / community-product docs.
-    const kbChunks = await kbQuery(companyId, `${topic} ${keywordStr}`, 5, KB_SCOPES.blog).catch(() => []);
+    const kbChunks = await kbQuery(companyId, `${topic} ${keywordStr}`, 5, KB_SCOPES.blog, "blog-draft").catch(() => []);
     const kbContext = kbChunks.length
       ? kbChunks.map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`).join("\n\n")
       : "No knowledge-base context available.";
-
-    // SW-KB-005: record which KB documents grounded this draft (deduped by doc).
     const kbCitations = dedupeKbCitations(kbChunks);
 
-    // SW-BLOG-002: explicit source citations from selected news items.
     let citations = [];
     let newsContext = "No source news selected.";
     if (Array.isArray(newsIds) && newsIds.length) {

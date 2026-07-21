@@ -6,6 +6,8 @@ import { getLeadTimezone, getNextValidSendWindow } from "../../lib/timezone.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { deadLetter } from "../../lib/dead-letter.js";
+import { deadLetterJob } from "../../lib/dead-letter.js";
+import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
 
 // Helper function to calculate delay
 const calculateDelayTime = (value, unit) => {
@@ -27,6 +29,8 @@ export const runNurtureCampaign = inngest.createFunction(
     idempotency: "event.data.enrollmentId",
     concurrency: [{ key: "event.data.enrollmentId", limit: 1 }],
     triggers: [{ event: "campaign.enrollment.started" }],
+    onFailure: async ({ event, error }) =>
+      deadLetterJob({ functionId: "run-nurture-campaign-v4", event, error }),
   },
   async ({ event, step }) => {
     const { leadId, campaignId, enrollmentId } = event.data;
@@ -164,31 +168,24 @@ export const runNurtureCampaign = inngest.createFunction(
           companyName: lead.company?.name || "",
           bookingLink,
         };
-
-        const renderText = (templateText) => {
-          if (!templateText) return "";
-          return templateText
-            .replace(/{firstName}/g, variables.firstName)
-            .replace(/{lastName}/g, variables.lastName)
-            .replace(/{email}/g, variables.email)
-            .replace(/{phone}/g, variables.phone)
-            .replace(/{city}/g, variables.city)
-            .replace(/{companyName}/g, variables.companyName)
-            .replace(/{bookingLink}/g, variables.bookingLink);
-        };
+        const renderText = (templateText, html = false) =>
+          renderMergeFields(templateText, variables, {
+            html,
+            raw: new Set(["bookingLink"]),
+          });
 
         console.log(`[Nurture] Step type=${currentStep.type}, lead.email=${lead.email}, lead.phone=${lead.phone}`);
 
         if (currentStep.type === "EMAIL" && lead.email) {
           const subject = renderText(currentStep.subject || "Outreach Update");
-          const body = renderText(currentStep.body || "");
+          const body = renderText(currentStep.body || "", true);
           console.log(`[Nurture] Sending EMAIL to ${lead.email}, subject="${subject}"`);
 
           const formattedHtml = `
             <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #eaeaea;">
               <div style="background-color: #0F3B3D; padding: 30px 40px; text-align: center; border-bottom: 3px solid #b48c3c;">
                 <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
-                  ${lead.company?.name || "Warranty Care & Sales Portal"}
+                  ${escapeHtml(lead.company?.name || "Warranty Care & Sales Portal")}
                 </h1>
               </div>
               <div style="padding: 40px; color: #334155; line-height: 1.8; font-size: 16px;">
@@ -217,11 +214,6 @@ export const runNurtureCampaign = inngest.createFunction(
             smtpConfig,
             headers: { "X-Mailin-Tag": currentStep.id },
           });
-
-          // SW-ANN-002: park a permanently-failed step send. Recorded here rather
-          // than in record-step because only this scope still has `finalHtml` —
-          // the step result carries the plain-text body, which wouldn't replay
-          // the message the lead was actually meant to receive.
           if (!emailResult.success) {
             await deadLetter({
               companyId: lead.companyId,
@@ -369,8 +361,6 @@ function shouldExitCampaign(reason, exitConditions, newStatus) {
     case "REPLY":
       return cfg.onReply !== false;
     case "APPOINTMENT":
-      // Hardcoded rule: a lead always exits its campaign once it books an
-      // appointment — this is not tenant-configurable.
       return true;
     case "STATUS_CHANGE":
       return !!cfg.onStatusChange && cfg.onStatusChange === newStatus;

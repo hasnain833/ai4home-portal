@@ -8,6 +8,7 @@ import { buildPrismaWhereClause } from "../../controllers/segments.controller.js
 import { htmlToText, looksLikeHtml } from "../../lib/sanitize-html.js";
 import { withActiveLeadFilter } from "../../lib/lead-audience.js";
 import { deadLetter } from "../../lib/dead-letter.js";
+import { renderMergeFields, leadMergeVars, escapeHtml, safeUrl } from "../../lib/utils.js";
 
 const CHUNK_SIZE = 50;
 
@@ -53,24 +54,27 @@ export async function resolveAnnouncementAudience(announcement) {
   });
 }
 
-function renderText(templateText, lead) {
-  return (templateText || "")
-    .replace(/{firstName}/g, lead.firstName || "")
-    .replace(/{lastName}/g, lead.lastName || "")
-    .replace(/{companyName}/g, lead.companyName || "")
-    .replace(/{email}/g, lead.email || "");
+// NFR-S-008: `html` escapes the substituted lead values (not the template — the
+// tenant's own body may legitimately contain markup).
+function renderText(templateText, lead, html = false) {
+  return renderMergeFields(templateText, leadMergeVars(lead), { html });
 }
 
 function buildEmailHtml(announcement, lead, body) {
-  const cta = announcement.ctaLink
+  // NFR-S-008: ctaLink went straight into href with no escaping or scheme check
+  // — a `javascript:` URL or a quote breakout would both have landed in every
+  // recipient's inbox. safeUrl returns null for anything not http/https/mailto,
+  // in which case the button is simply omitted.
+  const ctaHref = safeUrl(announcement.ctaLink);
+  const cta = ctaHref
     ? `<div style="text-align:center;margin-top:28px;">
-         <a href="${announcement.ctaLink}" style="background-color:#b48c3c;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:14px;display:inline-block;">Learn more</a>
+         <a href="${ctaHref}" style="background-color:#b48c3c;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:14px;display:inline-block;">Learn more</a>
        </div>`
     : "";
   return `
     <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 15px rgba(0,0,0,0.05);border:1px solid #eaeaea;">
       <div style="background-color:#0F3B3D;padding:30px 40px;text-align:center;border-bottom:3px solid #b48c3c;">
-        <h1 style="color:#ffffff;margin:0;font-size:24px;font-weight:600;letter-spacing:0.5px;">${lead.companyName || "Warranty Care & Sales Portal"}</h1>
+        <h1 style="color:#ffffff;margin:0;font-size:24px;font-weight:600;letter-spacing:0.5px;">${escapeHtml(lead.companyName || "Warranty Care & Sales Portal")}</h1>
       </div>
       <div style="padding:40px;color:#334155;line-height:1.8;font-size:16px;">
         ${looksLikeHtml(body) ? body : body.replace(/\n/g, "<br />")}
@@ -94,6 +98,8 @@ export const sendAnnouncement = inngest.createFunction(
     // Fair-share the fan-out per tenant and throttle to a provider-friendly rate.
     concurrency: [{ key: "event.data.companyId", limit: 3 }],
     throttle: { key: "event.data.companyId", limit: 200, period: "1m" },
+    onFailure: async ({ event, error }) =>
+      deadLetterJob({ functionId: "send-announcement", event, error }),
     // SW-ANN-003: scheduled sends are cancelable until the batch pipeline starts.
     cancelOn: [{ event: "announcement.cancel", match: "data.announcementId" }],
     triggers: [{ event: "announcement.send" }],
@@ -156,7 +162,7 @@ export const sendAnnouncement = inngest.createFunction(
                 skipped += 1;
               } else {
                 const subject = renderText(announcement.subject, lead) || announcement.title;
-                const html = buildEmailHtml(announcement, lead, renderText(announcement.body, lead));
+                const html = buildEmailHtml(announcement, lead, renderText(announcement.body, lead, true));
                 const unsubscribeUrl = `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/unsubscribe/${lead.id}`;
                 const finalHtml = ComplianceService.addEmailUnsubscribeFooter(
                   html,

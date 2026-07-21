@@ -7,10 +7,6 @@ import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from ".
 
 export const getCampaigns = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const companyId = req.user.companyId;
     const campaigns = await prisma.campaign.findMany({
       where: { companyId },
@@ -63,10 +59,6 @@ export const getCampaigns = async (req, res) => {
 
 export const getCampaignDetail = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { id } = req.params;
     const campaign = await prisma.campaign.findFirst({
       where: { id, companyId: req.user.companyId },
@@ -133,10 +125,6 @@ export const getCampaignDetail = async (req, res) => {
 
 export const createCampaign = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { name, description, channel } = req.body;
 
     if (!name) {
@@ -171,10 +159,6 @@ export const createCampaign = async (req, res) => {
 
 export const updateCampaign = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { id } = req.params;
     const {
       name,
@@ -253,10 +237,6 @@ export const updateCampaign = async (req, res) => {
 
 export const updateCampaignSteps = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { id } = req.params;
     const { steps } = req.body;
 
@@ -368,9 +348,6 @@ export const updateCampaignSteps = async (req, res) => {
 
 export const enrollCampaign = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { inngest } = await import("../lib/inngest.js");
 
     const { id } = req.params;
@@ -529,9 +506,6 @@ export const enrollCampaign = async (req, res) => {
 
 export const unenrollCampaign = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const { leadIds } = req.body;
 
@@ -585,10 +559,6 @@ export const unenrollCampaign = async (req, res) => {
 
 export const deleteCampaign = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { id } = req.params;
 
     const campaign = await prisma.campaign.findFirst({
@@ -726,10 +696,6 @@ Rules:
 
 export const createCampaignFromNews = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { newsId } = req.body;
     if (!newsId) {
       return res.status(400).json({ message: "newsId is required" });
@@ -788,10 +754,6 @@ export const createCampaignFromNews = async (req, res) => {
 
 export const generateCampaignCopy = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { goal, audience, brandVoice, stepType, contextInfo } = req.body;
 
     if (!goal || !stepType) {

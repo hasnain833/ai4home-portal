@@ -3,28 +3,55 @@ import { triggerAutomation } from "../lib/automation-events.js";
 import { findDuplicateLead, resolveMergedField } from "../lib/lead-dedup.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 
+const LEADS_DEFAULT_PAGE_SIZE = 25;
+const LEADS_MAX_PAGE_SIZE = 200;
+
+function qs(value, fallback = "") {
+  if (value === undefined || value === null) return fallback;
+  return Array.isArray(value) ? String(value[0] ?? fallback) : String(value);
+}
+
+async function distinctLeadTags({ companyId, ownerId, includeArchived }) {
+  const rows = await prisma.$queryRaw`
+    SELECT DISTINCT unnest(tags) AS tag
+    FROM "Lead"
+    WHERE "companyId" = ${companyId}
+      AND (${includeArchived}::boolean OR archived = false)
+      AND (${ownerId}::text IS NULL OR "ownerId" = ${ownerId})
+    ORDER BY tag ASC
+  `;
+  return rows.map((r) => r.tag).filter(Boolean);
+}
+
 export const getLeads = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res
-        .status(403)
-        .json({ message: "User is not associated with a company." });
-    }
-
-    const { search = "", status = "all", tag = "all", includeArchived } = req.query;
+    const search = qs(req.query.search);
+    const status = qs(req.query.status, "all");
+    const tag = qs(req.query.tag, "all");
+    const includeArchived = qs(req.query.includeArchived) === "true";
+    const rawSize = parseInt(qs(req.query.pageSize) || qs(req.query.limit), 10);
+    const pageSize = Math.min(
+      Math.max(
+        Number.isFinite(rawSize) && rawSize > 0
+          ? rawSize
+          : LEADS_DEFAULT_PAGE_SIZE,
+        1,
+      ),
+      LEADS_MAX_PAGE_SIZE,
+    );
+    const rawPage = parseInt(qs(req.query.page), 10);
+    const page = Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1);
 
     const companyId = req.user.companyId;
     const where = { companyId };
-
-    // SW-CRM-006: hide leads archived by a Salesforce deletion unless explicitly
-    // requested (?includeArchived=true).
-    if (includeArchived !== "true") {
+    if (!includeArchived) {
       where.archived = false;
     }
 
-    // Role-based visibility: homeowners only see their own uploaded leads. Admins/staff see all.
-    if (req.user.role.toUpperCase() === "HOMEOWNER") {
-      where.ownerId = req.user.id;
+    const ownerId =
+      req.user.role.toUpperCase() === "HOMEOWNER" ? req.user.id : null;
+    if (ownerId) {
+      where.ownerId = ownerId;
     }
 
     if (status !== "all") {
@@ -44,17 +71,30 @@ export const getLeads = async (req, res) => {
       ];
     }
 
-    const leads = await prisma.lead.findMany({
-      where,
-      include: {
-        owner: {
-          select: { name: true, email: true },
+    const [leads, total, availableTags] = await Promise.all([
+      prisma.lead.findMany({
+        where,
+        include: {
+          owner: {
+            select: { name: true, email: true },
+          },
         },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.lead.count({ where }),
+      distinctLeadTags({ companyId, ownerId, includeArchived }),
+    ]);
 
-    return res.json(leads);
+    return res.json({
+      leads,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(Math.ceil(total / pageSize), 1),
+      availableTags,
+    });
   } catch (error) {
     console.error("Fetch leads error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -63,12 +103,6 @@ export const getLeads = async (req, res) => {
 
 export const createLead = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res
-        .status(403)
-        .json({ message: "User is not associated with a company." });
-    }
-
     const {
       firstName,
       lastName,
@@ -110,8 +144,7 @@ export const createLead = async (req, res) => {
         emailOptIn: !!emailOptIn,
         smsOptIn: !!smsOptIn,
         consentSource:
-          consentSource ||
-          (emailOptIn || smsOptIn ? "Manual Form" : null),
+          consentSource || (emailOptIn || smsOptIn ? "Manual Form" : null),
         consentTimestamp: emailOptIn || smsOptIn ? new Date() : null,
         customFields: customFields || null,
         timeline: {
@@ -124,9 +157,11 @@ export const createLead = async (req, res) => {
         },
       },
     });
-
-    // SW-AMK: fire automation rules for manually-created leads.
-    await triggerAutomation({ companyId: lead.companyId, leadId: lead.id, event: "MANUAL_CREATION" });
+    await triggerAutomation({
+      companyId: lead.companyId,
+      leadId: lead.id,
+      event: "MANUAL_CREATION",
+    });
 
     return res.json(lead);
   } catch (error) {
@@ -137,27 +172,17 @@ export const createLead = async (req, res) => {
 
 export const importLeads = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res
-        .status(403)
-        .json({ message: "User is not associated with a company." });
-    }
-
     const { leadsList, mergeStrategy, attested } = req.body;
 
     if (!attested) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "You must attest that contacts have consented to be contacted.",
-        });
+      return res.status(400).json({
+        message:
+          "You must attest that contacts have consented to be contacted.",
+      });
     }
 
     if (!leadsList || !Array.isArray(leadsList)) {
-      return res
-        .status(400)
-        .json({ message: "Invalid lead list payload." });
+      return res.status(400).json({ message: "Invalid lead list payload." });
     }
 
     // Check homeowner limits
@@ -215,8 +240,6 @@ export const importLeads = async (req, res) => {
         continue;
       }
 
-      // SW-LEAD-003: normalized duplicate detection (case-insensitive email,
-      // then phone by last-10-digits, ignoring formatting).
       const duplicateLead = await findDuplicateLead(
         req.user.companyId,
         email,
@@ -232,29 +255,41 @@ export const importLeads = async (req, res) => {
           skippedCount++;
           continue;
         } else if (mergeStrategy === "update") {
-          // SW-LEAD-003: honor CRM as system-of-record — don't overwrite fields
-          // of a Salesforce-linked lead; only fill the gaps it left.
           const isCrmOwned = !!duplicateLead.externalId;
           await prisma.lead.update({
             where: { id: duplicateLead.id },
             data: {
-              firstName: resolveMergedField(firstName, duplicateLead.firstName, isCrmOwned),
-              lastName: resolveMergedField(lastName, duplicateLead.lastName, isCrmOwned),
-              street: resolveMergedField(street, duplicateLead.street, isCrmOwned),
+              firstName: resolveMergedField(
+                firstName,
+                duplicateLead.firstName,
+                isCrmOwned,
+              ),
+              lastName: resolveMergedField(
+                lastName,
+                duplicateLead.lastName,
+                isCrmOwned,
+              ),
+              street: resolveMergedField(
+                street,
+                duplicateLead.street,
+                isCrmOwned,
+              ),
               city: resolveMergedField(city, duplicateLead.city, isCrmOwned),
               state: resolveMergedField(state, duplicateLead.state, isCrmOwned),
-              zipCode: resolveMergedField(zipCode, duplicateLead.zipCode, isCrmOwned),
+              zipCode: resolveMergedField(
+                zipCode,
+                duplicateLead.zipCode,
+                isCrmOwned,
+              ),
               tags: Array.from(
-                new Set([...(duplicateLead.tags || []), ...(tags || [])])
+                new Set([...(duplicateLead.tags || []), ...(tags || [])]),
               ),
               emailOptIn:
                 emailOptIn !== undefined
                   ? !!emailOptIn
                   : duplicateLead.emailOptIn,
               smsOptIn:
-                smsOptIn !== undefined
-                  ? !!smsOptIn
-                  : duplicateLead.smsOptIn,
+                smsOptIn !== undefined ? !!smsOptIn : duplicateLead.smsOptIn,
               consentSource: optInSource || duplicateLead.consentSource,
               consentTimestamp:
                 optInTimestamp || duplicateLead.consentTimestamp,
@@ -325,24 +360,25 @@ export const deleteLead = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "User is not associated with a company." });
-    }
-
     const lead = await prisma.lead.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!lead || lead.companyId !== req.user.companyId) {
       return res.status(404).json({ message: "Lead not found." });
     }
 
-    if (req.user.role.toUpperCase() === "HOMEOWNER" && lead.ownerId !== req.user.id) {
-      return res.status(403).json({ message: "You do not have permission to delete this lead." });
+    if (
+      req.user.role.toUpperCase() === "HOMEOWNER" &&
+      lead.ownerId !== req.user.id
+    ) {
+      return res
+        .status(403)
+        .json({ message: "You do not have permission to delete this lead." });
     }
 
     await prisma.lead.delete({
-      where: { id }
+      where: { id },
     });
 
     return res.json({ message: "Lead deleted successfully." });
@@ -355,12 +391,6 @@ export const deleteLead = async (req, res) => {
 export const updateLead = async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (!req.user || !req.user.companyId) {
-      return res
-        .status(403)
-        .json({ message: "User is not associated with a company." });
-    }
 
     const lead = await prisma.lead.findUnique({
       where: { id },
@@ -457,15 +487,12 @@ export const updateLead = async (req, res) => {
       },
     });
 
-    // SW-NUR-003: a status change can be a configured exit condition for a sequence.
-    // Emit the event; handleCampaignExit only exits sequences that opted into this status.
     if (status !== undefined && status !== lead.status) {
       const { inngest } = await import("../lib/inngest.js");
       await inngest.send({
         name: "campaign.exit",
         data: { leadId: id, reason: "STATUS_CHANGE", newStatus: status },
       });
-      // SW-AMK: status changes can trigger automation rules.
       await triggerAutomation({
         companyId: req.user.companyId,
         leadId: id,
@@ -473,16 +500,19 @@ export const updateLead = async (req, res) => {
         context: { newStatus: status, previousStatus: lead.status },
       });
     }
-
-    // SW-CRM-008: write status / consent changes back to Salesforce (gated per
-    // tenant, no-op unless writeBackEnabled + the lead came from Salesforce).
     const writeBack = {};
-    if (status !== undefined && status !== lead.status) writeBack.status = status;
-    if (emailOptIn !== undefined && !!emailOptIn !== lead.emailOptIn) writeBack.emailOptIn = !!emailOptIn;
-    if (smsOptIn !== undefined && !!smsOptIn !== lead.smsOptIn) writeBack.smsOptIn = !!smsOptIn;
+    if (status !== undefined && status !== lead.status)
+      writeBack.status = status;
+    if (emailOptIn !== undefined && !!emailOptIn !== lead.emailOptIn)
+      writeBack.emailOptIn = !!emailOptIn;
+    if (smsOptIn !== undefined && !!smsOptIn !== lead.smsOptIn)
+      writeBack.smsOptIn = !!smsOptIn;
     if (Object.keys(writeBack).length > 0) {
       writeBackLeadToSalesforce(req.user.companyId, id, writeBack).catch((e) =>
-        console.error("[Lead Update] Salesforce write-back failed:", e?.message || e),
+        console.error(
+          "[Lead Update] Salesforce write-back failed:",
+          e?.message || e,
+        ),
       );
     }
 
@@ -497,12 +527,6 @@ export const getLeadTimeline = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!req.user || !req.user.companyId) {
-      return res
-        .status(403)
-        .json({ message: "User is not associated with a company." });
-    }
-
     const lead = await prisma.lead.findUnique({
       where: { id },
     });
@@ -515,9 +539,9 @@ export const getLeadTimeline = async (req, res) => {
       req.user.role.toUpperCase() === "HOMEOWNER" &&
       lead.ownerId !== req.user.id
     ) {
-      return res
-        .status(403)
-        .json({ message: "You do not have permission to view this lead's timeline." });
+      return res.status(403).json({
+        message: "You do not have permission to view this lead's timeline.",
+      });
     }
 
     const timeline = await prisma.leadTimeline.findMany({
@@ -531,4 +555,3 @@ export const getLeadTimeline = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-

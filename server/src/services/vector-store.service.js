@@ -11,7 +11,6 @@ export function isKbConfigured() {
 export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
   if (!chunks.length) return 0;
 
-  // Generate embeddings for all chunks in batch.
   let embeddings;
   try {
     embeddings = await embedBatch(chunks);
@@ -22,10 +21,8 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
     embeddings = new Array(chunks.length).fill(null);
   }
 
-  // Remove old chunks for this document.
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 
-  // Insert chunks with text content (Prisma createMany).
   await prisma.salesKBChunk.createMany({
     data: chunks.map((content, i) => ({
       companyId,
@@ -37,7 +34,6 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
     })),
   });
 
-  // Update embeddings via raw SQL (Prisma can't handle the vector type directly).
   const inserted = await prisma.salesKBChunk.findMany({
     where: { documentId },
     orderBy: { chunkIndex: "asc" },
@@ -63,17 +59,11 @@ export async function deleteDocument(companyId, documentId) {
   await prisma.salesKBChunk.deleteMany({ where: { documentId, companyId } });
 }
 
-// Returns { method, results } so callers can see which retrieval path answered:
-//   "semantic"                -> pgvector cosine match (pgvector set up + embeddings present)
-//   "fts (no semantic match)" -> pgvector ran but nothing cleared the 0.3 threshold
-//   "fts (semantic unavailable)" -> pgvector/embeddings not ready (column/extension missing,
-//                                     or the embedding model couldn't load) — pure keyword search
 export async function queryDetailed(companyId, text, k = 5, categories = null) {
   const q = (text || "").trim();
   if (!q) return { method: "empty", results: [] };
   const limit = Math.min(Number(k) || 5, 20);
 
-  // `null` => the semantic path failed/unavailable; `[]` => it ran but matched nothing.
   const semanticResults = await semanticQuery(companyId, q, limit, categories);
   if (semanticResults && semanticResults.length > 0) {
     return { method: "semantic", results: semanticResults };
@@ -85,12 +75,58 @@ export async function queryDetailed(companyId, text, k = 5, categories = null) {
   return { method, results };
 }
 
-export async function query(companyId, text, k = 5, categories = null) {
-  const { results } = await queryDetailed(companyId, text, k, categories);
+export async function query(companyId, text, k = 5, categories = null, context = "unknown") {
+  const { method, results } = await queryDetailed(companyId, text, k, categories);
+  if (method && method.startsWith("fts")) {
+    console.warn(
+      `[Vector Store] ${context}: retrieval degraded to ${method} for company ${companyId}. ` +
+      `Semantic search needs the pgvector setup SQL + POST /api/sales/kb/reindex.`,
+    );
+  }
   return results;
 }
 
-// ─── Semantic (pgvector cosine similarity) search ────────────────────────────
+export async function getRetrievalStatus(companyId) {
+  let pgvectorReady = false;
+  let embeddedChunks = 0;
+  let totalChunks = 0;
+  let detail = null;
+
+  try {
+    totalChunks = await prisma.salesKBChunk.count({ where: { companyId } });
+  } catch (err) {
+    detail = `Could not count chunks: ${err.message}`;
+  }
+
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS n FROM "SalesKBChunk" WHERE "companyId" = $1 AND embedding IS NOT NULL`,
+      companyId,
+    );
+    embeddedChunks = rows?.[0]?.n ?? 0;
+    pgvectorReady = true;
+  } catch (err) {
+    pgvectorReady = false;
+    detail = err.message;
+  }
+
+  const coverage = totalChunks > 0 ? embeddedChunks / totalChunks : 0;
+  let status = "SEMANTIC";
+  if (!pgvectorReady) status = "UNAVAILABLE";
+  else if (totalChunks === 0) status = "EMPTY";
+  else if (embeddedChunks === 0) status = "UNAVAILABLE";
+  else if (coverage < 1) status = "PARTIAL";
+
+  return {
+    status,
+    pgvectorReady,
+    totalChunks,
+    embeddedChunks,
+    coverage: Math.round(coverage * 100),
+    detail,
+  };
+}
+
 
 async function semanticQuery(companyId, text, limit, categories) {
   let queryEmbedding;
@@ -134,7 +170,6 @@ async function semanticQuery(companyId, text, limit, categories) {
         limit,
       );
 
-    // Filter out low-relevance results (cosine similarity < 0.3).
     return rows
       .filter((r) => Number(r.score) >= 0.3)
       .map((r) => ({
@@ -145,7 +180,6 @@ async function semanticQuery(companyId, text, limit, categories) {
         score: Number(r.score) || 0,
       }));
   } catch (err) {
-    // pgvector extension might not be enabled yet, or column doesn't exist.
     console.error("[Vector Store] Semantic query failed (pgvector may not be set up):", err.message);
     return null;
   }
@@ -209,7 +243,6 @@ export async function backfillEmbeddings(companyId, batchSize = 50) {
     }
   }
 
-  // Check how many remain.
   const remaining = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*)::int AS count FROM "SalesKBChunk" WHERE "companyId" = $1 AND embedding IS NULL`,
     companyId,

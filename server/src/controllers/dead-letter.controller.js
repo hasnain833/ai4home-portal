@@ -7,10 +7,6 @@ import {
 
 export const getDeadLetters = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { status, refId, limit } = req.query;
     const [rows, counts] = await Promise.all([
       listDeadLetters(req.user.companyId, { status, refId, limit }),
@@ -26,10 +22,6 @@ export const getDeadLetters = async (req, res) => {
 
 export const replayDeadLetterEntry = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const result = await replayDeadLetter(req.user.companyId, req.params.id);
     if (!result.success) {
       return res
@@ -45,10 +37,6 @@ export const replayDeadLetterEntry = async (req, res) => {
 
 export const discardDeadLetterEntry = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const result = await discardDeadLetter(req.user.companyId, req.params.id);
     if (!result.success) {
       return res.status(404).json({ message: result.reason || "Not found" });

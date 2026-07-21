@@ -1,11 +1,15 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
+import { deadLetterJob } from "../../lib/dead-letter.js";
 
 export const scheduleCalendarItem = inngest.createFunction(
   {
     id: "schedule-calendar-item",
     name: "Schedule Calendar Item",
-    triggers: [{ event: "calendar.item.scheduled" }]
+    concurrency: [{ key: "event.data.companyId", limit: 3 }],
+    triggers: [{ event: "calendar.item.scheduled" }],
+    onFailure: async ({ event, error }) =>
+      deadLetterJob({ functionId: "schedule-calendar-item", event, error }),
   },
   async ({ event, step }) => {
     const { calendarId, scheduledAt } = event.data;
