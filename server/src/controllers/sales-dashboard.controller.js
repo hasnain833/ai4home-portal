@@ -1,26 +1,11 @@
 import prisma from "../lib/prisma.js";
 import { parseAsync } from "json2csv";
 
-// How many active campaigns / calendar items the landing page shows.
 const DASHBOARD_LIST_LIMIT = 5;
-
-// SW-DSH-001 "upcoming calendar items": things that are actually going to happen.
-// Excludes `Suggested` (AI-proposed and inert until a user accepts it, per
-// SW-CAL-002), `Dismissed`, and the terminal states (Sent / Published / Failed).
 const UPCOMING_CALENDAR_STATUSES = ["Draft", "Approved", "Scheduled"];
-
-// A campaign counts as converted on the same basis as the campaign analytics
-// endpoint (campaigns.controller.js) — exited because the lead replied or booked.
-// Kept identical on purpose: two different conversion numbers between the
-// dashboard and the campaign page would be worse than none.
 const CONVERSION_EXIT_REASONS = ["REPLY", "APPOINTMENT"];
 
 const round1 = (n) => Math.round(n * 10) / 10;
-
-// Build per-campaign metrics from grouped aggregates. Deliberately avoids loading
-// enrollment rows: a tenant at the SRS's 100k-lead target would otherwise pull tens
-// of thousands of rows into memory just to render a dashboard card (NFR-P-001 wants
-// this page under 2s at p95).
 function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups, stepSums) {
   return campaigns.map((c) => {
     const groups = enrollmentGroups.filter((g) => g.campaignId === c.id);
@@ -56,10 +41,6 @@ function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups, step
 
 export const getDashboardStats = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
     const companyId = req.user.companyId;
     const now = new Date();
 
@@ -129,13 +110,9 @@ export const getDashboardStats = async (req, res) => {
           isAiSuggested: true,
         },
       }),
-      // Enrolled across every campaign. Counted here so the dashboard page doesn't
-      // have to fetch all campaigns with all their enrollment rows just to sum them.
       prisma.campaignEnrollment.count({ where: { campaign: { companyId } } }),
     ]);
 
-    // Metrics for the campaigns above. Bounded by DASHBOARD_LIST_LIMIT ids, and
-    // grouped in the database rather than counted in JS.
     const campaignIds = activeCampaigns.map((c) => c.id);
     const [enrollmentGroups, convertedGroups, stepSums] = campaignIds.length
       ? await Promise.all([
@@ -196,8 +173,6 @@ export const getDashboardStats = async (req, res) => {
   }
 };
 
-// SW-DSH-002: "All reporting views shall be exportable as CSV." One builder per
-// reporting view; each returns already-flattened rows ready for json2csv.
 const EXPORTERS = {
   leads: async (companyId) => {
     const leads = await prisma.lead.findMany({
@@ -222,7 +197,6 @@ const EXPORTERS = {
     }));
   },
 
-  // Per-campaign totals — mirrors the campaign analytics view (SW-NUR-008).
   campaigns: async (companyId) => {
     const campaigns = await prisma.campaign.findMany({
       where: { companyId },
@@ -274,8 +248,6 @@ const EXPORTERS = {
     });
   },
 
-  // Per-step breakdown — SW-NUR-008 asks for metrics "per sequence and per step",
-  // and a step-level bounce/complaint spike is the thing you actually act on.
   "campaign-steps": async (companyId) => {
     const steps = await prisma.campaignStep.findMany({
       where: { campaign: { companyId } },
@@ -301,7 +273,6 @@ const EXPORTERS = {
     }));
   },
 
-  // SW-ANN-005: per announcement, broken down by the counters the pipeline keeps.
   announcements: async (companyId) => {
     const announcements = await prisma.announcement.findMany({
       where: { companyId },
@@ -328,7 +299,6 @@ const EXPORTERS = {
     }));
   },
 
-  // SW-AMK-005: aggregate analytics per automation rule.
   automations: async (companyId) => {
     const rules = await prisma.marketingRule.findMany({
       where: { companyId },
@@ -336,7 +306,6 @@ const EXPORTERS = {
       include: { _count: { select: { runs: true } } },
     });
 
-    // One grouped query for matched-run counts rather than per-rule counting.
     const matched = await prisma.marketingRuleRun.groupBy({
       by: ["ruleId"],
       where: { companyId, matched: true },
@@ -354,9 +323,6 @@ const EXPORTERS = {
         CooldownHours: r.cooldownHours,
         RateLimitCount: r.rateLimitCount,
         RateLimitWindow: r.rateLimitWindow,
-        // runCount is the rule's own counter; TotalRuns counts logged run rows.
-        // They can diverge if runs were pruned — both are reported rather than
-        // silently picking one.
         RuleRunCount: r.runCount,
         TotalRuns: totalRuns,
         MatchedRuns: matchedRuns,
@@ -366,8 +332,6 @@ const EXPORTERS = {
       };
     });
   },
-
-  // SW-ANN-002 companion: what's sitting in the dead-letter queue.
   "failed-sends": async (companyId) => {
     const rows = await prisma.deadLetter.findMany({
       where: { companyId },
@@ -392,10 +356,6 @@ const EXPORTERS = {
 
 export const exportDashboardCsv = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
     const { type } = req.query;
     const build = EXPORTERS[type];
 
@@ -407,9 +367,6 @@ export const exportDashboardCsv = async (req, res) => {
 
     const rows = await build(req.user.companyId);
 
-    // json2csv infers columns from the data, so an empty result would produce an
-    // empty file with no header. Send the header row instead — an export that
-    // downloads a blank file reads as a bug.
     const csv = rows.length
       ? await parseAsync(rows)
       : await parseAsync([], { fields: ["No data"] });

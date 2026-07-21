@@ -3,6 +3,7 @@ import prisma from "../../lib/prisma.js";
 import mammoth from "mammoth";
 import { createRequire } from "module";
 import { upsertChunks } from "../../services/vector-store.service.js";
+import { deadLetterJob } from "../../lib/dead-letter.js";
 
 
 const require = createRequire(import.meta.url);
@@ -64,12 +65,6 @@ async function extractText(url, name) {
   return buffer.toString("utf-8");
 }
 
-
-// Core ingestion: fetch → extract → chunk → store in Postgres, updating the doc's
-// status as it goes. Now that there's no embedding/vector step, this is fast and
-// light enough to run inline (called fire-and-forget from the upload controller),
-// so KB indexing no longer depends on the Inngest dev server being up. Never
-// throws — records FAILED on the document and returns a status object instead.
 export async function runKbIngestion(documentId, companyId) {
   const doc = await prisma.salesKB.findUnique({ where: { id: documentId } });
   if (!doc) return { status: "skipped", reason: "document-not-found" };
@@ -111,13 +106,13 @@ export async function runKbIngestion(documentId, companyId) {
   }
 }
 
-// Thin Inngest wrapper — retained so the flow still works if the event is ever
-// dispatched via Inngest, but the primary path is a direct call from the controller.
 export const ingestKbDocument = inngest.createFunction(
   {
     id: "sales-kb-ingest",
     concurrency: [{ key: "event.data.companyId", limit: 2 }],
     triggers: [{ event: "sales.kb.ingest" }],
+    onFailure: async ({ event, error }) =>
+      deadLetterJob({ functionId: "sales-kb-ingest", event, error }),
   },
   async ({ event }) => runKbIngestion(event.data.documentId, event.data.companyId),
 );

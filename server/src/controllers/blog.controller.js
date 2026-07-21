@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { chat, hasLLM } from "../lib/llm.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
+import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,23 +29,11 @@ function readTimeMinutes(content) {
   return Math.max(1, Math.ceil(words / 200));
 }
 
+// Thin wrapper over the shared brand-context builder (SW-KB-006).
 function brandVoiceContext(company) {
-  const bp = company?.salesBrandProfile || {};
-  const parts = [
-    `Company name: ${company?.name || "the homebuilder"}`,
-    company?.voiceProfile ? `Voice profile: ${company.voiceProfile}` : null,
-    bp.tone ? `Brand tone: ${bp.tone}` : null,
-    bp.tagline ? `Tagline: ${bp.tagline}` : null,
-    bp.markets ? `Markets/communities: ${Array.isArray(bp.markets) ? bp.markets.join(", ") : bp.markets}` : null,
-    bp.audience ? `Primary audience: ${bp.audience}` : null,
-    bp.about ? `About: ${bp.about}` : null,
-  ].filter(Boolean);
-  return parts.join("\n");
+  return buildBrandContext(company);
 }
 
-// Minimal, injection-safe Markdown → HTML for export (headings, bold, italics,
-// unordered lists, and paragraphs). Escapes HTML first so draft content can't
-// smuggle markup into the exported document.
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -166,8 +155,6 @@ export const updateBlogPost = async (req, res) => {
     if (metaDescription !== undefined) data.metaDescription = metaDescription;
     if (headings !== undefined) data.headings = Array.isArray(headings) ? headings : [];
 
-    // Editing an approved/published/scheduled post sends it back to review
-    // (SW-BLOG-004: content must be re-approved before it can be re-published).
     const contentChanged = data.title !== undefined || data.content !== undefined || data.excerpt !== undefined;
     if (contentChanged && ["APPROVED", "SCHEDULED", "PUBLISHED"].includes(existing.status)) {
       data.status = "PENDING_REVIEW";
@@ -188,7 +175,6 @@ export const deleteBlogPost = async (req, res) => {
     const { companyId } = req.user;
     const existing = await prisma.blogPost.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.companyId !== companyId) return res.status(404).json({ message: "Post not found" });
-    // Clean up any linked calendar item.
     if (existing.calendarEventId) {
       await prisma.contentCalendar.deleteMany({ where: { id: existing.calendarEventId, companyId } });
     }
@@ -200,7 +186,6 @@ export const deleteBlogPost = async (req, res) => {
   }
 };
 
-// ─── AI generation (SW-BLOG-001 / 002) ─────────────────────────────────────────
 
 export const generateBlogDraft = async (req, res) => {
   try {
@@ -212,15 +197,13 @@ export const generateBlogDraft = async (req, res) => {
     if (!topic || !topic.trim()) return res.status(400).json({ message: "A topic prompt is required." });
 
     const company = await prisma.company.findUnique({ where: { id: companyId } });
-
-    // SW-BLOG-002: brand voice + KB RAG grounding.
     const keywordStr = Array.isArray(keywords) ? keywords.join(", ") : keywords || "";
-    const kbChunks = await kbQuery(companyId, `${topic} ${keywordStr}`, 5).catch(() => []);
+    const kbChunks = await kbQuery(companyId, `${topic} ${keywordStr}`, 5, KB_SCOPES.blog, "blog-draft").catch(() => []);
     const kbContext = kbChunks.length
       ? kbChunks.map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`).join("\n\n")
       : "No knowledge-base context available.";
+    const kbCitations = dedupeKbCitations(kbChunks);
 
-    // SW-BLOG-002: explicit source citations from selected news items.
     let citations = [];
     let newsContext = "No source news selected.";
     if (Array.isArray(newsIds) && newsIds.length) {
@@ -260,13 +243,9 @@ Keywords to work in naturally: ${keywordStr || "(none specified)"}`;
     const raw = await chat({ system, user, maxTokens: 2000, json: true });
     if (!raw) return res.status(502).json({ message: "The AI provider returned nothing. Please try again." });
 
-    let parsed;
-    try {
-      const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
-      const objText = cleaned.slice(cleaned.indexOf("{"), cleaned.lastIndexOf("}") + 1) || cleaned;
-      parsed = JSON.parse(objText);
-    } catch (e) {
-      console.error("[Blog] draft JSON parse failed:", e.message);
+    const parsed = parseLlmJson(raw);
+    if (!parsed) {
+      console.error("[Blog] draft JSON parse failed");
       return res.status(502).json({ message: "The AI draft could not be parsed. Please try again." });
     }
 
@@ -284,6 +263,7 @@ Keywords to work in naturally: ${keywordStr || "(none specified)"}`;
         tone: tone || company?.voiceProfile || null,
         targetAudience: targetAudience || null,
         citations: citations.length ? citations : undefined,
+        kbCitations: kbCitations.length ? kbCitations : undefined,
         sourceNewsIds: Array.isArray(newsIds) ? newsIds : [],
         aiAssisted: true,
         status: "DRAFT",

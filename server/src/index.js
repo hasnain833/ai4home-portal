@@ -2,7 +2,12 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 
-import { requireAuth, requireWorkspace } from "./middlewares/auth.js";
+import {
+  requireAuth,
+  requireWorkspace,
+  requireCompany,
+} from "./middlewares/auth.js";
+import { auditMutations } from "./lib/audit.js";
 import authRouter from "./routes/auth.js";
 import leadsRouter from "./routes/leads.js";
 import complianceRouter from "./routes/compliance.js";
@@ -21,8 +26,6 @@ import announcementsRouter from "./routes/announcements.js";
 import automationsRouter from "./routes/automations.js";
 import blogRouter from "./routes/blog.js";
 import publicBlogRouter from "./routes/public-blog.js";
-
-// Core Warranty Routes
 import dashboardRouter from "./routes/dashboard.js";
 import reportsRouter from "./routes/reports.js";
 import ticketsRouter from "./routes/tickets.js";
@@ -60,7 +63,6 @@ import { salesforceSyncCron } from "./inngest/functions/salesforce-cron.js";
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Enable CORS with credentials support to proxy requests cleanly
 app.use(
   cors({
     origin: process.env.NEXT_PUBLIC_URL || "http://localhost:3000",
@@ -71,10 +73,16 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Route registrations
 app.use("/api/auth", authRouter);
 
-const salesGuard = [requireAuth, requireWorkspace("sales")];
+// NFR-S-004: auditMutations records every non-GET request under these mounts,
+// so a newly added endpoint is covered without anyone remembering to log it.
+const salesGuard = [
+  requireAuth,
+  requireWorkspace("sales"),
+  requireCompany,
+  auditMutations("sales"),
+];
 app.use("/api/sales/leads", ...salesGuard, leadsRouter);
 app.use("/api/sales/compliance", complianceRouter);
 app.use("/api/sales/salesforce", salesforceRouter);
@@ -96,10 +104,14 @@ app.use("/api/sales/announcements", ...salesGuard, announcementsRouter);
 app.use("/api/sales/dead-letters", ...salesGuard, deadLetterRouter);
 app.use("/api/sales/automations", ...salesGuard, automationsRouter);
 app.use("/api/sales/blog", ...salesGuard, blogRouter);
-// Public tenant-hosted blog reads (SW-BLOG-005) — intentionally unguarded.
 app.use("/api/public/blog", publicBlogRouter);
 
-const warrantyGuard = [requireAuth, requireWorkspace("warranty")];
+const warrantyGuard = [
+  requireAuth,
+  requireWorkspace("warranty"),
+  requireCompany,
+  auditMutations("warranty"),
+];
 app.use("/api/dashboard", ...warrantyGuard, dashboardRouter);
 app.use("/api/reports", ...warrantyGuard, reportsRouter);
 app.use("/api/tickets", ...warrantyGuard, ticketsRouter);
@@ -111,7 +123,6 @@ app.use("/api/admin", adminRouter);
 app.use("/api/communities", ...warrantyGuard, communitiesRouter);
 app.use("/api/homeowners", ...warrantyGuard, homeownersRouter);
 app.use("/api/users", usersRouter);
-// Inngest Endpoint
 app.use(
   "/api/inngest",
   (req, res, next) => {
@@ -136,12 +147,10 @@ app.use(
   }),
 );
 
-// Health Check
 app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", timestamp: new Date() });
 });
 
-// Check if running on Vercel or Test
 if (process.env.VERCEL || process.env.NODE_ENV === "test") {
   console.log(
     "[Server] Running in Vercel/Test environment. Bypassing app.listen().",
@@ -152,5 +161,4 @@ if (process.env.VERCEL || process.env.NODE_ENV === "test") {
   });
 }
 
-// Export for Vercel serverless function
 export default app;

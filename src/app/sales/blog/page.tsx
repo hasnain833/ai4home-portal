@@ -34,6 +34,7 @@ import {
   Trash2,
   Calendar,
   Globe,
+  BookOpen,
   FileText,
   Clock,
   Download,
@@ -59,6 +60,7 @@ interface BlogPost {
   metaDescription?: string | null;
   headings?: string[];
   citations?: { title: string; url: string }[] | null;
+  kbCitations?: { documentId: string | null; name: string; category: string }[] | null;
   approvedAt?: string | null;
   scheduledAt?: string | null;
   publishedAt?: string | null;
@@ -398,6 +400,11 @@ export default function BlogDraftingPage() {
                               {Array.isArray(post.citations) && post.citations.length > 0 && (
                                 <p className="text-[10px] text-muted-foreground pt-1">
                                   <Globe className="h-3 w-3 inline mr-1" />{post.citations.length} source citation{post.citations.length > 1 ? "s" : ""}
+                                </p>
+                              )}
+                              {Array.isArray(post.kbCitations) && post.kbCitations.length > 0 && (
+                                <p className="text-[10px] text-muted-foreground pt-1" title={post.kbCitations.map((c) => c.name).join(", ")}>
+                                  <BookOpen className="h-3 w-3 inline mr-1" />{post.kbCitations.length} KB document{post.kbCitations.length > 1 ? "s" : ""} referenced
                                 </p>
                               )}
                             </div>

@@ -13,6 +13,9 @@ import {
   getAvailabilitySetting,
 } from "../../services/scheduling-service.js";
 import { query as kbQuery } from "../../services/vector-store.service.js";
+import { KB_SCOPES } from "../../lib/sales-ai.js";
+import { deadLetterJob } from "../../lib/dead-letter.js";
+import { redactPII, minimalLeadContext } from "../../lib/utils.js";
 
 const DEFAULT_MAX_TURNS = 4;
 const MIN_MAX_TURNS = 1;
@@ -137,7 +140,7 @@ export async function runClaudeTurn({ lead, company, channel, transcript, slots,
 Your ONLY job is to schedule a model-home visit or sales consultation for leads who reply to our outreach. You do one thing:
 1. Offer available visit times, handle counter-proposals, and book when the lead agrees.
 
-Lead: ${lead.firstName} ${lead.lastName}. Times are in ${timezone}.
+Lead: ${minimalLeadContext(lead).firstName}. Times are in ${timezone}.
 
 ${formatKbContext(kbChunks)}
 
@@ -153,7 +156,12 @@ Rules:
 
 Always reply by calling the 'respond' tool.`;
 
-  const messages = toAnthropicMessages(transcript);
+  // NFR-S-007: the transcript is arbitrary inbound text and routinely contains
+  // contact details the model has no use for — booking reads email/phone from the
+  // lead record, never from the conversation. Redact before it leaves the system.
+  const messages = toAnthropicMessages(transcript).map((m) =>
+    typeof m.content === "string" ? { ...m, content: redactPII(m.content) } : m,
+  );
   if (messages.length === 0) messages.push({ role: "user", content: "(the lead replied to our outreach expressing interest)" });
 
   // Provider-agnostic forced tool call (Anthropic → Groq fallback via llm.js).
@@ -170,6 +178,8 @@ export const appointmentSchedulingAgent = inngest.createFunction(
     id: "appointment-scheduling-agent",
     concurrency: [{ key: "event.data.leadId", limit: 1 }],
     triggers: [{ event: "lead.reply.received" }],
+    onFailure: async ({ event, error }) =>
+      deadLetterJob({ functionId: "appointment-scheduling-agent", event, error }),
   },
   async ({ event, step }) => {
     const { leadId, channel = "EMAIL", body = "", campaignId } = event.data;
@@ -243,7 +253,8 @@ export const appointmentSchedulingAgent = inngest.createFunction(
       const q = (body || "").trim();
       if (!q) return { chunks: [] };
       try {
-        const chunks = await kbQuery(lead.companyId, q, 5);
+        // SW-KB-004: scope the scheduling agent to FAQs/policy/community docs.
+        const chunks = await kbQuery(lead.companyId, q, 5, KB_SCOPES.scheduling, "appointment-agent");
         return { chunks };
       } catch (e) {
         console.error("[Appointment Agent] KB retrieval failed:", e.message);
@@ -363,11 +374,22 @@ export const appointmentReminders = inngest.createFunction(
         include: { lead: { include: { company: true } } },
       });
 
+      // Hoist the module import and memoize availability settings per company so a
+      // batch of reminders for the same tenant doesn't refetch settings each time.
+      const { formatSlotLabel } = await import("../../lib/scheduling.js");
+      const settingsByCompany = new Map();
+      const settingFor = async (companyId) => {
+        if (!settingsByCompany.has(companyId)) {
+          settingsByCompany.set(companyId, await getAvailabilitySetting(companyId));
+        }
+        return settingsByCompany.get(companyId);
+      };
+
       let sent = 0;
       for (const appt of upcoming) {
         const msToStart = appt.time.getTime() - now;
         const hours = msToStart / (60 * 60 * 1000);
-        const setting = await getAvailabilitySetting(appt.lead.companyId);
+        const setting = await settingFor(appt.lead.companyId);
         const reminderHours = setting.reminderHours || [24, 1];
         const tz = appt.leadTimezone || setting.timezone;
 
@@ -376,7 +398,6 @@ export const appointmentReminders = inngest.createFunction(
         else if (reminderHours.includes(1) && !appt.reminder1Sent && hours <= 1 && hours > 0) window = "1h";
         if (!window) continue;
 
-        const { formatSlotLabel } = await import("../../lib/scheduling.js");
         const when = formatSlotLabel(appt.time, tz);
         const meet = appt.meetingLink ? ` Join: ${appt.meetingLink}` : "";
         const text = `Reminder: your ${appt.title} is ${window === "1h" ? "in about an hour" : "tomorrow"} — ${when}.${meet}`;

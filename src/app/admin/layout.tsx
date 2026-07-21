@@ -18,7 +18,10 @@ import {
   ChevronRight,
   Menu,
   X,
-  Loader2
+  Loader2,
+  PlugZap,
+  Newspaper,
+  LifeBuoy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -28,9 +31,16 @@ const adminNavItems = [
   { name: "Companies", href: "/admin/companies", icon: Building2 },
   { name: "Verifications", href: "/admin/verifications", icon: ShieldCheck },
   { name: "Users & Access", href: "/admin/users", icon: Users },
+  { name: "CRM Health", href: "/admin/crm-health", icon: PlugZap },
+  { name: "News Defaults", href: "/admin/news-defaults", icon: Newspaper },
+  { name: "Support Access", href: "/admin/support", icon: LifeBuoy },
 ];
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default function AdminLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -71,25 +81,40 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         initial={false}
         animate={{ width: sidebarWidth }}
         transition={{ duration: 0.2, ease: "easeInOut" }}
-        className="fixed inset-y-0 left-0 z-50 hidden md:block bg-sidebar text-sidebar-foreground shadow-xl border-r border-sidebar-border"
-      >
+        className="fixed inset-y-0 left-0 z-50 hidden md:block bg-sidebar text-sidebar-foreground shadow-xl border-r border-sidebar-border">
         <div className="flex h-full flex-col">
           {/* Header */}
           <div className="flex h-16 items-center justify-between px-4 mt-2">
             <div className="flex items-center gap-3">
-              <img src="/logo.png" alt="Aiforhomebuilder" className="h-9 w-auto object-contain rounded-md" />
+              <img
+                src="/logo.png"
+                alt="Aiforhomebuilder"
+                className="h-9 w-auto object-contain rounded-md"
+              />
               {sidebarExpanded && (
                 <div className="flex flex-col leading-tight">
-                  <span className="text-lg font-bold tracking-tight">Aiforhomebuilder</span>
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">Super Admin</span>
+                  <span className="text-lg font-bold tracking-tight">
+                    Aiforhomebuilder
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">
+                    Super Admin
+                  </span>
                 </div>
               )}
             </div>
-            <Button variant="ghost" size="icon" onClick={toggleSidebar} className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-white/5">
-              {sidebarExpanded ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleSidebar}
+              className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-white/5">
+              {sidebarExpanded ? (
+                <ChevronLeft className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
             </Button>
           </div>
-          
+
           <div className="px-4 py-2">
             <Separator className="bg-white/10" />
           </div>
@@ -107,9 +132,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                       isActive
                         ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
                         : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200 border border-transparent"
-                    }`}
-                  >
-                    <item.icon className={`h-5 w-5 shrink-0 ${isActive ? "text-[#b48c3c]" : ""}`} />
+                    }`}>
+                    <item.icon
+                      className={`h-5 w-5 shrink-0 ${isActive ? "text-[#b48c3c]" : ""}`}
+                    />
                     {sidebarExpanded && <span>{item.name}</span>}
                   </motion.div>
                 </Link>
@@ -123,10 +149,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               variant="ghost"
               size="sm"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="w-full justify-start text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
-            >
-              {theme === "dark" ? <Sun className="h-4 w-4 mr-3" /> : <Moon className="h-4 w-4 mr-3" />}
-              {sidebarExpanded && (theme === "dark" ? "Light Mode" : "Dark Mode")}
+              className="w-full justify-start text-zinc-400 hover:bg-white/5 hover:text-zinc-200">
+              {theme === "dark" ? (
+                <Sun className="h-4 w-4 mr-3" />
+              ) : (
+                <Moon className="h-4 w-4 mr-3" />
+              )}
+              {sidebarExpanded &&
+                (theme === "dark" ? "Light Mode" : "Dark Mode")}
             </Button>
 
             <div className="w-full flex items-center justify-between gap-3 rounded-xl bg-white/5 border border-white/5 px-3 py-2.5 text-sm transition-all">
@@ -139,12 +169,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     <p className="text-xs font-semibold text-zinc-200 truncate">
                       {user?.name || "System Admin"}
                     </p>
-                    <p className="text-[10px] text-[#b48c3c] uppercase tracking-wider">Root Access</p>
+                    <p className="text-[10px] text-[#b48c3c] uppercase tracking-wider">
+                      Root Access
+                    </p>
                   </div>
                 )}
               </div>
               {sidebarExpanded && (
-                <Button variant="ghost" size="icon" onClick={logout} className="h-8 w-8 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 shrink-0" title="Logout">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={logout}
+                  className="h-8 w-8 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 shrink-0"
+                  title="Logout">
                   <LogOut className="h-4 w-4" />
                 </Button>
               )}
@@ -154,14 +191,22 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </motion.aside>
 
       {/* Main Content Wrapper */}
-      <main className={`flex-1 flex flex-col transition-all duration-200 ease-in-out h-full overflow-hidden ${sidebarExpanded ? "md:ml-64" : "md:ml-20"}`}>
+      <main
+        className={`flex-1 flex flex-col transition-all duration-200 ease-in-out h-full overflow-hidden ${sidebarExpanded ? "md:ml-64" : "md:ml-20"}`}>
         {/* Mobile Header */}
         <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-border bg-card/80 backdrop-blur-md px-4 md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setMobileSidebarOpen(true)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="Aiforhomebuilder" className="h-7 w-auto object-contain rounded-md" />
+            <img
+              src="/logo.png"
+              alt="Aiforhomebuilder"
+              className="h-7 w-auto object-contain rounded-md"
+            />
             <span className="font-bold">Aiforhomebuilder</span>
           </div>
           <div className="w-9" /> {/* Spacer */}
@@ -183,22 +228,33 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 animate={{ x: 0 }}
                 exit={{ x: "-100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                className="fixed top-0 left-0 z-50 h-full w-72 bg-sidebar text-sidebar-foreground shadow-2xl md:hidden"
-              >
+                className="fixed top-0 left-0 z-50 h-full w-72 bg-sidebar text-sidebar-foreground shadow-2xl md:hidden">
                 <div className="flex h-full flex-col">
                   <div className="flex h-16 items-center justify-between px-4 mt-2">
                     <div className="flex items-center gap-3">
-                      <img src="/logo.png" alt="Aiforhomebuilder" className="h-9 w-auto object-contain rounded-md" />
+                      <img
+                        src="/logo.png"
+                        alt="Aiforhomebuilder"
+                        className="h-9 w-auto object-contain rounded-md"
+                      />
                       <div className="flex flex-col leading-tight">
-                        <span className="text-lg font-bold tracking-tight">Aiforhomebuilder</span>
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">Super Admin</span>
+                        <span className="text-lg font-bold tracking-tight">
+                          Aiforhomebuilder
+                        </span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">
+                          Super Admin
+                        </span>
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={closeMobileSidebar} className="text-sidebar-foreground/60 hover:text-sidebar-foreground">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={closeMobileSidebar}
+                      className="text-sidebar-foreground/60 hover:text-sidebar-foreground">
                       <X className="h-5 w-5" />
                     </Button>
                   </div>
-                  
+
                   <div className="px-4 py-2">
                     <Separator className="bg-white/10" />
                   </div>
@@ -207,12 +263,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     {adminNavItems.map((item) => {
                       const isActive = pathname === item.href;
                       return (
-                        <Link key={item.name} href={item.href} onClick={closeMobileSidebar}>
-                          <div className={`flex items-center space-x-3 rounded-xl px-3 py-3 text-sm font-medium transition-all ${
-                            isActive
-                              ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
-                              : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
-                          }`}>
+                        <Link
+                          key={item.name}
+                          href={item.href}
+                          onClick={closeMobileSidebar}>
+                          <div
+                            className={`flex items-center space-x-3 rounded-xl px-3 py-3 text-sm font-medium transition-all ${
+                              isActive
+                                ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
+                                : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+                            }`}>
                             <item.icon className="h-5 w-5 shrink-0" />
                             <span>{item.name}</span>
                           </div>
@@ -224,17 +284,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <div className="border-t border-white/10 p-4 space-y-3">
                     <Button
                       variant="ghost"
-                      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                      className="w-full justify-start text-zinc-400 hover:bg-white/5"
-                    >
-                      {theme === "dark" ? <Sun className="h-4 w-4 mr-3" /> : <Moon className="h-4 w-4 mr-3" />}
+                      onClick={() =>
+                        setTheme(theme === "dark" ? "light" : "dark")
+                      }
+                      className="w-full justify-start text-zinc-400 hover:bg-white/5">
+                      {theme === "dark" ? (
+                        <Sun className="h-4 w-4 mr-3" />
+                      ) : (
+                        <Moon className="h-4 w-4 mr-3" />
+                      )}
                       {theme === "dark" ? "Light Mode" : "Dark Mode"}
                     </Button>
                     <Button
                       variant="ghost"
                       onClick={logout}
-                      className="w-full justify-start text-zinc-400 hover:text-red-400 hover:bg-red-500/10"
-                    >
+                      className="w-full justify-start text-zinc-400 hover:text-red-400 hover:bg-red-500/10">
                       <LogOut className="h-4 w-4 mr-3" />
                       Logout
                     </Button>
@@ -247,9 +311,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {/* Page Content */}
         <div className="flex-1 overflow-auto p-4 md:p-8">
-          <div className="mx-auto max-w-7xl h-full">
-            {children}
-          </div>
+          <div className="mx-auto max-w-7xl h-full">{children}</div>
         </div>
       </main>
     </div>

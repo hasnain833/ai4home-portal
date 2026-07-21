@@ -2,6 +2,8 @@ import prisma from "../lib/prisma.js";
 import { chat, hasLLM } from "../lib/llm.js";
 import { getNextValidSendWindow } from "../lib/timezone.js";
 import { inngest } from "../lib/inngest.js";
+import { query as kbQuery } from "../services/vector-store.service.js";
+import { KB_SCOPES, parseLlmJson } from "../lib/sales-ai.js";
 
 const VALID_STATUSES = [
   "Suggested",
@@ -28,7 +30,14 @@ const STATUS_TRANSITIONS = {
 const APPROVAL_REQUIRED_TARGETS = new Set(["Approved"]);
 
 const NON_EDITABLE_STATUSES = new Set(["Sent", "Published", "Dismissed"]);
-const EDITABLE_FIELDS = ["title", "content", "subject", "reason", "outline", "channel"];
+const EDITABLE_FIELDS = [
+  "title",
+  "content",
+  "subject",
+  "reason",
+  "outline",
+  "channel",
+];
 
 const DEFAULT_TIMEZONE = "America/New_York";
 const SMS_WINDOW_START_HOUR = 8;
@@ -52,8 +61,18 @@ const SEASONAL_MOMENTS = {
 function getSeasonalContext(now = new Date()) {
   const month = now.getMonth();
   const seasons = [
-    "Winter", "Winter", "Spring", "Spring", "Spring", "Summer",
-    "Summer", "Summer", "Fall", "Fall", "Fall", "Winter",
+    "Winter",
+    "Winter",
+    "Spring",
+    "Spring",
+    "Spring",
+    "Summer",
+    "Summer",
+    "Summer",
+    "Fall",
+    "Fall",
+    "Fall",
+    "Winter",
   ];
   return `Season: ${seasons[month]}. Notable seasonal / marketing moments around now: ${SEASONAL_MOMENTS[month]}.`;
 }
@@ -79,40 +98,47 @@ function checkSmsWindow(date) {
     DEFAULT_TIMEZONE,
     "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
     "08:00",
-    "21:00"
+    "21:00",
   );
   return {
     message: `Scheduled time is outside the SMS sending window (8:00 AM–9:00 PM ${DEFAULT_TIMEZONE}). Pick a time within that window.`,
     suggestedTime,
   };
 }
+function isHomeowner(req) {
+  return String(req.user?.role || "").toUpperCase() === "HOMEOWNER";
+}
+
+// Scope fragment for ContentCalendar reads. Spread into a `where`.
+function ownerScope(req) {
+  return isHomeowner(req) ? { ownerId: req.user.id } : {};
+}
 
 export const getCalendarEvents = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
+    const homeowner = isHomeowner(req);
 
     const manualEvents = await prisma.contentCalendar.findMany({
-      where: { companyId: req.user.companyId },
+      where: { companyId: req.user.companyId, ...ownerScope(req) },
       orderBy: { scheduledAt: "asc" },
     });
 
     const activeEnrollments = await prisma.campaignEnrollment.findMany({
       where: {
         campaign: { companyId: req.user.companyId },
+        ...(homeowner ? { lead: { ownerId: req.user.id } } : {}),
         status: "ACTIVE",
-        nextRunAt: { not: null }
+        nextRunAt: { not: null },
       },
       include: {
         campaign: {
           include: {
             steps: {
-              orderBy: { position: "asc" }
-            }
-          }
-        }
-      }
+              orderBy: { position: "asc" },
+            },
+          },
+        },
+      },
     });
 
     const groupedCampaigns = {};
@@ -124,14 +150,20 @@ export const getCalendarEvents = async (req, res) => {
       for (const step of enrollment.campaign.steps) {
         if (step.type === "DELAY") {
           if (step.delayUnit === "DAYS") {
-            currentSimTime.setDate(currentSimTime.getDate() + (step.delayValue || 0));
+            currentSimTime.setDate(
+              currentSimTime.getDate() + (step.delayValue || 0),
+            );
           } else if (step.delayUnit === "HOURS") {
-            currentSimTime.setHours(currentSimTime.getHours() + (step.delayValue || 0));
+            currentSimTime.setHours(
+              currentSimTime.getHours() + (step.delayValue || 0),
+            );
           } else if (step.delayUnit === "MINUTES") {
-            currentSimTime.setMinutes(currentSimTime.getMinutes() + (step.delayValue || 0));
+            currentSimTime.setMinutes(
+              currentSimTime.getMinutes() + (step.delayValue || 0),
+            );
           }
         } else {
-          const dateString = currentSimTime.toISOString().split('T')[0];
+          const dateString = currentSimTime.toISOString().split("T")[0];
           const isCompleted = step.position <= enrollment.currentStepPosition;
           const key = `${enrollment.campaignId}_${step.id}_${dateString}_${isCompleted}`;
 
@@ -144,11 +176,12 @@ export const getCalendarEvents = async (req, res) => {
               scheduledAt: new Date(dateString),
               isAiSuggested: false,
               type: "campaign_aggregation",
-              isCompleted: isCompleted
+              isCompleted: isCompleted,
             };
           } else {
             groupedCampaigns[key].count += 1;
-            groupedCampaigns[key].title = `${enrollment.campaign.name} - Step ${step.position} (${groupedCampaigns[key].count} Sends)`;
+            groupedCampaigns[key].title =
+              `${enrollment.campaign.name} - Step ${step.position} (${groupedCampaigns[key].count} Sends)`;
           }
         }
       }
@@ -156,20 +189,22 @@ export const getCalendarEvents = async (req, res) => {
 
     const campaignEvents = Object.values(groupedCampaigns);
 
-    const announcements = await prisma.announcement.findMany({
-      where: {
-        companyId: req.user.companyId,
-        OR: [{ scheduledAt: { not: null } }, { sentAt: { not: null } }],
-      },
-      select: {
-        id: true,
-        title: true,
-        channel: true,
-        status: true,
-        scheduledAt: true,
-        sentAt: true,
-      },
-    });
+    const announcements = homeowner
+      ? []
+      : await prisma.announcement.findMany({
+          where: {
+            companyId: req.user.companyId,
+            OR: [{ scheduledAt: { not: null } }, { sentAt: { not: null } }],
+          },
+          select: {
+            id: true,
+            title: true,
+            channel: true,
+            status: true,
+            scheduledAt: true,
+            sentAt: true,
+          },
+        });
 
     const announcementEvents = announcements
       .map((a) => {
@@ -193,7 +228,11 @@ export const getCalendarEvents = async (req, res) => {
       })
       .filter(Boolean);
 
-    const allEvents = [...manualEvents, ...campaignEvents, ...announcementEvents];
+    const allEvents = [
+      ...manualEvents,
+      ...campaignEvents,
+      ...announcementEvents,
+    ];
 
     allEvents.sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
 
@@ -206,14 +245,25 @@ export const getCalendarEvents = async (req, res) => {
 
 export const createCalendarEvent = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const { title, channel, scheduledAt, content, subject, reason, outline, isAiSuggested, status } = req.body;
+    const {
+      title,
+      channel,
+      scheduledAt,
+      content,
+      subject,
+      reason,
+      outline,
+      isAiSuggested,
+      status,
+    } = req.body;
 
     if (!title || !channel || !scheduledAt || !content) {
-      return res.status(400).json({ message: "Missing required fields: title, channel, scheduledAt, content" });
+      return res
+        .status(400)
+        .json({
+          message:
+            "Missing required fields: title, channel, scheduledAt, content",
+        });
     }
 
     const scheduledDate = new Date(scheduledAt);
@@ -223,7 +273,11 @@ export const createCalendarEvent = async (req, res) => {
 
     const initialStatus = status || (isAiSuggested ? "Suggested" : "Draft");
     if (!VALID_STATUSES.includes(initialStatus)) {
-      return res.status(400).json({ message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` });
+      return res
+        .status(400)
+        .json({
+          message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`,
+        });
     }
 
     if (initialStatus === "Scheduled" && channel === "SMS") {
@@ -252,8 +306,10 @@ export const createCalendarEvent = async (req, res) => {
         name: "calendar.item.scheduled",
         data: {
           calendarId: event.id,
-          scheduledAt: event.scheduledAt.toISOString()
-        }
+          // NFR-SC-002: carried so the scheduler can fair-share per tenant.
+          companyId: event.companyId,
+          scheduledAt: event.scheduledAt.toISOString(),
+        },
       });
     }
 
@@ -266,10 +322,6 @@ export const createCalendarEvent = async (req, res) => {
 
 export const getCalendarSuggestions = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const companyId = req.user.companyId;
 
     const company = await prisma.company.findUnique({
@@ -286,12 +338,16 @@ export const getCalendarSuggestions = async (req, res) => {
     const brand = company?.salesBrandProfile;
     if (brand && typeof brand === "object") {
       brandText = Object.entries(brand)
-        .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+        .map(
+          ([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`,
+        )
         .join("; ");
     }
     const tenantProfileText =
       [
-        company?.address ? `Primary market / location: ${company.address}` : null,
+        company?.address
+          ? `Primary market / location: ${company.address}`
+          : null,
         communityNames.length
           ? `Communities / markets served: ${communityNames.join(", ")}`
           : null,
@@ -303,50 +359,83 @@ export const getCalendarSuggestions = async (req, res) => {
     const seasonalContextText = getSeasonalContext();
 
     if (!hasLLM()) {
-      return res.status(500).json({ message: "No LLM provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY." });
+      return res
+        .status(500)
+        .json({
+          message:
+            "No LLM provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY.",
+        });
     }
+
+    const kbQueryText =
+      [company?.name, communityNames.join(" "), brandText]
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 400) || "brand voice communities products";
+    const kbChunks = await kbQuery(
+      companyId,
+      kbQueryText,
+      4,
+      KB_SCOPES.calendar,
+    ).catch(() => []);
+    const kbContextText = kbChunks.length
+      ? kbChunks
+          .map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`)
+          .join("\n\n")
+      : "No knowledge-base context available.";
 
     const existingEvents = await prisma.contentCalendar.findMany({
       where: {
         companyId,
+        ...ownerScope(req),
         scheduledAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-        status: { in: ["Draft", "Approved", "Scheduled", "Sent", "Published"] }
+        status: { in: ["Draft", "Approved", "Scheduled", "Sent", "Published"] },
       },
       select: { scheduledAt: true, title: true, channel: true },
-      orderBy: { scheduledAt: "asc" }
+      orderBy: { scheduledAt: "asc" },
     });
 
     const existingEventsText = existingEvents
-      .map(e => `${e.scheduledAt.toISOString().split('T')[0]}: ${e.channel} - ${e.title}`)
+      .map(
+        (e) =>
+          `${e.scheduledAt.toISOString().split("T")[0]}: ${e.channel} - ${e.title}`,
+      )
       .join("\n");
 
     const dismissedItems = await prisma.contentCalendar.findMany({
-      where: { companyId, status: "Dismissed" },
+      where: { companyId, ...ownerScope(req), status: "Dismissed" },
       select: { title: true, reason: true },
       orderBy: { updatedAt: "desc" },
-      take: 10
+      take: 10,
     });
 
-    const dismissedText = dismissedItems.length > 0
-      ? dismissedItems.map(d => `${d.title} (${d.reason || 'No reason'})`).join("\n")
-      : "None";
+    const dismissedText =
+      dismissedItems.length > 0
+        ? dismissedItems
+            .map((d) => `${d.title} (${d.reason || "No reason"})`)
+            .join("\n")
+        : "None";
     const recentNews = await prisma.scrapedNews.findMany({
       where: {
         companyId,
-        publishedAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) }
+        publishedAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
       },
       select: { title: true, summary: true, source: true, publishedAt: true },
       orderBy: { publishedAt: "desc" },
-      take: 8
+      take: 8,
     });
 
-    const recentNewsText = recentNews.length > 0
-      ? recentNews
-        .map(n => `${n.publishedAt.toISOString().split('T')[0]} [${n.source}] ${n.title}: ${n.summary}`)
-        .join("\n")
-      : "No recent market news available.";
+    const recentNewsText =
+      recentNews.length > 0
+        ? recentNews
+            .map(
+              (n) =>
+                `${n.publishedAt.toISOString().split("T")[0]} [${n.source}] ${n.title}: ${n.summary}`,
+            )
+            .join("\n")
+        : "No recent market news available.";
 
-    const systemPrompt = `You are a Content Assist Agent for a homebuilder company named "${company?.name || 'Homebuilder'}".
+    const systemPrompt = `You are a Content Assist Agent for a homebuilder company named "${company?.name || "Homebuilder"}".
 Your voice profile is: "${voiceProfile}".
 Your task is to generate exactly 3 content calendar suggestions for marketing (SMS, Email, Blog, or Announcement).
 Current date: ${new Date().toISOString()}
@@ -354,6 +443,9 @@ Current date: ${new Date().toISOString()}
 Context:
 Tenant profile (markets, communities, brand — tailor topics to this footprint):
 ${tenantProfileText}
+
+Company knowledge base (brand voice / product info — ground topic angles and copy in this; do not invent facts, prices, or policies not present here):
+${kbContextText}
 
 Seasonal context (favor timely, season-appropriate angles):
 ${seasonalContextText}
@@ -389,13 +481,22 @@ Requirements:
     });
 
     if (!text) {
-      return res.status(502).json({ message: "The AI provider did not return any suggestions. Please try again." });
+      return res
+        .status(502)
+        .json({
+          message:
+            "The AI provider did not return any suggestions. Please try again.",
+        });
     }
 
-    // Clean up potential markdown blocks, then isolate the JSON array (lenient parse).
-    const cleanedText = text.replace(/```json/gi, "").replace(/```/g, "").trim();
-    const arrayText = cleanedText.slice(cleanedText.indexOf("["), cleanedText.lastIndexOf("]") + 1) || cleanedText;
-    const suggestionsJson = JSON.parse(arrayText);
+    const suggestionsJson = parseLlmJson(text, { array: true });
+    if (!Array.isArray(suggestionsJson)) {
+      return res
+        .status(502)
+        .json({
+          message: "The AI suggestions could not be parsed. Please try again.",
+        });
+    }
 
     const createdSuggestions = [];
     for (const s of suggestionsJson) {
@@ -414,8 +515,8 @@ Requirements:
           content: s.outline || "",
           reason: s.reason || "",
           isAiSuggested: true,
-          ownerId: req.user.id
-        }
+          ownerId: req.user.id,
+        },
       });
       createdSuggestions.push(item);
     }
@@ -429,19 +530,17 @@ Requirements:
 
 export const updateCalendarEvent = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { id } = req.params;
     const item = await prisma.contentCalendar.findFirst({
-      where: { id, companyId: req.user.companyId },
+      where: { id, companyId: req.user.companyId, ...ownerScope(req) },
     });
     if (!item) {
       return res.status(404).json({ message: "Calendar item not found" });
     }
     if (NON_EDITABLE_STATUSES.has(item.status)) {
-      return res.status(409).json({ message: `Cannot edit an item in "${item.status}" state` });
+      return res
+        .status(409)
+        .json({ message: `Cannot edit an item in "${item.status}" state` });
     }
 
     const data = {};
@@ -455,7 +554,9 @@ export const updateCalendarEvent = async (req, res) => {
         return res.status(400).json({ message: "Invalid scheduledAt date" });
       }
       if (newDate.getTime() <= Date.now()) {
-        return res.status(422).json({ message: "Scheduled time must be in the future" });
+        return res
+          .status(422)
+          .json({ message: "Scheduled time must be in the future" });
       }
       const effectiveChannel = data.channel || item.channel;
       if (effectiveChannel === "SMS") {
@@ -482,21 +583,19 @@ export const updateCalendarEvent = async (req, res) => {
 
 export const transitionCalendarEvent = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const { id } = req.params;
     const { status: target } = req.body;
 
     if (!target || !VALID_STATUSES.includes(target)) {
       return res
         .status(400)
-        .json({ message: `Invalid target status. Must be one of: ${VALID_STATUSES.join(", ")}` });
+        .json({
+          message: `Invalid target status. Must be one of: ${VALID_STATUSES.join(", ")}`,
+        });
     }
 
     const item = await prisma.contentCalendar.findFirst({
-      where: { id, companyId: req.user.companyId },
+      where: { id, companyId: req.user.companyId, ...ownerScope(req) },
     });
     if (!item) {
       return res.status(404).json({ message: "Calendar item not found" });
@@ -513,8 +612,13 @@ export const transitionCalendarEvent = async (req, res) => {
       });
     }
 
-    if (APPROVAL_REQUIRED_TARGETS.has(target) && req.user.role?.toUpperCase() !== "ADMIN") {
-      return res.status(403).json({ message: "Only an ADMIN can approve calendar items" });
+    if (
+      APPROVAL_REQUIRED_TARGETS.has(target) &&
+      req.user.role?.toUpperCase() !== "ADMIN"
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Only an ADMIN can approve calendar items" });
     }
     if (target === "Scheduled" && item.channel === "SMS") {
       const windowError = checkSmsWindow(item.scheduledAt);
@@ -531,8 +635,9 @@ export const transitionCalendarEvent = async (req, res) => {
         name: "calendar.item.scheduled",
         data: {
           calendarId: updated.id,
-          scheduledAt: updated.scheduledAt.toISOString()
-        }
+          companyId: updated.companyId,
+          scheduledAt: updated.scheduledAt.toISOString(),
+        },
       });
     }
 

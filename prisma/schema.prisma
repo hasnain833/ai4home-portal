@@ -394,6 +394,22 @@ model SalesforceMappingVersion {
   @@index([companyId, createdAt])
 }
 
+model SalesConfigVersion {
+  id          String   @id @default(cuid())
+  companyId   String
+  version     Int
+  // Snapshot: { salesBrandProfile, voiceProfile, appointmentMode, agentMaxTurns }
+  snapshot    Json
+  // What produced this version: SAVE | ROLLBACK
+  changeType  String
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@unique([companyId, version])
+  @@index([companyId, createdAt])
+}
+
 model DeadLetter {
   id        String  @id @default(cuid())
   companyId String
@@ -701,6 +717,11 @@ model SchedulingConversation {
   @@index([leadId])
 }
 
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
 
 model AuditLog {
   id         String   @id @default(cuid())
@@ -744,6 +765,7 @@ model BlogPost {
   tone            String?
   targetAudience  String?
   citations       Json?
+  kbCitations     Json?
   sourceNewsIds   String[]   @default([])
   approvedAt      DateTime?
   approvedById    String?

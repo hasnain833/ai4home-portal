@@ -9,10 +9,12 @@ export const getAppointments = async (req, res) => {
     }
 
     const companyId = req.user.companyId;
+    const isHomeowner =
+      String(req.user.role || "").toUpperCase() === "HOMEOWNER";
 
     const appointments = await prisma.salesAppointment.findMany({
       where: {
-        lead: { companyId },
+        lead: { companyId, ...(isHomeowner ? { ownerId: req.user.id } : {}) },
       },
       include: {
         lead: {
@@ -37,10 +39,11 @@ export const bookAppointment = async (req, res) => {
     const { leadId, title, time, agentId } = req.body;
 
     if (!leadId || !title || !time) {
-      return res.status(400).json({ message: "Missing required fields: leadId, title, time" });
+      return res
+        .status(400)
+        .json({ message: "Missing required fields: leadId, title, time" });
     }
 
-    // Assign default agent if not provided
     let assignedAgentId = agentId;
     if (!assignedAgentId) {
       const lead = await prisma.lead.findUnique({
@@ -49,13 +52,19 @@ export const bookAppointment = async (req, res) => {
       if (lead?.ownerId) {
         assignedAgentId = lead.ownerId;
       } else {
-        // Find company default owner or first ADMIN in DB
         const company = lead
-          ? await prisma.company.findUnique({ where: { id: lead.companyId }, include: { users: true } })
+          ? await prisma.company.findUnique({
+              where: { id: lead.companyId },
+              include: { users: true },
+            })
           : null;
-        const fallback = company?.defaultLeadOwner || company?.users.find(u => u.role === "ADMIN")?.id;
+        const fallback =
+          company?.defaultLeadOwner ||
+          company?.users.find((u) => u.role === "ADMIN")?.id;
         if (!fallback) {
-          return res.status(400).json({ message: "No agent available to assign appointment." });
+          return res
+            .status(400)
+            .json({ message: "No agent available to assign appointment." });
         }
         assignedAgentId = fallback;
       }
@@ -71,7 +80,6 @@ export const bookAppointment = async (req, res) => {
       },
     });
 
-    // Update Lead status to 'Appointment Set'
     await prisma.lead.update({
       where: { id: leadId },
       data: {
@@ -79,7 +87,6 @@ export const bookAppointment = async (req, res) => {
       },
     });
 
-    // Write event to Lead Timeline
     await prisma.leadTimeline.create({
       data: {
         leadId,
@@ -89,17 +96,15 @@ export const bookAppointment = async (req, res) => {
       },
     });
 
-    // Notify Inngest to cancel active campaigns
     const { inngest } = await import("../lib/inngest.js");
     await inngest.send({
       name: "campaign.exit",
       data: {
         leadId,
-        reason: "APPOINTMENT"
-      }
+        reason: "APPOINTMENT",
+      },
     });
 
-    // SW-AMK: fire the APPOINTMENT_BOOKED automation trigger (best-effort).
     const apptLead = await prisma.lead.findUnique({
       where: { id: leadId },
       select: { companyId: true },
@@ -111,9 +116,13 @@ export const bookAppointment = async (req, res) => {
         event: "APPOINTMENT_BOOKED",
         context: { appointmentId: appointment.id, bookedVia: "CTA" },
       });
-      // SW-CRM-008: reflect the new status on the Salesforce record (gated per tenant).
-      writeBackLeadToSalesforce(apptLead.companyId, leadId, { status: "Appointment Set" }).catch((e) =>
-        console.error("[Appointment Book] Salesforce write-back failed:", e?.message || e),
+      writeBackLeadToSalesforce(apptLead.companyId, leadId, {
+        status: "Appointment Set",
+      }).catch((e) =>
+        console.error(
+          "[Appointment Book] Salesforce write-back failed:",
+          e?.message || e,
+        ),
       );
     }
 
@@ -128,8 +137,6 @@ export const getSlots = async (req, res) => {
   try {
     const { date } = req.query;
     const queryDate = date ? new Date(date) : new Date();
-
-    // Standard hours slots (9 AM to 5 PM)
     const slots = [];
     const baseHour = 9;
     for (let i = 0; i < 8; i++) {
@@ -138,7 +145,9 @@ export const getSlots = async (req, res) => {
       slots.push({
         time: timeString,
         available: true,
-        dateTimeString: new Date(queryDate.setHours(hour, 0, 0, 0)).toISOString(),
+        dateTimeString: new Date(
+          queryDate.setHours(hour, 0, 0, 0),
+        ).toISOString(),
       });
     }
 
@@ -165,7 +174,6 @@ export const triggerCta = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    // Log the click event to the timeline
     await prisma.leadTimeline.create({
       data: {
         leadId,

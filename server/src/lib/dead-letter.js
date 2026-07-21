@@ -30,6 +30,30 @@ export async function deadLetter({
   }
 }
 
+export async function deadLetterJob({ functionId, event, error }) {
+  const original = event?.data?.event ?? event ?? {};
+  const data = original?.data ?? {};
+  const companyId = data.companyId || data.company?.id || null;
+
+  if (!companyId) {
+    console.error(
+      `[DLQ] Job "${functionId}" failed with no resolvable companyId — not recorded.`,
+      { eventName: original?.name, error: String(error?.message || error) },
+    );
+    return null;
+  }
+
+  return deadLetter({
+    companyId,
+    source: "JOB",
+    channel: "JOB",
+    leadId: data.leadId || null,
+    refId: functionId,
+    payload: { functionId, eventName: original?.name || null, data },
+    error: error?.message || error,
+  });
+}
+
 export async function listDeadLetters(companyId, { status, refId, limit = 100 } = {}) {
   return prisma.deadLetter.findMany({
     where: {
@@ -56,6 +80,14 @@ export async function replayDeadLetter(companyId, id) {
   if (!row) return { success: false, reason: "Not found" };
   if (row.status !== "PENDING") {
     return { success: false, reason: `Already ${row.status.toLowerCase()}` };
+  }
+  if (row.channel !== "EMAIL" && row.channel !== "SMS") {
+    return {
+      success: false,
+      reason:
+        `This is a failed background job (${row.payload?.functionId || row.refId}), not a message. ` +
+        `Re-run it by re-emitting its event rather than replaying from here.`,
+    };
   }
 
   const { MessagingService } = await import("../services/messaging-service.js");

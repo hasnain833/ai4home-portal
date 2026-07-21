@@ -14,6 +14,7 @@ import MessagingSettingsTab from "@/components/sales/settings/MessagingSettingsT
 import NewsSourcesTab from "@/components/sales/settings/NewsSourcesTab";
 import MappingHistoryDialog from "@/components/sales/settings/MappingHistoryDialog";
 import DeadLetterTab from "@/components/sales/settings/DeadLetterTab";
+import AiConfigSafetyTab from "@/components/sales/settings/AiConfigSafetyTab";
 import { DEFAULT_LEAD_STATUSES } from "@/lib/lead-statuses";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -740,12 +741,13 @@ function SettingsPageContent() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <motion.div variants={fadeInUp}>
-              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-6 max-w-4xl h-10">
+              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-7 max-w-5xl h-10">
                 <TabsTrigger value="crm" className="text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
                 <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
                 <TabsTrigger value="pipeline" className="text-xs font-semibold rounded-lg">Lead Pipeline</TabsTrigger>
                 <TabsTrigger value="messaging" className="text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
                 <TabsTrigger value="news" className="text-xs font-semibold rounded-lg">News Sources</TabsTrigger>
+                <TabsTrigger value="aiconfig" className="text-xs font-semibold rounded-lg">AI Config</TabsTrigger>
                 <TabsTrigger value="failed" className="text-xs font-semibold rounded-lg">Failed Sends</TabsTrigger>
               </TabsList>
             </motion.div>
@@ -758,6 +760,11 @@ function SettingsPageContent() {
             {/* TAB: NEWS SOURCES (SW-NEWS-001 — per-tenant configurable feeds) */}
             <TabsContent value="news" className="space-y-6 focus-visible:outline-none">
               <NewsSourcesTab />
+            </TabsContent>
+
+            {/* SW-KB-007: AI config safety — version history / rollback + preview. */}
+            <TabsContent value="aiconfig" className="space-y-6 focus-visible:outline-none">
+              <AiConfigSafetyTab />
             </TabsContent>
 
             {/* SW-ANN-002: dead-letter queue — permanently failed sends. */}

@@ -4,7 +4,13 @@ import { useState, useEffect, useCallback } from "react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -17,7 +23,16 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Clock, Save, RefreshCw, CheckCircle2, Link2, XCircle, Video, CalendarCheck } from "lucide-react";
+import {
+  Clock,
+  Save,
+  RefreshCw,
+  CheckCircle2,
+  Link2,
+  XCircle,
+  Video,
+  CalendarCheck,
+} from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -56,7 +71,6 @@ type Appointment = {
   agent?: { name?: string; email?: string };
 };
 
-
 function formatSlotTime(iso: string, tz: string): string {
   try {
     return new Intl.DateTimeFormat("en-US", {
@@ -83,7 +97,10 @@ function formatSlotDay(iso: string, tz: string): string {
   }
 }
 
-function groupSlotsByDay(slots: Slot[], tz = "America/New_York"): [string, Slot[]][] {
+function groupSlotsByDay(
+  slots: Slot[],
+  tz = "America/New_York",
+): [string, Slot[]][] {
   const map = new Map<string, Slot[]>();
   for (const slot of slots) {
     const day = formatSlotDay(slot.iso, tz);
@@ -107,9 +124,20 @@ export default function AppointmentsPage() {
     // SW-APT-006: SRS default is 4 automated turns before human handoff.
     agentMaxTurns: "4",
   });
-  const [google, setGoogle] = useState({ connected: false, accountEmail: "", configured: false });
+  const [google, setGoogle] = useState({
+    connected: false,
+    accountEmail: "",
+    configured: false,
+  });
+  // SRS §4.12: a homeowner gets "own availability" — the window is read-only for
+  // them because AvailabilitySetting is a single shared row per company. The API
+  // reports this as `canEditAvailability`.
+  const [canEdit, setCanEdit] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
-  const [slotPreview, setSlotPreview] = useState<{ loading: boolean; slots: Slot[] }>({
+  const [slotPreview, setSlotPreview] = useState<{
+    loading: boolean;
+    slots: Slot[];
+  }>({
     loading: true,
     slots: [],
   });
@@ -150,11 +178,14 @@ export default function AppointmentsPage() {
         dayEnd: s.dayEnd || "17:00",
         bufferMinutes: String(s.bufferMinutes ?? 15),
         slotDuration: String(s.slotDuration ?? 30),
-        workingDays: (s.workingDays || "Mon,Tue,Wed,Thu,Fri").split(",").map((d: string) => d.trim()),
+        workingDays: (s.workingDays || "Mon,Tue,Wed,Thu,Fri")
+          .split(",")
+          .map((d: string) => d.trim()),
         timezone: s.timezone || "America/New_York",
         appointmentMode: data.appointmentMode || "AI",
         agentMaxTurns: String(data.agentMaxTurns ?? 4),
       });
+      setCanEdit(data.canEditAvailability !== false);
       setGoogle({
         connected: !!data.integrations?.google?.connected,
         accountEmail: data.integrations?.google?.accountEmail || "",
@@ -213,7 +244,9 @@ export default function AppointmentsPage() {
           dayEnd: settings.dayEnd,
           bufferMinutes: Number(settings.bufferMinutes),
           slotDuration: Number(settings.slotDuration),
-          workingDays: DAYS.filter((d) => settings.workingDays.includes(d)).join(","),
+          workingDays: DAYS.filter((d) =>
+            settings.workingDays.includes(d),
+          ).join(","),
           timezone: settings.timezone,
           appointmentMode: settings.appointmentMode,
           agentMaxTurns: Number(settings.agentMaxTurns),
@@ -234,7 +267,8 @@ export default function AppointmentsPage() {
     try {
       const res = await fetch("/api/sales/scheduling/google/connect");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Could not start Google connection");
+      if (!res.ok)
+        throw new Error(data.message || "Could not start Google connection");
       window.location.href = data.url;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Google connect failed");
@@ -243,7 +277,9 @@ export default function AppointmentsPage() {
 
   const disconnectGoogle = async () => {
     try {
-      const res = await fetch("/api/sales/scheduling/google/disconnect", { method: "POST" });
+      const res = await fetch("/api/sales/scheduling/google/disconnect", {
+        method: "POST",
+      });
       if (!res.ok) throw new Error("Disconnect failed");
       setGoogle((g) => ({ ...g, connected: false, accountEmail: "" }));
       toast.success("Google Calendar disconnected");
@@ -255,7 +291,9 @@ export default function AppointmentsPage() {
   const openReschedule = async (appt: Appointment) => {
     setReschedule({ open: true, appt, slots: [], selected: "", loading: true });
     try {
-      const res = await fetch(`/api/sales/scheduling/slots?leadId=${appt.leadId}&limit=24`);
+      const res = await fetch(
+        `/api/sales/scheduling/slots?leadId=${appt.leadId}&limit=24`,
+      );
       const data = await res.json();
       setReschedule((r) => ({ ...r, slots: data.slots || [], loading: false }));
     } catch {
@@ -269,12 +307,22 @@ export default function AppointmentsPage() {
       const res = await fetch("/api/sales/scheduling/reschedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appointmentId: reschedule.appt.id, startTime: reschedule.selected }),
+        body: JSON.stringify({
+          appointmentId: reschedule.appt.id,
+          startTime: reschedule.selected,
+        }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || data.reason || "Reschedule failed");
+      if (!res.ok)
+        throw new Error(data.message || data.reason || "Reschedule failed");
       toast.success("Appointment rescheduled");
-      setReschedule({ open: false, appt: null, slots: [], selected: "", loading: false });
+      setReschedule({
+        open: false,
+        appt: null,
+        slots: [],
+        selected: "",
+        loading: false,
+      });
       loadAppointments();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Reschedule failed");
@@ -284,12 +332,15 @@ export default function AppointmentsPage() {
   const confirm = useConfirm();
 
   const doCancel = async (appt: Appointment) => {
-    if (!(await confirm({
-      title: "Cancel appointment?",
-      description: `Cancel "${appt.title}" with ${appt.lead?.firstName || "this lead"}?`,
-      confirmText: "Cancel appointment",
-      cancelText: "Keep it",
-    }))) return;
+    if (
+      !(await confirm({
+        title: "Cancel appointment?",
+        description: `Cancel "${appt.title}" with ${appt.lead?.firstName || "this lead"}?`,
+        confirmText: "Cancel appointment",
+        cancelText: "Keep it",
+      }))
+    )
+      return;
     try {
       const res = await fetch("/api/sales/scheduling/cancel", {
         method: "POST",
@@ -325,7 +376,8 @@ export default function AppointmentsPage() {
                 Appointment Scheduling
               </h1>
               <p className="text-muted-foreground text-sm mt-1">
-                Manage virtual and on-site model home visits, and coordinate agent hours.
+                Manage virtual and on-site model home visits, and coordinate
+                agent hours.
               </p>
             </div>
             <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
@@ -333,16 +385,14 @@ export default function AppointmentsPage() {
                 variant={activeTab === "list" ? "default" : "ghost"}
                 size="sm"
                 onClick={() => setActiveTab("list")}
-                className="h-8 text-xs font-semibold rounded-lg"
-              >
+                className="h-8 text-xs font-semibold rounded-lg">
                 Booked Slots
               </Button>
               <Button
                 variant={activeTab === "settings" ? "default" : "ghost"}
                 size="sm"
                 onClick={() => setActiveTab("settings")}
-                className="h-8 text-xs font-semibold rounded-lg"
-              >
+                className="h-8 text-xs font-semibold rounded-lg">
                 Availability Settings
               </Button>
             </div>
@@ -351,8 +401,14 @@ export default function AppointmentsPage() {
           {activeTab === "list" ? (
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-sm font-bold">Scheduled Visits</CardTitle>
-                <Button variant="ghost" size="sm" onClick={loadAppointments} className="h-7 text-xs gap-1">
+                <CardTitle className="text-sm font-bold">
+                  Scheduled Visits
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={loadAppointments}
+                  className="h-7 text-xs gap-1">
                   <RefreshCw className="h-3.5 w-3.5" /> Refresh
                 </Button>
               </CardHeader>
@@ -371,13 +427,17 @@ export default function AppointmentsPage() {
                   <tbody>
                     {loadingAppts ? (
                       <tr>
-                        <td colSpan={6} className="py-10 text-center text-slate-400 text-xs">
+                        <td
+                          colSpan={6}
+                          className="py-10 text-center text-slate-400 text-xs">
                           Loading appointments…
                         </td>
                       </tr>
                     ) : appointments.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="py-10 text-center text-slate-400 text-xs">
+                        <td
+                          colSpan={6}
+                          className="py-10 text-center text-slate-400 text-xs">
                           No appointments booked yet.
                         </td>
                       </tr>
@@ -385,19 +445,22 @@ export default function AppointmentsPage() {
                       appointments.map((appt) => (
                         <tr
                           key={appt.id}
-                          className="border-b dark:border-slate-800 hover:bg-slate-50/20 dark:hover:bg-slate-900/10 transition"
-                        >
+                          className="border-b dark:border-slate-800 hover:bg-slate-50/20 dark:hover:bg-slate-900/10 transition">
                           <td className="py-3.5 px-6 font-semibold">
                             <div>
                               <p>
                                 {appt.lead?.firstName} {appt.lead?.lastName}
                               </p>
-                              <p className="text-[10px] text-slate-400 font-normal mt-0.5">{appt.lead?.email}</p>
+                              <p className="text-[10px] text-slate-400 font-normal mt-0.5">
+                                {appt.lead?.email}
+                              </p>
                             </div>
                           </td>
                           <td className="py-3.5 px-4 text-xs font-medium">
                             <div className="flex items-center gap-1.5">
-                              {appt.locationType === "VIRTUAL" && <Video className="h-3.5 w-3.5 text-slate-400" />}
+                              {appt.locationType === "VIRTUAL" && (
+                                <Video className="h-3.5 w-3.5 text-slate-400" />
+                              )}
                               {appt.title}
                             </div>
                             {appt.meetingLink && (
@@ -405,15 +468,15 @@ export default function AppointmentsPage() {
                                 href={appt.meetingLink}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="text-[10px] text-[#b48c3c] hover:underline"
-                              >
+                                className="text-[10px] text-[#b48c3c] hover:underline">
                                 Join link
                               </a>
                             )}
                           </td>
                           <td className="py-3.5 px-4 text-xs">
                             <span className="flex items-center gap-1">
-                              <Clock className="h-3.5 w-3.5 text-slate-400" /> {fmt(appt.time)}
+                              <Clock className="h-3.5 w-3.5 text-slate-400" />{" "}
+                              {fmt(appt.time)}
                             </span>
                           </td>
                           <td className="py-3.5 px-4">
@@ -422,27 +485,26 @@ export default function AppointmentsPage() {
                                 appt.status === "CONFIRMED"
                                   ? "bg-green-50 text-green-700 border-green-200/50 dark:bg-green-950/20 dark:text-green-400"
                                   : "bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300"
-                              }
-                            >
+                              }>
                               {appt.status}
                             </Badge>
                           </td>
-                          <td className="py-3.5 px-4 text-xs text-slate-500">{appt.agent?.name || "—"}</td>
+                          <td className="py-3.5 px-4 text-xs text-slate-500">
+                            {appt.agent?.name || "—"}
+                          </td>
                           <td className="py-3.5 px-6 text-right whitespace-nowrap">
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => openReschedule(appt)}
-                              className="text-xs"
-                            >
+                              className="text-xs">
                               Reschedule
                             </Button>
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => doCancel(appt)}
-                              className="text-red-500 hover:bg-red-50 text-xs"
-                            >
+                              className="text-red-500 hover:bg-red-50 text-xs">
                               Cancel
                             </Button>
                           </td>
@@ -455,282 +517,379 @@ export default function AppointmentsPage() {
             </Card>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-            <Card className="border border-border/80 shadow-xs">
-              <CardHeader className="border-b">
-                <CardTitle className="text-sm font-bold">Define Work Hours & Time Zones</CardTitle>
-                <CardDescription className="text-xs">
-                  Used by the AI conversational agent and the public booking page to offer slots.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-6">
-                <form onSubmit={handleSaveSettings} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="startTime" className="font-semibold">
-                        Day Starts At
-                      </Label>
-                      <Input
-                        id="startTime"
-                        type="time"
-                        value={settings.dayStart}
-                        onChange={(e) => setSettings((s) => ({ ...s, dayStart: e.target.value }))}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="endTime" className="font-semibold">
-                        Day Ends At
-                      </Label>
-                      <Input
-                        id="endTime"
-                        type="time"
-                        value={settings.dayEnd}
-                        onChange={(e) => setSettings((s) => ({ ...s, dayEnd: e.target.value }))}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="buffer" className="font-semibold">
-                        Buffer Time (Minutes)
-                      </Label>
-                      <Input
-                        id="buffer"
-                        type="number"
-                        min={0}
-                        value={settings.bufferMinutes}
-                        onChange={(e) => setSettings((s) => ({ ...s, bufferMinutes: e.target.value }))}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="duration" className="font-semibold">
-                        Slot Length (Minutes)
-                      </Label>
-                      <Input
-                        id="duration"
-                        type="number"
-                        min={5}
-                        step={5}
-                        value={settings.slotDuration}
-                        onChange={(e) => setSettings((s) => ({ ...s, slotDuration: e.target.value }))}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="font-semibold">TimeZone</Label>
-                    <Select
-                      value={settings.timezone}
-                      onValueChange={(val) => setSettings((s) => ({ ...s, timezone: val }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TIMEZONES.map((tz) => (
-                          <SelectItem key={tz.value} value={tz.value}>
-                            {tz.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="font-semibold">Working Days</Label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {DAYS.map((day) => (
-                        <button
-                          key={day}
-                          type="button"
-                          onClick={() => toggleDay(day)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
-                            settings.workingDays.includes(day)
-                              ? "bg-[#0F3B3D] text-white border-[#0F3B3D]"
-                              : "bg-transparent text-slate-500 border-slate-200 dark:border-slate-700"
-                          }`}
-                        >
-                          {day}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="font-semibold">When a lead replies, the agent should…</Label>
-                    <Select
-                      value={settings.appointmentMode}
-                      onValueChange={(val) => setSettings((s) => ({ ...s, appointmentMode: val }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {APPOINTMENT_MODES.map((m) => (
-                          <SelectItem key={m.value} value={m.value}>
-                            {m.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* SW-APT-006: turn limit before human handoff. Only meaningful in
-                      AI mode — SIMPLE just sends a booking link, OFF does nothing. */}
-                  {settings.appointmentMode === "AI" && (
-                    <div className="space-y-1.5">
-                      <Label className="font-semibold">Hand off to a human after…</Label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={settings.agentMaxTurns}
-                          onChange={(e) =>
-                            setSettings((s) => ({ ...s, agentMaxTurns: e.target.value }))
-                          }
-                          className="w-24"
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          agent replies without a booking
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-muted-foreground">
-                        The agent stops and offers a team member instead. Lower means a
-                        person steps in sooner. 1–20; the recommended default is 4.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="p-4 bg-slate-50 dark:bg-slate-900 border rounded-xl space-y-3">
-                    <h4 className="font-bold text-xs">Calendar Integrations</h4>
-                    <div className="flex items-center justify-between border-t dark:border-slate-800 pt-3 text-xs">
-                      <div>
-                        <span className="text-muted-foreground">Google Calendar</span>
-                        {google.connected && google.accountEmail && (
-                          <span className="ml-2 text-[10px] text-green-600">{google.accountEmail}</span>
-                        )}
-                      </div>
-                      {google.connected ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={disconnectGoogle}
-                          className="h-7 text-[10px] gap-1 text-red-500"
-                        >
-                          <XCircle className="h-3 w-3" /> Disconnect
-                        </Button>
-                      ) : (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={connectGoogle}
-                          disabled={!google.configured}
-                          title={google.configured ? "" : "Google OAuth not configured on the server"}
-                          className="h-7 text-[10px] gap-1"
-                        >
-                          <Link2 className="h-3 w-3" /> Connect
-                        </Button>
-                      )}
-                    </div>
-                    {google.connected && (
-                      <p className="flex items-center gap-1 text-[10px] text-green-600">
-                        <CheckCircle2 className="h-3 w-3" /> Two-way busy/free sync + Google Meet links active
-                      </p>
-                    )}
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Microsoft Outlook 365</span>
-                      <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled title="Coming soon">
-                        Coming soon
-                      </Button>
-                    </div>
-                  </div>
-
-                  <Button
-                    type="submit"
-                    disabled={savingSettings}
-                    className="w-full bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-1.5 font-semibold"
-                  >
-                    <Save className="h-4 w-4" /> {savingSettings ? "Saving…" : "Save Availability Settings"}
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-
-            <Card className="border border-border/80 shadow-xs">
-              <CardHeader className="border-b">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-sm font-bold flex items-center gap-1.5">
-                      <CalendarCheck className="h-4 w-4 text-[#b48c3c]" /> Available Slots
+              {!canEdit ? (
+                <Card className="border border-border/80 shadow-xs">
+                  <CardHeader className="border-b">
+                    <CardTitle className="text-sm font-bold">
+                      Booking Window
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      Next 14 days, with booked and Google Calendar time already removed.
+                      Set by your builder&apos;s admin. Your slots below are
+                      offered inside this window, minus anything already on your
+                      calendar.
                     </CardDescription>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={fetchSlotPreview}
-                    disabled={slotPreview.loading}
-                    className="h-8 gap-1.5 text-xs shrink-0"
-                  >
-                    <RefreshCw className={`h-3.5 w-3.5 ${slotPreview.loading ? "animate-spin" : ""}`} />
-                    Refresh
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-4">
-                {slotPreview.loading ? (
-                  <p className="text-sm text-muted-foreground py-10 text-center animate-pulse">
-                    Calculating slots…
-                  </p>
-                ) : slotPreview.slots.length === 0 ? (
-                  <div className="text-center py-10 px-4 border border-dashed rounded-lg">
-                    <Clock className="h-8 w-8 mx-auto text-slate-300 dark:text-slate-700" />
-                    <p className="text-sm font-semibold mt-3">No slots available</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Save your work hours and working days — if they are already set, every slot in
-                      the next 14 days is booked out.
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      <span className="font-semibold text-foreground">{slotPreview.slots.length}</span>{" "}
-                      slot{slotPreview.slots.length === 1 ? "" : "s"} open ·{" "}
-                      {settings.slotDuration} min each
-                    </p>
-                    <div className="max-h-96 overflow-y-auto space-y-4 pr-1">
-                      {groupSlotsByDay(slotPreview.slots, settings.timezone).map(([day, slots]) => (
-                        <div key={day}>
-                          <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 sticky top-0 bg-card py-1">
-                            {day}
-                          </p>
-                          <div className="grid grid-cols-3 gap-1.5">
-                            {slots.map((slot) => (
-                              <span
-                                key={slot.iso}
-                                className="px-2 py-1.5 rounded-md text-[11px] font-medium text-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40"
-                              >
-                                {formatSlotTime(slot.iso, settings.timezone)}
-                              </span>
-                            ))}
-                          </div>
+                  </CardHeader>
+                  <CardContent className="p-6">
+                    <dl className="space-y-3 text-xs">
+                      {[
+                        ["Hours", `${settings.dayStart} – ${settings.dayEnd}`],
+                        [
+                          "Working days",
+                          settings.workingDays.join(", ") || "—",
+                        ],
+                        ["Slot length", `${settings.slotDuration} min`],
+                        [
+                          "Buffer between slots",
+                          `${settings.bufferMinutes} min`,
+                        ],
+                        ["Time zone", settings.timezone],
+                      ].map(([label, value]) => (
+                        <div
+                          key={label}
+                          className="flex items-center justify-between gap-4 border-b border-border/60 pb-2 last:border-0">
+                          <dt className="text-muted-foreground">{label}</dt>
+                          <dd className="font-semibold text-right">{value}</dd>
                         </div>
                       ))}
+                    </dl>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="border border-border/80 shadow-xs">
+                  <CardHeader className="border-b">
+                    <CardTitle className="text-sm font-bold">
+                      Define Work Hours & Time Zones
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Used by the AI conversational agent and the public booking
+                      page to offer slots.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-6">
+                    <form onSubmit={handleSaveSettings} className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="startTime" className="font-semibold">
+                            Day Starts At
+                          </Label>
+                          <Input
+                            id="startTime"
+                            type="time"
+                            value={settings.dayStart}
+                            onChange={(e) =>
+                              setSettings((s) => ({
+                                ...s,
+                                dayStart: e.target.value,
+                              }))
+                            }
+                            required
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="endTime" className="font-semibold">
+                            Day Ends At
+                          </Label>
+                          <Input
+                            id="endTime"
+                            type="time"
+                            value={settings.dayEnd}
+                            onChange={(e) =>
+                              setSettings((s) => ({
+                                ...s,
+                                dayEnd: e.target.value,
+                              }))
+                            }
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="buffer" className="font-semibold">
+                            Buffer Time (Minutes)
+                          </Label>
+                          <Input
+                            id="buffer"
+                            type="number"
+                            min={0}
+                            value={settings.bufferMinutes}
+                            onChange={(e) =>
+                              setSettings((s) => ({
+                                ...s,
+                                bufferMinutes: e.target.value,
+                              }))
+                            }
+                            required
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="duration" className="font-semibold">
+                            Slot Length (Minutes)
+                          </Label>
+                          <Input
+                            id="duration"
+                            type="number"
+                            min={5}
+                            step={5}
+                            value={settings.slotDuration}
+                            onChange={(e) =>
+                              setSettings((s) => ({
+                                ...s,
+                                slotDuration: e.target.value,
+                              }))
+                            }
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="font-semibold">TimeZone</Label>
+                        <Select
+                          value={settings.timezone}
+                          onValueChange={(val) =>
+                            setSettings((s) => ({ ...s, timezone: val }))
+                          }>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TIMEZONES.map((tz) => (
+                              <SelectItem key={tz.value} value={tz.value}>
+                                {tz.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="font-semibold">Working Days</Label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {DAYS.map((day) => (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => toggleDay(day)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+                                settings.workingDays.includes(day)
+                                  ? "bg-[#0F3B3D] text-white border-[#0F3B3D]"
+                                  : "bg-transparent text-slate-500 border-slate-200 dark:border-slate-700"
+                              }`}>
+                              {day}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="font-semibold">
+                          When a lead replies, the agent should…
+                        </Label>
+                        <Select
+                          value={settings.appointmentMode}
+                          onValueChange={(val) =>
+                            setSettings((s) => ({ ...s, appointmentMode: val }))
+                          }>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {APPOINTMENT_MODES.map((m) => (
+                              <SelectItem key={m.value} value={m.value}>
+                                {m.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* SW-APT-006: turn limit before human handoff. Only meaningful in
+                      AI mode — SIMPLE just sends a booking link, OFF does nothing. */}
+                      {settings.appointmentMode === "AI" && (
+                        <div className="space-y-1.5">
+                          <Label className="font-semibold">
+                            Hand off to a human after…
+                          </Label>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min={1}
+                              max={20}
+                              value={settings.agentMaxTurns}
+                              onChange={(e) =>
+                                setSettings((s) => ({
+                                  ...s,
+                                  agentMaxTurns: e.target.value,
+                                }))
+                              }
+                              className="w-24"
+                            />
+                            <span className="text-xs text-muted-foreground">
+                              agent replies without a booking
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            The agent stops and offers a team member instead.
+                            Lower means a person steps in sooner. 1–20; the
+                            recommended default is 4.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="p-4 bg-slate-50 dark:bg-slate-900 border rounded-xl space-y-3">
+                        <h4 className="font-bold text-xs">
+                          Calendar Integrations
+                        </h4>
+                        <div className="flex items-center justify-between border-t dark:border-slate-800 pt-3 text-xs">
+                          <div>
+                            <span className="text-muted-foreground">
+                              Google Calendar
+                            </span>
+                            {google.connected && google.accountEmail && (
+                              <span className="ml-2 text-[10px] text-green-600">
+                                {google.accountEmail}
+                              </span>
+                            )}
+                          </div>
+                          {google.connected ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={disconnectGoogle}
+                              className="h-7 text-[10px] gap-1 text-red-500">
+                              <XCircle className="h-3 w-3" /> Disconnect
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={connectGoogle}
+                              disabled={!google.configured}
+                              title={
+                                google.configured
+                                  ? ""
+                                  : "Google OAuth not configured on the server"
+                              }
+                              className="h-7 text-[10px] gap-1">
+                              <Link2 className="h-3 w-3" /> Connect
+                            </Button>
+                          )}
+                        </div>
+                        {google.connected && (
+                          <p className="flex items-center gap-1 text-[10px] text-green-600">
+                            <CheckCircle2 className="h-3 w-3" /> Two-way
+                            busy/free sync + Google Meet links active
+                          </p>
+                        )}
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Microsoft Outlook 365</span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[10px]"
+                            disabled
+                            title="Coming soon">
+                            Coming soon
+                          </Button>
+                        </div>
+                      </div>
+
+                      <Button
+                        type="submit"
+                        disabled={savingSettings}
+                        className="w-full bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-1.5 font-semibold">
+                        <Save className="h-4 w-4" />{" "}
+                        {savingSettings
+                          ? "Saving…"
+                          : "Save Availability Settings"}
+                      </Button>
+                    </form>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card className="border border-border/80 shadow-xs">
+                <CardHeader className="border-b">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <CardTitle className="text-sm font-bold flex items-center gap-1.5">
+                        <CalendarCheck className="h-4 w-4 text-[#b48c3c]" />{" "}
+                        Available Slots
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        Next 14 days, with booked and Google Calendar time
+                        already removed.
+                      </CardDescription>
                     </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={fetchSlotPreview}
+                      disabled={slotPreview.loading}
+                      className="h-8 gap-1.5 text-xs shrink-0">
+                      <RefreshCw
+                        className={`h-3.5 w-3.5 ${slotPreview.loading ? "animate-spin" : ""}`}
+                      />
+                      Refresh
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  {slotPreview.loading ? (
+                    <p className="text-sm text-muted-foreground py-10 text-center animate-pulse">
+                      Calculating slots…
+                    </p>
+                  ) : slotPreview.slots.length === 0 ? (
+                    <div className="text-center py-10 px-4 border border-dashed rounded-lg">
+                      <Clock className="h-8 w-8 mx-auto text-slate-300 dark:text-slate-700" />
+                      <p className="text-sm font-semibold mt-3">
+                        No slots available
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Save your work hours and working days — if they are
+                        already set, every slot in the next 14 days is booked
+                        out.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        <span className="font-semibold text-foreground">
+                          {slotPreview.slots.length}
+                        </span>{" "}
+                        slot{slotPreview.slots.length === 1 ? "" : "s"} open ·{" "}
+                        {settings.slotDuration} min each
+                      </p>
+                      <div className="max-h-96 overflow-y-auto space-y-4 pr-1">
+                        {groupSlotsByDay(
+                          slotPreview.slots,
+                          settings.timezone,
+                        ).map(([day, slots]) => (
+                          <div key={day}>
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 sticky top-0 bg-card py-1">
+                              {day}
+                            </p>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {slots.map((slot) => (
+                                <span
+                                  key={slot.iso}
+                                  className="px-2 py-1.5 rounded-md text-[11px] font-medium text-center border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
+                                  {formatSlotTime(slot.iso, settings.timezone)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
             </div>
           )}
         </div>
@@ -738,17 +897,19 @@ export default function AppointmentsPage() {
         {/* Reschedule dialog */}
         <Dialog
           open={reschedule.open}
-          onOpenChange={(open) => setReschedule((r) => ({ ...r, open }))}
-        >
+          onOpenChange={(open) => setReschedule((r) => ({ ...r, open }))}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Reschedule appointment</DialogTitle>
               <DialogDescription>
-                Pick a new available slot for {reschedule.appt?.lead?.firstName} {reschedule.appt?.lead?.lastName}.
+                Pick a new available slot for {reschedule.appt?.lead?.firstName}{" "}
+                {reschedule.appt?.lead?.lastName}.
               </DialogDescription>
             </DialogHeader>
             {reschedule.loading ? (
-              <p className="text-sm text-slate-400 py-6 text-center">Loading available slots…</p>
+              <p className="text-sm text-slate-400 py-6 text-center">
+                Loading available slots…
+              </p>
             ) : reschedule.slots.length === 0 ? (
               <p className="text-sm text-slate-400 py-6 text-center">
                 No available slots. Check your availability settings.
@@ -759,13 +920,14 @@ export default function AppointmentsPage() {
                   <button
                     key={slot.iso}
                     type="button"
-                    onClick={() => setReschedule((r) => ({ ...r, selected: slot.iso }))}
+                    onClick={() =>
+                      setReschedule((r) => ({ ...r, selected: slot.iso }))
+                    }
                     className={`px-3 py-2 rounded-lg text-xs font-medium border text-left transition ${
                       reschedule.selected === slot.iso
                         ? "bg-[#0F3B3D] text-white border-[#0F3B3D]"
                         : "border-slate-200 dark:border-slate-700 hover:border-[#b48c3c]"
-                    }`}
-                  >
+                    }`}>
                     {slot.label}
                   </button>
                 ))}
@@ -774,15 +936,21 @@ export default function AppointmentsPage() {
             <DialogFooter>
               <Button
                 variant="ghost"
-                onClick={() => setReschedule({ open: false, appt: null, slots: [], selected: "", loading: false })}
-              >
+                onClick={() =>
+                  setReschedule({
+                    open: false,
+                    appt: null,
+                    slots: [],
+                    selected: "",
+                    loading: false,
+                  })
+                }>
                 Cancel
               </Button>
               <Button
                 onClick={doReschedule}
                 disabled={!reschedule.selected}
-                className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90"
-              >
+                className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90">
                 Confirm reschedule
               </Button>
             </DialogFooter>

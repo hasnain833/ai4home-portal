@@ -2,10 +2,6 @@ import prisma from "../lib/prisma.js";
 
 export const getSegments = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "User is not associated with a company." });
-    }
-
     const segments = await prisma.leadSegment.findMany({
       where: { companyId: req.user.companyId },
       orderBy: { createdAt: "desc" },
@@ -20,10 +16,6 @@ export const getSegments = async (req, res) => {
 
 export const createSegment = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "User is not associated with a company." });
-    }
-
     const { name, filters } = req.body;
     if (!name || !filters) {
       return res.status(400).json({ message: "Name and filters are required" });
@@ -46,10 +38,6 @@ export const createSegment = async (req, res) => {
 
 export const deleteSegment = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
     const { id } = req.params;
 
     const segment = await prisma.leadSegment.findUnique({ where: { id } });
@@ -69,10 +57,6 @@ export const deleteSegment = async (req, res) => {
 // Evaluate dynamic segment size
 export const evaluateSegment = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
     const { id } = req.params;
 
     const segment = await prisma.leadSegment.findUnique({ where: { id } });

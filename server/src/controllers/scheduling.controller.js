@@ -10,17 +10,25 @@ import {
   leadTimezone,
   AVAILABILITY_DEFAULTS,
 } from "../services/scheduling-service.js";
-// SW-APT-006: one clamp shared with the agent, so the value the UI saves and the
-// value the agent enforces can't drift apart.
 import { clampMaxTurns } from "../inngest/functions/appointment.js";
+import { snapshotSalesConfig } from "../services/sales-config-version.service.js";
 
 const TIME_RE = /^\d{1,2}:\d{2}$/;
+function isHomeowner(req) {
+  return String(req.user?.role || "").toUpperCase() === "HOMEOWNER";
+}
 
-// ─── Availability settings (staff) ────────────────────────────────────────────
+function leadScope(req) {
+  return {
+    companyId: req.user.companyId,
+    ...(isHomeowner(req) ? { ownerId: req.user.id } : {}),
+  };
+}
 
 export const getSettings = async (req, res) => {
   try {
-    if (!req.user?.companyId) return res.status(403).json({ message: "No company associated" });
+    if (!req.user?.companyId)
+      return res.status(403).json({ message: "No company associated" });
     const companyId = req.user.companyId;
 
     const setting = await getAvailabilitySetting(companyId);
@@ -28,6 +36,15 @@ export const getSettings = async (req, res) => {
       where: { id: companyId },
       select: { appointmentMode: true, agentMaxTurns: true },
     });
+
+    if (isHomeowner(req)) {
+      return res.json({
+        setting,
+        appointmentMode: company?.appointmentMode || "AI",
+        canEditAvailability: false,
+      });
+    }
+
     const googleConn = await prisma.calendarConnection.findUnique({
       where: { companyId_provider: { companyId, provider: "GOOGLE" } },
       select: { isActive: true, accountEmail: true },
@@ -36,11 +53,14 @@ export const getSettings = async (req, res) => {
     return res.json({
       setting,
       appointmentMode: company?.appointmentMode || "AI",
-      // SW-APT-006: automated turns before human handoff.
       agentMaxTurns: company?.agentMaxTurns ?? 4,
+      canEditAvailability: true,
       googleConfigured: GoogleCalendar.isGoogleConfigured(),
       integrations: {
-        google: { connected: !!googleConn?.isActive, accountEmail: googleConn?.accountEmail || null },
+        google: {
+          connected: !!googleConn?.isActive,
+          accountEmail: googleConn?.accountEmail || null,
+        },
         microsoft: { connected: false, accountEmail: null }, // stub — not yet implemented
       },
     });
@@ -52,21 +72,37 @@ export const getSettings = async (req, res) => {
 
 export const updateSettings = async (req, res) => {
   try {
-    if (!req.user?.companyId) return res.status(403).json({ message: "No company associated" });
+    if (!req.user?.companyId)
+      return res.status(403).json({ message: "No company associated" });
     const companyId = req.user.companyId;
-    const { dayStart, dayEnd, bufferMinutes, slotDuration, workingDays, timezone, reminderHours, appointmentMode, agentMaxTurns } = req.body;
+    const {
+      dayStart,
+      dayEnd,
+      bufferMinutes,
+      slotDuration,
+      workingDays,
+      timezone,
+      reminderHours,
+      appointmentMode,
+      agentMaxTurns,
+    } = req.body;
 
-    if (dayStart && !TIME_RE.test(dayStart)) return res.status(400).json({ message: "dayStart must be HH:mm" });
-    if (dayEnd && !TIME_RE.test(dayEnd)) return res.status(400).json({ message: "dayEnd must be HH:mm" });
+    if (dayStart && !TIME_RE.test(dayStart))
+      return res.status(400).json({ message: "dayStart must be HH:mm" });
+    if (dayEnd && !TIME_RE.test(dayEnd))
+      return res.status(400).json({ message: "dayEnd must be HH:mm" });
 
     const data = {};
     if (dayStart !== undefined) data.dayStart = dayStart;
     if (dayEnd !== undefined) data.dayEnd = dayEnd;
-    if (bufferMinutes !== undefined) data.bufferMinutes = Math.max(0, parseInt(bufferMinutes, 10) || 0);
-    if (slotDuration !== undefined) data.slotDuration = Math.max(5, parseInt(slotDuration, 10) || 30);
+    if (bufferMinutes !== undefined)
+      data.bufferMinutes = Math.max(0, parseInt(bufferMinutes, 10) || 0);
+    if (slotDuration !== undefined)
+      data.slotDuration = Math.max(5, parseInt(slotDuration, 10) || 30);
     if (workingDays !== undefined) data.workingDays = workingDays;
     if (timezone !== undefined) data.timezone = timezone;
-    if (Array.isArray(reminderHours)) data.reminderHours = reminderHours.map(Number).filter((n) => n > 0);
+    if (Array.isArray(reminderHours))
+      data.reminderHours = reminderHours.map(Number).filter((n) => n > 0);
 
     const setting = await prisma.availabilitySetting.upsert({
       where: { companyId },
@@ -74,8 +110,6 @@ export const updateSettings = async (req, res) => {
       update: data,
     });
 
-    // SW-APT-006: mode + turn limit both live on Company; write them together so a
-    // save that changes only one doesn't clobber the other.
     const companyData = {};
     if (appointmentMode && ["OFF", "SIMPLE", "AI"].includes(appointmentMode)) {
       companyData.appointmentMode = appointmentMode;
@@ -84,7 +118,16 @@ export const updateSettings = async (req, res) => {
       companyData.agentMaxTurns = clampMaxTurns(agentMaxTurns);
     }
     if (Object.keys(companyData).length > 0) {
-      await prisma.company.update({ where: { id: companyId }, data: companyData });
+      await prisma.company.update({
+        where: { id: companyId },
+        data: companyData,
+      });
+      // SW-KB-007: snapshot the updated agent toggles for rollback.
+      await snapshotSalesConfig(companyId, {
+        changeType: "SAVE",
+        note: "Agent behavior toggles updated",
+        userId: req.user.id,
+      });
     }
 
     return res.json({
@@ -98,17 +141,17 @@ export const updateSettings = async (req, res) => {
   }
 };
 
-// ─── Slots (staff) ────────────────────────────────────────────────────────────
-
 export const getSlots = async (req, res) => {
   try {
-    if (!req.user?.companyId) return res.status(403).json({ message: "No company associated" });
+    if (!req.user?.companyId)
+      return res.status(403).json({ message: "No company associated" });
     const { leadId, days, limit } = req.query;
-
-    let agentId = req.query.agentId;
+    let agentId = isHomeowner(req) ? req.user.id : req.query.agentId;
     let displayTz;
     if (leadId) {
-      const lead = await prisma.lead.findFirst({ where: { id: leadId, companyId: req.user.companyId } });
+      const lead = await prisma.lead.findFirst({
+        where: { id: leadId, ...leadScope(req) },
+      });
       if (lead) {
         agentId = agentId || (await resolveAgentId(lead));
         const setting = await getAvailabilitySetting(req.user.companyId);
@@ -130,21 +173,29 @@ export const getSlots = async (req, res) => {
   }
 };
 
-// ─── Reschedule / cancel (staff) ──────────────────────────────────────────────
-
 export const staffReschedule = async (req, res) => {
   try {
-    if (!req.user?.companyId) return res.status(403).json({ message: "No company associated" });
+    if (!req.user?.companyId)
+      return res.status(403).json({ message: "No company associated" });
     const { appointmentId, startTime, durationMinutes } = req.body;
-    if (!appointmentId || !startTime) return res.status(400).json({ message: "appointmentId and startTime required" });
+    if (!appointmentId || !startTime)
+      return res
+        .status(400)
+        .json({ message: "appointmentId and startTime required" });
 
     const appt = await prisma.salesAppointment.findFirst({
-      where: { id: appointmentId, lead: { companyId: req.user.companyId } },
+      where: { id: appointmentId, lead: leadScope(req) },
     });
-    if (!appt) return res.status(404).json({ message: "Appointment not found" });
+    if (!appt)
+      return res.status(404).json({ message: "Appointment not found" });
 
-    const result = await rescheduleAppointment({ appointmentId, newStartTime: startTime, durationMinutes });
-    if (!result.success) return res.status(result.conflict ? 409 : 400).json(result);
+    const result = await rescheduleAppointment({
+      appointmentId,
+      newStartTime: startTime,
+      durationMinutes,
+    });
+    if (!result.success)
+      return res.status(result.conflict ? 409 : 400).json(result);
     return res.json(result);
   } catch (error) {
     console.error("[Scheduling staffReschedule] Error:", error);
@@ -154,16 +205,24 @@ export const staffReschedule = async (req, res) => {
 
 export const staffCancel = async (req, res) => {
   try {
-    if (!req.user?.companyId) return res.status(403).json({ message: "No company associated" });
+    if (!req.user?.companyId)
+      return res.status(403).json({ message: "No company associated" });
     const { appointmentId, reason } = req.body;
-    if (!appointmentId) return res.status(400).json({ message: "appointmentId required" });
+    if (!appointmentId)
+      return res.status(400).json({ message: "appointmentId required" });
 
     const appt = await prisma.salesAppointment.findFirst({
-      where: { id: appointmentId, lead: { companyId: req.user.companyId } },
+      where: { id: appointmentId, lead: leadScope(req) },
     });
-    if (!appt) return res.status(404).json({ message: "Appointment not found" });
+    if (!appt)
+      return res.status(404).json({ message: "Appointment not found" });
 
-    const result = await cancelAppointment({ appointmentId, reason: reason || "Cancelled by staff" });
+    const result = await cancelAppointment({
+      appointmentId,
+      reason:
+        reason ||
+        (isHomeowner(req) ? "Cancelled by lead owner" : "Cancelled by staff"),
+    });
     return res.json(result);
   } catch (error) {
     console.error("[Scheduling staffCancel] Error:", error);
@@ -171,13 +230,17 @@ export const staffCancel = async (req, res) => {
   }
 };
 
-// ─── Google OAuth ─────────────────────────────────────────────────────────────
-
 export const googleConnect = async (req, res) => {
   try {
-    if (!req.user?.companyId) return res.status(403).json({ message: "No company associated" });
+    if (!req.user?.companyId)
+      return res.status(403).json({ message: "No company associated" });
     if (!GoogleCalendar.isGoogleConfigured()) {
-      return res.status(400).json({ message: "Google Calendar is not configured on the server (missing GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI)." });
+      return res
+        .status(400)
+        .json({
+          message:
+            "Google Calendar is not configured on the server (missing GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI).",
+        });
     }
     const url = GoogleCalendar.getAuthUrl(req.user.companyId);
     return res.json({ url });
@@ -187,10 +250,10 @@ export const googleConnect = async (req, res) => {
   }
 };
 
-// Public redirect target hit by Google. companyId arrives via `state`.
 export const googleCallback = async (req, res) => {
   const portal = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
-  const back = (status) => res.redirect(`${portal}/sales/scheduling?tab=settings&google=${status}`);
+  const back = (status) =>
+    res.redirect(`${portal}/sales/scheduling?tab=settings&google=${status}`);
   try {
     const { code, state, error } = req.query;
     if (error) return back("denied");
@@ -205,7 +268,8 @@ export const googleCallback = async (req, res) => {
 
 export const googleDisconnect = async (req, res) => {
   try {
-    if (!req.user?.companyId) return res.status(403).json({ message: "No company associated" });
+    if (!req.user?.companyId)
+      return res.status(403).json({ message: "No company associated" });
     await GoogleCalendar.disconnect(req.user.companyId);
     return res.json({ success: true });
   } catch (error) {
@@ -214,20 +278,25 @@ export const googleDisconnect = async (req, res) => {
   }
 };
 
-// ─── Public booking (lead-facing, no portal session) ──────────────────────────
-// The leadId acts as an unguessable booking token; appointment management uses the
-// per-appointment reschedule/cancel tokens.
-
 export const publicGetBooking = async (req, res) => {
   try {
     const { leadId } = req.params;
-    const lead = await prisma.lead.findUnique({ where: { id: leadId }, include: { company: { select: { name: true } } } });
+    const lead = await prisma.lead.findUnique({
+      where: { id: leadId },
+      include: { company: { select: { name: true } } },
+    });
     if (!lead) return res.status(404).json({ message: "Booking not found" });
 
     const setting = await getAvailabilitySetting(lead.companyId);
     const agentId = await resolveAgentId(lead);
     const displayTz = leadTimezone(lead, setting);
-    const slots = await getAvailableSlots({ companyId: lead.companyId, agentId, days: 14, limit: 30, displayTz });
+    const slots = await getAvailableSlots({
+      companyId: lead.companyId,
+      agentId,
+      days: 14,
+      limit: 30,
+      displayTz,
+    });
 
     return res.json({
       lead: { firstName: lead.firstName, lastName: lead.lastName },
@@ -245,7 +314,8 @@ export const publicGetBooking = async (req, res) => {
 export const publicBook = async (req, res) => {
   try {
     const { leadId, startTime, locationType, title } = req.body;
-    if (!leadId || !startTime) return res.status(400).json({ message: "leadId and startTime required" });
+    if (!leadId || !startTime)
+      return res.status(400).json({ message: "leadId and startTime required" });
 
     const result = await bookSlot({
       leadId,
@@ -254,7 +324,8 @@ export const publicBook = async (req, res) => {
       locationType: locationType || "VIRTUAL",
       bookedVia: "SELF",
     });
-    if (!result.success) return res.status(result.conflict ? 409 : 400).json(result);
+    if (!result.success)
+      return res.status(result.conflict ? 409 : 400).json(result);
     return res.status(201).json({
       success: true,
       appointment: {
@@ -278,7 +349,8 @@ export const publicGetManage = async (req, res) => {
       where: { rescheduleToken: token },
       include: { lead: { include: { company: { select: { name: true } } } } },
     });
-    if (!appt) return res.status(404).json({ message: "Appointment not found" });
+    if (!appt)
+      return res.status(404).json({ message: "Appointment not found" });
 
     const setting = await getAvailabilitySetting(appt.lead.companyId);
     const displayTz = appt.leadTimezone || leadTimezone(appt.lead, setting);
@@ -312,10 +384,19 @@ export const publicGetManage = async (req, res) => {
 export const publicReschedule = async (req, res) => {
   try {
     const { token, startTime } = req.body;
-    if (!token || !startTime) return res.status(400).json({ message: "token and startTime required" });
-    const result = await rescheduleAppointment({ rescheduleToken: token, newStartTime: startTime });
-    if (!result.success) return res.status(result.conflict ? 409 : 400).json(result);
-    return res.json({ success: true, time: result.appointment.time, meetingLink: result.appointment.meetingLink });
+    if (!token || !startTime)
+      return res.status(400).json({ message: "token and startTime required" });
+    const result = await rescheduleAppointment({
+      rescheduleToken: token,
+      newStartTime: startTime,
+    });
+    if (!result.success)
+      return res.status(result.conflict ? 409 : 400).json(result);
+    return res.json({
+      success: true,
+      time: result.appointment.time,
+      meetingLink: result.appointment.meetingLink,
+    });
   } catch (error) {
     console.error("[Scheduling publicReschedule] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -326,7 +407,10 @@ export const publicCancel = async (req, res) => {
   try {
     const { token } = req.body;
     if (!token) return res.status(400).json({ message: "token required" });
-    const result = await cancelAppointment({ cancelToken: token, reason: "Cancelled by lead" });
+    const result = await cancelAppointment({
+      cancelToken: token,
+      reason: "Cancelled by lead",
+    });
     if (!result.success) return res.status(404).json(result);
     return res.json({ success: true });
   } catch (error) {

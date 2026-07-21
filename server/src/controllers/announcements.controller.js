@@ -25,10 +25,6 @@ function sanitizeGeoFilter(geo) {
 
 export const getAnnouncements = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const announcements = await prisma.announcement.findMany({
       where: { companyId: req.user.companyId },
       orderBy: { createdAt: "desc" },
@@ -63,9 +59,6 @@ export const getAnnouncements = async (req, res) => {
 
 export const getAnnouncementDetail = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const announcement = await prisma.announcement.findFirst({
       where: { id, companyId: req.user.companyId },
@@ -82,9 +75,6 @@ export const getAnnouncementDetail = async (req, res) => {
 
 export const previewAudience = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { audienceType = "ALL", segmentId = null, geoFilter = null, channel = "EMAIL" } = req.body;
     const leads = await resolveAnnouncementAudience({
       companyId: req.user.companyId,
@@ -101,10 +91,6 @@ export const previewAudience = async (req, res) => {
 };
 export const createAnnouncement = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
     const {
       title,
       subject,
@@ -171,9 +157,6 @@ export const createAnnouncement = async (req, res) => {
 
 export const updateAnnouncement = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const existing = await prisma.announcement.findFirst({
       where: { id, companyId: req.user.companyId },
@@ -208,9 +191,6 @@ export const updateAnnouncement = async (req, res) => {
 // Send a previously-created Draft, immediately or scheduled.
 export const sendAnnouncement = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const { scheduledAt = null } = req.body;
 
@@ -256,9 +236,6 @@ export const sendAnnouncement = async (req, res) => {
 // SW-ANN-003: cancel a scheduled send before the batch pipeline starts.
 export const cancelAnnouncement = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const announcement = await prisma.announcement.findFirst({
       where: { id, companyId: req.user.companyId },
@@ -290,9 +267,6 @@ export const cancelAnnouncement = async (req, res) => {
 
 export const deleteAnnouncement = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const announcement = await prisma.announcement.findFirst({
       where: { id, companyId: req.user.companyId },
@@ -313,9 +287,6 @@ export const deleteAnnouncement = async (req, res) => {
 
 export const getAnnouncementFailures = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const announcement = await prisma.announcement.findFirst({
       where: { id, companyId: req.user.companyId },
@@ -362,9 +333,6 @@ export const getAnnouncementFailures = async (req, res) => {
 };
 export const retryAnnouncement = async (req, res) => {
   try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
     const { id } = req.params;
     const announcement = await prisma.announcement.findFirst({
       where: { id, companyId: req.user.companyId },

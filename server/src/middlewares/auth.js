@@ -2,6 +2,7 @@ import { supabase } from "../lib/supabase.js";
 import prisma from "../lib/prisma.js";
 import { verifySuperadminSessionToken } from "../lib/superadmin-session.js";
 import { hasSalesPermission, SALES_PERMISSIONS } from "../lib/permissions.js";
+import { withDbRetry } from "../lib/utils.js";
 
 export async function requireAuth(req, res, next) {
   try {
@@ -140,10 +141,14 @@ export async function requireAuth(req, res, next) {
         .json({ message: "Unauthorized: Invalid token session" });
     }
 
-    const dbUser = await prisma.user.findUnique({
-      where: { email: user.email },
-      include: { company: true },
-    });
+    const dbUser = await withDbRetry(
+      () =>
+        prisma.user.findUnique({
+          where: { email: user.email },
+          include: { company: true },
+        }),
+      { label: "auth user lookup" },
+    );
 
     if (!dbUser) {
       return res
@@ -203,6 +208,18 @@ export function requireWorkspace(workspace) {
     }
     next();
   };
+}
+
+export function requireCompany(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  if (!req.user.companyId) {
+    return res
+      .status(403)
+      .json({ message: "User is not associated with a company." });
+  }
+  next();
 }
 
 export function requireRoles(allowedRoles) {
