@@ -22,6 +22,7 @@ import {
   Upload,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
 
 // Types
 interface CompanyData {
@@ -88,33 +89,28 @@ export default function CompanyPage() {
     phone?: string;
   }>({});
 
-  // Load from API on mount
   useEffect(() => {
-    const fetchCompany = async () => {
-      setLoading(true);
-      try {
-        const response = await fetch("/api/company");
-        if (response.ok) {
-          const data = await response.json();
-          if (data) {
-            setCompany({
-              id: data.id,
-              name: data.name || "",
-              logo: data.logo || "",
-              email: data.email || "",
-              phone: data.phone || "",
-              address: data.address || "",
-              warrantyPolicy: data.warrantyPolicy || "",
-            });
-          }
-        }
-      } catch (error) {
-        console.error("Failed to fetch company:", error);
-      } finally {
-        setLoading(false);
-      }
+    let cancelled = false;
+    fetchKey<Record<string, string>>(QUERY_KEYS.company)
+      .then((data) => {
+        if (cancelled || !data) return;
+        setCompany({
+          id: data.id,
+          name: data.name || "",
+          logo: data.logo || "",
+          email: data.email || "",
+          phone: data.phone || "",
+          address: data.address || "",
+          warrantyPolicy: data.warrantyPolicy || "",
+        });
+      })
+      .catch((error) => console.error("Failed to fetch company:", error))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
     };
-    fetchCompany();
   }, []);
 
   // Show toast notification
@@ -158,6 +154,7 @@ export default function CompanyPage() {
         } else {
           updateProfile({ companyName: company.name });
         }
+        invalidate(QUERY_KEYS.company);
         showToast("success", "Company information saved successfully");
       } else {
         showToast("error", "Failed to save information");
@@ -184,6 +181,7 @@ export default function CompanyPage() {
       });
 
       if (response.ok) {
+        invalidate(QUERY_KEYS.company);
         showToast("success", "Warranty policy saved successfully");
       } else {
         showToast("error", "Failed to save policy");

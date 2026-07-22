@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useQuery, QUERY_KEYS } from "@/lib/use-query";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -89,7 +90,7 @@ const statusStyles: Record<string, string> = {
 
 export default function AnnouncementsPage() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [segments, setSegments] = useState<Segment[]>([]);
+  // Segments come straight from the shared query cache — see below.
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const confirm = useConfirm();
@@ -127,12 +128,15 @@ export default function AnnouncementsPage() {
     }
   }, []);
 
+  // NFR-P-001: both requests start together, and the segment list comes from
+  // the shared cache — the leads and campaigns pages read the same key. Derived
+  // straight from the cache rather than mirrored into state, so there is no
+  // extra render pass when it arrives.
+  const { data: cachedSegments } = useQuery<Segment[]>(QUERY_KEYS.segments);
+  const segments: Segment[] = Array.isArray(cachedSegments) ? cachedSegments : [];
+
   useEffect(() => {
     loadAnnouncements();
-    fetch("/api/sales/segments")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setSegments(Array.isArray(data) ? data : []))
-      .catch(() => {});
   }, [loadAnnouncements]);
 
   const resetForm = () => {

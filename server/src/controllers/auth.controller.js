@@ -4,6 +4,7 @@ import nodemailer from "nodemailer";
 import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import { createSuperadminSessionToken } from "../lib/superadmin-session.js";
+import { resolveDownloadUrl } from "../lib/storage.js";
 
 const safeEqual = (a, b) => {
   const ab = Buffer.from(String(a ?? ""), "utf8");
@@ -84,7 +85,8 @@ export const getMe = async (req, res) => {
       hasWarrantyAccess,
       hasSalesAccess,
       verificationStatus,
-      verificationDocUrl: dbUser.company?.verificationDocUrl || null,
+      // NFR-S-006: stored as a private storage reference — sign it for display.
+      verificationDocUrl: await resolveDownloadUrl(dbUser.company?.verificationDocUrl),
       avatar: avatarUrl,
       companyLogo: dbUser.company?.logo || null,
       companyName: dbUser.company?.name || null,

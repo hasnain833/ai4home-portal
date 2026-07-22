@@ -14,8 +14,10 @@ export function hasLLM() {
   return isRealAnthropicKey() || !!getGroqKey();
 }
 
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+// Model choice is a code decision, not deployment config — changing it affects
+// prompt behaviour and output quality, so it belongs in review, not in a .env.
+const ANTHROPIC_MODEL = "claude-sonnet-5";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 async function callAnthropic({ system, user, maxTokens }) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {

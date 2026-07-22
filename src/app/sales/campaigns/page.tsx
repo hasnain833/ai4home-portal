@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { fetchKey, QUERY_KEYS } from "@/lib/use-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -288,17 +289,19 @@ export default function CampaignsPage() {
     setSelectedSegmentId("");
     setLoadingLeads(true);
     try {
-      const [leadsRes, segRes] = await Promise.all([
-        fetch("/api/sales/leads?pageSize=50"),
-        fetch("/api/sales/segments"),
+      // NFR-P-001: concurrent, and the segment list comes from the cache shared
+      // with the leads and announcements pages.
+      const [leadsResult, segResult] = await Promise.allSettled([
+        fetchKey<unknown[] | { leads?: unknown[] }>("/api/sales/leads?pageSize=50"),
+        fetchKey<unknown[] | { segments?: unknown[] }>(QUERY_KEYS.segments),
       ]);
-      if (leadsRes.ok) {
-        const data = await leadsRes.json();
-        setLeadsForEnroll(Array.isArray(data) ? data : data.leads || []);
+      if (leadsResult.status === "fulfilled") {
+        const data = leadsResult.value;
+        setLeadsForEnroll(Array.isArray(data) ? data : data?.leads || []);
       }
-      if (segRes.ok) {
-        const s = await segRes.json();
-        setSegments(Array.isArray(s) ? s : s.segments || []);
+      if (segResult.status === "fulfilled") {
+        const s = segResult.value;
+        setSegments(Array.isArray(s) ? s : s?.segments || []);
       }
     } catch (e) {
       console.error(e);

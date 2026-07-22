@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Clock,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,6 +40,7 @@ type KbDoc = {
   chunkCount: number;
   error?: string | null;
   createdAt: string;
+  hasFile?: boolean;
 };
 
 type Match = { documentId: string; name: string; category: string; text: string; score: number };
@@ -158,8 +160,8 @@ export default function SalesKnowledgeBasePage() {
         fail++;
         continue;
       }
-      if (file.size > 50 * 1024 * 1024) {
-        toast.error(`Skipped ${file.name}: file must be under 50MB`);
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error(`Skipped ${file.name}: file must be under 25MB`);
         fail++;
         continue;
       }
@@ -190,6 +192,21 @@ export default function SalesKnowledgeBasePage() {
     e.preventDefault();
     setDragActive(false);
     if (e.dataTransfer.files?.length) uploadFiles(e.dataTransfer.files);
+  };
+
+  const handleView = async (id: string) => {
+    try {
+      const res = await fetch(`/api/sales/kb/${id}/download`);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast.error(d.message || "Could not open that document.");
+        return;
+      }
+      const { url } = await res.json();
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      toast.error("Network error.");
+    }
   };
 
   const confirm = useConfirm();
@@ -268,7 +285,7 @@ export default function SalesKnowledgeBasePage() {
             <CardHeader className="border-b">
               <CardTitle className="text-sm font-bold">Upload Documents</CardTitle>
               <CardDescription className="text-xs">
-                PDF, DOCX, or TXT up to 50MB. Documents are chunked, embedded, and indexed automatically.
+                PDF, DOCX, or TXT up to 25MB. Files are virus-scanned, stored privately, then chunked, embedded, and indexed automatically.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
@@ -368,9 +385,22 @@ export default function SalesKnowledgeBasePage() {
                           <td className="py-3.5 px-4 text-xs text-muted-foreground">{d.size}</td>
                           <td className="py-3.5 px-4 text-xs text-muted-foreground">{new Date(d.createdAt).toLocaleDateString()}</td>
                           <td className="py-3.5 px-4">
-                            <Button variant="ghost" size="sm" className="h-7 text-red-500 hover:text-red-600" onClick={() => handleDelete(d.id, d.name)}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              {d.hasFile !== false && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7"
+                                  title="Open the stored file (link expires shortly)"
+                                  onClick={() => handleView(d.id)}
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="sm" className="h-7 text-red-500 hover:text-red-600" onClick={() => handleDelete(d.id, d.name)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       );

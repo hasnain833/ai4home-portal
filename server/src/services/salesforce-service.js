@@ -1,5 +1,9 @@
 import prisma from "../lib/prisma.js";
-import { createCipheriv, createDecipheriv, randomBytes, createHash } from "crypto";
+import { randomBytes, createHash } from "crypto";
+import { encrypt, decryptSafe } from "../lib/crypto.js";
+
+export { encrypt };
+export const decrypt = decryptSafe;
 
 export function generateCodeVerifier() {
   return randomBytes(32).toString("base64url");
@@ -7,44 +11,6 @@ export function generateCodeVerifier() {
 
 export function codeChallengeFromVerifier(verifier) {
   return createHash("sha256").update(verifier).digest("base64url");
-}
-
-const ALGORITHM = "aes-256-gcm";
-const DEFAULT_ENCRYPTION_KEY = "change_me_to_a_32_char_hex_key_00";
-const ENCRYPTION_KEY = process.env.SALESFORCE_ENCRYPTION_KEY || DEFAULT_ENCRYPTION_KEY;
-
-if (ENCRYPTION_KEY === DEFAULT_ENCRYPTION_KEY) {
-  console.warn(
-    "[salesforce-service] SALESFORCE_ENCRYPTION_KEY is the public default — Salesforce token encryption is NOT secure. Set a strong 32-char key and re-encrypt stored connections before production.",
-  );
-}
-
-function getKeyBuffer() {
-  const key = ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32);
-  return Buffer.from(key, "utf-8");
-}
-
-export function encrypt(text) {
-  const iv = randomBytes(16);
-  const cipher = createCipheriv(ALGORITHM, getKeyBuffer(), iv);
-  let encrypted = cipher.update(text, "utf8", "hex");
-  encrypted += cipher.final("hex");
-  const authTag = cipher.getAuthTag().toString("hex");
-  return `${iv.toString("hex")}:${authTag}:${encrypted}`;
-}
-
-export function decrypt(encryptedText) {
-  try {
-    const [ivHex, authTagHex, encrypted] = encryptedText.split(":");
-    if (!ivHex || !authTagHex || !encrypted) return encryptedText; 
-    const decipher = createDecipheriv(ALGORITHM, getKeyBuffer(), Buffer.from(ivHex, "hex"));
-    decipher.setAuthTag(Buffer.from(authTagHex, "hex"));
-    let decrypted = decipher.update(encrypted, "hex", "utf8");
-    decrypted += decipher.final("utf8");
-    return decrypted;
-  } catch {
-    return encryptedText;
-  }
 }
 
 export const DEFAULT_FIELD_MAPPINGS = [

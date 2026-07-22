@@ -19,6 +19,7 @@ import {
   updateDefaultNewsSources,
   getSupportLeads,
   getSupportAccessLog,
+  getSecurityPosture,
 } from "../admin/platform.controller.js";
 
 const router = express.Router();
@@ -37,6 +38,7 @@ router.get("/news-defaults", requireAuth, getDefaultNewsSources);
 router.put("/news-defaults", requireAuth, updateDefaultNewsSources);
 router.get("/support/leads/:companyId", requireAuth, getSupportLeads);
 router.get("/support/access-log", requireAuth, getSupportAccessLog);
+router.get("/security-posture", requireAuth, getSecurityPosture);
 
 router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);

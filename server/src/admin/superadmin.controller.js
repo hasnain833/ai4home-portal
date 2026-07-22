@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
+import { resolveDownloadUrl } from "../lib/storage.js";
 
 export const getCompanies = async (req, res) => {
   try {
@@ -22,8 +23,16 @@ export const getCompanies = async (req, res) => {
         createdAt: "desc",
       },
     });
+    const withSignedDocs = await Promise.all(
+      companies.map(async (company) => ({
+        ...company,
+        verificationDocUrl: await resolveDownloadUrl(company.verificationDocUrl, {
+          expiresIn: 900,
+        }),
+      })),
+    );
 
-    return res.json(companies);
+    return res.json(withSignedDocs);
   } catch (error) {
     console.error("Error fetching companies:", error);
     return res.status(500).json({ message: "Error fetching companies" });
@@ -122,8 +131,6 @@ export const updateCompanyWorkspaces = async (req, res) => {
   }
 };
 
-// Super Admin reviews a submitted verification document and approves or rejects
-// the tenant. Approving unlocks (unblurs) their warranty workspace.
 export const verifyCompany = async (req, res) => {
   try {
     const session = req.user;
@@ -132,7 +139,7 @@ export const verifyCompany = async (req, res) => {
     }
 
     const { companyId } = req.params;
-    const { action } = req.body; // "approve" | "reject"
+    const { action } = req.body; 
 
     const existing = await prisma.company.findUnique({ where: { id: companyId } });
     if (!existing) {
@@ -140,7 +147,6 @@ export const verifyCompany = async (req, res) => {
     }
 
     if (action === "reject") {
-      // Send the tenant back to PENDING so they can re-upload a valid document.
       const company = await prisma.company.update({
         where: { id: companyId },
         data: {

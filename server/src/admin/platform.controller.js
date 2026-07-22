@@ -5,6 +5,8 @@ import {
   NEWS_DEFAULTS_KEY,
   normalizeNewsSources,
 } from "../lib/news-sources.js";
+import { decryptDetailed, encryptionKeyStatus, isEncrypted } from "../lib/crypto.js";
+import { avScannerStatus } from "../lib/file-security.js";
 
 function denyUnlessSuperAdmin(req, res) {
   if (!req.user?.isSuperAdmin) {
@@ -36,7 +38,6 @@ export const getCrmHealth = async (req, res) => {
       },
     });
 
-    // Recent sync failures per tenant, so "healthy" isn't just "last run was OK".
     const since = new Date(Date.now() - SYNC_WINDOW_HOURS * 60 * 60 * 1000);
     const recentLogs = await prisma.syncLog.groupBy({
       by: ["companyId", "status"],
@@ -71,7 +72,6 @@ export const getCrmHealth = async (req, res) => {
       };
       const tokenExpired =
         !!c.tokenExpiresAt && c.tokenExpiresAt.getTime() < now;
-      // Stale = no successful run within a generous multiple of its own interval.
       const staleAfterMs = Math.max(c.syncInterval || 15, 15) * 60 * 1000 * 4;
       const stale =
         !c.lastSyncAt || now - c.lastSyncAt.getTime() > staleAfterMs;
@@ -133,7 +133,6 @@ function safeHost(url) {
   }
 }
 
-// ─── News: manage default sources ─────────────────────────────────────────────
 
 export const getDefaultNewsSources = async (req, res) => {
   try {
@@ -150,8 +149,6 @@ export const getDefaultNewsSources = async (req, res) => {
     });
     const saved = normalizeNewsSources(row?.value);
 
-    // How many tenants actually fall back to these — the number that makes the
-    // Platform Admin's edit here meaningful rather than theoretical.
     const companies = await prisma.company.findMany({
       select: { newsSources: true },
     });
@@ -190,7 +187,6 @@ export const updateDefaultNewsSources = async (req, res) => {
       return res.status(400).json({ message: "`sources` must be an array" });
     }
 
-    // Same normalizer the per-tenant path uses: http(s) only, deduped, capped.
     const normalized = normalizeNewsSources(sources);
     if (sources.length > 0 && normalized.length === 0) {
       return res
@@ -226,7 +222,6 @@ export const updateDefaultNewsSources = async (req, res) => {
   }
 };
 
-// ─── Leads: support access (audited) ──────────────────────────────────────────
 
 const SUPPORT_LEAD_LIMIT = 100;
 
@@ -325,6 +320,73 @@ export const getSupportAccessLog = async (req, res) => {
     return res.json(entries);
   } catch (error) {
     console.error("[Platform getSupportAccessLog] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const SECRET_COLUMNS = [
+  { model: "integration", label: "ERP / SMTP / SMS credentials", fields: ["apiKey", "secretKey"] },
+  {
+    model: "salesforceConnection",
+    label: "Salesforce OAuth",
+    fields: ["accessToken", "refreshToken", "clientSecret"],
+  },
+  { model: "calendarConnection", label: "Google Calendar OAuth", fields: ["accessToken", "refreshToken"] },
+];
+
+export const getSecurityPosture = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+
+    const breakdown = [];
+    let plaintext = 0;
+    let stale = 0;
+    let unreadable = 0;
+    let current = 0;
+
+    for (const target of SECRET_COLUMNS) {
+      const delegate = prisma[target.model];
+      if (!delegate) continue;
+
+      const select = { id: true };
+      for (const f of target.fields) select[f] = true;
+      const rows = await delegate.findMany({ select });
+
+      const counts = { label: target.label, plaintext: 0, stale: 0, unreadable: 0, current: 0 };
+      for (const row of rows) {
+        for (const field of target.fields) {
+          const value = row[field];
+          if (value == null || value === "") continue;
+          if (!isEncrypted(value)) {
+            counts.plaintext++;
+            continue;
+          }
+          const detail = decryptDetailed(value);
+          if (detail.failed) counts.unreadable++;
+          else if (detail.stale) counts.stale++;
+          else counts.current++;
+        }
+      }
+
+      plaintext += counts.plaintext;
+      stale += counts.stale;
+      unreadable += counts.unreadable;
+      current += counts.current;
+      breakdown.push(counts);
+    }
+
+    const needsRotation = plaintext + stale;
+
+    return res.json({
+      encryptionKey: encryptionKeyStatus(),
+      uploadScanning: avScannerStatus(),
+      secrets: { current, plaintext, stale, unreadable, needsRotation, breakdown },
+      remediation: needsRotation
+        ? "Run `npm run rotate-keys` in server/ to re-encrypt these under the current key."
+        : null,
+    });
+  } catch (error) {
+    console.error("[Platform getSecurityPosture] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

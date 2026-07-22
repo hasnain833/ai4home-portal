@@ -4,6 +4,7 @@ import mammoth from "mammoth";
 import { createRequire } from "module";
 import { upsertChunks } from "../../services/vector-store.service.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
+import { resolveDownloadUrl } from "../../lib/storage.js";
 
 
 const require = createRequire(import.meta.url);
@@ -75,7 +76,11 @@ export async function runKbIngestion(documentId, companyId) {
   });
 
   try {
-    const text = await extractText(doc.url, doc.name);
+    const sourceUrl = await resolveDownloadUrl(doc.url, { expiresIn: 900 });
+    if (!sourceUrl) {
+      throw new Error("Document file is missing from storage.");
+    }
+    const text = await extractText(sourceUrl, doc.name);
     const chunks = chunkText(text);
 
     if (!chunks.length) {
