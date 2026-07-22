@@ -1,6 +1,15 @@
 import prisma from "../lib/prisma.js";
-import { createClient } from "@supabase/supabase-js";
 import { deleteDocument, queryDetailed, backfillEmbeddings, getRetrievalStatus, query as kbQuery } from "../services/vector-store.service.js";
+import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
+import {
+  BUCKETS,
+  DEFAULT_SIGNED_URL_TTL,
+  deleteObject,
+  isLegacyPublicUrl,
+  resolveDownloadUrl,
+  uploadObject,
+} from "../lib/storage.js";
+import { writeAuditLog } from "../lib/audit.js";
 import { runKbIngestion } from "../inngest/functions/kb-ingest.js";
 import { chat, hasLLM } from "../lib/llm.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations } from "../lib/sales-ai.js";
@@ -9,8 +18,6 @@ import {
   listSalesConfigVersions,
   rollbackSalesConfig,
 } from "../services/sales-config-version.service.js";
-
-const SALES_KB_BUCKET = "sales_knowledge_base";
 
 function formatFileSize(bytes) {
   if (!bytes) return "0 Bytes";
@@ -22,18 +29,50 @@ function formatFileSize(bytes) {
 
 export const getSalesKB = async (req, res) => {
   try {
-    // SW-KB-003: soft-deleted docs are hidden from the active list.
     const documents = await prisma.salesKB.findMany({
       where: { companyId: req.user.companyId, isDeleted: false },
       orderBy: { createdAt: "desc" },
     });
-
-    return res.json(documents);
+    return res.json(
+      documents.map(({ url, ...doc }) => ({
+        ...doc,
+        hasFile: Boolean(url),
+        legacyPublicUrl: isLegacyPublicUrl(url),
+      })),
+    );
   } catch (error) {
     console.error("[Sales KB List] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+function validateExternalDocumentUrl(raw) {
+  let parsed;
+  try {
+    parsed = new URL(String(raw));
+  } catch {
+    return "That document URL isn't a valid URL.";
+  }
+
+  if (parsed.protocol !== "https:") return "Document URLs must use HTTPS.";
+
+  const host = parsed.hostname.toLowerCase();
+  const isPrivate =
+    host === "localhost" ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host === "::1" ||
+    host === "[::1]" ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^0\./.test(host);
+
+  if (isPrivate) return "That document URL points to a private address, which isn't allowed.";
+  return null;
+}
 
 export const addSalesKBDocument = async (req, res) => {
   try {
@@ -42,6 +81,9 @@ export const addSalesKBDocument = async (req, res) => {
     if (!name || !size || !url) {
       return res.status(400).json({ message: "Missing required fields: name, size, url" });
     }
+
+    const urlError = validateExternalDocumentUrl(url);
+    if (urlError) return res.status(400).json({ message: urlError });
 
     const document = await prisma.salesKB.create({
       data: {
@@ -58,7 +100,8 @@ export const addSalesKBDocument = async (req, res) => {
       console.error("[Sales KB] Ingestion failed:", e?.message || e),
     );
 
-    return res.status(201).json(document);
+    const { url: _external, ...safeDocument } = document;
+    return res.status(201).json({ ...safeDocument, hasFile: true, legacyPublicUrl: true });
   } catch (error) {
     console.error("[Sales KB Create] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -73,51 +116,81 @@ export const uploadSalesKBDocument = async (req, res) => {
     const companyId = req.user.companyId;
     const category = req.body.category || "General";
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.error("Missing Supabase credentials for Sales KB upload");
-      return res.status(500).json({ message: "Server storage is not configured" });
-    }
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Ensure the bucket exists (public so the ingester can fetch the file by URL).
-    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-    if (!bucketsError && !buckets.some((b) => b.name === SALES_KB_BUCKET)) {
-      await supabase.storage.createBucket(SALES_KB_BUCKET, { public: true });
-    }
+    const scan = await assertUploadSafe(file, "kbDocument");
 
     const originalName = file.originalname || "document";
-    const fileName = `${companyId}/${Date.now()}_${originalName.replace(/[^a-zA-Z0-9.\-_]/g, "")}`;
+    const key = buildStorageKey(companyId, originalName, "document");
 
-    const { error: uploadError } = await supabase.storage
-      .from(SALES_KB_BUCKET)
-      .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: false });
-    if (uploadError) {
-      console.error("Sales KB storage upload error:", uploadError);
-      return res.status(500).json({ message: "Error uploading file to storage" });
-    }
-
-    const { data: publicUrlData } = supabase.storage.from(SALES_KB_BUCKET).getPublicUrl(fileName);
+    const { ref } = await uploadObject({
+      bucket: BUCKETS.salesKb,
+      key,
+      buffer: file.buffer,
+      contentType: file.mimetype,
+      isPublic: false,
+    });
 
     const document = await prisma.salesKB.create({
       data: {
         companyId,
         name: originalName,
         size: formatFileSize(file.size),
-        url: publicUrlData.publicUrl,
+        url: ref,
         category,
         status: "PENDING",
       },
+    });
+
+    await writeAuditLog({
+      req,
+      action: "KB_DOCUMENT_UPLOADED",
+      companyId,
+      targetType: "SalesKB",
+      targetId: document.id,
+      metadata: { name: originalName, bytes: file.size, scanned: scan.scanned, scanner: scan.provider },
     });
 
     runKbIngestion(document.id, companyId).catch((e) =>
       console.error("[Sales KB] Ingestion failed:", e?.message || e),
     );
 
-    return res.status(201).json(document);
+    const { url: _stored, ...safeDocument } = document;
+    return res.status(201).json({ ...safeDocument, hasFile: true, legacyPublicUrl: false });
   } catch (error) {
+    if (error instanceof UploadRejected) {
+      return res.status(error.status).json({ message: error.message, code: error.code });
+    }
     console.error("[Sales KB Upload] Error:", error);
+    return res.status(error?.status || 500).json({
+      message: error?.status ? error.message : "Internal server error",
+    });
+  }
+};
+
+export const getSalesKBDownloadUrl = async (req, res) => {
+  try {
+    const document = await prisma.salesKB.findFirst({
+      where: { id: req.params.id, companyId: req.user.companyId, isDeleted: false },
+    });
+    if (!document) return res.status(404).json({ message: "Document not found" });
+    if (!document.url) return res.status(404).json({ message: "This document has no stored file." });
+
+    const url = await resolveDownloadUrl(document.url);
+    if (!url) {
+      return res.status(500).json({ message: "Could not generate a download link for this document." });
+    }
+
+    await writeAuditLog({
+      req,
+      action: "KB_DOCUMENT_DOWNLOADED",
+      companyId: req.user.companyId,
+      targetType: "SalesKB",
+      targetId: document.id,
+      metadata: { name: document.name },
+    });
+
+    return res.json({ url, expiresInSeconds: DEFAULT_SIGNED_URL_TTL });
+  } catch (error) {
+    console.error("[Sales KB Download] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -139,9 +212,17 @@ export const deleteSalesKBDocument = async (req, res) => {
       console.error("[Sales KB Delete] chunk cleanup failed:", e?.message || e);
     }
 
+    const purge = await deleteObject(document.url);
+
     await prisma.salesKB.update({
       where: { id },
-      data: { isDeleted: true, deletedAt: new Date(), status: "PENDING", chunkCount: 0 },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+        status: "PENDING",
+        chunkCount: 0,
+        ...(purge.removed ? { url: "" } : {}),
+      },
     });
 
     return res.json({ success: true, message: "Document removed from the knowledge base." });

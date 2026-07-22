@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Newspaper, Plus, Trash2, Save, RefreshCcw, Rss } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
 
 interface NewsSource {
   url: string;
@@ -36,27 +37,25 @@ export default function NewsSourcesTab() {
   const [newLabel, setNewLabel] = useState("");
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/company", { credentials: "include" });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data?.newsSources)) {
-            setSources(
-              data.newsSources.map((s: NewsSource) => ({
-                url: String(s.url || ""),
-                label: String(s.label || ""),
-                enabled: s.enabled === undefined ? true : !!s.enabled,
-              }))
-            );
-          }
-        }
-      } catch (error) {
-        console.error("Failed to load news sources:", error);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    let cancelled = false;
+    fetchKey<{ newsSources?: NewsSource[] }>(QUERY_KEYS.company)
+      .then((data) => {
+        if (cancelled || !Array.isArray(data?.newsSources)) return;
+        setSources(
+          data.newsSources.map((s: NewsSource) => ({
+            url: String(s.url || ""),
+            label: String(s.label || ""),
+            enabled: s.enabled === undefined ? true : !!s.enabled,
+          })),
+        );
+      })
+      .catch((error) => console.error("Failed to load news sources:", error))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const addSource = () => {
@@ -102,6 +101,7 @@ export default function NewsSourcesTab() {
       const data = await res.json();
       // Reflect the server-normalized list (invalid/dupe entries dropped).
       if (Array.isArray(data?.newsSources)) setSources(data.newsSources);
+      invalidate(QUERY_KEYS.company);
       toast.success("News sources saved.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save");

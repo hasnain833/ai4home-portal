@@ -8,11 +8,15 @@ import {
   uploadCompanyLogo,
   submitVerificationDocument
 } from "../controllers/company.controller.js";
+import { handleUploadErrors } from "../middlewares/upload.js";
 
 const router = express.Router();
 
-// Set up multer for handling multipart/form-data
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+const uploadFile = handleUploadErrors(upload.single("file"));
 
 router.get("/", requireAuth, getCompany);
 router.put("/", requireAuth, updateCompany);
@@ -25,12 +29,7 @@ router.options("/branding", (req, res) => {
   return res.status(204).end();
 });
 
-router.post("/logo", requireAuth, upload.single("file"), uploadCompanyLogo);
-router.post(
-  "/verification",
-  requireAuth,
-  upload.single("file"),
-  submitVerificationDocument,
-);
+router.post("/logo", requireAuth, uploadFile, uploadCompanyLogo);
+router.post("/verification", requireAuth, uploadFile, submitVerificationDocument);
 
 export default router;

@@ -1,8 +1,13 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
 import { sendSms } from "../services/sms.service.js";
+import { encrypt, decryptSafe } from "../lib/crypto.js";
 
-// GET /api/sales/settings/messaging
+const last4 = (value) => {
+  const plain = decryptSafe(value);
+  return plain ? `••••${String(plain).slice(-4)}` : null;
+};
+
 export const getMessagingSettings = async (req, res) => {
   try {
     const session = req.user;
@@ -28,8 +33,8 @@ export const getMessagingSettings = async (req, res) => {
         smtpPort: emailInt.smtpPort,
         senderEmail: emailInt.senderEmail,
         senderName: emailInt.senderName,
-        smtpUser: emailInt.apiKey ? `••••${emailInt.apiKey.slice(-4)}` : null,
-        smtpPass: emailInt.secretKey ? `••••${emailInt.secretKey.slice(-4)}` : null,
+        smtpUser: last4(emailInt.apiKey),
+        smtpPass: last4(emailInt.secretKey),
         isActive: emailInt.isActive,
       };
     }
@@ -39,11 +44,9 @@ export const getMessagingSettings = async (req, res) => {
       settings.sms = {
         id: smsInt.id,
         provider: smsInt.platform,
-        // Twilio "from" number (E.164) or Messaging Service SID — not sensitive.
         senderName: smsInt.senderName,
-        // Account SID (apiKey) and Auth Token (secretKey) returned masked.
-        apiKey: smsInt.apiKey ? `••••${smsInt.apiKey.slice(-4)}` : null,
-        apiSecret: smsInt.secretKey ? `••••${smsInt.secretKey.slice(-4)}` : null,
+        apiKey: last4(smsInt.apiKey),
+        apiSecret: last4(smsInt.secretKey),
         isActive: smsInt.isActive,
       };
     }
@@ -55,7 +58,6 @@ export const getMessagingSettings = async (req, res) => {
   }
 };
 
-// PUT /api/sales/settings/messaging/email
 export const saveEmailSettings = async (req, res) => {
   try {
     const session = req.user;
@@ -77,9 +79,8 @@ export const saveEmailSettings = async (req, res) => {
       isActive: isActive ?? true,
     };
 
-    // Only update passwords if they are provided (not masked)
-    if (smtpUser && !smtpUser.includes("••••")) data.apiKey = smtpUser;
-    if (smtpPass && !smtpPass.includes("••••")) data.secretKey = smtpPass;
+    if (smtpUser && !smtpUser.includes("••••")) data.apiKey = encrypt(smtpUser);
+    if (smtpPass && !smtpPass.includes("••••")) data.secretKey = encrypt(smtpPass);
 
     let integration;
     if (existing) {
@@ -95,7 +96,6 @@ export const saveEmailSettings = async (req, res) => {
   }
 };
 
-// PUT /api/sales/settings/messaging/sms
 export const saveSmsSettings = async (req, res) => {
   try {
     const session = req.user;
@@ -108,7 +108,6 @@ export const saveSmsSettings = async (req, res) => {
       return res.status(400).json({ message: "Invalid SMS provider" });
     }
 
-    // Delete any stale SMS integrations (including legacy Brevo SMS rows).
     await prisma.integration.deleteMany({
       where: {
         companyId,
@@ -126,8 +125,8 @@ export const saveSmsSettings = async (req, res) => {
       isActive: isActive ?? true,
     };
 
-    if (apiKey && !apiKey.includes("••••")) data.apiKey = apiKey;
-    if (apiSecret && !apiSecret.includes("••••")) data.secretKey = apiSecret;
+    if (apiKey && !apiKey.includes("••••")) data.apiKey = encrypt(apiKey);
+    if (apiSecret && !apiSecret.includes("••••")) data.secretKey = encrypt(apiSecret);
 
     let integration;
     if (existing) {
@@ -143,7 +142,6 @@ export const saveSmsSettings = async (req, res) => {
   }
 };
 
-// POST /api/sales/settings/messaging/test-email
 export const testEmail = async (req, res) => {
   try {
     const { to, config } = req.body;
@@ -159,8 +157,8 @@ export const testEmail = async (req, res) => {
       smtpConfig = {
         host: existing.smtpHost,
         port: existing.smtpPort,
-        user: existing.apiKey,
-        pass: existing.secretKey,
+        user: decryptSafe(existing.apiKey),
+        pass: decryptSafe(existing.secretKey),
         senderEmail: existing.senderEmail,
         senderName: existing.senderName,
       };
@@ -194,14 +192,12 @@ export const testEmail = async (req, res) => {
   }
 };
 
-// POST /api/sales/settings/messaging/test-sms
 export const testSms = async (req, res) => {
   try {
     const { to, config } = req.body;
     if (!to) return res.status(400).json({ message: "Recipient phone number required" });
     
     let smsConfig;
-    // If either credential is masked, pull the real values from the DB.
     if (config.apiKey?.includes("••••") || config.apiSecret?.includes("••••")) {
       const existing = await prisma.integration.findFirst({
         where: { companyId: req.user?.companyId || "demo-company", platform: "TWILIO_SMS" },
@@ -210,8 +206,8 @@ export const testSms = async (req, res) => {
 
       smsConfig = {
         provider: "TWILIO_SMS",
-        accountSid: existing.apiKey,
-        authToken: existing.secretKey,
+        accountSid: decryptSafe(existing.apiKey),
+        authToken: decryptSafe(existing.secretKey),
         from: existing.senderName,
       };
     } else {

@@ -1,4 +1,5 @@
 import prisma from "./prisma.js";
+import { decryptSafe } from "./crypto.js";
 
 function isPubliclyReachable(hostname) {
   const h = hostname.toLowerCase();
@@ -13,7 +14,7 @@ function isPubliclyReachable(hostname) {
 }
 
 export function buildSmsWebhookUrl(path, companyId) {
-  const base = process.env.PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_URL;
+  const base = process.env.NEXT_PUBLIC_URL;
   if (!base) return null;
   try {
     const url = new URL(path, base);
@@ -47,8 +48,8 @@ export async function getMessagingConfig(companyId) {
     smtpConfig = {
       host: emailInt.smtpHost,
       port: emailInt.smtpPort,
-      user: emailInt.apiKey,
-      pass: emailInt.secretKey,
+      user: decryptSafe(emailInt.apiKey),
+      pass: decryptSafe(emailInt.secretKey),
       senderEmail: emailInt.senderEmail,
       senderName: emailInt.senderName,
     };
@@ -58,8 +59,8 @@ export async function getMessagingConfig(companyId) {
   if (smsInt) {
     smsConfig = {
       provider: "TWILIO_SMS",
-      accountSid: smsInt.apiKey,
-      authToken: smsInt.secretKey,
+      accountSid: decryptSafe(smsInt.apiKey),
+      authToken: decryptSafe(smsInt.secretKey),
       from: smsInt.senderName,
       statusCallbackUrl: buildSmsWebhookUrl("/api/sales/compliance/events/sms", companyId),
     };

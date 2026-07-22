@@ -1,10 +1,12 @@
 import { Router } from "express";
 import multer from "multer";
 import { requireAuth, requireRoles, requirePermission } from "../middlewares/auth.js";
+import { handleUploadErrors } from "../middlewares/upload.js";
 import {
   getSalesKB,
   addSalesKBDocument,
   uploadSalesKBDocument,
+  getSalesKBDownloadUrl,
   deleteSalesKBDocument,
   searchSalesKB,
   getBrandProfile,
@@ -17,7 +19,8 @@ import {
 } from "../controllers/kb.controller.js";
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const uploadKbFile = handleUploadErrors(upload.single("file"));
 
 const staff = requireRoles(["ADMIN", "STAFF"]);
 const canManage = requirePermission("kb.manage");
@@ -27,7 +30,8 @@ router.post("/search", requireAuth, searchSalesKB);
 router.get("/retrieval-status", requireAuth, getKbRetrievalStatus);
 
 router.post("/", requireAuth, staff, canManage, addSalesKBDocument);
-router.post("/upload", requireAuth, staff, canManage, upload.single("file"), uploadSalesKBDocument);
+router.post("/upload", requireAuth, staff, canManage, uploadKbFile, uploadSalesKBDocument);
+router.get("/:id/download", requireAuth, getSalesKBDownloadUrl);
 router.delete("/:id", requireAuth, staff, canManage, deleteSalesKBDocument);
 
 router.get("/brand-profile", requireAuth, getBrandProfile);

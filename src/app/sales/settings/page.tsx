@@ -15,6 +15,8 @@ import NewsSourcesTab from "@/components/sales/settings/NewsSourcesTab";
 import MappingHistoryDialog from "@/components/sales/settings/MappingHistoryDialog";
 import DeadLetterTab from "@/components/sales/settings/DeadLetterTab";
 import AiConfigSafetyTab from "@/components/sales/settings/AiConfigSafetyTab";
+import PrivacyRequestsTab from "@/components/sales/settings/PrivacyRequestsTab";
+import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
 import { DEFAULT_LEAD_STATUSES } from "@/lib/lead-statuses";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -244,38 +246,45 @@ function SettingsPageContent() {
 
   // ─── Fetch Company Settings ──────────────────────────────────────────────
   const fetchCompanySettings = useCallback(async () => {
-    try {
-      const res = await fetch("/api/company");
-      if (res.ok) {
-        const data = await res.json();
-        if (data) {
-          if (data.defaultLeadOwner) setDefaultOwner(data.defaultLeadOwner);
-          if (data.voiceProfile) setVoiceProfile(data.voiceProfile);
-          if (data.complianceOptInRequired !== undefined) setComplianceOptInRequired(data.complianceOptInRequired);
-          if (data.smsQuietHoursEnabled !== undefined) setSmsQuietHoursEnabled(data.smsQuietHoursEnabled);
-          if (data.quietHoursStart !== undefined) setQuietHoursStart(data.quietHoursStart);
-          if (data.quietHoursEnd !== undefined) setQuietHoursEnd(data.quietHoursEnd);
-          if (data.quietHoursTimezone) setQuietHoursTimezone(data.quietHoursTimezone);
-          if (Array.isArray(data.leadStatuses) && data.leadStatuses.length) {
-            setLeadStatuses(data.leadStatuses.map((s: unknown) => String(s)));
-          } else {
-            setLeadStatuses([...DEFAULT_LEAD_STATUSES]);
-          }
-        }
+    type CompanySettings = {
+      defaultLeadOwner?: string;
+      voiceProfile?: string;
+      complianceOptInRequired?: boolean;
+      smsQuietHoursEnabled?: boolean;
+      quietHoursStart?: number;
+      quietHoursEnd?: number;
+      quietHoursTimezone?: string;
+      leadStatuses?: unknown[];
+    };
+
+    const [companyResult, usersResult] = await Promise.allSettled([
+      fetchKey<CompanySettings>(QUERY_KEYS.company),
+      fetchKey<unknown[]>("/api/users"),
+    ]);
+
+    if (companyResult.status === "fulfilled" && companyResult.value) {
+      const data = companyResult.value;
+      if (data.defaultLeadOwner) setDefaultOwner(data.defaultLeadOwner);
+      if (data.voiceProfile) setVoiceProfile(data.voiceProfile);
+      if (data.complianceOptInRequired !== undefined) setComplianceOptInRequired(data.complianceOptInRequired);
+      if (data.smsQuietHoursEnabled !== undefined) setSmsQuietHoursEnabled(data.smsQuietHoursEnabled);
+      if (data.quietHoursStart !== undefined) setQuietHoursStart(data.quietHoursStart);
+      if (data.quietHoursEnd !== undefined) setQuietHoursEnd(data.quietHoursEnd);
+      if (data.quietHoursTimezone) setQuietHoursTimezone(data.quietHoursTimezone);
+      if (Array.isArray(data.leadStatuses) && data.leadStatuses.length) {
+        setLeadStatuses(data.leadStatuses.map((s: unknown) => String(s)));
+      } else {
+        setLeadStatuses([...DEFAULT_LEAD_STATUSES]);
       }
-    } catch (error) {
-      console.error("Failed to fetch company compliance settings:", error);
+    } else if (companyResult.status === "rejected") {
+      console.error("Failed to fetch company compliance settings:", companyResult.reason);
     }
 
     // Populate the "default lead owner" dropdown from real team members.
-    try {
-      const usersRes = await fetch("/api/users");
-      if (usersRes.ok) {
-        const users = await usersRes.json();
-        if (Array.isArray(users)) setTeamMembers(users);
-      }
-    } catch (error) {
-      console.error("Failed to fetch team members:", error);
+    if (usersResult.status === "fulfilled" && Array.isArray(usersResult.value)) {
+      setTeamMembers(usersResult.value as { id: string; name: string | null; email: string }[]);
+    } else if (usersResult.status === "rejected") {
+      console.error("Failed to fetch team members:", usersResult.reason);
     }
   }, []);
 
@@ -315,6 +324,9 @@ function SettingsPageContent() {
       });
 
       if (res.ok) {
+        // The company record is cached and shared; drop it so other pages pick
+        // up the new values instead of serving a stale copy.
+        invalidate(QUERY_KEYS.company);
         showToast("Outreach and compliance settings saved successfully.");
       } else {
         const data = await res.json();
@@ -343,6 +355,7 @@ function SettingsPageContent() {
         body: JSON.stringify({ leadStatuses: cleaned }),
       });
       if (res.ok) {
+        invalidate(QUERY_KEYS.company);
         showToast("Lead statuses saved.");
       } else {
         const data = await res.json().catch(() => ({}));
@@ -741,7 +754,7 @@ function SettingsPageContent() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <motion.div variants={fadeInUp}>
-              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-7 max-w-5xl h-10">
+              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-8 max-w-6xl h-10">
                 <TabsTrigger value="crm" className="text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
                 <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
                 <TabsTrigger value="pipeline" className="text-xs font-semibold rounded-lg">Lead Pipeline</TabsTrigger>
@@ -749,6 +762,7 @@ function SettingsPageContent() {
                 <TabsTrigger value="news" className="text-xs font-semibold rounded-lg">News Sources</TabsTrigger>
                 <TabsTrigger value="aiconfig" className="text-xs font-semibold rounded-lg">AI Config</TabsTrigger>
                 <TabsTrigger value="failed" className="text-xs font-semibold rounded-lg">Failed Sends</TabsTrigger>
+                <TabsTrigger value="privacy" className="text-xs font-semibold rounded-lg">Privacy</TabsTrigger>
               </TabsList>
             </motion.div>
 
@@ -770,6 +784,11 @@ function SettingsPageContent() {
             {/* SW-ANN-002: dead-letter queue — permanently failed sends. */}
             <TabsContent value="failed" className="space-y-6 focus-visible:outline-none">
               <DeadLetterTab />
+            </TabsContent>
+
+            {/* NFR-S-005: GDPR / CCPA subject access + erasure. */}
+            <TabsContent value="privacy" className="space-y-6 focus-visible:outline-none">
+              <PrivacyRequestsTab />
             </TabsContent>
 
             {/* TAB: LEAD PIPELINE (SW-LEAD-006 — tenant-configurable statuses) */}

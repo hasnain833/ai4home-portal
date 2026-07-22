@@ -1,8 +1,9 @@
 import prisma from "../lib/prisma.js";
-import { createClient } from "@supabase/supabase-js";
 import { MailService } from "../services/mail-service.js";
 import { normalizeLeadStatuses } from "../lib/lead-statuses.js";
 import { normalizeNewsSources } from "../lib/news-sources.js";
+import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
+import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
 
 export const getCompany = async (req, res) => {
   try {
@@ -59,12 +60,10 @@ export const updateCompany = async (req, res) => {
       data.leadStatuses = normalizeLeadStatuses(data.leadStatuses);
     }
 
-    // SW-NEWS-001: validate + normalize the tenant's news source list.
     if (data.newsSources !== undefined) {
       data.newsSources = normalizeNewsSources(data.newsSources);
     }
 
-    // SW-ANN: clamp quiet-hours bounds to a valid 0–24 hour range.
     const clampHour = (v, fallback) => {
       const n = Number(v);
       return Number.isFinite(n) ? Math.min(24, Math.max(0, Math.round(n))) : fallback;
@@ -163,55 +162,16 @@ export const submitVerificationDocument = async (req, res) => {
       return res.status(400).json({ message: "No file provided" });
     }
 
-    // Guard: only allow image uploads.
-    if (!file.mimetype || !file.mimetype.startsWith("image/")) {
-      return res.status(400).json({ message: "Only image files are allowed" });
-    }
-
     const companyId = session.companyId;
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.error("Missing Supabase credentials for verification upload");
-      return res.status(500).json({ message: "Server configuration error" });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Ensure bucket exists (private-ish, but we serve a public URL for the admin panel).
-    const bucketName = "verification_docs";
-    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-    if (!bucketsError) {
-      const bucketExists = buckets.some((b) => b.name === bucketName);
-      if (!bucketExists) {
-        await supabase.storage.createBucket(bucketName, { public: true });
-      } else {
-        await supabase.storage.updateBucket(bucketName, { public: true });
-      }
-    }
-
-    const fileBuffer = file.buffer;
+    await assertUploadSafe(file, "verificationDoc");
     const originalName = file.originalname || "document.png";
-    const fileName = `${companyId}/${Date.now()}_${originalName.replace(/[^a-zA-Z0-9.\-_]/g, "")}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from(bucketName)
-      .upload(fileName, fileBuffer, {
-        contentType: file.mimetype,
-        upsert: false,
-      });
-
-    if (uploadError) {
-      console.error("Supabase verification upload error:", uploadError);
-      return res.status(500).json({ message: "Error uploading file to storage" });
-    }
-
-    const { data: publicUrlData } = supabase.storage
-      .from(bucketName)
-      .getPublicUrl(fileName);
-
-    const url = publicUrlData.publicUrl;
+    const { ref: url } = await uploadObject({
+      bucket: BUCKETS.verificationDocs,
+      key: buildStorageKey(companyId, originalName, "document.png"),
+      buffer: file.buffer,
+      contentType: file.mimetype,
+      isPublic: false,
+    });
 
     const company = await prisma.company.update({
       where: { id: companyId },
@@ -222,7 +182,6 @@ export const submitVerificationDocument = async (req, res) => {
       },
     });
 
-    // Best-effort: nudge the Super Admin that a document is waiting for review.
     try {
       const superAdminEmail = process.env.SUPERADMIN_EMAIL;
       if (superAdminEmail) {
@@ -247,11 +206,16 @@ export const submitVerificationDocument = async (req, res) => {
 
     return res.json({
       verificationStatus: company.verificationStatus,
-      verificationDocUrl: company.verificationDocUrl,
+      verificationDocUrl: await resolveDownloadUrl(company.verificationDocUrl),
     });
   } catch (error) {
+    if (error instanceof UploadRejected) {
+      return res.status(error.status).json({ message: error.message, code: error.code });
+    }
     console.error("Error submitting verification document:", error);
-    return res.status(500).json({ message: "Error submitting verification document" });
+    return res
+      .status(error?.status || 500)
+      .json({ message: error?.status ? error.message : "Error submitting verification document" });
   }
 };
 
@@ -259,7 +223,6 @@ export const uploadCompanyLogo = async (req, res) => {
   try {
     const session = req.user;
 
-    // Both ADMIN and STAFF can upload logos
     if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -271,63 +234,29 @@ export const uploadCompanyLogo = async (req, res) => {
     }
 
     const companyId = session.companyId || "demo-company";
+    await assertUploadSafe(file, "image");
 
-    // 1. Initialize Supabase Admin Client
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.error("Missing Supabase credentials for logo upload");
-      return res.status(500).json({ message: "Server configuration error" });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // 2. Ensure bucket exists
-    const bucketName = "company_logos";
-    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-    if (!bucketsError) {
-      const bucketExists = buckets.some(b => b.name === bucketName);
-      if (!bucketExists) {
-        await supabase.storage.createBucket(bucketName, { public: true });
-      } else {
-        await supabase.storage.updateBucket(bucketName, { public: true });
-      }
-    }
-
-    // 3. Upload file
-    const fileBuffer = file.buffer;
-    const originalName = file.originalname || "logo.png";
-    const fileName = `${companyId}/${Date.now()}_${originalName.replace(/[^a-zA-Z0-9.\-_]/g, '')}`;
-
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(bucketName)
-      .upload(fileName, fileBuffer, {
-        contentType: file.mimetype,
-        upsert: false
-      });
-
-    if (uploadError) {
-      console.error("Supabase upload error:", uploadError);
-      return res.status(500).json({ message: "Error uploading file to storage" });
-    }
-
-    // 4. Get public URL
-    const { data: publicUrlData } = supabase.storage
-      .from(bucketName)
-      .getPublicUrl(fileName);
-
-    const url = publicUrlData.publicUrl;
-
-    // 5. Save to database
-    const company = await prisma.company.update({
-      where: { id: companyId },
-      data: { logo: url }
+    const { publicUrl } = await uploadObject({
+      bucket: BUCKETS.companyLogos,
+      key: buildStorageKey(companyId, file.originalname, "logo.png"),
+      buffer: file.buffer,
+      contentType: file.mimetype,
+      isPublic: true,
     });
 
-    return res.json({ url });
+    await prisma.company.update({
+      where: { id: companyId },
+      data: { logo: publicUrl },
+    });
+
+    return res.json({ url: publicUrl });
   } catch (error) {
+    if (error instanceof UploadRejected) {
+      return res.status(error.status).json({ message: error.message, code: error.code });
+    }
     console.error("Error uploading logo:", error);
-    return res.status(500).json({ message: "Error uploading logo" });
+    return res
+      .status(error?.status || 500)
+      .json({ message: error?.status ? error.message : "Error uploading logo" });
   }
 };

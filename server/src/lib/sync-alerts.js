@@ -4,10 +4,10 @@ import { getMessagingConfig } from "./messaging-config.js";
 
 const ALERT_ACTION = "FAILURE_ALERT";
 
-const threshold = () =>
-  Math.max(1, parseInt(process.env.SYNC_FAILURE_ALERT_THRESHOLD || "3", 10));
-const cooldownHours = () =>
-  Math.max(1, parseInt(process.env.SYNC_FAILURE_ALERT_COOLDOWN_HOURS || "24", 10));
+// Alert after 3 consecutive sync failures, then stay quiet about the same
+// company for a day so a persistent outage doesn't become an inbox flood.
+const threshold = () => 3;
+const cooldownHours = () => 24;
 
 async function resolveRecipients(companyId) {
   const company = await prisma.company.findUnique({

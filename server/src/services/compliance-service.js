@@ -1,6 +1,13 @@
 import prisma from "../lib/prisma.js";
 import { getLeadTimezone } from "../lib/timezone.js";
 
+// Spam-complaint monitoring thresholds. 0.1% over a rolling 24 hours is the
+// figure the major mailbox providers publish, so these are fixed rather than
+// configurable — a deployment that "tunes" them is just hiding a problem.
+const COMPLAINT_RATE_WINDOW_HOURS = 24;
+const COMPLAINT_RATE_THRESHOLD = 0.001;
+const COMPLAINT_RATE_MIN_VOLUME = 100;
+
 export class ComplianceService {
 
   static checkSendingHours(timeZone, startHour = 8, endHour = 21) {
@@ -462,9 +469,12 @@ export class ComplianceService {
   }
 
   static async checkComplaintRate(companyId, channel = "EMAIL") {
-    const windowHours = parseInt(process.env.COMPLAINT_RATE_WINDOW_HOURS || "24", 10);
-    const threshold = parseFloat(process.env.COMPLAINT_RATE_THRESHOLD || "0.001"); // 0.1%
-    const minVolume = parseInt(process.env.COMPLAINT_RATE_MIN_VOLUME || "100", 10);
+    // Industry practice: investigate above a 0.1% complaint rate, measured over
+    // a rolling day, and ignore small samples where one complaint would skew the
+    // percentage. These are standards rather than per-deployment preferences.
+    const windowHours = COMPLAINT_RATE_WINDOW_HOURS;
+    const threshold = COMPLAINT_RATE_THRESHOLD;
+    const minVolume = COMPLAINT_RATE_MIN_VOLUME;
     const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
 
     const sentType = channel === "EMAIL" ? "EMAIL_SENT" : "SMS_SENT";

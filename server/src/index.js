@@ -8,6 +8,7 @@ import {
   requireCompany,
 } from "./middlewares/auth.js";
 import { auditMutations } from "./lib/audit.js";
+import { assertEncryptionKeyOnBoot } from "./lib/crypto.js";
 import authRouter from "./routes/auth.js";
 import leadsRouter from "./routes/leads.js";
 import complianceRouter from "./routes/compliance.js";
@@ -38,6 +39,7 @@ import communitiesRouter from "./routes/communities.js";
 import homeownersRouter from "./routes/homeowners.js";
 import usersRouter from "./routes/users.js";
 import deadLetterRouter from "./routes/dead-letter.js";
+import privacyRouter from "./routes/privacy.js";
 
 import { serve } from "inngest/express";
 import { inngest } from "./lib/inngest.js";
@@ -60,6 +62,8 @@ import {
 } from "./inngest/functions/automation.js";
 import { salesforceSyncCron } from "./inngest/functions/salesforce-cron.js";
 
+assertEncryptionKeyOnBoot();
+
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -75,8 +79,6 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.use("/api/auth", authRouter);
 
-// NFR-S-004: auditMutations records every non-GET request under these mounts,
-// so a newly added endpoint is covered without anyone remembering to log it.
 const salesGuard = [
   requireAuth,
   requireWorkspace("sales"),
@@ -104,6 +106,7 @@ app.use("/api/sales/announcements", ...salesGuard, announcementsRouter);
 app.use("/api/sales/dead-letters", ...salesGuard, deadLetterRouter);
 app.use("/api/sales/automations", ...salesGuard, automationsRouter);
 app.use("/api/sales/blog", ...salesGuard, blogRouter);
+app.use("/api/sales/privacy", ...salesGuard, privacyRouter);
 app.use("/api/public/blog", publicBlogRouter);
 
 const warrantyGuard = [

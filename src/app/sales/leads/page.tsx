@@ -12,6 +12,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DEFAULT_LEAD_STATUSES, statusColor, resolveLeadStatuses } from "@/lib/lead-statuses";
+import { useQuery, fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
 import {
   Select,
   SelectContent,
@@ -93,7 +94,7 @@ const ITEMS_PER_PAGE = 25;
 export default function LeadsPage() {
   const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [statuses, setStatuses] = useState<string[]>(DEFAULT_LEAD_STATUSES);
+  // `statuses` is derived from the cached company record — see below.
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -113,9 +114,9 @@ export default function LeadsPage() {
 
   const fetchSegments = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/segments");
-      if (!res.ok) return;
-      const data: Segment[] = await res.json();
+      // Shared with the campaigns and announcements pages via the query cache.
+      const data = await fetchKey<Segment[]>(QUERY_KEYS.segments);
+      if (!Array.isArray(data)) return;
       setSegments(data);
       const entries = await Promise.all(
         data.map(async (seg) => {
@@ -147,6 +148,7 @@ export default function LeadsPage() {
       toast.success(`Segment "${segmentName.trim()}" saved`);
       setSaveSegmentOpen(false);
       setSegmentName("");
+      invalidate(QUERY_KEYS.segments);
       fetchSegments();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save segment");
@@ -160,6 +162,7 @@ export default function LeadsPage() {
       const res = await fetch(`/api/sales/segments/${seg.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete segment");
       toast.success(`Segment "${seg.name}" deleted`);
+      invalidate(QUERY_KEYS.segments);
       fetchSegments();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete segment");
@@ -268,12 +271,15 @@ export default function LeadsPage() {
     fetchSegments();
   }, [fetchSegments]);
 
-  useEffect(() => {
-    fetch("/api/company")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setStatuses(resolveLeadStatuses(data?.leadStatuses)))
-      .catch(() => {});
-  }, []);
+  // NFR-P-001: /api/company is read by most pages. Going through the shared
+  // cache means navigating between them reuses one response instead of
+  // re-requesting it on every mount. Derived rather than copied into state, so
+  // the tenant's configured statuses apply on the render they arrive.
+  const { data: company } = useQuery<{ leadStatuses?: unknown }>(QUERY_KEYS.company);
+  const statuses = useMemo(
+    () => (company ? resolveLeadStatuses(company.leadStatuses) : DEFAULT_LEAD_STATUSES),
+    [company],
+  );
 
   const uniqueTags = useMemo(() => {
     if (serverTags.length > 0) return serverTags;
