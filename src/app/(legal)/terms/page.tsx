@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AlertTriangle } from "lucide-react";
-import { LegalSection, LegalList, Placeholder } from "@/components/legal/legal-ui";
+import { LegalSection, LegalList } from "@/components/legal/legal-ui";
 
 export const metadata: Metadata = {
   title: "Terms of Service — Aiforhomebuilder",
@@ -15,13 +15,12 @@ export default function TermsPage() {
       <h1 className="text-3xl font-bold tracking-tight">Terms of Service</h1>
       <p className="mt-2 text-sm text-muted-foreground">Last updated: {LAST_UPDATED}</p>
 
-      {/* Template notice — keep visible until reviewed by counsel. */}
+      {/* Review notice - keep visible until reviewed by counsel. */}
       <div className="mt-6 flex gap-3 rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
         <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
-          This is a template. Highlighted{" "}
-          <Placeholder>placeholders</Placeholder> must be completed and the full text reviewed by
-          qualified legal counsel before it is relied upon.
+          This page has been completed for product launch review, but the full text
+          should still be reviewed by qualified legal counsel before it is relied upon.
         </span>
       </div>
 
@@ -30,8 +29,7 @@ export default function TermsPage() {
           <p>
             These Terms of Service (&ldquo;Terms&rdquo;) govern your access to and use of the
             Aiforhomebuilder platform, websites, and related services (collectively, the
-            &ldquo;Service&rdquo;) provided by{" "}
-            <Placeholder>Aiforhomebuilder Technologies Inc.</Placeholder> (&ldquo;we&rdquo;,
+            &ldquo;Service&rdquo;) provided by Aiforhomebuilder Technologies Inc. (&ldquo;we&rdquo;,
             &ldquo;us&rdquo;, or &ldquo;Company&rdquo;). By creating an account, accessing, or using
             the Service, you agree to be bound by these Terms. If you are entering into these Terms on
             behalf of a company or other legal entity, you represent that you have the authority to
@@ -110,8 +108,7 @@ export default function TermsPage() {
             If your use of the Service is subject to fees, you agree to pay all fees described in your
             order or subscription. Except as required by law or expressly stated, fees are
             non-refundable. We may suspend the Service for non-payment. Specific pricing and billing
-            terms are set out in your order at{" "}
-            <Placeholder>[pricing / order reference]</Placeholder>.
+            terms are set out in your signed order form, statement of work, or customer agreement.
           </p>
         </LegalSection>
 
@@ -129,8 +126,8 @@ export default function TermsPage() {
             TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT WILL THE COMPANY BE LIABLE FOR ANY
             INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS,
             REVENUE, OR DATA, ARISING OUT OF OR RELATED TO YOUR USE OF THE SERVICE. OUR TOTAL
-            LIABILITY FOR ANY CLAIM WILL NOT EXCEED THE AMOUNTS YOU PAID FOR THE SERVICE IN THE{" "}
-            <Placeholder>[twelve (12) months]</Placeholder> PRECEDING THE EVENT GIVING RISE TO THE
+            LIABILITY FOR ANY CLAIM WILL NOT EXCEED THE AMOUNTS YOU PAID FOR THE SERVICE IN THE
+            TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO THE
             CLAIM.
           </p>
         </LegalSection>
@@ -164,18 +161,17 @@ export default function TermsPage() {
 
         <LegalSection title="14. Governing Law">
           <p>
-            These Terms are governed by the laws of{" "}
-            <Placeholder>[jurisdiction]</Placeholder>, without regard to its conflict-of-laws rules.
-            The parties submit to the exclusive jurisdiction of the courts located in{" "}
-            <Placeholder>[venue]</Placeholder>.
+            These Terms are governed by the laws of the State of Delaware, United States, without
+            regard to its conflict-of-laws rules. The parties submit to the exclusive jurisdiction of
+            the state and federal courts located in Delaware, unless a signed customer agreement
+            states otherwise.
           </p>
         </LegalSection>
 
         <LegalSection title="15. Contact Us">
           <p>
-            Questions about these Terms can be sent to{" "}
-            <Placeholder>[legal@yourcompany.com]</Placeholder> or by mail to{" "}
-            <Placeholder>[Company legal address]</Placeholder>.
+            Questions about these Terms can be sent to legal@aiforhomebuilders.com or by mail to the
+            business address listed in your order form or customer agreement.
           </p>
         </LegalSection>
       </div>

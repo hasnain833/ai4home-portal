@@ -106,6 +106,7 @@ model Company {
   scrapedNews             ScrapedNews[]
   blogPosts               BlogPost[]
   csvMappingTemplates     CsvMappingTemplate[]
+  csvImportJobs           CsvImportJob[]
   deadLetters             DeadLetter[]
   tickets                 Ticket[]
   properties              Property[]
@@ -126,6 +127,32 @@ model CsvMappingTemplate {
   updatedAt DateTime @updatedAt
 
   @@unique([companyId, name])
+}
+
+model CsvImportJob {
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId        String?
+  status        String   @default("QUEUED")
+  mergeStrategy String   @default("update")
+  totalRows     Int      @default(0)
+  processedRows Int      @default(0)
+  createdCount  Int      @default(0)
+  updatedCount  Int      @default(0)
+  skippedCount  Int      @default(0)
+  errorCount    Int      @default(0)
+  rows          Json
+  errors        Json?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  failedAt      DateTime?
+  errorMessage  String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([companyId, status, createdAt])
+  @@index([companyId, createdAt])
 }
 
 model Integration {

@@ -251,7 +251,7 @@ export const googleConnect = async (req, res) => {
 };
 
 export const googleCallback = async (req, res) => {
-  const portal = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+  const portal = process.env.NEXT_PUBLIC_URL || "";
   const back = (status) =>
     res.redirect(`${portal}/sales/scheduling?tab=settings&google=${status}`);
   try {

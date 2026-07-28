@@ -2,11 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   async rewrites() {
-    return process.env.NODE_ENV === "development"
+    return process.env.NODE_ENV === "development" && process.env.BACKEND_URL
       ? [
           {
             source: "/api/:path*",
-            destination: "http://localhost:5000/api/:path*",
+            destination: `${process.env.BACKEND_URL}/api/:path*`,
           },
         ]
       : [];

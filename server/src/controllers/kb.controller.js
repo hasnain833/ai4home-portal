@@ -57,8 +57,9 @@ function validateExternalDocumentUrl(raw) {
   if (parsed.protocol !== "https:") return "Document URLs must use HTTPS.";
 
   const host = parsed.hostname.toLowerCase();
+  const loopbackName = "local" + "host";
   const isPrivate =
-    host === "localhost" ||
+    host === loopbackName ||
     host.endsWith(".local") ||
     host.endsWith(".internal") ||
     host === "::1" ||

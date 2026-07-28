@@ -6,7 +6,6 @@ import {
   normalizeNewsSources,
 } from "../lib/news-sources.js";
 import { decryptDetailed, encryptionKeyStatus, isEncrypted } from "../lib/crypto.js";
-import { avScannerStatus } from "../lib/file-security.js";
 
 function denyUnlessSuperAdmin(req, res) {
   if (!req.user?.isSuperAdmin) {
@@ -379,7 +378,6 @@ export const getSecurityPosture = async (req, res) => {
 
     return res.json({
       encryptionKey: encryptionKeyStatus(),
-      uploadScanning: avScannerStatus(),
       secrets: { current, plaintext, stale, unreadable, needsRotation, breakdown },
       remediation: needsRotation
         ? "Run `npm run rotate-keys` in server/ to re-encrypt these under the current key."

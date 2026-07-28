@@ -7,11 +7,10 @@ import { writeAuditLog } from "../lib/audit.js";
 import { encrypt, decryptSafe } from "../lib/crypto.js";
 
 function isAuthorizedBotpress(req) {
-  const secret =
-    process.env.BOTPRESS_WEBHOOK_SECRET || process.env.SESSION_SECRET || "";
+  const secret =process.env.SESSION_SECRET || "";
   if (!secret) {
     console.error(
-      "[Botpress] No BOTPRESS_WEBHOOK_SECRET/SESSION_SECRET configured — rejecting webhook.",
+      "[Botpress] No SESSION_SECRET configured — rejecting webhook.",
     );
     return false;
   }

@@ -19,6 +19,20 @@ const publicRoutes = [
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  if (
+    pathname === "/" &&
+    request.nextUrl.searchParams.get("mode") === "fullscreen"
+  ) {
+    const companyId = request.nextUrl.searchParams.get("company");
+
+    if (companyId) {
+      const widgetUrl = request.nextUrl.clone();
+      widgetUrl.pathname = `/widget/${encodeURIComponent(companyId)}`;
+      widgetUrl.searchParams.delete("company");
+      return NextResponse.redirect(widgetUrl);
+    }
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

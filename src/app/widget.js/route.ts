@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const portalUrl = process.env.NEXT_PUBLIC_URL;
+  const portalUrl = process.env.NEXT_PUBLIC_URL || "";
 
   const jsContent = `(function() {
   // Prevent double initialization
@@ -21,13 +21,16 @@ export async function GET() {
   }
 
   var companyId = 'demo-company';
+  var mode = 'widget';
   var portalUrl = '${portalUrl}'; // Injected from server-side env
 
   if (scriptTag && scriptTag.src) {
     try {
       var url = new URL(scriptTag.src);
       var compParam = url.searchParams.get('company');
+      var modeParam = url.searchParams.get('mode');
       if (compParam) companyId = compParam;
+      if (modeParam === 'fullscreen') mode = 'fullscreen';
       // Use resolved script URL origin as fallback to handle custom domains
       portalUrl = url.origin || portalUrl;
     } catch (e) {
@@ -36,7 +39,9 @@ export async function GET() {
   }
 
   // 2. Fetch company branding
-  fetch(portalUrl + '/api/company/branding?id=' + companyId)
+  fetch(portalUrl + '/api/company/branding?id=' + encodeURIComponent(companyId) + '&v=' + Date.now(), {
+    cache: 'no-store'
+  })
     .then(function(res) {
       if (!res.ok) throw new Error('Failed to fetch branding');
       return res.json();
@@ -67,6 +72,13 @@ export async function GET() {
       '  right: 20px;' +
       '  z-index: 2147483647;' +
       '  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;' +
+      '}' +
+      '#warranty-widget-container.fullscreen {' +
+      '  inset: 0;' +
+      '  bottom: auto;' +
+      '  right: auto;' +
+      '  width: 100vw;' +
+      '  height: 100vh;' +
       '}' +
       '#warranty-widget-bubble {' +
       '  width: 60px;' +
@@ -118,6 +130,25 @@ export async function GET() {
       '  display: flex;' +
       '  opacity: 1;' +
       '  transform: translateY(0) scale(1);' +
+      '}' +
+      '#warranty-widget-container.fullscreen #warranty-widget-panel {' +
+      '  position: fixed;' +
+      '  inset: 0;' +
+      '  bottom: auto;' +
+      '  right: auto;' +
+      '  width: 100vw;' +
+      '  height: 100vh;' +
+      '  max-width: none;' +
+      '  max-height: none;' +
+      '  border-radius: 0;' +
+      '  border: none;' +
+      '  box-shadow: none;' +
+      '  display: flex;' +
+      '  opacity: 1;' +
+      '  transform: none;' +
+      '}' +
+      '#warranty-widget-container.fullscreen #warranty-widget-bubble {' +
+      '  display: none;' +
       '}' +
       '#warranty-widget-iframe {' +
       '  width: 100%;' +
@@ -176,6 +207,9 @@ export async function GET() {
     // 4. Create DOM elements
     var container = document.createElement('div');
     container.id = 'warranty-widget-container';
+    if (mode === 'fullscreen') {
+      container.className = 'fullscreen';
+    }
 
     // Bubble button
     var bubble = document.createElement('button');
@@ -211,7 +245,8 @@ export async function GET() {
     var iframeSrc = portalUrl + '/widget/' + companyId +
       '?botColor=' + encodeURIComponent(botColor) +
       '&botName=' + encodeURIComponent(botName) +
-      '&botLogo=' + encodeURIComponent(logo);
+      '&botLogo=' + encodeURIComponent(logo) +
+      '&mode=' + encodeURIComponent(mode);
     iframe.title = botName + ' Chat Widget';
 
     // Preload iframe immediately (don't wait for first click)
@@ -228,7 +263,11 @@ export async function GET() {
     panel.appendChild(skeleton);
     panel.appendChild(iframe);
     container.appendChild(panel);
-    container.appendChild(bubble);
+    if (mode !== 'fullscreen') {
+      container.appendChild(bubble);
+    } else {
+      panel.classList.add('open');
+    }
     document.body.appendChild(container);
 
     // 5. Setup interaction handlers
@@ -275,7 +314,9 @@ export async function GET() {
       }
     }
 
-    bubble.addEventListener('click', toggleWidget);
+    if (mode !== 'fullscreen') {
+      bubble.addEventListener('click', toggleWidget);
+    }
 
     // Support listening to message from inside iframe to close widget
     window.addEventListener('message', function(event) {

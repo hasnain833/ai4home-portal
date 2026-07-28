@@ -206,6 +206,7 @@ export default function LeadsPage() {
   const [consentAttested, setConsentAttested] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResults, setImportResults] = useState<any>(null);
+  const [importJobStatus, setImportJobStatus] = useState<any>(null);
   const [validation, setValidation] = useState<any>(null);
   const [validating, setValidating] = useState(false);
   const [csvTemplates, setCsvTemplates] = useState<any[]>([]);
@@ -467,6 +468,12 @@ export default function LeadsPage() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadImportErrors = () => {
+    const jobId = importJobStatus?.id || importResults?.jobId;
+    if (!jobId) return;
+    window.location.href = `/api/sales/csv/imports/${jobId}/errors.csv`;
+  };
+
   const fetchCsvTemplates = async () => {
     try {
       const res = await fetch("/api/sales/csv/templates");
@@ -533,6 +540,16 @@ export default function LeadsPage() {
       const data = await res.json();
       if (res.ok) {
         setImportResults(data);
+        setImportJobStatus({
+          id: data.jobId,
+          status: "QUEUED",
+          totalRows: data.rowCount,
+          processedRows: 0,
+          createdCount: 0,
+          updatedCount: 0,
+          skippedCount: 0,
+          errorCount: 0,
+        });
         setCsvStep(5);
         fetchLeads();
       } else {
@@ -555,9 +572,39 @@ export default function LeadsPage() {
     setCsvMapping({});
     setConsentAttested(false);
     setImportResults(null);
+    setImportJobStatus(null);
     setValidation(null);
     setNewTemplateName("");
   };
+
+  useEffect(() => {
+    if (csvStep !== 5 || !importResults?.jobId) return;
+    if (importJobStatus?.status === "COMPLETED" || importJobStatus?.status === "FAILED") return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/sales/csv/imports/${importResults.jobId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setImportJobStatus(data);
+        if (data.status === "COMPLETED") {
+          setImportResults((prev: any) => ({ ...prev, ...data, errorsCount: data.errorCount }));
+          fetchLeads();
+        }
+      } catch {
+        /* keep polling */
+      }
+    };
+
+    poll();
+    const timer = window.setInterval(poll, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [csvStep, importResults?.jobId, importJobStatus?.status]);
 
   useEffect(() => {
     if (csvModalOpen) fetchCsvTemplates();
@@ -1285,45 +1332,78 @@ export default function LeadsPage() {
             {/* STEP 5: Results & Completion */}
             {csvStep === 5 && importResults && (
               <div className="space-y-4 pt-2">
-                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 rounded-xl flex items-center gap-3">
-                  <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                {(() => {
+                  const status = importJobStatus || importResults;
+                  const total = status.totalRows || importResults.rowCount || 0;
+                  const processed = status.processedRows || 0;
+                  const complete = status.status === "COMPLETED";
+                  const failed = status.status === "FAILED";
+                  const progress = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+                  return (
+                    <>
+                <div className={`p-4 rounded-xl flex items-center gap-3 border ${failed ? "bg-rose-50 dark:bg-rose-950/20 border-rose-200" : complete ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200" : "bg-amber-50 dark:bg-amber-950/20 border-amber-200"}`}>
+                  {complete ? (
+                    <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                  ) : failed ? (
+                    <AlertTriangle className="h-6 w-6 text-rose-600" />
+                  ) : (
+                    <RefreshCw className="h-6 w-6 text-amber-600 animate-spin" />
+                  )}
                   <div>
-                    <h4 className="font-bold text-emerald-800 dark:text-emerald-400 text-sm">Bulk Ingestion Complete!</h4>
-                    <p className="text-xs text-muted-foreground mt-0.5">CSV import job finished processing successfully.</p>
+                    <h4 className={`font-bold text-sm ${failed ? "text-rose-800 dark:text-rose-400" : complete ? "text-emerald-800 dark:text-emerald-400" : "text-amber-800 dark:text-amber-400"}`}>
+                      {failed ? "CSV Import Failed" : complete ? "Bulk Ingestion Complete" : "CSV Import Running"}
+                    </h4>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {failed
+                        ? status.errorMessage || "The import stopped before all rows could be processed."
+                        : complete
+                          ? "CSV import job finished processing successfully."
+                          : `${processed} of ${total} rows processed.`}
+                    </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3 my-4">
-                  <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border text-center">
-                    <span className="text-slate-400 text-[10px] block uppercase font-bold">Created</span>
-                    <span className="text-xl font-bold text-slate-800 dark:text-slate-100">{importResults.createdCount}</span>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border text-center">
-                    <span className="text-slate-400 text-[10px] block uppercase font-bold">Merged</span>
-                    <span className="text-xl font-bold text-slate-800 dark:text-slate-100">{importResults.updatedCount}</span>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border text-center">
-                    <span className="text-slate-400 text-[10px] block uppercase font-bold">Skipped</span>
-                    <span className="text-xl font-bold text-slate-800 dark:text-slate-100">{importResults.skippedCount}</span>
-                  </div>
-                </div>
-
-                {importResults.errorsCount > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-xs text-rose-500 font-bold">Ingestion error reports ({importResults.errorsCount} rows skipped):</Label>
-                    <div className="max-h-37.5 overflow-y-auto border border-rose-200/50 rounded-lg p-2 bg-rose-50/20 text-[11px] font-mono space-y-1">
-                      {importResults.errors.map((err: any, idx: number) => (
-                        <p key={idx} className="text-rose-700 dark:text-rose-400">
-                          Row {err.row} ({err.name}): {err.reason}
-                        </p>
-                      ))}
-                    </div>
+                {!complete && !failed && (
+                  <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+                    <div className="h-full bg-[#b48c3c] transition-all" style={{ width: `${progress}%` }} />
                   </div>
                 )}
 
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-4">
+                  <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border text-center">
+                    <span className="text-slate-400 text-[10px] block uppercase font-bold">Processed</span>
+                    <span className="text-xl font-bold text-slate-800 dark:text-slate-100">{processed}</span>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border text-center">
+                    <span className="text-slate-400 text-[10px] block uppercase font-bold">Created</span>
+                    <span className="text-xl font-bold text-slate-800 dark:text-slate-100">{status.createdCount || 0}</span>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border text-center">
+                    <span className="text-slate-400 text-[10px] block uppercase font-bold">Merged</span>
+                    <span className="text-xl font-bold text-slate-800 dark:text-slate-100">{status.updatedCount || 0}</span>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border text-center">
+                    <span className="text-slate-400 text-[10px] block uppercase font-bold">Skipped</span>
+                    <span className="text-xl font-bold text-slate-800 dark:text-slate-100">{(status.skippedCount || 0) + (status.errorCount || 0)}</span>
+                  </div>
+                </div>
+
+                {(status.errorCount || 0) > 0 && (
+                  <Button variant="outline" size="sm" onClick={downloadImportErrors} className="gap-1.5">
+                    <Download className="h-3.5 w-3.5" />
+                    Download {status.errorCount} rejected row{status.errorCount === 1 ? "" : "s"}
+                  </Button>
+                )}
+
                 <DialogFooter>
-                  <Button onClick={closeCSVWizard} className="bg-primary text-white">Done</Button>
+                  <Button onClick={closeCSVWizard} disabled={!complete && !failed} className="bg-primary text-white">
+                    {complete || failed ? "Done" : "Importing..."}
+                  </Button>
                 </DialogFooter>
+                    </>
+                  );
+                })()}
               </div>
             )}
           </DialogContent>

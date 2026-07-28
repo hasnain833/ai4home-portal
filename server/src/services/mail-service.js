@@ -86,7 +86,23 @@ export class MailService {
       console.log(`[Mail Service]   Response: ${info.response}`);
       console.log(`[Mail Service]   Accepted: ${JSON.stringify(info.accepted)}`);
       console.log(`[Mail Service]   Rejected: ${JSON.stringify(info.rejected)}`);
-      return { success: true, messageId: info.messageId, response: info.response };
+      if (Array.isArray(info.rejected) && info.rejected.length > 0) {
+        return {
+          success: false,
+          messageId: info.messageId,
+          response: info.response,
+          accepted: info.accepted || [],
+          rejected: info.rejected,
+          error: `SMTP rejected recipient(s): ${info.rejected.join(", ")}`,
+        };
+      }
+      return {
+        success: true,
+        messageId: info.messageId,
+        response: info.response,
+        accepted: info.accepted || [],
+        rejected: info.rejected || [],
+      };
     } catch (error) {
       console.error(`[Mail Service] ❌ Failed to send email to ${to}`);
       console.error(`[Mail Service]   Error Code: ${error.code || 'N/A'}`);
@@ -103,7 +119,7 @@ export class MailService {
 
     const companyName = company?.name || "Aiforhomebuilder";
     const companyEmail = company?.email || this.SENDER_EMAIL;
-    const portalUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+    const portalUrl = process.env.NEXT_PUBLIC_URL || "";
 
     const html = `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;">

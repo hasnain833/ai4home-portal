@@ -186,7 +186,7 @@ export const triggerCta = async (req, res) => {
     return res.json({
       success: true,
       message: "CTA click recorded",
-      bookingUrl: `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/sales/scheduling?leadId=${leadId}`,
+      bookingUrl: `${process.env.NEXT_PUBLIC_URL || ""}/sales/scheduling?leadId=${leadId}`,
     });
   } catch (error) {
     console.error("[CTA Trigger] Error:", error);

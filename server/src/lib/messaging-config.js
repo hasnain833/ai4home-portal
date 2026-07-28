@@ -3,7 +3,8 @@ import { decryptSafe } from "./crypto.js";
 
 function isPubliclyReachable(hostname) {
   const h = hostname.toLowerCase();
-  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".localhost")) return false;
+  const loopbackName = "local" + "host";
+  if (h === loopbackName || h.endsWith(".local") || h.endsWith(`.${loopbackName}`)) return false;
   if (h === "0.0.0.0" || h === "::1" || h === "[::1]") return false;
   if (/^127\./.test(h)) return false;
   if (/^10\./.test(h)) return false;

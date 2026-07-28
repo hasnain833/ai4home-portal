@@ -9,13 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft,
@@ -26,7 +19,6 @@ import {
   Sparkles,
   ThumbsUp,
   Trash2,
-  Bot,
   FileText,
   Wrench,
   Mail,
@@ -40,6 +32,119 @@ import { toast } from "sonner";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "ESCALATED";
 type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+
+type TicketDetailData = {
+  id: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  createdAt: string;
+  warrantyYear: number;
+  isEmergency: boolean;
+  issueType: string;
+  ticketType?: string | null;
+  description?: string | null;
+  draftResponse?: string | null;
+  chatSummary?: string | null;
+  extractedInfo?: string | null;
+  kbReferences?: string | null;
+  homeowner?: {
+    name?: string | null;
+    email?: string | null;
+  } | null;
+  property?: {
+    address?: string | null;
+    city?: string | null;
+    state?: string | null;
+    zipCode?: string | null;
+    coeDate?: string | null;
+    coverageTerm?: string | null;
+  } | null;
+};
+
+type DiagnosticInfo = Record<string, string>;
+
+const statusFlow: TicketStatus[] = ["OPEN", "IN_PROGRESS", "RESOLVED", "ESCALATED"];
+const statusLabels: Record<TicketStatus, string> = {
+  OPEN: "Open",
+  IN_PROGRESS: "In Progress",
+  RESOLVED: "Resolved",
+  ESCALATED: "Escalated",
+};
+
+function normalizeDiagnosticValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+function normalizeDiagnosticKey(key: string) {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parseDiagnosticInfo(raw?: string | null): DiagnosticInfo | null {
+  if (!raw?.trim()) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+
+    const normalized = Object.entries(parsed).reduce<DiagnosticInfo>((acc, [key, value]) => {
+      const displayValue = normalizeDiagnosticValue(value);
+      if (displayValue) acc[key] = displayValue;
+      return acc;
+    }, {});
+
+    return Object.keys(normalized).length ? normalized : null;
+  } catch {
+    const pairs = Array.from(raw.matchAll(/(?:^|[,;\n])\s*([^:,\n;]+?)\s*:\s*([^,;\n]+)/g));
+    const parsed = pairs.reduce<DiagnosticInfo>((acc, match) => {
+      const key = match[1]?.trim();
+      const value = match[2]?.trim();
+      if (key && value) acc[key] = value;
+      return acc;
+    }, {});
+
+    return Object.keys(parsed).length ? parsed : null;
+  }
+}
+
+function isRedundantDiagnosticField(key: string, value: string, ticket: TicketDetailData) {
+  const normalizedKey = normalizeDiagnosticKey(key);
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (!normalizedValue) return true;
+  if (["location", "address", "property", "propertylocation"].includes(normalizedKey)) {
+    return [
+      ticket.property?.address,
+      ticket.property?.city,
+      ticket.property?.state,
+      ticket.property?.zipCode,
+    ].some((part) => part?.trim().toLowerCase() === normalizedValue);
+  }
+  if (["issue", "issuetype", "category", "issuecategory", "symptom"].includes(normalizedKey)) {
+    return ticket.issueType.trim().toLowerCase() === normalizedValue;
+  }
+  if (["description", "details", "summary"].includes(normalizedKey)) {
+    return ticket.description?.trim().toLowerCase() === normalizedValue;
+  }
+
+  return false;
+}
+
+function getDiagnosticValue(info: DiagnosticInfo | null, acceptedKeys: string[]) {
+  if (!info) return null;
+  const normalizedKeys = new Set(acceptedKeys.map(normalizeDiagnosticKey));
+  const match = Object.entries(info).find(([key, value]) => normalizedKeys.has(normalizeDiagnosticKey(key)) && value.trim());
+  return match?.[1] ?? null;
+}
+
+function formatDiagnosticKey(key: string) {
+  return key
+    .replace(/([A-Z])/g, " $1")
+    .replace(/[_-]/g, " ")
+    .replace(/^\w/, (c) => c.toUpperCase());
+}
 
 const statusStyles: Record<TicketStatus, { bg: string, text: string, border: string, dot: string }> = {
   OPEN: {
@@ -93,9 +198,7 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
 
 export default function TicketDetail() {
   const { id } = useParams();
-  const [ticket, setTicket] = useState<any>(null);
-  const [status, setStatus] = useState<TicketStatus>("OPEN");
-  const [priority, setPriority] = useState<TicketPriority>("MEDIUM");
+  const [ticket, setTicket] = useState<TicketDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [draftResponse, setDraftResponse] = useState<string | null>(null);
@@ -105,11 +208,9 @@ export default function TicketDetail() {
   useEffect(() => {
     const fetchTicket = async () => {
       try {
-        const data = await apiFetch<any>(`/api/tickets/${id}`);
+        const data = await apiFetch<TicketDetailData>(`/api/tickets/${id}`);
         setTicket(data);
-        setStatus(data.status);
-        setPriority(data.priority);
-        setDraftResponse(data.draftResponse);
+        setDraftResponse(data.draftResponse ?? null);
         setDraftText(data.draftResponse || "");
       } catch (error) {
         console.error("Error fetching ticket:", error);
@@ -125,21 +226,28 @@ export default function TicketDetail() {
     fetchTicket();
   }, [id]);
 
-  const handleUpdate = async () => {
+  const getNextStatus = (current: TicketStatus) => {
+    const index = statusFlow.indexOf(current);
+    return statusFlow[(index + 1) % statusFlow.length];
+  };
+
+  const handleAdvanceStatus = async () => {
+    if (!ticket) return;
+    const nextStatus = getNextStatus(ticket.status);
     setUpdating(true);
     try {
       await apiFetch(`/api/tickets/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, priority }),
+        body: JSON.stringify({ status: nextStatus }),
       });
-      setTicket((prev: any) => ({ ...prev, status, priority }));
+      setTicket((prev) => prev ? { ...prev, status: nextStatus } : prev);
     } catch (error) {
       console.error("Error updating ticket:", error);
       toast.error(
         error instanceof ApiError
           ? error.message
-          : "Failed to update the ticket. Please try again.",
+          : "Failed to update ticket status. Please try again.",
       );
     } finally {
       setUpdating(false);
@@ -221,11 +329,21 @@ export default function TicketDetail() {
 
   const st = statusStyles[ticket.status as TicketStatus] || statusStyles.OPEN;
   const pr = priorityStyles[ticket.priority as TicketPriority] || priorityStyles.MEDIUM;
+  const nextStatus = getNextStatus(ticket.status);
+  const diagnosticInfo = parseDiagnosticInfo(ticket.extractedInfo);
+  const duration = getDiagnosticValue(diagnosticInfo, ["duration", "timing", "timeframe", "time", "howLong"]);
+  const additionalIssueDetails = diagnosticInfo
+    ? Object.entries(diagnosticInfo).filter(([key, value]) => {
+        const normalizedKey = normalizeDiagnosticKey(key);
+        const isDuration = ["duration", "timing", "timeframe", "time", "howlong"].includes(normalizedKey);
+        return !isDuration && !isRedundantDiagnosticField(key, value, ticket);
+      })
+    : [];
 
   return (
     <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout>
-        <div className="max-w-7xl mx-auto space-y-8 pb-12">
+        <div className="max-w-7xl mx-auto space-y-6 pb-12">
           {/* Top Bar / Navigation */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/60 dark:border-slate-800/60 pb-6">
             <div className="space-y-2">
@@ -271,9 +389,9 @@ export default function TicketDetail() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px] gap-6 items-start">
             {/* Left Main Content */}
-            <div className="lg:col-span-2 space-y-8">
+            <div className="space-y-6">
               {/* Botpress Agent Reviewer (AI Draft) */}
               {draftResponse && (
                 <Card className="border-cyan-500/30 bg-linear-to-br from-slate-900 to-slate-950 text-slate-100 shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
@@ -348,9 +466,9 @@ export default function TicketDetail() {
                     <CardDescription className="text-xs">Initial request information reported by user</CardDescription>
                   </div>
                 </CardHeader>
-                <CardContent className="p-6 space-y-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-100 dark:border-slate-900/50">
-                    <div className="space-y-1">
+                <CardContent className="p-6 space-y-5">
+                  <div className={cn("grid grid-cols-1 gap-4", duration && "md:grid-cols-2")}>
+                    <div className="space-y-2 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-100 dark:border-slate-900/50">
                       <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Issue Category</p>
                       <div className="flex items-center gap-2">
                         <Badge className="bg-[#b48c3c]/10 text-[#b48c3c] dark:bg-[#b48c3c]/20 dark:text-[#ebd09a] border border-[#b48c3c]/30 font-semibold px-2.5 py-0.5 rounded-md text-xs">
@@ -363,6 +481,12 @@ export default function TicketDetail() {
                         )}
                       </div>
                     </div>
+                    {duration && (
+                      <div className="space-y-2 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-100 dark:border-slate-900/50">
+                        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Duration</p>
+                        <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{duration}</p>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Description</p>
@@ -370,6 +494,16 @@ export default function TicketDetail() {
                       {ticket.description || "No description provided."}
                     </p>
                   </div>
+                  {additionalIssueDetails.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {additionalIssueDetails.map(([key, value]) => (
+                        <div key={key} className="space-y-2 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-100 dark:border-slate-900/50">
+                          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{formatDiagnosticKey(key)}</p>
+                          <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -392,59 +526,6 @@ export default function TicketDetail() {
                   </CardContent>
                 </Card>
               )}
-
-              {/* Extracted Diagnostic Info */}
-              {ticket.extractedInfo && (() => {
-                let parsedInfo: Record<string, any> | null = null;
-                try {
-                  const parsed = JSON.parse(ticket.extractedInfo);
-                  if (parsed && typeof parsed === "object") {
-                    parsedInfo = parsed;
-                  }
-                } catch (e) {
-                  console.error("[warranty/tickets/[id]]", e);
-                  // Fallback
-                }
-
-                return (
-                  <Card className="border-indigo-500/20 bg-linear-to-br from-slate-900 to-slate-950 text-slate-100 shadow-md overflow-hidden">
-                    <div className="bg-linear-to-r from-indigo-600/10 to-blue-600/10 px-6 py-4 flex items-center gap-3 border-b border-slate-800">
-                      <div className="p-2 bg-indigo-500/20 rounded-xl">
-                        <Bot className="h-5 w-5 text-indigo-400" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-sm font-bold tracking-tight">Extracted Diagnostic Info</CardTitle>
-                        <p className="text-[10px] text-indigo-300/80 font-medium">Variables extracted by Botpress AI</p>
-                      </div>
-                    </div>
-                    <CardContent className="p-6">
-                      {parsedInfo ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {Object.entries(parsedInfo).map(([key, value]) => {
-                            const formattedKey = key
-                              .replace(/([A-Z])/g, " $1")
-                              .replace(/[_-]/g, " ")
-                              .replace(/^\w/, (c) => c.toUpperCase());
-
-                            const displayValue = typeof value === "object" ? JSON.stringify(value) : String(value);
-
-                            return (
-                              <div key={key} className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/40 hover:border-indigo-500/30 transition duration-200">
-                                <p className="text-[10px] text-indigo-400 font-bold tracking-wider uppercase">{formattedKey}</p>
-                                <p className="text-sm text-slate-200 mt-1.5 font-medium">{displayValue}</p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line bg-slate-955/40 p-4 rounded-xl border border-slate-800/40">
-                          {ticket.extractedInfo}
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })()}
 
               {/* Referenced KB Documents */}
               {ticket.kbReferences && (() => {
@@ -489,7 +570,7 @@ export default function TicketDetail() {
             </div>
 
             {/* Right Side Sidebar */}
-            <div className="space-y-8">
+            <div className="space-y-6">
               {/* Homeowner & Property Card */}
               <Card className="border-slate-200/60 dark:border-slate-800/60 shadow-xs bg-white/70 dark:bg-slate-900/60 backdrop-blur-md overflow-hidden">
                 <CardHeader className="border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 py-4 px-6 flex flex-row items-center gap-3">
@@ -572,56 +653,32 @@ export default function TicketDetail() {
                     <RefreshCcw className="h-5 w-5" />
                   </div>
                   <div>
-                    <CardTitle className="text-base font-bold">Action Control Center</CardTitle>
-                    <CardDescription className="text-[11px]">Update ticket details and logs</CardDescription>
+                    <CardTitle className="text-base font-bold">Update Status</CardTitle>
+                    <CardDescription className="text-[11px]">Advance ticket lifecycle</CardDescription>
                   </div>
                 </CardHeader>
-                <CardContent className="p-6 space-y-6">
-                  {/* Status and Priority Select */}
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ticket Status</label>
-                      <Select value={status} onValueChange={(val: any) => setStatus(val)}>
-                        <SelectTrigger className="w-full bg-slate-50/50 dark:bg-slate-950/30 border-slate-200 dark:border-slate-800 rounded-xl focus:ring-[#0F3B3D]">
-                          <SelectValue placeholder="Select Status" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl border-slate-200 dark:border-slate-800">
-                          <SelectItem value="OPEN" className="rounded-lg">Open</SelectItem>
-                          <SelectItem value="IN_PROGRESS" className="rounded-lg">In Progress</SelectItem>
-                          <SelectItem value="RESOLVED" className="rounded-lg">Resolved</SelectItem>
-                          <SelectItem value="ESCALATED" className="rounded-lg">Escalated</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ticket Priority</label>
-                      <Select value={priority} onValueChange={(val: any) => setPriority(val)}>
-                        <SelectTrigger className="w-full bg-slate-50/50 dark:bg-slate-950/30 border-slate-200 dark:border-slate-800 rounded-xl focus:ring-[#0F3B3D]">
-                          <SelectValue placeholder="Select Priority" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl border-slate-200 dark:border-slate-800">
-                          <SelectItem value="LOW" className="rounded-lg">Low</SelectItem>
-                          <SelectItem value="MEDIUM" className="rounded-lg">Medium</SelectItem>
-                          <SelectItem value="HIGH" className="rounded-lg">High</SelectItem>
-                          <SelectItem value="URGENT" className="rounded-lg">Urgent</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <Button
-                      onClick={handleUpdate}
-                      disabled={updating}
-                      className="w-full bg-[#0F3B3D] hover:bg-[#0F3B3D]/95 text-white font-semibold shadow-xs py-2 rounded-xl transition duration-150"
-                    >
-                      {updating ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCcw className="mr-2 h-4 w-4" />
-                      )}
-                      Save Settings
-                    </Button>
+                <CardContent className="p-6 space-y-4">
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/30 p-4">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Current Status</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-200">{statusLabels[ticket.status]}</p>
                   </div>
+
+                  <Button
+                    onClick={handleAdvanceStatus}
+                    disabled={updating}
+                    className="w-full bg-[#0F3B3D] hover:bg-[#0F3B3D]/95 text-white font-semibold shadow-xs py-2 rounded-xl transition duration-150"
+                  >
+                    {updating ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCcw className="mr-2 h-4 w-4" />
+                    )}
+                    Move to {statusLabels[nextStatus]}
+                  </Button>
+
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Priority stays {ticket.priority.toLowerCase()}.
+                  </p>
                 </CardContent>
               </Card>
             </div>
