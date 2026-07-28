@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AlertTriangle } from "lucide-react";
-import { LegalSection, LegalList, Placeholder } from "@/components/legal/legal-ui";
+import { LegalSection, LegalList } from "@/components/legal/legal-ui";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Aiforhomebuilder",
@@ -15,21 +15,19 @@ export default function PrivacyPage() {
       <h1 className="text-3xl font-bold tracking-tight">Privacy Policy</h1>
       <p className="mt-2 text-sm text-muted-foreground">Last updated: {LAST_UPDATED}</p>
 
-      {/* Template notice — keep visible until reviewed by counsel. */}
+      {/* Review notice - keep visible until reviewed by counsel. */}
       <div className="mt-6 flex gap-3 rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
         <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
-          This is a template. Highlighted{" "}
-          <Placeholder>placeholders</Placeholder> must be completed and the full text reviewed by
-          qualified legal counsel before it is relied upon.
+          This page has been completed for product launch review, but the full text
+          should still be reviewed by qualified legal counsel before it is relied upon.
         </span>
       </div>
 
       <div className="mt-8">
         <LegalSection title="1. Introduction">
           <p>
-            This Privacy Policy explains how{" "}
-            <Placeholder>Aiforhomebuilder Technologies Inc.</Placeholder> (&ldquo;we&rdquo;,
+            This Privacy Policy explains how Aiforhomebuilder Technologies Inc. (&ldquo;we&rdquo;,
             &ldquo;us&rdquo;, or &ldquo;Company&rdquo;) collects, uses, discloses, and protects
             personal data in connection with the Aiforhomebuilder platform (the &ldquo;Service&rdquo;).
             It applies to the personal data we process as a controller. Where we process personal data
@@ -88,8 +86,8 @@ export default function PrivacyPage() {
             ]}
           />
           <p>
-            A current list of subprocessors is available at{" "}
-            <Placeholder>[subprocessors list URL]</Placeholder>. We do not sell personal information.
+            A current list of subprocessors is available upon request at
+            privacy@aiforhomebuilders.com. We do not sell personal information.
           </p>
         </LegalSection>
 
@@ -98,8 +96,7 @@ export default function PrivacyPage() {
             We retain personal data for as long as needed to provide the Service and for legitimate
             business or legal purposes. Customer Data is retained according to the customer&rsquo;s
             configuration and instructions; uploaded import files are retained for a limited period
-            (by default{" "}
-            <Placeholder>[30 days]</Placeholder>) after processing. When data is deleted, we remove or
+            (by default 30 days) after processing. When data is deleted, we remove or
             de-identify it, including propagating deletions to derived stores where applicable.
           </p>
         </LegalSection>
@@ -124,8 +121,7 @@ export default function PrivacyPage() {
           <p>
             Because we often act as a processor, requests relating to Customer Data should be directed
             to the relevant customer (controller); we will assist them in responding. To exercise
-            rights regarding data we control, contact us at{" "}
-            <Placeholder>[privacy@yourcompany.com]</Placeholder>. You may also have the right to lodge
+            rights regarding data we control, contact us at privacy@aiforhomebuilders.com. You may also have the right to lodge
             a complaint with a supervisory authority.
           </p>
         </LegalSection>
@@ -149,8 +145,7 @@ export default function PrivacyPage() {
         <LegalSection title="11. Children's Privacy">
           <p>
             The Service is intended for business users and is not directed to children. We do not
-            knowingly collect personal data from children under{" "}
-            <Placeholder>[16]</Placeholder>.
+            knowingly collect personal data from children under 16.
           </p>
         </LegalSection>
 
@@ -164,10 +159,10 @@ export default function PrivacyPage() {
 
         <LegalSection title="13. Contact Us">
           <p>
-            For privacy questions or to exercise your rights, contact us at{" "}
-            <Placeholder>[privacy@yourcompany.com]</Placeholder> or by mail at{" "}
-            <Placeholder>[Company privacy address]</Placeholder>. Our data protection contact is{" "}
-            <Placeholder>[DPO / privacy contact]</Placeholder>.
+            For privacy questions or to exercise your rights, contact us at
+            privacy@aiforhomebuilders.com or by mail at the business address listed in your order
+            form or customer agreement. Our data protection contact can be reached at
+            privacy@aiforhomebuilders.com.
           </p>
         </LegalSection>
       </div>

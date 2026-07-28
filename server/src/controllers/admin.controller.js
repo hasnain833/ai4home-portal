@@ -6,7 +6,6 @@ import {
   normalizeSalesPermissions,
 } from "../lib/permissions.js";
 
-// Initialize Supabase Admin client
 const getSupabaseAdmin = () => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -16,11 +15,6 @@ const getSupabaseAdmin = () => {
   return createClient(supabaseUrl, supabaseServiceKey);
 };
 
-// NOTE: getCompanies / updateCompanyWorkspaces used to be duplicated here with a
-// latent role-check bug (they checked role === "SUPER_ADMIN", but requireAuth
-// exposes super admins as role "ADMIN" + isSuperAdmin=true). The live, correct
-// implementations are in ../admin/superadmin.controller.js. The dead copies were
-// removed during the 2026 technical audit — see AUDIT.md.
 
 export const getStaff = async (req, res) => {
   try {
@@ -41,14 +35,11 @@ export const getStaff = async (req, res) => {
         role: true,
         createdAt: true,
         avatar: true,
-        // SRS §4.12: the member's granted Sales permissions.
         salesPermissions: true,
       },
       orderBy: { createdAt: "desc" },
     });
 
-    // Ship the catalogue alongside the list so the UI renders whatever the server
-    // actually recognises, instead of keeping its own copy that can drift.
     return res.json({ staff, permissionCatalogue: SALES_PERMISSIONS });
   } catch (error) {
     console.error("Failed to list staff:", error);
@@ -78,7 +69,6 @@ export const createStaff = async (req, res) => {
         .json({ message: "An account with this email already exists" });
     }
 
-    // 1. Create user in Supabase Auth
     const supabaseAdmin = getSupabaseAdmin();
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
@@ -95,13 +85,12 @@ export const createStaff = async (req, res) => {
       });
     }
 
-    // 2. Create user in Prisma DB
     const hashedPassword = await bcrypt.hash(password, 10);
     const newStaff = await prisma.user.create({
       data: {
         name,
         email,
-        password: hashedPassword, // Hash using bcrypt
+        password: hashedPassword, 
         role: "STAFF",
         companyId: session.companyId,
       },
@@ -137,7 +126,6 @@ export const updateStaff = async (req, res) => {
         .json({ message: "Staff ID, name, and email are required" });
     }
 
-    // Verify the staff belongs to the admin's company and has role STAFF
     const staff = await prisma.user.findFirst({
       where: { id: staffId, companyId: session.companyId, role: "STAFF" },
     });
@@ -146,7 +134,6 @@ export const updateStaff = async (req, res) => {
       return res.status(404).json({ message: "Staff member not found" });
     }
 
-    // If email is changing, make sure it is not taken by anyone else
     if (email !== staff.email) {
       const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) {
@@ -156,7 +143,6 @@ export const updateStaff = async (req, res) => {
       }
     }
 
-    // 1. Find corresponding Supabase Auth user
     const supabaseAdmin = getSupabaseAdmin();
     const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
     const supabaseUser = usersData.users.find((u) => u.email === staff.email);
@@ -167,7 +153,6 @@ export const updateStaff = async (req, res) => {
         .json({ message: "Supabase user not found for this staff email" });
     }
 
-    // 2. Update Supabase Auth user
     const updateData = {
       email,
       user_metadata: { name },
@@ -195,7 +180,6 @@ export const updateStaff = async (req, res) => {
       });
     }
 
-    // 3. Update Prisma DB user
     const dbUpdateData = {
       name,
       email,
@@ -205,9 +189,6 @@ export const updateStaff = async (req, res) => {
       dbUpdateData.password = await bcrypt.hash(password, 10);
     }
 
-    // SRS §4.12: the Builder Admin grants a member their permissions. Only applied
-    // when the caller sends the field, so an edit that only changes a name can't
-    // silently wipe someone's grants. Unknown keys are dropped by normalize().
     if (salesPermissions !== undefined) {
       dbUpdateData.salesPermissions = normalizeSalesPermissions(salesPermissions);
     }

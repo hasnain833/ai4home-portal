@@ -6,30 +6,37 @@ import { useParams, useSearchParams } from "next/navigation";
 const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v3.6/inject.js";
 const CONFIG_URL = process.env.NEXT_PUBLIC_BOTPRESS_CONFIG_URL || "https://files.bpcontent.cloud/2026/06/24/12/20260624123527-XY5YMA41.js";
 
+type BotpressClient = {
+  on?: (event: string, handler: () => void) => void;
+  updateUser?: (payload: Record<string, unknown>) => void;
+};
+
+type BotpressWindow = Window & {
+  botpress?: BotpressClient;
+};
+
 export default function WidgetPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const companyId = (params?.companyId as string) || "demo-company";
-
-  // Read branding from query params first (passed by widget.js), fallback to API
   const qColor = searchParams.get("botColor");
   const qName = searchParams.get("botName");
   const qLogo = searchParams.get("botLogo");
-
+  const mode = searchParams.get("mode") === "fullscreen" ? "fullscreen" : "widget";
   const hasBrandingParams = !!(qColor || qName || qLogo);
-
   const [themeColor, setThemeColor] = useState(qColor || "#0F3B3D");
   const [botName, setBotName] = useState(qName || "AI Assistant");
   const [botLogoUrl, setBotLogoUrl] = useState(qLogo || "");
-  const [loading, setLoading] = useState(!hasBrandingParams); // Skip loading if params already present
-
-  // Only fetch branding from API if no query params were provided (direct iframe access)
+  const [loading, setLoading] = useState(!hasBrandingParams);
   useEffect(() => {
-    if (hasBrandingParams) return; // Already have branding from query params
+    if (hasBrandingParams) return;
 
     const fetchBranding = async () => {
       try {
-        const response = await fetch(`/api/company/branding?id=${companyId}`);
+        const response = await fetch(
+          `/api/company/branding?id=${encodeURIComponent(companyId)}&v=${Date.now()}`,
+          { cache: "no-store" }
+        );
         if (response.ok) {
           const data = await response.json();
           if (data) {
@@ -48,7 +55,6 @@ export default function WidgetPage() {
     fetchBranding();
   }, [companyId, hasBrandingParams]);
 
-  // Preload Botpress CDN scripts as soon as component mounts
   useEffect(() => {
     const preloadInject = document.createElement("link");
     preloadInject.rel = "preload";
@@ -72,31 +78,27 @@ export default function WidgetPage() {
     if (loading) return;
 
     let cancelled = false;
-
-    // Load inject.js, then a same-origin /bp-config script with per-company branding
-    // + embeddedChatId baked in. We DON'T proxy window.botpress — that breaks
-    // Botpress' inline (embedded) mount and forces the floating widget.
     const injectScript = document.createElement("script");
     injectScript.src = INJECT_URL;
     injectScript.async = true;
 
     const params = new URLSearchParams({ botColor: themeColor, botName });
     if (botLogoUrl) params.set("botLogo", botLogoUrl);
+    params.set("v", Date.now().toString());
     const configScript = document.createElement("script");
     configScript.src = `/bp-config?${params.toString()}`;
     configScript.defer = true;
 
     const startWebchat = () => {
       if (cancelled) return;
-      const bp = (window as any).botpress;
+      const bp = (window as BotpressWindow).botpress;
       if (!bp) {
         setTimeout(startWebchat, 100);
         return;
       }
 
-      // Register listeners BEFORE the config script calls botpress.init(...).
       try {
-        bp.on("webchat:initialized", () => {
+        bp.on?.("webchat:initialized", () => {
           if (bp.updateUser) {
             try {
               bp.updateUser({
@@ -127,9 +129,8 @@ export default function WidgetPage() {
       );
       bpElements.forEach((el) => el.remove());
       try {
-        delete (window as any).botpress;
+        delete (window as BotpressWindow).botpress;
       } catch {
-        // Ignore — inject.js may define it as non-configurable.
       }
     };
   }, [loading, companyId, themeColor, botName, botLogoUrl]);
@@ -143,11 +144,10 @@ export default function WidgetPage() {
   }
 
   return (
-    <div className="w-screen h-screen overflow-hidden bg-transparent">
-      {/* Botpress embedded container */}
+    <div className={`w-screen h-screen overflow-hidden ${mode === "fullscreen" ? "bg-white" : "bg-transparent"}`}>
       <div
         id="bp-embedded-webchat"
-        className="w-full h-full bg-transparent"
+        className={`w-full h-full ${mode === "fullscreen" ? "bg-white" : "bg-transparent"}`}
       />
     </div>
   );

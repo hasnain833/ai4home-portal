@@ -10,21 +10,8 @@ const MIN_DISTINCT_CHARS = 12;
 
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
-const PRIMARY_KEY =
-  process.env.APP_ENCRYPTION_KEY ||
-  process.env.SALESFORCE_ENCRYPTION_KEY ||
-  DEFAULT_KEY;
-
-const PREVIOUS_KEYS = [
-  ...String(process.env.APP_ENCRYPTION_KEY_PREVIOUS || "")
-    .split(",")
-    .map((k) => k.trim())
-    .filter(Boolean),
-  process.env.SALESFORCE_ENCRYPTION_KEY || "",
-  DEFAULT_KEY,
-].filter((k) => k && k !== PRIMARY_KEY);
-
-const CANDIDATE_KEYS = [PRIMARY_KEY, ...new Set(PREVIOUS_KEYS)];
+const PRIMARY_KEY = process.env.APP_ENCRYPTION_KEY || DEFAULT_KEY;
+const CANDIDATE_KEYS = [PRIMARY_KEY];
 
 const USING_DEFAULT_KEY = PRIMARY_KEY === DEFAULT_KEY;
 
@@ -65,7 +52,6 @@ export function encryptionKeyStatus() {
     usingDefaultKey: USING_DEFAULT_KEY,
     strong: PRIMARY_KEY_HEALTH.ok,
     problems: PRIMARY_KEY_HEALTH.reasons,
-    previousKeysConfigured: PREVIOUS_KEYS.filter((k) => k !== DEFAULT_KEY).length,
     algorithm: ALGORITHM,
     format: V2_PREFIX,
   };

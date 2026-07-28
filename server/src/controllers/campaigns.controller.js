@@ -5,6 +5,24 @@ import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
 
+const CAMPAIGN_BATCH_SIZE = 500;
+
+async function sendCampaignEnrollmentEvents(inngest, enrollments, campaignId) {
+  for (let i = 0; i < enrollments.length; i += CAMPAIGN_BATCH_SIZE) {
+    const batch = enrollments.slice(i, i + CAMPAIGN_BATCH_SIZE);
+    await inngest.send(
+      batch.map((enrollment) => ({
+        name: "campaign.enrollment.started",
+        data: {
+          leadId: enrollment.leadId,
+          campaignId,
+          enrollmentId: enrollment.id,
+        },
+      })),
+    );
+  }
+}
+
 export const getCampaigns = async (req, res) => {
   try {
     const companyId = req.user.companyId;
@@ -209,17 +227,9 @@ export const updateCampaign = async (req, res) => {
         console.log(
           `[Campaign Controller] Campaign ${id} launch: sending Inngest events for ${enrollments.length} enrolled leads.`,
         );
-        const events = enrollments.map((enrollment) => ({
-          name: "campaign.enrollment.started",
-          data: {
-            leadId: enrollment.leadId,
-            campaignId: id,
-            enrollmentId: enrollment.id,
-          },
-        }));
-        await inngest.send(events);
+        await sendCampaignEnrollmentEvents(inngest, enrollments, id);
         console.log(
-          `[Campaign Controller] Sent ${events.length} Inngest events successfully.`,
+          `[Campaign Controller] Sent ${enrollments.length} Inngest events successfully.`,
         );
       } else {
         console.log(
@@ -387,106 +397,108 @@ export const enrollCampaign = async (req, res) => {
       return res.status(404).json({ message: "Campaign not found" });
     }
 
-    const firstStep = await prisma.campaignStep.findFirst({
-      where: { campaignId: id },
-      orderBy: { position: "asc" },
-    });
-
+    const uniqueLeadIds = Array.from(new Set(leadIds));
     let enrolledCount = 0;
     const skippedDuplicates = [];
     const skippedInactive = [];
     const concurrentWarnings = [];
+    const enrollmentsToStart = [];
 
-    for (const leadId of leadIds) {
-      try {
-        const lead = await prisma.lead.findFirst({
-          where: { id: leadId, companyId: req.user.companyId },
-        });
-
-        if (!lead) continue;
-
-        // SW-ANN-001: explicit leadIds bypass the segment query above, so re-check
-        // here — this is the path a bulk "select all" in the UI takes.
-        if (!isActiveLead(lead)) {
-          skippedInactive.push(leadId);
-          continue;
-        }
-
-        const existingEnrollment = await prisma.campaignEnrollment.findUnique({
-          where: { leadId_campaignId: { leadId, campaignId: id } },
-        });
-
-        if (
-          existingEnrollment &&
-          (existingEnrollment.status === "ACTIVE" ||
-            existingEnrollment.status === "PAUSED")
-        ) {
-          skippedDuplicates.push(leadId);
-          continue;
-        }
-        const concurrentEnrollments = await prisma.campaignEnrollment.findFirst(
-          {
-            where: {
-              leadId,
-              status: { in: ["ACTIVE", "PAUSED"] },
-              campaignId: { not: id },
-            },
-          },
-        );
-        if (concurrentEnrollments) {
-          concurrentWarnings.push(leadId);
-        }
-        const enrollment = await prisma.campaignEnrollment.upsert({
+    for (let i = 0; i < uniqueLeadIds.length; i += CAMPAIGN_BATCH_SIZE) {
+      const batchIds = uniqueLeadIds.slice(i, i + CAMPAIGN_BATCH_SIZE);
+      const [leads, existingEnrollments, otherActiveEnrollments] = await Promise.all([
+        prisma.lead.findMany({
+          where: { id: { in: batchIds }, companyId: req.user.companyId },
+        }),
+        prisma.campaignEnrollment.findMany({
+          where: { campaignId: id, leadId: { in: batchIds } },
+        }),
+        prisma.campaignEnrollment.findMany({
           where: {
-            leadId_campaignId: {
-              leadId,
-              campaignId: id,
+            leadId: { in: batchIds },
+            status: { in: ["ACTIVE", "PAUSED"] },
+            campaignId: { not: id },
+          },
+          select: { leadId: true },
+        }),
+      ]);
+
+      const leadsById = new Map(leads.map((lead) => [lead.id, lead]));
+      const existingByLeadId = new Map(existingEnrollments.map((enrollment) => [enrollment.leadId, enrollment]));
+      const concurrentLeadIds = new Set(otherActiveEnrollments.map((enrollment) => enrollment.leadId));
+      const timelineRows = [];
+
+      for (const leadId of batchIds) {
+        try {
+          const lead = leadsById.get(leadId);
+          if (!lead) continue;
+
+          if (!isActiveLead(lead)) {
+            skippedInactive.push(leadId);
+            continue;
+          }
+
+          const existingEnrollment = existingByLeadId.get(leadId);
+          if (
+            existingEnrollment &&
+            (existingEnrollment.status === "ACTIVE" ||
+              existingEnrollment.status === "PAUSED")
+          ) {
+            skippedDuplicates.push(leadId);
+            continue;
+          }
+
+          if (concurrentLeadIds.has(leadId)) {
+            concurrentWarnings.push(leadId);
+          }
+
+          const enrollment = await prisma.campaignEnrollment.upsert({
+            where: {
+              leadId_campaignId: {
+                leadId,
+                campaignId: id,
+              },
             },
-          },
-          create: {
-            leadId,
-            campaignId: id,
-            status: "ACTIVE",
-            currentStepPosition: 1,
-          },
-          update: {
-            status: "ACTIVE",
-            currentStepPosition: 1,
-            exitedReason: null,
-          },
-        });
-        if (campaign.status === "Active") {
-          console.log(
-            `[Campaign Controller] Sending Inngest event 'campaign.enrollment.started' for lead: ${leadId}`,
-          );
-          await inngest.send({
-            name: "campaign.enrollment.started",
-            data: {
+            create: {
               leadId,
               campaignId: id,
-              enrollmentId: enrollment.id,
+              status: "ACTIVE",
+              currentStepPosition: 1,
+            },
+            update: {
+              status: "ACTIVE",
+              currentStepPosition: 1,
+              exitedReason: null,
             },
           });
-          console.log(`[Campaign Controller] Inngest event sent successfully!`);
-        } else {
-          console.log(
-            `[Campaign Controller] Campaign ${id} is not Active (status: ${campaign.status}). Postponing Inngest event for lead: ${leadId}`,
-          );
-        }
-        await prisma.leadTimeline.create({
-          data: {
+
+          if (campaign.status === "Active") {
+            enrollmentsToStart.push(enrollment);
+          }
+
+          timelineRows.push({
             leadId,
             type: "SYNC_UPDATE",
             description: `Enrolled in nurture campaign "${campaign.name}"`,
-          },
-        });
+          });
 
-        enrolledCount++;
-      } catch (err) {
-        console.error(`Failed to enroll lead ${leadId}:`, err);
+          enrolledCount++;
+        } catch (err) {
+          console.error(`Failed to enroll lead ${leadId}:`, err);
+        }
+      }
+
+      if (timelineRows.length > 0) {
+        await prisma.leadTimeline.createMany({ data: timelineRows });
       }
     }
 
+    if (campaign.status === "Active" && enrollmentsToStart.length > 0) {
+      console.log(
+        `[Campaign Controller] Sending campaign enrollment events for ${enrollmentsToStart.length} leads in batches.`,
+      );
+      await sendCampaignEnrollmentEvents(inngest, enrollmentsToStart, id);
+    }
     return res.json({
       success: true,
       enrolledCount,

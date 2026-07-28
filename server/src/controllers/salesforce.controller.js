@@ -19,6 +19,13 @@ import {
 } from "../services/salesforce-service.js";
 import { runIncrementalSync } from "../services/salesforce-sync.js";
 
+function getPortalUrl() {
+  if (!process.env.NEXT_PUBLIC_URL) {
+    throw new Error("NEXT_PUBLIC_URL is required for Salesforce OAuth redirects");
+  }
+  return process.env.NEXT_PUBLIC_URL;
+}
+
 export const connectSalesforce = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -35,7 +42,7 @@ export const connectSalesforce = async (req, res) => {
     }
 
     const env = environment === "production" ? "production" : "sandbox";
-    const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+    const baseUrl = getPortalUrl();
     const redirectUri = `${baseUrl}/api/sales/salesforce/callback`;
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = codeChallengeFromVerifier(codeVerifier);
@@ -72,7 +79,7 @@ export const salesforceCallback = async (req, res) => {
     const error = req.query.error;
     const errorDescription = req.query.error_description;
 
-    const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+    const baseUrl = getPortalUrl();
 
     if (error) {
       console.error(`[Salesforce Callback] OAuth error: ${error} — ${errorDescription}`);
@@ -168,7 +175,7 @@ export const salesforceCallback = async (req, res) => {
     return res.redirect(`${baseUrl}/sales/settings?connected=true`);
   } catch (err) {
     console.error("[Salesforce Callback] Error:", err);
-    const baseUrl = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+    const baseUrl = process.env.NEXT_PUBLIC_URL || "";
     return res.redirect(
       `${baseUrl}/sales/settings?sf_error=${encodeURIComponent(err.message || "token_exchange_failed")}`
     );

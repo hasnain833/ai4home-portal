@@ -37,7 +37,7 @@ Feature-level status is tracked in detail in
 
 - **Frontend** (`src/`): Next.js App Router. Talks to the backend exclusively
   over `/api/*`. In development, `next.config.ts` rewrites `/api/*` to
-  `http://localhost:5000`. The frontend does **not** access the database
+  the `BACKEND_URL` configured in `.env`. The frontend does **not** access the database
   directly — all data access goes through the Express API.
 - **Backend** (`server/`): a standalone Express app (`server/src/index.js`).
   Route groups are guarded by `requireAuth` + `requireWorkspace("sales"|"warranty")`.
@@ -126,7 +126,7 @@ cd server && npm run dev
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open the URL shown by the Next.js dev server.
 
 ---
 
@@ -154,10 +154,11 @@ the **root environment must contain the backend variables too** — use
 | `DATABASE_URL` | Postgres connection |
 | `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase auth verification |
 | `SESSION_SECRET` | Super Admin session signing |
-| `APP_ENCRYPTION_KEY` | **AES-256-GCM key for integration secrets at rest** (fallback: `SALESFORCE_ENCRYPTION_KEY`). Must be a strong 32-char value in production — a startup warning fires if left at the default. |
+| `APP_ENCRYPTION_KEY` | **AES-256-GCM key for integration secrets at rest**. Must be a strong 32-char value in production — a startup warning fires if left at the default. |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Primary LLM (Sales). Falls back to Groq if not a real `sk-ant-` key. |
 | `GROQ_API_KEY` / `GROQ_MODEL` | Groq LLM fallback (`OPENAI_API_KEY` holding a `gsk_` key is also accepted for back-compat; it is **not** used for embeddings) |
 | `SMTP_*` / `SENDER_EMAIL` | Transactional + campaign email (Brevo) |
+| `BREVO_API_KEY` / `BREVO_SMS_SENDER` | Platform/admin SMS notifications through Brevo |
 | `GOOGLE_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` | Google Calendar / Meet |
 | `INBOUND_WEBHOOK_SECRET` | Shared secret for Brevo/Twilio inbound webhooks |
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` / `INNGEST_DEV` | Inngest background jobs |

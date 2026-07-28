@@ -8,17 +8,29 @@ import { Bot, Copy, Check, Info, Code } from "lucide-react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v0/inject.js";
+const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v3.6/inject.js";
+
+type BotpressClient = {
+  config?: (payload: Record<string, unknown>) => void;
+  on?: (event: string, handler: () => void) => void;
+  updateUser?: (payload: Record<string, unknown>) => void;
+};
+
+type BotpressWindow = Window & {
+  botpress?: BotpressClient;
+};
 
 export default function AIChatPage() {
   const { user, isLoading } = useAuth();
   const [copied, setCopied] = useState(false);
+  const [embedMode, setEmbedMode] = useState<"widget" | "fullscreen">("widget");
   const [themeColor, setThemeColor] = useState("#0F3B3D");
 
   const botName = user?.companyName ? `${user.companyName} Assistant` : "Aiforhomebuilder Assistant";
@@ -29,7 +41,7 @@ export default function AIChatPage() {
 
     const fetchCompanyData = async () => {
       try {
-        const response = await fetch("/api/company");
+        const response = await fetch("/api/company", { cache: "no-store" });
         if (response.ok) {
           const data = await response.json();
           if (data && data.botColor) {
@@ -53,13 +65,14 @@ export default function AIChatPage() {
 
     const params = new URLSearchParams({ botColor: themeColor, botName });
     if (botLogoUrl) params.set("botLogo", botLogoUrl);
+    params.set("v", Date.now().toString());
     const configScript = document.createElement("script");
     configScript.src = `/bp-config?${params.toString()}`;
     configScript.defer = true;
 
     const startWebchat = () => {
       if (cancelled) return;
-      const bp = (window as any).botpress;
+      const bp = (window as BotpressWindow).botpress;
       if (!bp) {
         // inject.js hasn't defined window.botpress yet — retry shortly.
         setTimeout(startWebchat, 100);
@@ -68,7 +81,7 @@ export default function AIChatPage() {
 
       // Register listeners BEFORE the config script calls botpress.init(...).
       try {
-        bp.on("webchat:initialized", () => {
+        bp.on?.("webchat:initialized", () => {
           if (user && bp.updateUser) {
             try {
               bp.updateUser({
@@ -113,19 +126,26 @@ export default function AIChatPage() {
       );
       bpElements.forEach((el) => el.remove());
       try {
-        delete (window as any).botpress;
+        delete (window as BotpressWindow).botpress;
       } catch {
         // Ignore — inject.js may define it as non-configurable.
       }
     };
   }, [user, isLoading, themeColor, botName, botLogoUrl]);
 
-  const portalUrl = process.env.NEXT_PUBLIC_URL;
-  const embedScriptCode = `<script src="${portalUrl}/widget.js?company=${user?.companyId || "demo-company"}"></script>`;
+  const portalUrl =
+    process.env.NEXT_PUBLIC_URL ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+  const companyId = user?.companyId || "demo-company";
+  const widgetScriptCode = `<script src="${portalUrl}/widget.js?company=${companyId}&mode=widget"></script>`;
+  const fullScreenScriptCode = `<script src="${portalUrl}/widget.js?company=${companyId}&mode=fullscreen"></script>`;
+  const fullScreenUrl = `${portalUrl}/widget/${companyId}?mode=fullscreen`;
+  const embedScriptCode =
+    embedMode === "widget" ? widgetScriptCode : fullScreenScriptCode;
 
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(embedScriptCode);
+  const copyToClipboard = (value = embedScriptCode) => {
+    navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -160,9 +180,9 @@ export default function AIChatPage() {
                       </div>
                       <div>
                         <DialogTitle className="text-lg">AI Assistant Widget Embed</DialogTitle>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Integrate this AI assistant into your company's website.
-                        </p>
+                        <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                          Integrate this AI assistant into your company website.
+                        </DialogDescription>
                       </div>
                     </div>
                   </DialogHeader>
@@ -171,7 +191,7 @@ export default function AIChatPage() {
                     <div className="bg-[#0F3B3D]/5 dark:bg-[#b48c3c]/5 border border-border/50 rounded-xl p-4 space-y-3">
                       <div className="flex flex-col gap-0.5">
                         <span className="text-xs font-semibold text-foreground">Chatbot Theme Color</span>
-                        <span className="text-[10px] text-muted-foreground">Select a custom color matching your company's branding color scheme.</span>
+                        <span className="text-[10px] text-muted-foreground">Select a custom color matching your company branding color scheme.</span>
                       </div>
                       <div className="flex items-center gap-3">
                         <input
@@ -181,11 +201,14 @@ export default function AIChatPage() {
                             const newColor = e.target.value;
                             setThemeColor(newColor);
                             try {
-                              await fetch("/api/company", {
+                              const response = await fetch("/api/company", {
                                 method: "PUT",
                                 headers: { "Content-Type": "application/json" },
                                 body: JSON.stringify({ botColor: newColor })
                               });
+                              if (!response.ok) {
+                                throw new Error(`Save failed with status ${response.status}`);
+                              }
                             } catch (err) {
                               console.error("Failed to save bot color:", err);
                             }
@@ -199,10 +222,37 @@ export default function AIChatPage() {
                       </div>
                     </div>
 
+                    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-muted/30 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setEmbedMode("widget")}
+                        className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                          embedMode === "widget"
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        Widget Mode
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEmbedMode("fullscreen")}
+                        className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                          embedMode === "fullscreen"
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        Full Screen Mode
+                      </button>
+                    </div>
+
                     <div className="flex justify-between items-center">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Widget Code</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {embedMode === "widget" ? "Widget Script" : "Full Screen Script"}
+                      </span>
                       <Button
-                        onClick={copyToClipboard}
+                        onClick={() => copyToClipboard()}
                         className="gap-2 bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-medium"
                         size="sm"
                       >
@@ -222,14 +272,33 @@ export default function AIChatPage() {
                     <div className="relative rounded-xl border border-slate-800 bg-[#020617] p-4 text-xs font-mono text-slate-300 overflow-x-auto max-h-50 w-full">
                       <pre className="whitespace-pre">{embedScriptCode}</pre>
                     </div>
+                    {embedMode === "fullscreen" && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Direct Full Screen URL</span>
+                          <Button
+                            onClick={() => copyToClipboard(fullScreenUrl)}
+                            variant="outline"
+                            className="gap-2 font-medium"
+                            size="sm"
+                          >
+                            <Copy className="h-4 w-4" />
+                            Copy URL
+                          </Button>
+                        </div>
+                        <div className="relative rounded-xl border border-border bg-muted/40 p-3 text-xs font-mono text-muted-foreground overflow-x-auto w-full">
+                          <pre className="whitespace-pre">{fullScreenUrl}</pre>
+                        </div>
+                      </div>
+                    )}
                     <div className="bg-[#0F3B3D]/5 dark:bg-[#b48c3c]/5 border border-[#0F3B3D]/25 dark:border-[#b48c3c]/25 rounded-xl p-4 flex items-start gap-3 w-full">
                       <Info className="h-5 w-5 text-[#0F3B3D] dark:text-[#b48c3c] shrink-0 mt-0.5" />
                       <div className="text-xs text-muted-foreground space-y-1">
-                        <p className="font-semibold text-foreground">💡 How to use this script:</p>
+                        <p className="font-semibold text-foreground">How to use this script:</p>
                         <p>1. Copy the script code block above.</p>
-                        <p>2. Paste the snippet into the HTML of your external website (preferably right before the closing <code className="px-1 py-0.5 rounded bg-muted font-mono">&lt;/body&gt;</code> tag).</p>
-                        <p>3. The floating chat bubble (💬) will automatically appear in the bottom-right corner of your website.</p>
-                        <p>4. Your company's custom theme color, logo, and name are loaded automatically from the database—no manual configuration is needed on your website!</p>
+                        <p>2. Paste the snippet into the HTML of your external website, preferably before the closing <code className="px-1 py-0.5 rounded bg-muted font-mono">&lt;/body&gt;</code> tag.</p>
+                        <p>3. Widget mode shows the floating chat bubble. Full Screen mode fills the browser window.</p>
+                        <p>4. The custom theme color, logo, and name are loaded automatically from the database.</p>
                       </div>
                     </div>
                   </div>

@@ -6,11 +6,14 @@ const BASE_CONFIG_URL =
 
 const EMBED_CONTAINER_ID = "bp-embedded-webchat";
 
+type BotpressConfig = Record<string, unknown> & {
+  configuration?: Record<string, unknown>;
+};
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
-let cached: { config: Record<string, any>; ts: number } | null = null;
+let cached: { config: BotpressConfig; ts: number } | null = null;
 
-async function getBaseConfig(): Promise<Record<string, any> | null> {
+async function getBaseConfig(): Promise<BotpressConfig | null> {
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.config;
   try {
     const res = await fetch(BASE_CONFIG_URL, { cache: "no-store" });
@@ -43,20 +46,49 @@ export async function GET(req: NextRequest) {
   }
 
   // Clone so per-request branding overrides don't pollute the shared cache.
-  const config: Record<string, any> = JSON.parse(JSON.stringify(base));
+  const config: BotpressConfig = JSON.parse(JSON.stringify(base));
   config.configuration = config.configuration || {};
-  if (botColor) config.configuration.color = botColor;
+  const configurationOverrides: Record<string, unknown> = {
+    themeMode: "light",
+    headerVariant: "solid",
+    variant: "solid",
+  };
+  if (botColor) {
+    configurationOverrides.color = botColor;
+    config.configuration.color = botColor;
+  }
+  Object.assign(config.configuration, configurationOverrides);
   if (botName) config.configuration.botName = botName;
   if (botLogo) config.configuration.botAvatar = botLogo;
   // Force inline rendering into the portal container.
   config.configuration.embeddedChatId = EMBED_CONTAINER_ID;
 
-  const js = `window.botpress.init(${JSON.stringify(config)});`;
+  const js = `(function initBotpress(attempt) {
+  if (window.botpress && typeof window.botpress.init === "function") {
+    var configurationOverrides = ${JSON.stringify(configurationOverrides)};
+    if (typeof window.botpress.on === "function" && typeof window.botpress.config === "function") {
+      window.botpress.on("webchat:initialized", function() {
+        window.botpress.config({ configuration: configurationOverrides });
+      });
+    }
+    window.botpress.init(${JSON.stringify(config)});
+    window.setTimeout(function() {
+      if (window.botpress && typeof window.botpress.config === "function") {
+        window.botpress.config({ configuration: configurationOverrides });
+      }
+    }, 250);
+    return;
+  }
+  if (attempt > 100) {
+    console.error("[bp-config] Botpress inject script did not expose window.botpress.init");
+    return;
+  }
+  window.setTimeout(function() { initBotpress(attempt + 1); }, 50);
+})(0);`;
   return new NextResponse(js, {
     headers: {
       "Content-Type": "application/javascript; charset=utf-8",
-      // Let the browser/CDN cache the branded script too.
-      "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
+      "Cache-Control": "no-store",
     },
   });
 }

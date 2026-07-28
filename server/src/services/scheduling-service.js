@@ -191,7 +191,7 @@ export async function bookSlot({
 async function sendConfirmations(lead, appointment, tz) {
   const when = formatSlotLabel(appointment.time, tz);
   const meet = appointment.meetingLink;
-  const portal = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+  const portal = process.env.NEXT_PUBLIC_URL || "";
   const rescheduleUrl = `${portal}/book/manage/${appointment.rescheduleToken}`;
   const { smtpConfig, smsConfig } = await getMessagingConfig(lead.companyId);
 

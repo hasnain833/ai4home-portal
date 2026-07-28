@@ -4,6 +4,8 @@ import {
   uploadCsvMiddleware,
   handleCsvUpload,
   validateCsvImport,
+  getCsvImportStatus,
+  downloadCsvImportErrors,
   getMappingTemplates,
   saveMappingTemplate,
   deleteMappingTemplate,
@@ -18,6 +20,8 @@ const canImport = requirePermission("csv.upload");
 
 router.post("/upload", requireAuth, canImport, uploadCsvMiddleware, handleCsvUpload);
 router.post("/validate", requireAuth, canImport, validateCsvImport);
+router.get("/imports/:id", requireAuth, getCsvImportStatus);
+router.get("/imports/:id/errors.csv", requireAuth, downloadCsvImportErrors);
 
 // SW-CSV-002: reusable column-mapping templates. Reading them is harmless — the
 // grant gates writing, which is what changes what other imports will do.

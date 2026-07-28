@@ -165,14 +165,25 @@ export const handleCsvUpload = async (req, res) => {
       });
     }
 
-    // Fire background Inngest event with pre-mapped rows
+    const job = await prisma.csvImportJob.create({
+      data: {
+        companyId: req.user.companyId,
+        userId: req.user.id,
+        status: "QUEUED",
+        mergeStrategy,
+        totalRows: leadsList.length,
+        rows: leadsList,
+        errors: [],
+      },
+    });
+
+    // Fire a small background event. The large CSV payload stays in the database
+    // so Inngest payload limits and request retries do not duplicate thousands of rows.
     await inngest.send({
       name: "csv/import.started",
       data: {
-        rows: leadsList,
-        mergeStrategy,
+        jobId: job.id,
         companyId: req.user.companyId,
-        userId: req.user.id,
         userRole: req.user.role,
         userName: req.user.name || req.user.email,
       },
@@ -180,10 +191,65 @@ export const handleCsvUpload = async (req, res) => {
 
     return res.json({
       message: "CSV import started successfully in the background.",
+      jobId: job.id,
       rowCount: leadsList.length,
     });
   } catch (error) {
     console.error("CSV Upload Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getCsvImportStatus = async (req, res) => {
+  try {
+    const job = await prisma.csvImportJob.findFirst({
+      where: { id: req.params.id, companyId: req.user.companyId },
+      select: {
+        id: true,
+        status: true,
+        totalRows: true,
+        processedRows: true,
+        createdCount: true,
+        updatedCount: true,
+        skippedCount: true,
+        errorCount: true,
+        errorMessage: true,
+        startedAt: true,
+        completedAt: true,
+        failedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    if (!job) return res.status(404).json({ message: "CSV import job not found." });
+    return res.json(job);
+  } catch (error) {
+    console.error("[CSV Status] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const downloadCsvImportErrors = async (req, res) => {
+  try {
+    const job = await prisma.csvImportJob.findFirst({
+      where: { id: req.params.id, companyId: req.user.companyId },
+      select: { id: true, errors: true },
+    });
+    if (!job) return res.status(404).json({ message: "CSV import job not found." });
+
+    const errors = Array.isArray(job.errors) ? job.errors : [];
+    const header = ["row", "reason", "firstName", "lastName", "email", "phone"];
+    const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const csv = [
+      header.join(","),
+      ...errors.map((row) => header.map((key) => escape(row[key])).join(",")),
+    ].join("\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename=csv-import-${job.id}-errors.csv`);
+    return res.send(csv);
+  } catch (error) {
+    console.error("[CSV Errors Download] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

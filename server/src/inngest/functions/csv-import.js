@@ -14,24 +14,63 @@ export const handleCsvImport = inngest.createFunction(
       deadLetterJob({ functionId: "handle-csv-import", event, error }),
   },
   async ({ event, step }) => {
-    const { rows, mergeStrategy, companyId, userId, userRole, userName } = event.data;
+    const { jobId, companyId, userRole, userName } = event.data;
+    const job = await step.run("load-import-job", async () => {
+      if (!jobId) {
+        throw new Error("CSV import event is missing jobId.");
+      }
+      return prisma.csvImportJob.findFirst({
+        where: { id: jobId, companyId },
+      });
+    });
 
-    const chunkSize = 100;
-    const summary = await step.run("process-rows", async () => {
-      let createdCount = 0;
-      let updatedCount = 0;
-      let skippedCount = 0;
-      const errors = [];
+    if (!job) {
+      throw new Error(`CSV import job not found: ${jobId}`);
+    }
 
-      for (let i = 0; i < rows.length; i += chunkSize) {
-        const chunk = rows.slice(i, i + chunkSize);
+    const rows = Array.isArray(job.rows) ? job.rows : [];
+    const mergeStrategy = job.mergeStrategy || "update";
+    const userId = job.userId;
+
+    await step.run("mark-running", async () => {
+      await prisma.csvImportJob.update({
+        where: { id: job.id },
+        data: { status: "RUNNING", startedAt: job.startedAt || new Date(), totalRows: rows.length },
+      });
+    });
+
+    const chunkSize = 250;
+    const totals = {
+      createdCount: job.createdCount || 0,
+      updatedCount: job.updatedCount || 0,
+      skippedCount: job.skippedCount || 0,
+      errors: Array.isArray(job.errors) ? job.errors : [],
+    };
+
+    try {
+      for (let i = job.processedRows || 0; i < rows.length; i += chunkSize) {
+        const result = await step.run(`process-rows-${i + 1}-${Math.min(i + chunkSize, rows.length)}`, async () => {
+          let createdCount = 0;
+          let updatedCount = 0;
+          let skippedCount = 0;
+          const errors = [];
+          const createdLeadIds = [];
+          const chunk = rows.slice(i, i + chunkSize);
+
         for (let j = 0; j < chunk.length; j++) {
           const lead = chunk[j];
           const rowNum = i + j + 1;
 
           const check = validateLeadRow(lead);
           if (!check.valid) {
-            errors.push({ row: rowNum, reason: check.reason });
+            errors.push({
+              row: rowNum,
+              reason: check.reason,
+              firstName: lead.firstName || "",
+              lastName: lead.lastName || "",
+              email: lead.email || "",
+              phone: lead.phone || "",
+            });
             continue;
           }
           const firstName = sanitizeCsvValue(lead.firstName);
@@ -117,20 +156,94 @@ export const handleCsvImport = inngest.createFunction(
             },
           });
           createdCount++;
-          await triggerAutomation({ companyId, leadId: createdLead.id, event: "CRM_INGEST", context: { source: "CSV" } });
+          createdLeadIds.push(createdLead.id);
+        }
+
+          return {
+            processedRows: chunk.length,
+            createdCount,
+            updatedCount,
+            skippedCount,
+            errors,
+            createdLeadIds,
+          };
+        });
+
+        totals.createdCount += result.createdCount;
+        totals.updatedCount += result.updatedCount;
+        totals.skippedCount += result.skippedCount;
+        totals.errors.push(...result.errors);
+
+        await step.run(`checkpoint-${i + result.processedRows}`, async () => {
+          await prisma.csvImportJob.update({
+            where: { id: job.id },
+            data: {
+              processedRows: Math.min(i + result.processedRows, rows.length),
+              createdCount: totals.createdCount,
+              updatedCount: totals.updatedCount,
+              skippedCount: totals.skippedCount,
+              errorCount: totals.errors.length,
+              errors: totals.errors,
+            },
+          });
+        });
+
+        if (result.createdLeadIds.length > 0) {
+          await step.run(`emit-automation-${i + 1}`, async () => {
+            for (let k = 0; k < result.createdLeadIds.length; k += 100) {
+              await Promise.all(
+                result.createdLeadIds
+                  .slice(k, k + 100)
+                  .map((leadId) =>
+                    triggerAutomation({
+                      companyId,
+                      leadId,
+                      event: "CRM_INGEST",
+                      context: { source: "CSV" },
+                    }),
+                  ),
+              );
+            }
+          });
         }
       }
 
-      return { createdCount, updatedCount, skippedCount, errors };
-    });
+      await step.run("mark-completed", async () => {
+        await prisma.csvImportJob.update({
+          where: { id: job.id },
+          data: {
+            status: "COMPLETED",
+            processedRows: rows.length,
+            completedAt: new Date(),
+            createdCount: totals.createdCount,
+            updatedCount: totals.updatedCount,
+            skippedCount: totals.skippedCount,
+            errorCount: totals.errors.length,
+            errors: totals.errors,
+          },
+        });
+      });
 
-    return {
-      total: rows.length,
-      createdCount: summary.createdCount,
-      updatedCount: summary.updatedCount,
-      skippedCount: summary.skippedCount,
-      errorsCount: summary.errors.length,
-      errors: summary.errors,
-    };
+      return {
+        jobId: job.id,
+        total: rows.length,
+        createdCount: totals.createdCount,
+        updatedCount: totals.updatedCount,
+        skippedCount: totals.skippedCount,
+        errorsCount: totals.errors.length,
+      };
+    } catch (error) {
+      await step.run("mark-failed", async () => {
+        await prisma.csvImportJob.update({
+          where: { id: job.id },
+          data: {
+            status: "FAILED",
+            failedAt: new Date(),
+            errorMessage: String(error?.message || error).slice(0, 2000),
+          },
+        });
+      });
+      throw error;
+    }
   }
 );

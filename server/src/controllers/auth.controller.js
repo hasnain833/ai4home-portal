@@ -5,6 +5,7 @@ import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import { createSuperadminSessionToken } from "../lib/superadmin-session.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
+import { sendBrevoSms } from "../services/brevo-sms.service.js";
 
 const safeEqual = (a, b) => {
   const ab = Buffer.from(String(a ?? ""), "utf8");
@@ -86,7 +87,9 @@ export const getMe = async (req, res) => {
       hasSalesAccess,
       verificationStatus,
       // NFR-S-006: stored as a private storage reference — sign it for display.
-      verificationDocUrl: await resolveDownloadUrl(dbUser.company?.verificationDocUrl),
+      verificationDocUrl: await resolveDownloadUrl(
+        dbUser.company?.verificationDocUrl,
+      ),
       avatar: avatarUrl,
       companyLogo: dbUser.company?.logo || null,
       companyName: dbUser.company?.name || null,
@@ -208,7 +211,12 @@ export const superadminLogin = async (req, res) => {
       !!envEmail &&
       String(email).trim().toLowerCase() === envEmail.trim().toLowerCase();
 
-    if (envEmail && envPassword && emailMatches && safeEqual(password, envPassword)) {
+    if (
+      envEmail &&
+      envPassword &&
+      emailMatches &&
+      safeEqual(password, envPassword)
+    ) {
       const token = createSuperadminSessionToken({
         id: "env-superadmin",
         email: email,
@@ -409,8 +417,11 @@ export const signup = async (req, res) => {
     }
 
     try {
-      const superAdminEmail = process.env.SUPERADMIN_EMAIL;
-      if (superAdminEmail && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      const adminNotifyEmail = process.env.ADMIN_NOTIFY_EMAIL;
+      const adminNotifyPhone = process.env.ADMIN_NOTIFY_PHONE;
+      const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/verifications`;
+
+      if (adminNotifyEmail && process.env.SMTP_USER && process.env.SMTP_PASS) {
         const transporter = nodemailer.createTransport({
           host: process.env.SMTP_HOST,
           port: Number(process.env.SMTP_PORT) || 587,
@@ -421,23 +432,21 @@ export const signup = async (req, res) => {
           },
         });
 
-        const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/verifications`;
-
         await transporter.sendMail({
           from: `"Aiforhomebuilder" <${process.env.SENDER_EMAIL}>`,
-          to: superAdminEmail,
+          to: adminNotifyEmail,
           subject: `New tenant registration: ${companyName}`,
-          text: `A new company "${companyName}" (${companyEmail}) just signed up and is awaiting document verification. Review it at ${adminUrl}`,
+          text: `A new company "${companyName}" (${companyEmail}) just signed up. Phone: ${companyPhone || "not provided"}. Schedule an onboarding appointment and review it at ${adminUrl}`,
           html: `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
               <h2 style="color: #b48c3c;">New Tenant Registration</h2>
-              <p>A new company just signed up and is awaiting document verification before their warranty workspace is unlocked.</p>
+              <p>A new company just signed up. Please schedule an onboarding appointment with the new tenant.</p>
               <table style="margin: 16px 0; font-size: 14px; color: #333;">
                 <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Company</td><td>${companyName}</td></tr>
                 <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Email</td><td>${companyEmail}</td></tr>
                 <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Phone</td><td>${companyPhone || "—"}</td></tr>
               </table>
-              <p>Once the tenant uploads their verification document, review and approve it here:</p>
+              <p>You can review the tenant verification status here:</p>
               <div style="text-align: center; margin: 24px 0;">
                 <a href="${adminUrl}" style="background-color: #b48c3c; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Open Verifications</a>
               </div>
@@ -446,12 +455,24 @@ export const signup = async (req, res) => {
         });
       } else {
         console.warn(
-          "[Signup] SUPERADMIN_EMAIL or SMTP creds missing — skipping super admin notification.",
+          "[Signup] ADMIN_NOTIFY_EMAIL or SMTP creds missing - skipping admin email notification.",
+        );
+      }
+
+      if (adminNotifyPhone) {
+        await sendBrevoSms({
+          to: adminNotifyPhone,
+          tag: "tenant-registration",
+          body: `New tenant registered: ${companyName}. Email: ${companyEmail}. Phone: ${companyPhone || "not provided"}. Please schedule an onboarding appointment.`,
+        });
+      } else {
+        console.warn(
+          "[Signup] ADMIN_NOTIFY_PHONE missing - skipping admin SMS notification.",
         );
       }
     } catch (adminMailError) {
       console.error(
-        "[Signup] Failed to notify super admin of new registration:",
+        "[Signup] Failed to notify admin of new registration:",
         adminMailError,
       );
     }
