@@ -21,9 +21,6 @@ export function buildSmsWebhookUrl(path, companyId) {
     const url = new URL(path, base);
     if (!isPubliclyReachable(url.hostname)) return null;
     if (companyId) url.searchParams.set("companyId", companyId);
-    if (process.env.INBOUND_WEBHOOK_SECRET) {
-      url.searchParams.set("token", process.env.INBOUND_WEBHOOK_SECRET);
-    }
     return url.toString();
   } catch {
     return null;

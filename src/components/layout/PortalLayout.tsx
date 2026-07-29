@@ -19,9 +19,9 @@ import {
   User,
   Sun,
   Moon,
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
+  PanelLeftClose,
+  PanelLeftOpen,
   X,
   Users,
   Pencil,
@@ -88,7 +88,10 @@ export default function PortalLayout({
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     if (mounted && user) {
@@ -124,6 +127,10 @@ export default function PortalLayout({
   const filteredNav = navItems.filter((item) => user && item.roles.includes(user.role));
   const getInitials = (name: string) =>
     name.split(" ").map((n) => n[0]).join("").toUpperCase();
+  const companyName = user?.companyName || "Aiforhomebuilder";
+  const sidebarCompanyName = companyName.trim().split(/\s+/)[0] || companyName;
+  const workspaceLabel = workspace === "warranty" ? "Warranty Care" : "Sales Hub";
+  const WorkspaceIcon = workspace === "warranty" ? Bot : Layers;
 
   const handleWorkspaceSwitch = (ws: "warranty" | "sales") => {
     localStorage.setItem("last-workspace", ws);
@@ -151,15 +158,23 @@ export default function PortalLayout({
       >
         <div className="flex h-full flex-col">
           {/* Header with logo and toggle */}
-          <div className="flex h-16 items-center justify-between px-4">
-            <button onClick={() => router.push(workspace === "warranty" ? "/warranty/dashboard" : "/sales/dashboard")} className="flex items-center gap-3.5 hover:opacity-80 transition">
-              <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-9 w-auto object-contain rounded-md" />
-              {sidebarExpanded && (
-                <span className="text-xl font-bold tracking-tight">{user?.companyName || "Aiforhomebuilder"}</span>
-              )}
-            </button>
+          <div className={`flex h-16 items-center ${sidebarExpanded ? "justify-between px-4" : "justify-center px-0"}`}>
+            {sidebarExpanded ? (
+              <button
+                onClick={() => router.push(workspace === "warranty" ? "/warranty/dashboard" : "/sales/dashboard")}
+                className="flex min-w-0 items-center gap-3.5 hover:opacity-80 transition"
+                title={companyName}
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/95 p-1 ring-1 ring-white/15">
+                  <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-full w-full object-contain" />
+                </span>
+                <span className="min-w-0 truncate text-xl font-bold tracking-tight">{sidebarCompanyName}</span>
+              </button>
+            ) : (
+              null
+            )}
             <Button variant="ghost" size="icon" onClick={toggleSidebar} className="text-white hover:bg-white/10">
-              {sidebarExpanded ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+              {sidebarExpanded ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
             </Button>
           </div>
           <Separator className="bg-white/10" />
@@ -169,13 +184,20 @@ export default function PortalLayout({
             <div className="px-3 py-2">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex w-full items-center justify-between gap-2 rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm text-white hover:bg-white/10 transition cursor-pointer outline-hidden">
-                    <div className="flex items-center gap-2 overflow-hidden text-left">
-                      <span className="font-semibold text-[10px] tracking-wider uppercase text-white/40 shrink-0">WS:</span>
-                      <span className="font-medium text-white text-xs truncate">
-                        {workspace === "warranty" ? "Warranty Care" : "Sales Hub"}
-                      </span>
-                    </div>
+                  <button
+                    className={`flex w-full items-center rounded-lg bg-white/5 border border-white/10 text-sm text-white hover:bg-white/10 transition cursor-pointer outline-hidden ${
+                      sidebarExpanded ? "justify-between gap-2 px-3 py-2" : "h-11 justify-center px-0"
+                    }`}
+                    title={`Switch workspace: ${workspaceLabel}`}
+                  >
+                    {sidebarExpanded ? (
+                      <div className="flex items-center gap-2 overflow-hidden text-left">
+                        <span className="font-semibold text-[10px] tracking-wider uppercase text-white/40 shrink-0">WS:</span>
+                        <span className="font-medium text-white text-xs truncate">{workspaceLabel}</span>
+                      </div>
+                    ) : (
+                      <WorkspaceIcon className="h-5 w-5 text-white/85" />
+                    )}
                     {sidebarExpanded && <ChevronDown className="h-3.5 w-3.5 text-white/50 shrink-0" />}
                   </button>
                 </DropdownMenuTrigger>
@@ -212,6 +234,7 @@ export default function PortalLayout({
                       ? "border-l-4 border-l-secondary bg-white/5 pl-2 text-white font-semibold"
                       : "text-white/80 hover:bg-white/10 hover:text-white"
                       }`}
+                    title={sidebarExpanded ? undefined : item.name}
                   >
                     <item.icon className="h-5 w-5 shrink-0" />
                     {sidebarExpanded && <span>{item.name}</span>}
@@ -227,16 +250,25 @@ export default function PortalLayout({
               variant="ghost"
               size="sm"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="w-full justify-start text-white/80 hover:bg-white/10 hover:text-white"
+              className={`w-full text-white/80 hover:bg-white/10 hover:text-white ${
+                sidebarExpanded ? "justify-start" : "justify-center px-0"
+              }`}
+              title={theme === "dark" ? "Light Mode" : "Dark Mode"}
             >
-              {theme === "dark" ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />}
+              {theme === "dark" ? (
+                <Sun className={`h-4 w-4 ${sidebarExpanded ? "mr-2" : ""}`} />
+              ) : (
+                <Moon className={`h-4 w-4 ${sidebarExpanded ? "mr-2" : ""}`} />
+              )}
               {sidebarExpanded && (theme === "dark" ? "Light Mode" : "Dark Mode")}
             </Button>
 
             {user?.role === "admin" ? (
               // ADMIN: show company logo + company name + logout icon
-              <div className="w-full flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm font-medium text-white/80 transition-all">
-                <div className="flex items-center gap-3">
+              <div className={`w-full flex items-center rounded-md py-2 text-sm font-medium text-white/80 transition-all ${
+                sidebarExpanded ? "justify-between gap-3 px-3" : "justify-center px-0"
+              }`}>
+                <div className={`flex items-center ${sidebarExpanded ? "gap-3" : "justify-center"}`}>
                   <div className="relative">
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={user?.avatar} />
@@ -249,7 +281,7 @@ export default function PortalLayout({
                   {sidebarExpanded && (
                     <div className="flex-1 text-left overflow-hidden">
                       <p className="text-sm font-medium text-white truncate">
-                        {user?.companyName || user?.name}
+                        {sidebarCompanyName || user?.name}
                       </p>
                       <p className="text-xs text-white/60 capitalize">{user?.role}</p>
                     </div>
@@ -262,8 +294,10 @@ export default function PortalLayout({
                 )}
               </div>
             ) : (
-              <div className="w-full flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm font-medium text-white/80 transition-all">
-                <div className="flex items-center gap-3">
+              <div className={`w-full flex items-center rounded-md py-2 text-sm font-medium text-white/80 transition-all ${
+                sidebarExpanded ? "justify-between gap-3 px-3" : "justify-center px-0"
+              }`}>
+                <div className={`flex items-center ${sidebarExpanded ? "gap-3" : "justify-center"}`}>
                   <div className="relative">
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={user?.avatar} />

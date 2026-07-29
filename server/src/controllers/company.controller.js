@@ -1,6 +1,5 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
-import { normalizeLeadStatuses } from "../lib/lead-statuses.js";
 import { normalizeNewsSources } from "../lib/news-sources.js";
 import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
 import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
@@ -48,16 +47,11 @@ export const updateCompany = async (req, res) => {
       "quietHoursStart",
       "quietHoursEnd",
       "quietHoursTimezone",
-      "leadStatuses",
       "newsSources",
     ];
     const data = {};
     for (const key of ALLOWED_FIELDS) {
       if (req.body[key] !== undefined) data[key] = req.body[key];
-    }
-
-    if (data.leadStatuses !== undefined) {
-      data.leadStatuses = normalizeLeadStatuses(data.leadStatuses);
     }
 
     if (data.newsSources !== undefined) {

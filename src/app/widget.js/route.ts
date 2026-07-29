@@ -61,7 +61,8 @@ export async function GET() {
   function initializeWidget(branding) {
     var botColor = branding.botColor || '#0F3B3D';
     var logo = branding.logo || (portalUrl + '/logo.png');
-    var botName = branding.name || 'AI Assistant';
+    var companyName = branding.name || 'your company';
+    var botName = companyName === 'your company' ? 'AI Assistant' : (companyName + ' Assistant');
 
     // 3. Inject CSS Styles
     var styleTag = document.createElement('style');
@@ -245,6 +246,7 @@ export async function GET() {
     var iframeSrc = portalUrl + '/widget/' + companyId +
       '?botColor=' + encodeURIComponent(botColor) +
       '&botName=' + encodeURIComponent(botName) +
+      '&companyName=' + encodeURIComponent(companyName) +
       '&botLogo=' + encodeURIComponent(logo) +
       '&mode=' + encodeURIComponent(mode);
     iframe.title = botName + ' Chat Widget';

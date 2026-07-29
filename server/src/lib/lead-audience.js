@@ -1,4 +1,9 @@
-export const INACTIVE_LEAD_STATUSES = ["Closed Won", "Closed Lost", "Unsubscribed"];
+import { LEAD_STATUS } from "./lead-statuses.js";
+
+export const INACTIVE_LEAD_STATUSES = [
+  LEAD_STATUS.CLOSED_WON,
+  LEAD_STATUS.UNSUBSCRIBED,
+];
 
 export function activeLeadFilter() {
   return {

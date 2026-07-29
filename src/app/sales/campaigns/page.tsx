@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { fetchKey, QUERY_KEYS } from "@/lib/use-query";
+import { DEFAULT_LEAD_STATUSES, statusColor } from "@/lib/lead-statuses";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,8 +38,44 @@ import {
   Pencil,
   Layers,
   Activity,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
+
+const DEFAULT_EMAIL_SUBJECT = "Checking in from {companyName}";
+const DEFAULT_EMAIL_BODY = `Hi {firstName},
+
+I wanted to check in from {companyName} about our "{campaignName}" campaign.
+
+If you have questions or would like to talk through next steps, you can book a time here: {bookingLink}
+
+Best,
+The {companyName} Team`;
+
+const DEFAULT_SMS_BODY = "Hi {firstName}, just checking in from {companyName} about {campaignName}. Let me know if you need anything! Reply STOP to unsubscribe.";
+const CAMPAIGN_EXCLUDED_STATUSES = new Set(["Closed Won", "Unsubscribed"]);
+
+type EnrollableLead = {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  status?: string | null;
+  tags?: string[];
+};
+
+const isEnrollableLead = (lead: unknown): lead is EnrollableLead => {
+  return typeof lead === "object" && lead !== null && typeof (lead as { id?: unknown }).id === "string";
+};
+
+const buildDefaultEmailStep = () => ({
+  type: "EMAIL",
+  subject: DEFAULT_EMAIL_SUBJECT,
+  body: DEFAULT_EMAIL_BODY,
+  delayValue: "",
+  delayUnit: "DAYS",
+});
 
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -53,19 +90,27 @@ export default function CampaignsPage() {
   const [seqToDelete, setSeqToDelete] = useState<any>(null);
   const [addStepModalOpen, setAddStepModalOpen] = useState(false);
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
-  const [newStep, setNewStep] = useState<any>({ type: "EMAIL", subject: "", body: "", delayValue: "", delayUnit: "DAYS" });
+  const [newStep, setNewStep] = useState<any>(buildDefaultEmailStep());
+  const [generatingStepCopy, setGeneratingStepCopy] = useState(false);
 
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
-  const [leadsForEnroll, setLeadsForEnroll] = useState<any[]>([]);
+  const [leadsForEnroll, setLeadsForEnroll] = useState<EnrollableLead[]>([]);
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [tagFilter, setTagFilter] = useState("ALL");
 
   // Segment-based enrollment (SW-NUR-002)
   const [segments, setSegments] = useState<any[]>([]);
   const [enrollMode, setEnrollMode] = useState<"leads" | "segment">("leads");
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>("");
+
+  const enrollLeadTags = useMemo(() => {
+    const tags = new Set<string>();
+    leadsForEnroll.forEach((lead) => lead.tags?.forEach((tag) => tags.add(tag)));
+    return Array.from(tags).sort((a, b) => a.localeCompare(b));
+  }, [leadsForEnroll]);
 
   const fetchCampaigns = async () => {
     setLoading(true);
@@ -188,7 +233,7 @@ export default function CampaignsPage() {
       if (res.ok) {
         setAddStepModalOpen(false);
         setEditingStepIndex(null);
-        setNewStep({ type: "EMAIL", subject: "", body: "", delayValue: "", delayUnit: "DAYS" });
+        setNewStep(buildDefaultEmailStep());
         // Refetch campaign detail and list to update steps count
         const resDetail = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
         if (resDetail.ok) {
@@ -202,6 +247,46 @@ export default function CampaignsPage() {
     } catch (error) {
       console.error("[sales/campaigns]", error);
       toast.error("Error saving step.");
+    }
+  };
+
+  const generateStepCopy = async () => {
+    if (!activeSeq || newStep.type === "DELAY") return;
+
+    setGeneratingStepCopy(true);
+    try {
+      const res = await fetch("/api/sales/campaigns/generate-copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: `Write a ${newStep.type === "SMS" ? "short SMS" : "nurture email"} for the campaign named "${activeSeq.name}".`,
+          audience: "Sales leads, homebuyers, and existing homeowner prospects",
+          stepType: newStep.type,
+          contextInfo: [
+            `Campaign name: ${activeSeq.name}`,
+            activeSeq.description ? `Campaign description: ${activeSeq.description}` : null,
+            newStep.body ? `Current draft to improve: ${newStep.body}` : null,
+          ].filter(Boolean).join("\n"),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        toast.error(data?.message || "Failed to generate AI copy.");
+        return;
+      }
+
+      setNewStep((prev: any) => ({
+        ...prev,
+        subject: prev.type === "EMAIL" ? (data.subject || prev.subject) : prev.subject,
+        body: data.body || data.draft || prev.body,
+      }));
+      toast.success("AI copy generated.");
+    } catch (error) {
+      console.error("[sales/campaigns] generate copy", error);
+      toast.error("Error generating AI copy.");
+    } finally {
+      setGeneratingStepCopy(false);
     }
   };
 
@@ -287,17 +372,25 @@ export default function CampaignsPage() {
     setEnrollModalOpen(true);
     setEnrollMode("leads");
     setSelectedSegmentId("");
+    setSearchQuery("");
+    setStatusFilter("ALL");
+    setTagFilter("ALL");
     setLoadingLeads(true);
     try {
       // NFR-P-001: concurrent, and the segment list comes from the cache shared
       // with the leads and announcements pages.
       const [leadsResult, segResult] = await Promise.allSettled([
-        fetchKey<unknown[] | { leads?: unknown[] }>("/api/sales/leads?pageSize=50"),
+        fetchKey<unknown[] | { leads?: unknown[] }>("/api/sales/leads?pageSize=200"),
         fetchKey<unknown[] | { segments?: unknown[] }>(QUERY_KEYS.segments),
       ]);
       if (leadsResult.status === "fulfilled") {
         const data = leadsResult.value;
-        setLeadsForEnroll(Array.isArray(data) ? data : data?.leads || []);
+        const allLeads = Array.isArray(data) ? data : data?.leads || [];
+        setLeadsForEnroll(
+          allLeads
+            .filter(isEnrollableLead)
+            .filter((lead) => !CAMPAIGN_EXCLUDED_STATUSES.has(String(lead.status || "")))
+        );
       }
       if (segResult.status === "fulfilled") {
         const s = segResult.value;
@@ -521,7 +614,7 @@ export default function CampaignsPage() {
                       )}
                     </div>
                     <div className="mt-8 pt-4 border-t border-border/50 flex justify-center ml-4 pl-8">
-                      <Button onClick={() => { setEditingStepIndex(null); setNewStep({ type: "EMAIL", subject: "", body: "", delayValue: "", delayUnit: "DAYS" }); setAddStepModalOpen(true); }} variant="outline" size="sm" className="border-dashed hover:border-[#b48c3c] hover:text-[#b48c3c] text-muted-foreground w-full max-w-xl text-xs h-10">
+                      <Button onClick={() => { setEditingStepIndex(null); setNewStep(buildDefaultEmailStep()); setAddStepModalOpen(true); }} variant="outline" size="sm" className="border-dashed hover:border-[#b48c3c] hover:text-[#b48c3c] text-muted-foreground w-full max-w-xl text-xs h-10">
                         <Plus className="h-4 w-4 mr-2" /> Add Step
                       </Button>
                     </div>
@@ -596,10 +689,15 @@ export default function CampaignsPage() {
                 <Label>Step Type</Label>
                 <Select value={newStep.type} onValueChange={(val) => {
                   let defaultBody = newStep.body;
+                  let defaultSubject = newStep.subject;
                   if (val === "SMS" && !defaultBody) {
-                    defaultBody = "Hi {firstName}, just checking in on your recent warranty service. Let me know if you need anything! Reply STOP to unsubscribe.";
+                    defaultBody = DEFAULT_SMS_BODY;
                   }
-                  setNewStep({ ...newStep, type: val, body: defaultBody });
+                  if (val === "EMAIL") {
+                    if (!defaultBody) defaultBody = DEFAULT_EMAIL_BODY;
+                    if (!defaultSubject) defaultSubject = DEFAULT_EMAIL_SUBJECT;
+                  }
+                  setNewStep({ ...newStep, type: val, subject: defaultSubject, body: defaultBody });
                 }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select type" />
@@ -641,7 +739,20 @@ export default function CampaignsPage() {
                     </div>
                   )}
                   <div className="space-y-2">
-                    <Label>Message Body</Label>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label>Message Body</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 border-[#b48c3c]/40 text-[#b48c3c] hover:bg-[#b48c3c]/10 hover:text-[#b48c3c]"
+                        onClick={generateStepCopy}
+                        disabled={generatingStepCopy || !activeSeq}
+                        title={`Generate ${newStep.type === "SMS" ? "SMS" : "email"} copy with AI`}
+                      >
+                        <Sparkles className={`h-4 w-4 ${generatingStepCopy ? "animate-pulse" : ""}`} />
+                      </Button>
+                    </div>
                     <textarea
                       className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-25"
                       value={newStep.body}
@@ -718,35 +829,40 @@ export default function CampaignsPage() {
                 <div className="p-4 text-center text-sm text-muted-foreground">No leads available.</div>
               ) : (
                 <>
-                  <div className="flex items-center gap-2 mb-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_140px_140px] gap-2 mb-4">
                     <Input
                       placeholder="Search leads..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="flex-1"
                     />
-                    {(() => {
-                      const uniqueStatuses = Array.from(new Set(leadsForEnroll.map(l => l.status).filter(Boolean)));
-                      return (
-                        <Select value={statusFilter} onValueChange={setStatusFilter}>
-                          <SelectTrigger className="w-35">
-                            <SelectValue placeholder="Status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="ALL">All Statuses</SelectItem>
-                            {uniqueStatuses.map((status: any) => (
-                              <SelectItem key={status} value={status}>{status}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      );
-                    })()}
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-35 shrink-0">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All Statuses</SelectItem>
+                        {DEFAULT_LEAD_STATUSES.filter((status) => !CAMPAIGN_EXCLUDED_STATUSES.has(status)).map((status) => (
+                          <SelectItem key={status} value={status}>{status}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={tagFilter} onValueChange={setTagFilter}>
+                      <SelectTrigger className="w-35 shrink-0">
+                        <SelectValue placeholder="Tag" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All Tags</SelectItem>
+                        {enrollLeadTags.map((tag) => (
+                          <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-3 overflow-y-auto pr-1">
                     {(() => {
-                      const enrolledLeadIds = (activeSeqDetail?.enrollments || []).map((e: any) => e.leadId);
+                      const enrolledLeadIds = ((activeSeqDetail?.enrollments || []) as Array<{ leadId: string }>).map((e) => e.leadId);
 
-                      const filteredLeads = leadsForEnroll.filter((lead: any) => {
+                      const filteredLeads = leadsForEnroll.filter((lead) => {
                         const q = searchQuery.toLowerCase();
                         const matchesSearch = !searchQuery || (
                           lead.firstName?.toLowerCase().includes(q) ||
@@ -754,12 +870,13 @@ export default function CampaignsPage() {
                           lead.email?.toLowerCase().includes(q)
                         );
                         const matchesStatus = statusFilter === "ALL" || lead.status === statusFilter;
-                        return matchesSearch && matchesStatus;
+                        const matchesTag = tagFilter === "ALL" || lead.tags?.includes(tagFilter);
+                        return matchesSearch && matchesStatus && matchesTag;
                       });
 
-                      const selectableFiltered = filteredLeads.filter((l: any) => !enrolledLeadIds.includes(l.id));
-                      const allSelected = selectableFiltered.length > 0 && selectableFiltered.every((l: any) => selectedLeadIds.includes(l.id));
-                      const isFiltered = searchQuery.length > 0 || statusFilter !== "ALL";
+                      const selectableFiltered = filteredLeads.filter((l) => !enrolledLeadIds.includes(l.id));
+                      const allSelected = selectableFiltered.length > 0 && selectableFiltered.every((l) => selectedLeadIds.includes(l.id));
+                      const isFiltered = searchQuery.length > 0 || statusFilter !== "ALL" || tagFilter !== "ALL";
                       const selectAllLabel = isFiltered ? `Select All Filtered (${selectableFiltered.length})` : `Select All (${selectableFiltered.length})`;
 
                       return (
@@ -772,10 +889,10 @@ export default function CampaignsPage() {
                                 onCheckedChange={(checked) => {
                                   if (checked) {
                                     const newIds = new Set(selectedLeadIds);
-                                    selectableFiltered.forEach((l: any) => newIds.add(l.id));
+                                    selectableFiltered.forEach((l) => newIds.add(l.id));
                                     setSelectedLeadIds(Array.from(newIds));
                                   } else {
-                                    const toRemove = new Set(selectableFiltered.map((l: any) => l.id));
+                                    const toRemove = new Set(selectableFiltered.map((l) => l.id));
                                     setSelectedLeadIds(selectedLeadIds.filter(id => !toRemove.has(id)));
                                   }
                                 }}
@@ -784,7 +901,7 @@ export default function CampaignsPage() {
                             </div>
                           )}
 
-                          {filteredLeads.map((lead: any) => {
+                          {filteredLeads.map((lead) => {
                             const isEnrolled = enrolledLeadIds.includes(lead.id);
                             return (
                               <div key={lead.id} className={`flex items-center space-x-3 p-2 rounded-md border border-transparent ${isEnrolled ? "opacity-60 bg-slate-50 dark:bg-slate-900/50" : "hover:bg-slate-50 dark:hover:bg-slate-900 hover:border-border cursor-pointer"}`} onClick={() => {
@@ -808,11 +925,25 @@ export default function CampaignsPage() {
                                   }}
                                 />
                                 <div className="flex-1">
-                                  <div className="flex items-center justify-between">
+                                  <div className="flex items-center justify-between gap-2">
                                     <p className="text-sm font-semibold">{lead.firstName} {lead.lastName}</p>
-                                    {isEnrolled && <span className="text-[10px] text-green-600 font-semibold bg-green-50 px-1.5 py-0.5 rounded-sm">Already Enrolled</span>}
+                                    <div className="flex items-center gap-1.5">
+                                      <Badge variant="outline" className={`rounded-full px-2 py-0.5 text-[10px] font-semibold border ${statusColor(lead.status || "New")}`}>
+                                        {lead.status || "New"}
+                                      </Badge>
+                                      {isEnrolled && <span className="text-[10px] text-green-600 font-semibold bg-green-50 px-1.5 py-0.5 rounded-sm">Already Enrolled</span>}
+                                    </div>
                                   </div>
                                   <p className="text-xs text-muted-foreground">{lead.email || lead.phone || "No contact info"}</p>
+                                  {lead.tags && lead.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {lead.tags.map((tag) => (
+                                        <Badge key={tag} variant="secondary" className="text-[9px] font-mono tracking-tight px-1.5 py-0">
+                                          {tag}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             );

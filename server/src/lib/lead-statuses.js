@@ -10,23 +10,23 @@ export const DEFAULT_LEAD_STATUSES = [
   "Unsubscribed",
 ];
 
+export const LEAD_STATUS = {
+  NEW: "New",
+  NURTURING: "Nurturing",
+  ENGAGED: "Engaged",
+  APPOINTMENT_SET: "Appointment Set",
+  QUALIFIED: "Qualified",
+  CLOSED_WON: "Closed Won",
+  CLOSED_LOST: "Closed Lost",
+  UNSUBSCRIBED: "Unsubscribed",
+};
+
 export function normalizeLeadStatuses(input) {
-  if (!Array.isArray(input)) return null;
-  const seen = new Set();
-  const out = [];
-  for (const raw of input) {
-    const label = String(raw ?? "").trim().slice(0, 40);
-    if (!label) continue;
-    const key = label.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(label);
-    if (out.length >= 30) break;
-  }
-  return out.length ? out : null;
+  void input;
+  return DEFAULT_LEAD_STATUSES;
 }
 
 export function resolveLeadStatuses(company) {
-  const configured = normalizeLeadStatuses(company?.leadStatuses);
-  return configured || DEFAULT_LEAD_STATUSES;
+  void company;
+  return DEFAULT_LEAD_STATUSES;
 }

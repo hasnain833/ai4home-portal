@@ -2,6 +2,17 @@ import prisma from "../lib/prisma.js";
 import { ComplianceService } from "../services/compliance-service.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
+import { LEAD_STATUS } from "../lib/lead-statuses.js";
+
+async function markLeadEngaged(leadId) {
+  await prisma.lead.updateMany({
+    where: {
+      id: leadId,
+      status: { in: [LEAD_STATUS.NEW, LEAD_STATUS.NURTURING] },
+    },
+    data: { status: LEAD_STATUS.ENGAGED },
+  });
+}
 
 export const getSuppressions = async (req, res) => {
   try {
@@ -216,7 +227,6 @@ export const processInbound = async (req, res) => {
       });
     }
 
-    // 2. Log reply to lead timeline
     const isSms = channel === "SMS";
     const normalizedContact = isSms
       ? sender.replace(/\D/g, "")
@@ -234,24 +244,13 @@ export const processInbound = async (req, res) => {
 
     if (leads.length > 0) {
       for (const lead of leads) {
-        await prisma.leadTimeline.create({
-          data: {
-            leadId: lead.id,
-            type: "REPLY_RECEIVED",
-            description: `Received inbound ${channel.toLowerCase()} reply: "${body.slice(
-              0,
-              150
-            )}${body.length > 150 ? "..." : ""}"`,
-            metadata: { body, channel, sender },
-          },
-        });
-
         const { inngest } = await import("../lib/inngest.js");
         await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
         await inngest.send({
           name: "lead.reply.received",
           data: { leadId: lead.id, companyId, channel, body, sender },
         });
+        await markLeadEngaged(lead.id);
         await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel } });
       }
 
@@ -260,7 +259,7 @@ export const processInbound = async (req, res) => {
         isComplianceAction: false,
         processed: true,
         leadsMatched: leads.length,
-        message: "Logged inbound reply on lead timeline",
+        message: "Processed inbound reply",
       });
     }
 
@@ -308,14 +307,6 @@ export const unsubscribeByLead = async (req, res) => {
         ...(isEmail ? { emailOptIn: false } : { smsOptIn: false }),
         consentSource: isEmail ? "Email unsubscribe link" : "SMS unsubscribe link",
         consentTimestamp: new Date(),
-      },
-    });
-
-    await prisma.leadTimeline.create({
-      data: {
-        leadId: lead.id,
-        type: "CONSENT_CHANGE",
-        description: `Opted out of ${isEmail ? "Email" : "SMS"} via unsubscribe link.`,
       },
     });
 
@@ -437,15 +428,6 @@ export const unsubscribeWebhook = async (req, res) => {
     }
 
     for (const lead of leadsToUpdate) {
-      await prisma.leadTimeline.create({
-        data: {
-          leadId: lead.id,
-          type: "SYNC_UPDATE",
-          description: `Lead opted out of ${isEmail ? "Email" : "SMS"} via unsubscribe webhook`,
-          metadata: { email, phone, companyId },
-        },
-      });
-
       import("../lib/inngest.js")
         .then(({ inngest }) =>
           inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "UNSUBSCRIBE" } }),
@@ -467,52 +449,6 @@ export const unsubscribeWebhook = async (req, res) => {
   }
 };
 
-export const processBrevoEmailEvents = async (req, res) => {
-  try {
-    const companyId = req.query.companyId || req.body?.companyId;
-    if (!companyId) {
-      return res.status(400).json({ message: "companyId is required." });
-    }
-
-    const raw = req.body;
-    const events = Array.isArray(raw)
-      ? raw
-      : Array.isArray(raw?.items)
-        ? raw.items
-        : Array.isArray(raw?.events)
-          ? raw.events
-          : [raw];
-
-    let handled = 0;
-    for (const ev of events) {
-      const email = ev.email || ev.recipient || ev["email_address"];
-      const eventType = ev.event || ev.type || "";
-      if (!email || !eventType) continue;
-
-      const result = await ComplianceService.handleMessageEvent({
-        companyId,
-        channel: "EMAIL",
-        provider: "BREVO",
-        contact: email,
-        rawEventType: eventType,
-        metadata: {
-          subject: ev.subject,
-          messageId: ev["message-id"] || ev.messageId,
-          reason: ev.reason,
-          link: ev.link,
-          tag: ev.tag,
-          ts: ev.ts || ev.date,
-        },
-      });
-      if (result.handled) handled++;
-    }
-
-    return res.json({ success: true, handled, total: events.length });
-  } catch (error) {
-    console.error("[Brevo Email Events] Error:", error);
-    return res.status(500).json({ message: error.message || "Internal server error" });
-  }
-};
 
 export const processTwilioSmsStatus = async (req, res) => {
   try {
@@ -567,7 +503,6 @@ export const processBrevoInboundEmail = async (req, res) => {
 
     for (const item of items) {
       const fromEmail = item.From?.Address;
-      const subject = item.Subject || "";
       const textBody = item.RawTextBody || item.TextBody || item.ExtractedMarkdownMessage || "";
       const htmlBody = item.RawHtmlBody || item.HtmlBody || "";
 
@@ -586,24 +521,13 @@ export const processBrevoInboundEmail = async (req, res) => {
 
       for (const lead of leads) {
         const replyContent = textBody || htmlBody || "No body content";
-        await prisma.leadTimeline.create({
-          data: {
-            leadId: lead.id,
-            type: "REPLY_RECEIVED",
-            description: `Received inbound email reply: "${subject}"`,
-            metadata: {
-              subject,
-              body: replyContent.slice(0, 1000),
-            },
-          },
-        });
-
         const { inngest } = await import("../lib/inngest.js");
         await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
         await inngest.send({
           name: "lead.reply.received",
           data: { leadId: lead.id, companyId, channel: "EMAIL", body: replyContent, sender: normalizedEmail },
         });
+        await markLeadEngaged(lead.id);
         await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "EMAIL" } });
       }
 
@@ -678,21 +602,13 @@ export const processTwilioInboundSms = async (req, res) => {
     console.log(`[SMS IN] matched ${leads.length} lead(s) for ${sender} in company ${companyId}${leads.length === 0 ? " — no lead with this phone, nothing to trigger" : ""}.`);
 
     for (const lead of leads) {
-      await prisma.leadTimeline.create({
-        data: {
-          leadId: lead.id,
-          type: "REPLY_RECEIVED",
-          description: `Received inbound SMS reply: "${body.slice(0, 150)}${body.length > 150 ? "..." : ""}"`,
-          metadata: { body, channel: "SMS", sender },
-        },
-      });
-
       const { inngest } = await import("../lib/inngest.js");
       await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
       await inngest.send({
         name: "lead.reply.received",
         data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
       });
+      await markLeadEngaged(lead.id);
       await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "SMS" } });
       console.log(`[SMS IN] → triggered AI agent (lead.reply.received) for lead=${lead.id} (${lead.firstName || ""} ${lead.lastName || ""})`);
     }

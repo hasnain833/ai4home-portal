@@ -33,7 +33,8 @@ export default function AIChatPage() {
   const [embedMode, setEmbedMode] = useState<"widget" | "fullscreen">("widget");
   const [themeColor, setThemeColor] = useState("#0F3B3D");
 
-  const botName = user?.companyName ? `${user.companyName} Assistant` : "Aiforhomebuilder Assistant";
+  const companyName = user?.companyName || "Aiforhomebuilder";
+  const botName = `${companyName} Assistant`;
   const botLogoUrl = user?.companyLogo || (typeof window !== "undefined" ? window.location.origin + "/logo.png" : "");
 
   useEffect(() => {
@@ -63,7 +64,7 @@ export default function AIChatPage() {
     injectScript.src = INJECT_URL;
     injectScript.async = true;
 
-    const params = new URLSearchParams({ botColor: themeColor, botName });
+    const params = new URLSearchParams({ botColor: themeColor, botName, companyName });
     if (botLogoUrl) params.set("botLogo", botLogoUrl);
     params.set("v", Date.now().toString());
     const configScript = document.createElement("script");
@@ -91,7 +92,7 @@ export default function AIChatPage() {
                   name: user.name || "",
                   role: user.role || "",
                   companyId: user.companyId || "",
-                  companyName: user.companyName || "",
+                  companyName,
                 },
                 tags: {
                   email: user.email || "",
@@ -99,7 +100,7 @@ export default function AIChatPage() {
                   name: user.name || "",
                   role: user.role || "",
                   companyId: user.companyId || "",
-                  companyName: user.companyName || "",
+                  companyName,
                 },
               });
             } catch (err) {
@@ -131,7 +132,7 @@ export default function AIChatPage() {
         // Ignore — inject.js may define it as non-configurable.
       }
     };
-  }, [user, isLoading, themeColor, botName, botLogoUrl]);
+  }, [user, isLoading, themeColor, botName, botLogoUrl, companyName]);
 
   const portalUrl =
     process.env.NEXT_PUBLIC_URL ||

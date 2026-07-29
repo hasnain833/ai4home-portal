@@ -8,6 +8,8 @@ import { ComplianceService } from "./compliance-service.js";
 import { getMessagingConfig } from "../lib/messaging-config.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "./salesforce-writeback.js";
+import { appointmentTokenData } from "../lib/public-tokens.js";
+import { LEAD_STATUS } from "../lib/lead-statuses.js";
 
 const DEFAULTS = {
   dayStart: "09:00",
@@ -119,6 +121,7 @@ export async function bookSlot({
         bookedVia,
         notes,
         leadTimezone: tz,
+        ...appointmentTokenData(),
       },
     });
   } catch (e) {
@@ -151,15 +154,7 @@ export async function bookSlot({
     }
   }
 
-  await prisma.lead.update({ where: { id: leadId }, data: { status: "Appointment Set" } });
-  await prisma.leadTimeline.create({
-    data: {
-      leadId,
-      type: "APPOINTMENT_SET",
-      description: `Booked "${apptTitle}" for ${formatSlotLabel(start, tz)}${bookedVia === "AI_AGENT" ? " (AI agent)" : ""}`,
-      metadata: { appointmentId: appointment.id, time: start.toISOString(), meetingLink, bookedVia },
-    },
-  });
+  await prisma.lead.update({ where: { id: leadId }, data: { status: LEAD_STATUS.APPOINTMENT_SET } });
 
   try {
     const { inngest } = await import("../lib/inngest.js");
@@ -181,7 +176,7 @@ export async function bookSlot({
   });
 
   // SW-CRM-008: reflect the new status on the Salesforce record (gated per tenant).
-  writeBackLeadToSalesforce(lead.companyId, leadId, { status: "Appointment Set" }).catch((e) =>
+  writeBackLeadToSalesforce(lead.companyId, leadId, { status: LEAD_STATUS.APPOINTMENT_SET }).catch((e) =>
     console.error("[Scheduling] Salesforce write-back failed:", e?.message || e),
   );
 
@@ -262,20 +257,12 @@ export async function rescheduleAppointment({ appointmentId, rescheduleToken, ne
     await GoogleCalendar.updateEventTime(appt.lead.companyId, appt.googleEventId, { start, end, timezone: tz });
   }
 
-  await prisma.leadTimeline.create({
-    data: {
-      leadId: appt.leadId,
-      type: "APPOINTMENT_SET",
-      description: `Rescheduled "${appt.title}" to ${formatSlotLabel(start, tz)}`,
-      metadata: { appointmentId: appt.id, time: start.toISOString() },
-    },
-  });
-
   await sendConfirmations(appt.lead, updated, tz).catch(() => { });
   return { success: true, appointment: updated };
 }
 
 export async function cancelAppointment({ appointmentId, cancelToken, reason = "Cancelled" }) {
+  void reason;
   const where = appointmentId ? { id: appointmentId } : { cancelToken };
   const appt = await prisma.salesAppointment.findUnique({ where, include: { lead: { include: { company: true } } } });
   if (!appt) return { success: false, reason: "Appointment not found" };
@@ -286,15 +273,6 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
   }
 
   await prisma.salesAppointment.delete({ where: { id: appt.id } });
-
-  await prisma.leadTimeline.create({
-    data: {
-      leadId: appt.leadId,
-      type: "SYNC_UPDATE",
-      description: `Cancelled "${appt.title}" (${formatSlotLabel(appt.time, tz)}). Reason: ${reason}`,
-      metadata: { time: appt.time.toISOString(), reason },
-    },
-  });
 
   try {
     const { smtpConfig, smsConfig } = await getMessagingConfig(appt.lead.companyId);

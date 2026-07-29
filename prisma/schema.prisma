@@ -276,6 +276,7 @@ model Lead {
   state                   String?
   zipCode                 String?
   status                  String                   @default("New")
+  bookingToken            String?                  @unique
   ownerId                 String?
   owner                   User?                    @relation("LeadOwner", fields: [ownerId], references: [id])
   tags                    String[]                 @default([])
@@ -286,7 +287,6 @@ model Lead {
   customFields            Json?
   archived                Boolean                  @default(false)
   archivedAt              DateTime?
-  timeline                LeadTimeline[]
   appointments            SalesAppointment[]
   campaignEnrollments     CampaignEnrollment[]
   schedulingConversations SchedulingConversation[]
@@ -298,18 +298,6 @@ model Lead {
   @@index([companyId, phone])
   @@index([ownerId])
   @@index([companyId, archived])
-}
-
-model LeadTimeline {
-  id          String   @id @default(cuid())
-  leadId      String
-  lead        Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  type        String
-  description String   @db.Text
-  metadata    Json?
-  createdAt   DateTime @default(now())
-
-  @@index([leadId, createdAt])
 }
 
 model LeadSegment {
@@ -339,8 +327,8 @@ model SalesAppointment {
   notes           String?   @db.Text
   leadTimezone    String?
   bookedVia       String    @default("STAFF")
-  rescheduleToken String    @unique @default(cuid())
-  cancelToken     String    @unique @default(cuid())
+  rescheduleToken String    @unique @default(uuid())
+  cancelToken     String    @unique @default(uuid())
   reminder24Sent  Boolean   @default(false)
   reminder1Sent   Boolean   @default(false)
   agentId         String

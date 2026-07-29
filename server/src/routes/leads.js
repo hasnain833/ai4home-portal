@@ -5,8 +5,7 @@ import {
   createLead,
   importLeads,
   deleteLead,
-  updateLead,
-  getLeadTimeline
+  updateLead
 } from "../controllers/leads.controller.js";
 
 const router = Router();
@@ -16,6 +15,5 @@ router.post("/", requireAuth, createLead);
 router.post("/import", requireAuth, importLeads);
 router.delete("/:id", requireAuth, deleteLead);
 router.patch("/:id", requireAuth, updateLead);
-router.get("/:id/timeline", requireAuth, getLeadTimeline);
 
 export default router;

@@ -280,9 +280,9 @@ export const googleDisconnect = async (req, res) => {
 
 export const publicGetBooking = async (req, res) => {
   try {
-    const { leadId } = req.params;
+    const { token } = req.params;
     const lead = await prisma.lead.findUnique({
-      where: { id: leadId },
+      where: { bookingToken: token },
       include: { company: { select: { name: true } } },
     });
     if (!lead) return res.status(404).json({ message: "Booking not found" });
@@ -313,12 +313,18 @@ export const publicGetBooking = async (req, res) => {
 
 export const publicBook = async (req, res) => {
   try {
-    const { leadId, startTime, locationType, title } = req.body;
-    if (!leadId || !startTime)
-      return res.status(400).json({ message: "leadId and startTime required" });
+    const { bookingToken, startTime, locationType, title } = req.body;
+    if (!bookingToken || !startTime)
+      return res.status(400).json({ message: "bookingToken and startTime required" });
+
+    const lead = await prisma.lead.findUnique({
+      where: { bookingToken },
+      select: { id: true },
+    });
+    if (!lead) return res.status(404).json({ message: "Booking not found" });
 
     const result = await bookSlot({
-      leadId,
+      leadId: lead.id,
       startTime,
       title: title || "Model Home Visit",
       locationType: locationType || "VIRTUAL",

@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const botColor = searchParams.get("botColor");
   const botName = searchParams.get("botName");
+  const companyName = searchParams.get("companyName");
   const botLogo = searchParams.get("botLogo");
 
   const base = await getBaseConfig();
@@ -59,6 +60,11 @@ export async function GET(req: NextRequest) {
   }
   Object.assign(config.configuration, configurationOverrides);
   if (botName) config.configuration.botName = botName;
+  if (companyName) {
+    const botDescription = `You are the Warranty Care Assistant for ${companyName}.`;
+    config.configuration.botDescription = botDescription;
+    config.configuration.description = botDescription;
+  }
   if (botLogo) config.configuration.botAvatar = botLogo;
   // Force inline rendering into the portal container.
   config.configuration.embeddedChatId = EMBED_CONTAINER_ID;

@@ -17,7 +17,6 @@ import DeadLetterTab from "@/components/sales/settings/DeadLetterTab";
 import AiConfigSafetyTab from "@/components/sales/settings/AiConfigSafetyTab";
 import PrivacyRequestsTab from "@/components/sales/settings/PrivacyRequestsTab";
 import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
-import { DEFAULT_LEAD_STATUSES } from "@/lib/lead-statuses";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -39,7 +38,6 @@ import {
   Settings,
   Plug,
   Shield,
-  SlidersHorizontal,
   Database,
   CheckCircle2,
   AlertCircle,
@@ -57,8 +55,6 @@ import {
   Check,
 } from "lucide-react";
 import { motion } from "framer-motion";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ConnectionStatus {
   connected: boolean;
@@ -94,8 +90,6 @@ interface SyncLogEntry {
   createdAt: string;
 }
 
-// ─── Animation Variants ───────────────────────────────────────────────────────
-
 const fadeInUp = {
   hidden: { opacity: 0, y: 15 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
@@ -112,8 +106,6 @@ const staggerContainer = {
 function SettingsPageContent() {
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState("crm");
-
-  // ─── Salesforce Connection State ──────────────────────────────────────────
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [oauthModalOpen, setOauthModalOpen] = useState(false);
@@ -121,15 +113,10 @@ function SettingsPageContent() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [bulkIngesting, setBulkIngesting] = useState(false);
   const [syncingIncremental, setSyncingIncremental] = useState(false);
-
-  // OAuth form fields
   const [sfClientId, setSfClientId] = useState("");
   const [sfClientSecret, setSfClientSecret] = useState("");
   const [sfEnvironment, setSfEnvironment] = useState<"sandbox" | "production">("sandbox");
   const [copiedRedirect, setCopiedRedirect] = useState(false);
-
-  // The exact callback URL that must be registered in the Salesforce Connected
-  // App — mirrors the redirect_uri the backend sends (derived from the origin).
   const redirectUri =
     typeof window !== "undefined" ? `${window.location.origin}/api/sales/salesforce/callback` : "";
 
@@ -143,7 +130,6 @@ function SettingsPageContent() {
     }
   };
 
-  // ─── Field Mappings State ────────────────────────────────────────────────
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
   const [loadingMappings, setLoadingMappings] = useState(false);
   const [addMappingOpen, setAddMappingOpen] = useState(false);
@@ -152,30 +138,17 @@ function SettingsPageContent() {
   const [newDescription, setNewDescription] = useState("");
   const [newIsConsent, setNewIsConsent] = useState(false);
   const [savingMapping, setSavingMapping] = useState(false);
-  // SW-CRM-004: mapping version history / rollback.
   const [mappingHistoryOpen, setMappingHistoryOpen] = useState(false);
-
-  // ─── Sync Logs State ─────────────────────────────────────────────────────
   const [syncLogs, setSyncLogs] = useState<SyncLogEntry[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
-
-  // ─── Outreach & Compliance State ──────────────────────────────────────────
   const [defaultOwner, setDefaultOwner] = useState("Unassigned");
   const [teamMembers, setTeamMembers] = useState<{ id: string; name: string | null; email: string }[]>([]);
   const [voiceProfile, setVoiceProfile] = useState("professional");
   const [complianceOptInRequired, setComplianceOptInRequired] = useState(true);
-
-  // ─── SMS Quiet Hours (SW-ANN — tenant-configurable, not hardcoded) ─────────
   const [smsQuietHoursEnabled, setSmsQuietHoursEnabled] = useState(true);
   const [quietHoursStart, setQuietHoursStart] = useState(8);
   const [quietHoursEnd, setQuietHoursEnd] = useState(21);
   const [quietHoursTimezone, setQuietHoursTimezone] = useState("");
-
-  // ─── Lead Lifecycle Statuses (SW-LEAD-006 — tenant-configurable) ───────────
-  const [leadStatuses, setLeadStatuses] = useState<string[]>([]);
-  const [newStatus, setNewStatus] = useState("");
-  const [savingStatuses, setSavingStatuses] = useState(false);
-
   const [savingOutreach, setSavingOutreach] = useState(false);
   const [suppressionList, setSuppressionList] = useState<{ id: string; value: string; reason: string; createdAt: string }[]>([]);
   const [loadingSuppression, setLoadingSuppression] = useState(false);
@@ -185,16 +158,12 @@ function SettingsPageContent() {
   const [suppressionSearch, setSuppressionSearch] = useState("");
   const [suppressionPage, setSuppressionPage] = useState(1);
   const [suppressionTotalPages, setSuppressionTotalPages] = useState(1);
-
-  // ─── Toast / Notifications ────────────────────────────────────────────────
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
-
-  // ─── Fetch Connection Status ──────────────────────────────────────────────
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -210,8 +179,6 @@ function SettingsPageContent() {
     }
   }, []);
 
-  // ─── Fetch Field Mappings ─────────────────────────────────────────────────
-
   const fetchMappings = useCallback(async () => {
     setLoadingMappings(true);
     try {
@@ -226,9 +193,6 @@ function SettingsPageContent() {
       setLoadingMappings(false);
     }
   }, []);
-
-  // ─── Fetch Sync Logs ──────────────────────────────────────────────────────
-
   const fetchLogs = useCallback(async () => {
     setLoadingLogs(true);
     try {
@@ -244,7 +208,6 @@ function SettingsPageContent() {
     }
   }, []);
 
-  // ─── Fetch Company Settings ──────────────────────────────────────────────
   const fetchCompanySettings = useCallback(async () => {
     type CompanySettings = {
       defaultLeadOwner?: string;
@@ -254,7 +217,6 @@ function SettingsPageContent() {
       quietHoursStart?: number;
       quietHoursEnd?: number;
       quietHoursTimezone?: string;
-      leadStatuses?: unknown[];
     };
 
     const [companyResult, usersResult] = await Promise.allSettled([
@@ -271,16 +233,10 @@ function SettingsPageContent() {
       if (data.quietHoursStart !== undefined) setQuietHoursStart(data.quietHoursStart);
       if (data.quietHoursEnd !== undefined) setQuietHoursEnd(data.quietHoursEnd);
       if (data.quietHoursTimezone) setQuietHoursTimezone(data.quietHoursTimezone);
-      if (Array.isArray(data.leadStatuses) && data.leadStatuses.length) {
-        setLeadStatuses(data.leadStatuses.map((s: unknown) => String(s)));
-      } else {
-        setLeadStatuses([...DEFAULT_LEAD_STATUSES]);
-      }
     } else if (companyResult.status === "rejected") {
       console.error("Failed to fetch company compliance settings:", companyResult.reason);
     }
 
-    // Populate the "default lead owner" dropdown from real team members.
     if (usersResult.status === "fulfilled" && Array.isArray(usersResult.value)) {
       setTeamMembers(usersResult.value as { id: string; name: string | null; email: string }[]);
     } else if (usersResult.status === "rejected") {
@@ -288,7 +244,6 @@ function SettingsPageContent() {
     }
   }, []);
 
-  // ─── Fetch Suppression List ──────────────────────────────────────────────
   const fetchSuppressionList = useCallback(async (page = 1, search = "") => {
     setLoadingSuppression(true);
     try {
@@ -324,8 +279,6 @@ function SettingsPageContent() {
       });
 
       if (res.ok) {
-        // The company record is cached and shared; drop it so other pages pick
-        // up the new values instead of serving a stale copy.
         invalidate(QUERY_KEYS.company);
         showToast("Outreach and compliance settings saved successfully.");
       } else {
@@ -338,60 +291,6 @@ function SettingsPageContent() {
     } finally {
       setSavingOutreach(false);
     }
-  };
-
-  // SW-LEAD-006: persist the tenant's lead lifecycle status set.
-  const handleSaveLeadStatuses = async () => {
-    const cleaned = leadStatuses.map((s) => s.trim()).filter(Boolean);
-    if (cleaned.length === 0) {
-      showToast("Add at least one lead status", "error");
-      return;
-    }
-    setSavingStatuses(true);
-    try {
-      const res = await fetch("/api/company", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadStatuses: cleaned }),
-      });
-      if (res.ok) {
-        invalidate(QUERY_KEYS.company);
-        showToast("Lead statuses saved.");
-      } else {
-        const data = await res.json().catch(() => ({}));
-        showToast(data.message || "Failed to save lead statuses", "error");
-      }
-    } catch (error) {
-      console.error("[sales/settings] lead statuses save failed:", error);
-      showToast("Error saving lead statuses", "error");
-    } finally {
-      setSavingStatuses(false);
-    }
-  };
-
-  const addLeadStatus = () => {
-    const label = newStatus.trim();
-    if (!label) return;
-    if (leadStatuses.some((s) => s.toLowerCase() === label.toLowerCase())) {
-      showToast("That status already exists", "error");
-      return;
-    }
-    setLeadStatuses((prev) => [...prev, label]);
-    setNewStatus("");
-  };
-
-  const removeLeadStatus = (label: string) => {
-    setLeadStatuses((prev) => prev.filter((s) => s !== label));
-  };
-
-  const moveLeadStatus = (index: number, dir: -1 | 1) => {
-    setLeadStatuses((prev) => {
-      const next = [...prev];
-      const target = index + dir;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
   };
 
   const handleAddSuppression = async () => {
@@ -454,8 +353,6 @@ function SettingsPageContent() {
     }
   };
 
-  // ─── Initial Data Load ────────────────────────────────────────────────────
-
   useEffect(() => {
     fetchStatus();
     fetchMappings();
@@ -464,7 +361,6 @@ function SettingsPageContent() {
     fetchSuppressionList(1, "");
   }, [fetchStatus, fetchMappings, fetchLogs, fetchCompanySettings, fetchSuppressionList]);
 
-  // Handle OAuth redirect results
   useEffect(() => {
     const connected = searchParams.get("connected");
     const sfError = searchParams.get("sf_error");
@@ -474,7 +370,6 @@ function SettingsPageContent() {
       fetchStatus();
       fetchMappings();
       fetchLogs();
-      // Clean URL
       window.history.replaceState({}, "", "/sales/settings");
     } else if (sfError) {
       showToast(`Salesforce connection failed: ${decodeURIComponent(sfError)}`, "error");
@@ -482,14 +377,11 @@ function SettingsPageContent() {
     }
   }, [searchParams, fetchStatus, fetchMappings, fetchLogs]);
 
-  // Auto-refresh logs every 30 seconds when CRM tab is active
   useEffect(() => {
     if (activeTab !== "crm") return;
     const interval = setInterval(fetchLogs, 30000);
     return () => clearInterval(interval);
   }, [activeTab, fetchLogs]);
-
-  // ─── Handlers ─────────────────────────────────────────────────────────────
 
   const handleConnectSF = async () => {
     if (!sfClientId.trim() || !sfClientSecret.trim()) {
@@ -509,7 +401,6 @@ function SettingsPageContent() {
       });
       const data = await res.json();
       if (res.ok && data.authUrl) {
-        // Redirect to Salesforce OAuth login
         window.location.href = data.authUrl;
       } else {
         showToast(data.message || "Failed to initiate OAuth", "error");
@@ -611,9 +502,7 @@ function SettingsPageContent() {
     }
   };
 
-  // SW-CRM-008: toggle outbound write-back (status/consent → Salesforce).
   const handleWriteBackToggle = async (enabled: boolean) => {
-    // Optimistic update; revert on failure.
     setConnectionStatus((prev) => (prev ? { ...prev, writeBackEnabled: enabled } : prev));
     try {
       const res = await fetch("/api/sales/salesforce/status", {
@@ -633,7 +522,6 @@ function SettingsPageContent() {
     }
   };
 
-  // ─── Field Mapping Handlers ───────────────────────────────────────────────
 
   const handleAddMapping = async () => {
     if (!newSfField.trim() || !newPortalField.trim()) return;
@@ -685,8 +573,6 @@ function SettingsPageContent() {
       showToast("Failed to delete mapping", "error");
     }
   };
-
-  // ─── Helpers ──────────────────────────────────────────────────────────────
 
   const isConnected = connectionStatus?.connected ?? false;
 
@@ -754,10 +640,9 @@ function SettingsPageContent() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <motion.div variants={fadeInUp}>
-              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-8 max-w-6xl h-10">
+              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-7 max-w-6xl h-10">
                 <TabsTrigger value="crm" className="text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
                 <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
-                <TabsTrigger value="pipeline" className="text-xs font-semibold rounded-lg">Lead Pipeline</TabsTrigger>
                 <TabsTrigger value="messaging" className="text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
                 <TabsTrigger value="news" className="text-xs font-semibold rounded-lg">News Sources</TabsTrigger>
                 <TabsTrigger value="aiconfig" className="text-xs font-semibold rounded-lg">AI Config</TabsTrigger>
@@ -766,143 +651,23 @@ function SettingsPageContent() {
               </TabsList>
             </motion.div>
 
-            {/* TAB: MESSAGING (EMAIL & SMS) */}
             <TabsContent value="messaging" className="space-y-6 focus-visible:outline-none">
               <MessagingSettingsTab />
             </TabsContent>
-
-            {/* TAB: NEWS SOURCES (SW-NEWS-001 — per-tenant configurable feeds) */}
             <TabsContent value="news" className="space-y-6 focus-visible:outline-none">
               <NewsSourcesTab />
             </TabsContent>
-
-            {/* SW-KB-007: AI config safety — version history / rollback + preview. */}
             <TabsContent value="aiconfig" className="space-y-6 focus-visible:outline-none">
               <AiConfigSafetyTab />
             </TabsContent>
-
-            {/* SW-ANN-002: dead-letter queue — permanently failed sends. */}
             <TabsContent value="failed" className="space-y-6 focus-visible:outline-none">
               <DeadLetterTab />
             </TabsContent>
-
-            {/* NFR-S-005: GDPR / CCPA subject access + erasure. */}
             <TabsContent value="privacy" className="space-y-6 focus-visible:outline-none">
               <PrivacyRequestsTab />
             </TabsContent>
-
-            {/* TAB: LEAD PIPELINE (SW-LEAD-006 — tenant-configurable statuses) */}
-            <TabsContent value="pipeline" className="space-y-6 focus-visible:outline-hidden">
-              <Card className="border border-border/80 shadow-xs max-w-2xl">
-                <CardHeader>
-                  <CardTitle className="text-sm font-bold flex items-center gap-2">
-                    <SlidersHorizontal className="h-4.5 w-4.5 text-[#b48c3c]" />
-                    Lead Lifecycle Statuses
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    Define the pipeline stages your team uses. These appear in the lead table, filters, and status dropdowns. Reorder to match your funnel.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="p-5 space-y-4">
-                  <div className="space-y-2">
-                    {leadStatuses.map((status, idx) => (
-                      <div
-                        key={status}
-                        className="flex items-center gap-2 rounded-lg border p-2 pl-3 bg-slate-50/40 dark:bg-slate-900/20"
-                      >
-                        <span className="flex-1 text-xs font-medium">{status}</span>
-                        <div className="flex items-center gap-0.5">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground"
-                            disabled={idx === 0}
-                            onClick={() => moveLeadStatus(idx, -1)}
-                            title="Move up"
-                          >
-                            <ArrowUpFromLine className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground"
-                            disabled={idx === leadStatuses.length - 1}
-                            onClick={() => moveLeadStatus(idx, 1)}
-                            title="Move down"
-                          >
-                            <ArrowDownToLine className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-red-500 hover:bg-red-500/10"
-                            disabled={leadStatuses.length <= 1}
-                            onClick={() => removeLeadStatus(status)}
-                            title="Remove"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                    {leadStatuses.length === 0 && (
-                      <p className="text-xs text-muted-foreground py-4 text-center">No statuses yet — add one below.</p>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2 pt-1">
-                    <Input
-                      value={newStatus}
-                      onChange={(e) => setNewStatus(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addLeadStatus();
-                        }
-                      }}
-                      placeholder="Add a status (e.g. Proposal Sent)"
-                      className="h-9 text-xs"
-                      maxLength={40}
-                    />
-                    <Button
-                      onClick={addLeadStatus}
-                      variant="outline"
-                      className="h-9 text-xs gap-1.5 shrink-0"
-                    >
-                      <Plus className="h-3.5 w-3.5" /> Add
-                    </Button>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs text-muted-foreground"
-                      onClick={() => setLeadStatuses([...DEFAULT_LEAD_STATUSES])}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Reset to defaults
-                    </Button>
-                    <Button
-                      onClick={handleSaveLeadStatuses}
-                      disabled={savingStatuses}
-                      className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 border-none text-xs h-9 px-4"
-                    >
-                      {savingStatuses && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-                      Save Statuses
-                    </Button>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    Note: changing labels here doesn&apos;t rewrite statuses already stored on existing leads. Existing values remain valid and are still shown.
-                  </p>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* TAB 1: CRM & SALESFORCE CONNECTOR */}
             <TabsContent value="crm" className="space-y-6 focus-visible:outline-hidden">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-                {/* Salesforce Info & Settings */}
                 <div className="lg:col-span-2 space-y-6">
                   <Card className="border border-border/80 shadow-xs">
                     <CardHeader className="border-b border-border/40 bg-slate-50/40 dark:bg-slate-950/20">
@@ -987,7 +752,6 @@ function SettingsPageContent() {
                         </div>
                       </div>
 
-                      {/* SW-CRM-008: outbound write-back toggle */}
                       <div className="flex items-start justify-between gap-4 rounded-lg border border-border/60 p-4">
                         <div className="space-y-1">
                           <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Write changes back to Salesforce</p>
@@ -1007,7 +771,6 @@ function SettingsPageContent() {
                         </Button>
                       </div>
 
-                      {/* Synced Leads Count */}
                       {isConnected && connectionStatus?.syncedLeadCount !== undefined && (
                         <div className="bg-sky-50/50 dark:bg-sky-950/10 p-3 rounded-lg border border-sky-100/50 dark:border-sky-900/20 flex items-center gap-3">
                           <Database className="h-4 w-4 text-sky-600" />
@@ -1056,7 +819,6 @@ function SettingsPageContent() {
                     </CardContent>
                   </Card>
 
-                  {/* Mapping Fields Card */}
                   <Card className="border border-border/80 shadow-xs">
                     <CardHeader>
                       <div className="flex justify-between items-center">
@@ -1068,9 +830,6 @@ function SettingsPageContent() {
                           <CardDescription className="text-xs">Align Lead fields in the care portal database with Salesforce API field paths.</CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
-                          {/* SW-CRM-004: history is readable even when disconnected —
-                              past mappings are exactly what you want to look at while
-                              reconnecting a broken integration. */}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1160,7 +919,6 @@ function SettingsPageContent() {
                   </Card>
                 </div>
 
-                {/* Logs History Sidebar */}
                 <div className="space-y-6">
                   <Card className="border border-border/80 shadow-xs">
                     <CardHeader className="pb-2">
@@ -1231,7 +989,6 @@ function SettingsPageContent() {
               </div>
             </TabsContent>
 
-            {/* TAB 2: OUTREACH & COMPLIANCE */}
             <TabsContent value="outreach" className="space-y-6 focus-visible:outline-hidden">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
               <Card className="border border-border/80 shadow-xs">
@@ -1290,8 +1047,6 @@ function SettingsPageContent() {
                   </div>
 
                   <Separator />
-
-                  {/* SW-ANN: tenant-configurable SMS quiet hours (no hardcoded window). */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -1371,7 +1126,6 @@ function SettingsPageContent() {
                 </CardContent>
               </Card>
 
-              {/* Suppression List Card */}
               <Card className="border border-border/80 shadow-xs">
                 <CardHeader>
                   <CardTitle className="text-sm font-bold flex items-center gap-2">
@@ -1514,7 +1268,6 @@ function SettingsPageContent() {
           </Tabs>
         </motion.div>
 
-        {/* Salesforce Connection Settings Modal */}
         <Dialog open={oauthModalOpen} onOpenChange={setOauthModalOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
@@ -1621,14 +1374,12 @@ function SettingsPageContent() {
           </DialogContent>
         </Dialog>
 
-        {/* SW-CRM-004: mapping version history + rollback */}
         <MappingHistoryDialog
           open={mappingHistoryOpen}
           onOpenChange={setMappingHistoryOpen}
           onRolledBack={fetchMappings}
         />
 
-        {/* Add Field Mapping Modal */}
         <Dialog open={addMappingOpen} onOpenChange={setAddMappingOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>

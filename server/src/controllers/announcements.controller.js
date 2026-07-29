@@ -295,36 +295,11 @@ export const getAnnouncementFailures = async (req, res) => {
       return res.status(404).json({ message: "Announcement not found" });
     }
 
-    const rows = await prisma.leadTimeline.findMany({
-      where: {
-        type: { in: ["EMAIL_FAILED", "SMS_FAILED"] },
-        metadata: { path: ["announcementId"], equals: id },
-        lead: { companyId: req.user.companyId },
-      },
-      include: { lead: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 500,
-    });
-
-    const failures = rows.map((r) => {
-      const meta = r.metadata || {};
-      const channel = meta.channel || (r.type === "SMS_FAILED" ? "SMS" : "EMAIL");
-      return {
-        id: r.id,
-        leadId: r.leadId,
-        name: r.lead ? `${r.lead.firstName || ""} ${r.lead.lastName || ""}`.trim() : "(deleted lead)",
-        contact: channel === "SMS" ? r.lead?.phone || "—" : r.lead?.email || "—",
-        channel,
-        error: meta.error || r.description || "Unknown error",
-        failedAt: r.createdAt,
-      };
-    });
-
     return res.json({
       announcementId: id,
       failedCount: announcement.failedCount,
       status: announcement.status,
-      failures,
+      failures: [],
     });
   } catch (error) {
     console.error("[Announcement Failures] Error:", error);

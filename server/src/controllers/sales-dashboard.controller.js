@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { parseAsync } from "json2csv";
+import { LEAD_STATUS } from "../lib/lead-statuses.js";
 
 const DASHBOARD_LIST_LIMIT = 5;
 const UPCOMING_CALENDAR_STATUSES = ["Draft", "Approved", "Scheduled"];
@@ -52,7 +53,6 @@ export const getDashboardStats = async (req, res) => {
       appointmentSetLeads,
       closedWonLeads,
       activeCampaignsCount,
-      recentTimelineEvents,
       upcomingAppointments,
       salesforceConnection,
       activeCampaigns,
@@ -61,16 +61,10 @@ export const getDashboardStats = async (req, res) => {
     ] = await prisma.$transaction([
       prisma.lead.count({ where: { companyId } }),
       prisma.lead.count({ where: { companyId, status: "New" } }),
-      prisma.lead.count({ where: { companyId, status: "Nurturing" } }),
-      prisma.lead.count({ where: { companyId, status: "Appointment Set" } }),
-      prisma.lead.count({ where: { companyId, status: "Closed Won" } }),
+      prisma.lead.count({ where: { companyId, status: LEAD_STATUS.NURTURING } }),
+      prisma.lead.count({ where: { companyId, status: LEAD_STATUS.APPOINTMENT_SET } }),
+      prisma.lead.count({ where: { companyId, status: LEAD_STATUS.CLOSED_WON } }),
       prisma.campaign.count({ where: { companyId, status: "Active" } }),
-      prisma.leadTimeline.findMany({
-        where: { lead: { companyId } },
-        take: 10,
-        orderBy: { createdAt: "desc" },
-        include: { lead: { select: { firstName: true, lastName: true } } },
-      }),
       prisma.salesAppointment.findMany({
         where: {
           lead: { companyId },
@@ -162,7 +156,6 @@ export const getDashboardStats = async (req, res) => {
           stepSums,
         ),
       },
-      recentActivity: recentTimelineEvents,
       upcomingAppointments,
       upcomingCalendarItems,
       crmSyncHealth: salesforceConnection || null,

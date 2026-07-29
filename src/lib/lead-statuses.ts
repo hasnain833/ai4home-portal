@@ -39,11 +39,6 @@ export function statusColor(status: string, index?: number): string {
 }
 
 export function resolveLeadStatuses(raw: unknown): string[] {
-  if (Array.isArray(raw)) {
-    const cleaned = raw
-      .map((s) => String(s ?? "").trim())
-      .filter(Boolean);
-    if (cleaned.length) return cleaned;
-  }
+  void raw;
   return DEFAULT_LEAD_STATUSES;
 }

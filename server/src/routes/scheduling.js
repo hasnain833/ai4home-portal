@@ -22,7 +22,7 @@ import {
 
 const router = Router();
 
-router.get("/public/lead/:leadId", publicGetBooking);
+router.get("/public/lead/:token", publicGetBooking);
 router.post("/public/book", publicBook);
 router.get("/public/manage/:token", publicGetManage);
 router.post("/public/reschedule", publicReschedule);
