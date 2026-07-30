@@ -29,7 +29,7 @@ export const runNurtureCampaign = inngest.createFunction(
   {
     id: "run-nurture-campaign-v4",
     idempotency: "event.data.enrollmentId",
-    concurrency: [{ key: "event.data.enrollmentId", limit: 1 }],
+    concurrency: [{ key: "event.data.campaignId", limit: 2 }],
     triggers: [{ event: "campaign.enrollment.started" }],
     onFailure: async ({ event, error }) =>
       deadLetterJob({ functionId: "run-nurture-campaign-v4", event, error }),

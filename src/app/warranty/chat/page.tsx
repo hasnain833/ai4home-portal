@@ -310,6 +310,26 @@ export default function AIChatPage() {
           </div>
 
           <div className="flex-1 w-full overflow-hidden rounded-3xl border border-slate-800 shadow-2xl bg-[#020617] p-0 flex flex-col min-h-0">
+            <style jsx global>{`
+              #bp-embedded-webchat [class*="fab"],
+              #bp-embedded-webchat [class*="Fab"],
+              #bp-embedded-webchat [class*="launcher"],
+              #bp-embedded-webchat [class*="Launcher"],
+              #bp-embedded-webchat button[aria-label*="Open"],
+              #bp-embedded-webchat button[aria-label*="open"],
+              body > [class*="bpFab"],
+              body > [class*="bp-fab"],
+              body > button[aria-label*="Open"],
+              body > button[aria-label*="open"] {
+                display: none !important;
+              }
+
+              #bp-embedded-webchat,
+              #bp-embedded-webchat > * {
+                width: 100% !important;
+                height: 100% !important;
+              }
+            `}</style>
             <div
               id="bp-embedded-webchat"
               className="w-full h-full bg-[#020617]"

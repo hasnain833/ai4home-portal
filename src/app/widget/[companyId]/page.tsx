@@ -150,6 +150,26 @@ export default function WidgetPage() {
 
   return (
     <div className={`w-screen h-screen overflow-hidden ${mode === "fullscreen" ? "bg-white" : "bg-transparent"}`}>
+      <style jsx global>{`
+        #bp-embedded-webchat [class*="fab"],
+        #bp-embedded-webchat [class*="Fab"],
+        #bp-embedded-webchat [class*="launcher"],
+        #bp-embedded-webchat [class*="Launcher"],
+        #bp-embedded-webchat button[aria-label*="Open"],
+        #bp-embedded-webchat button[aria-label*="open"],
+        body > [class*="bpFab"],
+        body > [class*="bp-fab"],
+        body > button[aria-label*="Open"],
+        body > button[aria-label*="open"] {
+          display: none !important;
+        }
+
+        #bp-embedded-webchat,
+        #bp-embedded-webchat > * {
+          width: 100% !important;
+          height: 100% !important;
+        }
+      `}</style>
       <div
         id="bp-embedded-webchat"
         className={`w-full h-full ${mode === "fullscreen" ? "bg-white" : "bg-transparent"}`}

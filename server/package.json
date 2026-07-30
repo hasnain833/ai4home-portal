@@ -5,7 +5,7 @@
   "description": "Standalone Node.js backend for AI4HB Warranty & Sales Portal",
   "main": "src/index.js",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development INNGEST_DEV=1 nodemon src/index.js",
+    "dev": "cross-env NODE_ENV=development INNGEST_DEV=http://127.0.0.1:8288 nodemon src/index.js",
     "start": "node src/index.js",
     "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --forceExit"
   },

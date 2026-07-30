@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
+import { encrypt, decryptSafe } from "../lib/crypto.js";
 import { normalizeNewsSources } from "../lib/news-sources.js";
 import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
 import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
@@ -14,8 +15,27 @@ export const getCompany = async (req, res) => {
     const company = await prisma.company.findUnique({
       where: { id: session.companyId || "demo-company" }
     });
+    const aiIntegrations = await prisma.integration.findMany({
+      where: {
+        companyId: session.companyId || "demo-company",
+        platform: { in: ["OPENAI", "GROQ"] },
+      },
+      select: { platform: true, apiKey: true, isActive: true },
+    });
+    const mask = (value) => {
+      const plain = decryptSafe(value || "");
+      return plain ? `••••${plain.slice(-4)}` : "";
+    };
+    const activeProvider =
+      aiIntegrations.find((i) => i.isActive)?.platform?.toLowerCase() ||
+      "platform";
 
-    return res.json(company);
+    return res.json({
+      ...(company || {}),
+      aiProvider: activeProvider,
+      aiOpenAiKeyMasked: mask(aiIntegrations.find((i) => i.platform === "OPENAI")?.apiKey),
+      aiGroqKeyMasked: mask(aiIntegrations.find((i) => i.platform === "GROQ")?.apiKey),
+    });
   } catch (error) {
     console.error("Error fetching company details:", error);
     return res.status(500).json({ message: "Error fetching company" });
@@ -58,6 +78,12 @@ export const updateCompany = async (req, res) => {
       data.newsSources = normalizeNewsSources(data.newsSources);
     }
 
+    const aiProvider = ["platform", "openai", "groq"].includes(req.body.aiProvider)
+      ? req.body.aiProvider
+      : undefined;
+    const aiOpenAiKey = typeof req.body.aiOpenAiKey === "string" ? req.body.aiOpenAiKey.trim() : undefined;
+    const aiGroqKey = typeof req.body.aiGroqKey === "string" ? req.body.aiGroqKey.trim() : undefined;
+
     const clampHour = (v, fallback) => {
       const n = Number(v);
       return Number.isFinite(n) ? Math.min(24, Math.max(0, Math.round(n))) : fallback;
@@ -74,6 +100,11 @@ export const updateCompany = async (req, res) => {
       where: { id: companyId },
       data,
     });
+
+    if (aiProvider !== undefined || aiOpenAiKey || aiGroqKey) {
+      await saveAiIntegration(companyId, "OPENAI", aiProvider === "openai", aiOpenAiKey);
+      await saveAiIntegration(companyId, "GROQ", aiProvider === "groq", aiGroqKey);
+    }
 
     if (
       data.campaignExitConditions !== undefined ||
@@ -105,6 +136,29 @@ export const updateCompany = async (req, res) => {
     return res.status(500).json({ message: "Error updating company" });
   }
 };
+
+async function saveAiIntegration(companyId, platform, isActive, apiKey) {
+  const existing = await prisma.integration.findFirst({
+    where: { companyId, platform },
+    select: { id: true },
+  });
+  const data = {
+    isActive,
+    environment: "production",
+    ...(apiKey && !apiKey.includes("••••") ? { apiKey: encrypt(apiKey) } : {}),
+  };
+  if (existing) {
+    await prisma.integration.update({ where: { id: existing.id }, data });
+  } else if (isActive || apiKey) {
+    await prisma.integration.create({
+      data: {
+        companyId,
+        platform,
+        ...data,
+      },
+    });
+  }
+}
 
 export const getCompanyBranding = async (req, res) => {
   try {

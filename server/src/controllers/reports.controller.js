@@ -75,9 +75,13 @@ export const getAnalytics = async (req, res) => {
     const totalTickets = tickets.length;
     const resolvedTickets = tickets.filter(t => t.status === "RESOLVED");
     const escalatedTickets = tickets.filter(t => t.status === "ESCALATED" || t.isEmergency);
+    const openTickets = tickets.filter(t => t.status === "OPEN" || t.status === "IN_PROGRESS");
 
-    const autoResolutionRate = totalTickets > 0
+    const resolutionRate = totalTickets > 0
       ? Math.round((resolvedTickets.length / totalTickets) * 100)
+      : 0;
+    const escalationRate = totalTickets > 0
+      ? Math.round((escalatedTickets.length / totalTickets) * 100)
       : 0;
 
     let avgResolutionTime = 0;
@@ -105,35 +109,32 @@ export const getAnalytics = async (req, res) => {
     const diyGuidanceRate = totalTickets > 0 ? Math.round((diyGuidanceTickets / totalTickets) * 100) : 0;
 
     const agentPerformance = [
-      { label: "Auto-resolved", value: autoResolutionRate },
-      { label: "Escalated to staff", value: totalTickets > 0 ? Math.round((escalatedTickets.length / totalTickets) * 100) : 0 },
+      { label: "Resolved", value: resolutionRate },
+      { label: "Escalated / emergency", value: escalationRate },
       { label: "DIY guidance", value: diyGuidanceRate }
     ];
 
-    const activeSurveyCount = 0;
-    const customerSatisfaction = 0.0;
-    const readinessFromCsat = (customerSatisfaction / 5) * 50;
-    const readinessFromAuto = (autoResolutionRate / 100) * 30;
-    const readinessFromSpeed = avgResolutionTime > 0 ? Math.max(0, 20 - avgResolutionTime * 2) : 20;
-    const surveyReadiness = Math.round(readinessFromCsat + readinessFromAuto + readinessFromSpeed);
-    const predictedTickets = totalTickets > 0 ? Math.round(totalTickets * (period === "7d" ? 1.12 : period === "30d" ? 1.08 : 1.05)) : 0;
-    const topIssue = issueBreakdown[0]?.category || "None";
-    const predictedRiskArea = topIssue;
-    const escalationRisk = escalatedTickets.length > (totalTickets * 0.4) ? "HIGH" : "LOW";
+    const resolutionScore = resolutionRate * 0.7;
+    const escalationScore = Math.max(0, 100 - escalationRate) * 0.2;
+    const speedScore = resolvedTickets.length === 0
+      ? 0
+      : Math.max(0, 100 - Math.min(avgResolutionTime, 10) * 10) * 0.1;
+    const surveyReadiness = totalTickets > 0
+      ? Math.round(resolutionScore + escalationScore + speedScore)
+      : 0;
 
     return res.json({
-      autoResolutionRate,
+      totalTickets,
+      resolvedTickets: resolvedTickets.length,
+      openTickets: openTickets.length,
+      escalatedTickets: escalatedTickets.length,
+      resolutionRate,
+      escalationRate,
       avgResolutionTime: parseFloat(avgResolutionTime.toFixed(1)),
       avgResponseTime: parseFloat((avgResolutionTime * 24 * 60).toFixed(0)) || 0,
-      tokensPerClaim: 0,
-      customerSatisfaction,
-      surveyCount: activeSurveyCount,
       issueBreakdown,
       agentPerformance,
       surveyReadiness,
-      predictedTickets,
-      predictedRiskArea,
-      escalationRisk,
       erpSyncSuccessRate,
       erpSyncedCount,
       erpFailedCount,

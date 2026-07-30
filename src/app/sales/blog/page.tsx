@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -40,6 +41,7 @@ import {
   Download,
   Check,
   CheckCircle2,
+  ExternalLink,
   Send,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -111,6 +113,7 @@ async function api(path: string, options?: RequestInit) {
 
 export default function BlogDraftingPage() {
   const confirm = useConfirm();
+  const { user } = useAuth();
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("all");
@@ -319,12 +322,16 @@ export default function BlogDraftingPage() {
     return matches && post.status === activeTab.toUpperCase();
   });
 
+  const publicBlogUrl = user?.companyId ? `/blog/${user.companyId}` : "";
+  const getPublicPostUrl = (post: BlogPost) =>
+    user?.companyId && post.slug ? `/blog/${user.companyId}/${post.slug}` : "";
+
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
       <PortalLayout workspace="sales">
         <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-6 max-w-7xl mx-auto">
-          <motion.div variants={fadeInUp} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
+          <motion.div variants={fadeInUp} className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
               <h1 className="text-2xl md:text-3xl font-bold bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
                 AI Blog Post Builder
               </h1>
@@ -332,12 +339,19 @@ export default function BlogDraftingPage() {
                 Draft builder blogs with AI grounded in your brand voice, knowledge base, and market news — then approve, publish, or schedule.
               </p>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={openAiModal} className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-2 h-9 border-none">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-start lg:shrink-0 lg:flex-nowrap lg:justify-end">
+              {publicBlogUrl && (
+                <Button asChild variant="outline" className="h-9 justify-center gap-2">
+                  <a href={publicBlogUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="h-4 w-4" /> View
+                  </a>
+                </Button>
+              )}
+              <Button onClick={openAiModal} className="h-9 justify-center gap-2 border-none bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90">
                 <Sparkles className="h-4 w-4" /> AI Draft Assistant
               </Button>
-              <Button onClick={() => openEditor()} className="bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90 gap-2 h-9">
-                <Plus className="h-4 w-4" /> New Blog Post
+              <Button onClick={() => openEditor()} className="h-9 justify-center gap-2 bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90">
+                <Plus className="h-4 w-4" /> New
               </Button>
             </div>
           </motion.div>
@@ -421,6 +435,13 @@ export default function BlogDraftingPage() {
                               </div>
 
                               <div className="flex gap-1 flex-wrap md:justify-end">
+                                {post.status === "PUBLISHED" && getPublicPostUrl(post) && (
+                                  <Button asChild variant="ghost" size="icon" className="h-7 w-7 text-slate-600 hover:bg-slate-500/10" title="View published post">
+                                    <a href={getPublicPostUrl(post)} target="_blank" rel="noopener noreferrer">
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                    </a>
+                                  </Button>
+                                )}
                                 {(post.status === "DRAFT" || post.status === "PENDING_REVIEW") && (
                                   <Button variant="ghost" size="sm" disabled={busyId === post.id} className="h-7 px-2 text-blue-600 hover:bg-blue-500/10 text-[11px]" onClick={() => handleApprove(post)} title="Approve (required before publishing)">
                                     <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve

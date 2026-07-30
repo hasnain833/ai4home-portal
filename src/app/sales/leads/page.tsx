@@ -586,7 +586,7 @@ export default function LeadsPage() {
     };
 
     poll();
-    const timer = window.setInterval(poll, 2500);
+    const timer = window.setInterval(poll, 750);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -1053,7 +1053,7 @@ export default function LeadsPage() {
 
         {/* CSV Import Wizard Dialog */}
         <Dialog open={csvModalOpen} onOpenChange={closeCSVWizard}>
-          <DialogContent className="sm:max-w-xl">
+          <DialogContent className="no-scrollbar max-h-[92vh] overflow-y-auto overflow-x-hidden sm:max-w-xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Upload className="h-5 w-5 text-[#b48c3c]" />
@@ -1102,7 +1102,7 @@ export default function LeadsPage() {
 
             {/* STEP 2: Map Columns */}
             {csvStep === 2 && (
-              <div className="space-y-4 pt-2 max-h-[60vh] overflow-y-auto pr-2">
+              <div className="no-scrollbar space-y-4 pt-2 max-h-[60vh] overflow-y-auto overflow-x-hidden pr-1">
                 <Label className="font-semibold text-sm">Map CSV Headers to Lead Data Model</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">Assign your CSV columns to the appropriate fields. Leftover columns will be omitted.</p>
 

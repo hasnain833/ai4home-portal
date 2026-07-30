@@ -635,10 +635,21 @@ The {companyName} Team`;
   return { emailSubject, emailBody, smsBody };
 }
 
+function getAiProviderConfig(company) {
+  const integrations = company?.integrations || [];
+  const active = integrations.find((i) => i.isActive);
+  return {
+    provider: active?.platform?.toLowerCase() || "platform",
+    openAiApiKey: integrations.find((i) => i.platform === "OPENAI")?.apiKey,
+    groqApiKey: integrations.find((i) => i.platform === "GROQ")?.apiKey,
+  };
+}
+
 async function generateNewsCampaignCopy(news, company) {
   const fallback = buildFallbackNewsCopy(news);
+  const providerConfig = getAiProviderConfig(company);
 
-  if (!hasLLM()) {
+  if (!hasLLM(providerConfig)) {
     return { ...fallback, aiGenerated: false };
   }
 
@@ -678,6 +689,7 @@ Rules:
       user: userPrompt,
       maxTokens: 700,
       json: true,
+      providerConfig,
     });
     const parsed = parseJsonBlock(text || "");
     if (parsed && parsed.emailSubject && parsed.emailBody && parsed.smsBody) {
@@ -713,7 +725,15 @@ export const createCampaignFromNews = async (req, res) => {
 
     const company = await prisma.company.findUnique({
       where: { id: companyId },
-      select: { name: true, voiceProfile: true, salesBrandProfile: true },
+      select: {
+        name: true,
+        voiceProfile: true,
+        salesBrandProfile: true,
+        integrations: {
+          where: { platform: { in: ["OPENAI", "GROQ"] } },
+          select: { platform: true, apiKey: true, isActive: true },
+        },
+      },
     });
 
     const copy = await generateNewsCampaignCopy(news, company);
@@ -763,17 +783,26 @@ export const generateCampaignCopy = async (req, res) => {
         .json({ message: "Goal and stepType are required" });
     }
 
-    if (!hasLLM()) {
-      return res.status(500).json({
-        message:
-          "No AI provider is configured (set ANTHROPIC_API_KEY or a Groq key).",
-      });
-    }
-
     const company = await prisma.company.findUnique({
       where: { id: req.user.companyId },
-      select: { name: true, voiceProfile: true, salesBrandProfile: true },
+      select: {
+        name: true,
+        voiceProfile: true,
+        salesBrandProfile: true,
+        integrations: {
+          where: { platform: { in: ["OPENAI", "GROQ"] } },
+          select: { platform: true, apiKey: true, isActive: true },
+        },
+      },
     });
+    const providerConfig = getAiProviderConfig(company);
+
+    if (!hasLLM(providerConfig)) {
+      return res.status(500).json({
+        message:
+          "No AI provider is configured. Add an OpenAI or Groq key in Sales Settings > AI Config.",
+      });
+    }
     const brandLines = buildBrandContext(company, { brandVoice });
 
     // SW-KB-002: ground nurture copy in the tenant KB (brand voice / product / FAQ),
@@ -808,6 +837,7 @@ Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body"
       user: "Please generate the draft copy based on the provided parameters.",
       maxTokens: 500,
       json: true,
+      providerConfig,
     });
 
     if (!content) {

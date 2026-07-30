@@ -52,7 +52,7 @@ const warrantyNavItems = [
   { name: "Tickets", href: "/warranty/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
   { name: "Team", href: "/warranty/team", icon: Users, roles: ["admin"] },
   { name: "Homeowners", href: "/warranty/homeowners", icon: User, roles: ["admin", "staff"] },
-  // { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
+  { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
   { name: "Knowledge Base", href: "/warranty/knowledge-base", icon: Database, roles: ["admin", "staff"] },
   { name: "Company", href: "/warranty/company", icon: Building2, roles: ["admin", "staff"] },
   { name: "Reports", href: "/warranty/reports", icon: BarChart3, roles: ["admin", "staff"] },
@@ -222,7 +222,7 @@ export default function PortalLayout({
           )}
 
           {/* Navigation */}
-          <nav className="flex-1 space-y-1 p-3 overflow-y-auto">
+          <nav className="no-scrollbar flex-1 space-y-1 overflow-y-auto p-3">
             {filteredNav.map((item) => {
               const isActive = pathname === item.href;
               return (
@@ -329,7 +329,7 @@ export default function PortalLayout({
 
       {/* Main content area - margin-left adjusts based on sidebar state */}
       <main
-        className={`flex-1 flex flex-col transition-all duration-200 ease-in-out overflow-auto ${sidebarExpanded ? "md:ml-64" : "md:ml-20"
+        className={`no-scrollbar flex-1 flex flex-col transition-all duration-200 ease-in-out overflow-auto ${sidebarExpanded ? "md:ml-64" : "md:ml-20"
           }`}
       >
         {/* Mobile header (visible only on < md) */}
@@ -411,7 +411,7 @@ export default function PortalLayout({
                     </div>
                   )}
 
-                  <nav className="flex-1 space-y-1 p-3">
+                  <nav className="no-scrollbar flex-1 space-y-1 overflow-y-auto p-3">
                     {filteredNav.map((item) => (
                       <Link key={item.name} href={item.href} onClick={closeMobileSidebar}>
                         <div className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${pathname === item.href

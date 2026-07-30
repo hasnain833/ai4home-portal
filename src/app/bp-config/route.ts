@@ -53,21 +53,30 @@ export async function GET(req: NextRequest) {
     themeMode: "light",
     headerVariant: "solid",
     variant: "solid",
+    embeddedChatId: EMBED_CONTAINER_ID,
   };
   if (botColor) {
     configurationOverrides.color = botColor;
     config.configuration.color = botColor;
   }
-  Object.assign(config.configuration, configurationOverrides);
-  if (botName) config.configuration.botName = botName;
+  if (botName) {
+    configurationOverrides.botName = botName;
+    config.configuration.botName = botName;
+  }
   if (companyName) {
     const botDescription = `You are the Warranty Care Assistant for ${companyName}.`;
+    configurationOverrides.botDescription = botDescription;
+    configurationOverrides.description = botDescription;
     config.configuration.botDescription = botDescription;
     config.configuration.description = botDescription;
   }
-  if (botLogo) config.configuration.botAvatar = botLogo;
+  if (botLogo) {
+    configurationOverrides.botAvatar = botLogo;
+    config.configuration.botAvatar = botLogo;
+  }
   // Force inline rendering into the portal container.
   config.configuration.embeddedChatId = EMBED_CONTAINER_ID;
+  Object.assign(config.configuration, configurationOverrides);
 
   const js = `(function initBotpress(attempt) {
   if (window.botpress && typeof window.botpress.init === "function") {

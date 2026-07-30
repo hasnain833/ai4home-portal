@@ -39,7 +39,7 @@ export const handleCsvImport = inngest.createFunction(
       });
     });
 
-    const chunkSize = 250;
+    const chunkSize = 25;
     const totals = {
       createdCount: job.createdCount || 0,
       updatedCount: job.updatedCount || 0,

@@ -39,6 +39,7 @@ import {
   Layers,
   Activity,
   Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -105,6 +106,7 @@ export default function CampaignsPage() {
   const [segments, setSegments] = useState<any[]>([]);
   const [enrollMode, setEnrollMode] = useState<"leads" | "segment">("leads");
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>("");
+  const [enrolling, setEnrolling] = useState(false);
 
   const enrollLeadTags = useMemo(() => {
     const tags = new Set<string>();
@@ -415,6 +417,7 @@ export default function CampaignsPage() {
       ? { segmentId: selectedSegmentId }
       : { leadIds: selectedLeadIds };
 
+    setEnrolling(true);
     try {
       const res = await fetch(`/api/sales/campaigns/${activeSeq.id}/enroll`, {
         method: "POST",
@@ -438,6 +441,8 @@ export default function CampaignsPage() {
     } catch (e) {
       console.error("[sales/campaigns]", e);
       toast.error("Error enrolling leads.");
+    } finally {
+      setEnrolling(false);
     }
   };
 
@@ -753,6 +758,9 @@ export default function CampaignsPage() {
                         <Sparkles className={`h-4 w-4 ${generatingStepCopy ? "animate-pulse" : ""}`} />
                       </Button>
                     </div>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      Merge tags: <code>{`{firstName}`}</code>, <code>{`{lastName}`}</code>, <code>{`{companyName}`}</code>, <code>{`{campaignName}`}</code>, <code>{`{city}`}</code>, <code>{`{bookingLink}`}</code>. Configure AI provider in Settings &gt; AI Config.
+                    </p>
                     <textarea
                       className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-25"
                       value={newStep.body}
@@ -775,7 +783,7 @@ export default function CampaignsPage() {
         </Dialog>
 
         {/* Enroll Leads Dialog */}
-        <Dialog open={enrollModalOpen} onOpenChange={setEnrollModalOpen}>
+        <Dialog open={enrollModalOpen} onOpenChange={(open) => !enrolling && setEnrollModalOpen(open)}>
           <DialogContent className="sm:max-w-md max-h-[80vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>Enroll Leads</DialogTitle>
@@ -789,6 +797,7 @@ export default function CampaignsPage() {
                 <button
                   type="button"
                   onClick={() => setEnrollMode("leads")}
+                  disabled={enrolling}
                   className={`text-xs font-semibold py-1.5 rounded-md transition ${enrollMode === "leads" ? "bg-white dark:bg-slate-800 shadow-sm text-[#b48c3c]" : "text-muted-foreground"}`}
                 >
                   Select Leads
@@ -796,6 +805,7 @@ export default function CampaignsPage() {
                 <button
                   type="button"
                   onClick={() => setEnrollMode("segment")}
+                  disabled={enrolling}
                   className={`text-xs font-semibold py-1.5 rounded-md transition ${enrollMode === "segment" ? "bg-white dark:bg-slate-800 shadow-sm text-[#b48c3c]" : "text-muted-foreground"}`}
                 >
                   By Segment
@@ -810,7 +820,7 @@ export default function CampaignsPage() {
                       No saved segments yet. Create one on the Leads page, then target it here.
                     </p>
                   ) : (
-                    <Select value={selectedSegmentId} onValueChange={setSelectedSegmentId}>
+                    <Select value={selectedSegmentId} onValueChange={setSelectedSegmentId} disabled={enrolling}>
                       <SelectTrigger><SelectValue placeholder="Choose a segment" /></SelectTrigger>
                       <SelectContent>
                         {segments.map((s: any) => (
@@ -834,8 +844,9 @@ export default function CampaignsPage() {
                       placeholder="Search leads..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
+                      disabled={enrolling}
                     />
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <Select value={statusFilter} onValueChange={setStatusFilter} disabled={enrolling}>
                       <SelectTrigger className="w-35 shrink-0">
                         <SelectValue placeholder="Status" />
                       </SelectTrigger>
@@ -846,7 +857,7 @@ export default function CampaignsPage() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <Select value={tagFilter} onValueChange={setTagFilter}>
+                    <Select value={tagFilter} onValueChange={setTagFilter} disabled={enrolling}>
                       <SelectTrigger className="w-35 shrink-0">
                         <SelectValue placeholder="Tag" />
                       </SelectTrigger>
@@ -858,7 +869,7 @@ export default function CampaignsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-3 overflow-y-auto pr-1">
+                  <div className="no-scrollbar space-y-3 overflow-y-auto pr-1">
                     {(() => {
                       const enrolledLeadIds = ((activeSeqDetail?.enrollments || []) as Array<{ leadId: string }>).map((e) => e.leadId);
 
@@ -885,7 +896,7 @@ export default function CampaignsPage() {
                             <div className="flex items-center space-x-2 pb-2 mb-2 border-b">
                               <Checkbox
                                 checked={allSelected}
-                                disabled={selectableFiltered.length === 0}
+                                disabled={enrolling || selectableFiltered.length === 0}
                                 onCheckedChange={(checked) => {
                                   if (checked) {
                                     const newIds = new Set(selectedLeadIds);
@@ -905,7 +916,7 @@ export default function CampaignsPage() {
                             const isEnrolled = enrolledLeadIds.includes(lead.id);
                             return (
                               <div key={lead.id} className={`flex items-center space-x-3 p-2 rounded-md border border-transparent ${isEnrolled ? "opacity-60 bg-slate-50 dark:bg-slate-900/50" : "hover:bg-slate-50 dark:hover:bg-slate-900 hover:border-border cursor-pointer"}`} onClick={() => {
-                                if (isEnrolled) return;
+                                if (enrolling || isEnrolled) return;
                                 if (selectedLeadIds.includes(lead.id)) {
                                   setSelectedLeadIds(selectedLeadIds.filter(id => id !== lead.id));
                                 } else {
@@ -913,10 +924,10 @@ export default function CampaignsPage() {
                                 }
                               }}>
                                 <Checkbox
-                                  disabled={isEnrolled}
+                                  disabled={enrolling || isEnrolled}
                                   checked={isEnrolled || selectedLeadIds.includes(lead.id)}
                                   onCheckedChange={(checked) => {
-                                    if (isEnrolled) return;
+                                    if (enrolling || isEnrolled) return;
                                     if (checked) {
                                       setSelectedLeadIds([...selectedLeadIds, lead.id]);
                                     } else {
@@ -960,15 +971,20 @@ export default function CampaignsPage() {
               )}
             </div>
             <DialogFooter className="sm:justify-end gap-2 mt-4 pt-4 border-t">
-              <Button variant="outline" onClick={() => setEnrollModalOpen(false)}>
+              <Button variant="outline" onClick={() => setEnrollModalOpen(false)} disabled={enrolling}>
                 Cancel
               </Button>
               <Button
-                className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90"
+                className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-1.5"
                 onClick={confirmEnroll}
-                disabled={enrollMode === "segment" ? !selectedSegmentId : selectedLeadIds.length === 0}
+                disabled={enrolling || (enrollMode === "segment" ? !selectedSegmentId : selectedLeadIds.length === 0)}
               >
-                {enrollMode === "segment" ? "Enroll Segment" : `Enroll ${selectedLeadIds.length} Leads`}
+                {enrolling && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                {enrolling
+                  ? "Enrolling..."
+                  : enrollMode === "segment"
+                    ? "Enroll Segment"
+                    : `Enroll ${selectedLeadIds.length} Leads`}
               </Button>
             </DialogFooter>
           </DialogContent>
