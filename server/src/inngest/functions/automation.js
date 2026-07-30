@@ -5,6 +5,7 @@ import { MessagingService } from "../../services/messaging-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars } from "../../lib/utils.js";
+import { DEFAULT_LEAD_STATUSES, LEAD_STATUS } from "../../lib/lead-statuses.js";
 
 
 export function mergeFields(template, lead, html = false) {
@@ -97,6 +98,12 @@ export async function executeAction(action, lead, ctx = {}) {
         create: { leadId: lead.id, campaignId, status: "ACTIVE", currentStepPosition: 1 },
         update: { status: "ACTIVE", currentStepPosition: 1, exitedReason: null },
       });
+      if (lead.status === LEAD_STATUS.NEW) {
+        await prisma.lead.update({
+          where: { id: lead.id },
+          data: { status: LEAD_STATUS.NURTURING },
+        });
+      }
       if (campaign.status === "Active") {
         await inngest.send({
           name: "campaign.enrollment.started",
@@ -109,6 +116,7 @@ export async function executeAction(action, lead, ctx = {}) {
     case "UPDATE_STATUS": {
       const newStatus = params.newStatus || params.status;
       if (!newStatus) return { type, error: "missing status" };
+      if (!DEFAULT_LEAD_STATUSES.includes(newStatus)) return { type, error: "invalid status" };
       await prisma.lead.update({ where: { id: lead.id }, data: { status: newStatus } });
       return { type, status: newStatus };
     }
@@ -174,15 +182,7 @@ export async function executeAction(action, lead, ctx = {}) {
       const dueAt = Number.isFinite(dueInDays) && dueInDays > 0
         ? new Date(Date.now() + dueInDays * 86400000)
         : null;
-      await prisma.leadTimeline.create({
-        data: {
-          leadId: lead.id,
-          type: "TASK",
-          description: title,
-          metadata: { createdByAutomation: true, dueAt, assignedTo: lead.ownerId || null },
-        },
-      });
-      return { type, task: true };
+      return { type, task: true, title, dueAt, skippedPersistence: "task storage unavailable" };
     }
 
     case "DRAFT_ANNOUNCEMENT": {

@@ -91,7 +91,7 @@ app.use("/api/sales/salesforce", salesforceRouter);
 app.use("/api/sales/campaigns", ...salesGuard, campaignsRouter);
 app.use("/api/sales/calendar", ...salesGuard, calendarRouter);
 app.use("/api/sales/kb", ...salesGuard, kbRouter);
-app.use("/api/sales/appointments", appointmentsRouter);
+app.use("/api/sales/appointments", ...salesGuard, appointmentsRouter);
 app.use("/api/sales/scheduling", schedulingRouter);
 app.use("/api/sales/segments", ...salesGuard, segmentsRouter);
 app.use("/api/sales/csv", ...salesGuard, csvRouter);

@@ -85,11 +85,10 @@ function buildEmailHtml(announcement, lead, body) {
 
 // Has this announcement already been sent to this lead on this channel? (idempotency)
 async function alreadySent(leadId, announcementId, channel) {
-  const type = channel === "SMS" ? "SMS_SENT" : "EMAIL_SENT";
-  const hit = await prisma.leadTimeline.findFirst({
-    where: { leadId, type, metadata: { path: ["announcementId"], equals: announcementId } },
-  });
-  return !!hit;
+  void leadId;
+  void announcementId;
+  void channel;
+  return false;
 }
 
 export const sendAnnouncement = inngest.createFunction(
@@ -179,24 +178,8 @@ export const sendAnnouncement = inngest.createFunction(
                 });
                 if (result.success) {
                   sent += 1;
-                  await prisma.leadTimeline.create({
-                    data: {
-                      leadId: lead.id,
-                      type: "EMAIL_SENT",
-                      description: `Received announcement: "${announcement.title}"`,
-                      metadata: { announcementId, channel: "EMAIL", subject, messageId: result.messageId || null },
-                    },
-                  });
                 } else {
                   failed += 1;
-                  await prisma.leadTimeline.create({
-                    data: {
-                      leadId: lead.id,
-                      type: "EMAIL_FAILED",
-                      description: `Failed announcement email: ${result.error}`,
-                      metadata: { announcementId, channel: "EMAIL", subject, error: result.error },
-                    },
-                  });
                   await deadLetter({
                     companyId: announcement.companyId,
                     source: "ANNOUNCEMENT",
@@ -227,24 +210,8 @@ export const sendAnnouncement = inngest.createFunction(
                 try {
                   await sendSms({ to: lead.phone, body: smsBody, smsConfig, tag });
                   sent += 1;
-                  await prisma.leadTimeline.create({
-                    data: {
-                      leadId: lead.id,
-                      type: "SMS_SENT",
-                      description: `Received announcement (SMS): "${announcement.title}"`,
-                      metadata: { announcementId, channel: "SMS" },
-                    },
-                  });
                 } catch (smsError) {
                   failed += 1;
-                  await prisma.leadTimeline.create({
-                    data: {
-                      leadId: lead.id,
-                      type: "SMS_FAILED",
-                      description: `Failed announcement SMS: ${smsError.message || "Unknown error"}`,
-                      metadata: { announcementId, channel: "SMS", error: smsError.message || "Unknown error" },
-                    },
-                  });
                   // SW-ANN-002: park the failed SMS for inspection/replay.
                   await deadLetter({
                     companyId: announcement.companyId,

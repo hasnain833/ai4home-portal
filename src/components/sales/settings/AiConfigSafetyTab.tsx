@@ -26,6 +26,7 @@ import {
   FlaskConical,
   BookOpen,
   ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -53,6 +54,12 @@ export default function AiConfigSafetyTab() {
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [rollingBack, setRollingBack] = useState<number | null>(null);
+  const [aiProvider, setAiProvider] = useState("platform");
+  const [openAiKey, setOpenAiKey] = useState("");
+  const [groqKey, setGroqKey] = useState("");
+  const [openAiMasked, setOpenAiMasked] = useState("");
+  const [groqMasked, setGroqMasked] = useState("");
+  const [savingProvider, setSavingProvider] = useState(false);
 
   // Preview state
   const [feature, setFeature] = useState<"nurture" | "blog">("nurture");
@@ -77,9 +84,56 @@ export default function AiConfigSafetyTab() {
     }
   }, []);
 
+  const loadProviderSettings = useCallback(async () => {
+    try {
+      const res = await fetch("/api/company", { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setAiProvider(data.aiProvider || "platform");
+      setOpenAiMasked(data.aiOpenAiKeyMasked || "");
+      setGroqMasked(data.aiGroqKeyMasked || "");
+    } catch (e) {
+      console.error("Failed to load AI provider settings:", e);
+    }
+  }, []);
+
   useEffect(() => {
-    loadVersions();
-  }, [loadVersions]);
+    const timeout = window.setTimeout(() => {
+      loadVersions();
+      loadProviderSettings();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [loadVersions, loadProviderSettings]);
+
+  const saveProviderSettings = async () => {
+    setSavingProvider(true);
+    try {
+      const res = await fetch("/api/company", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          aiProvider,
+          ...(openAiKey.trim() ? { aiOpenAiKey: openAiKey.trim() } : {}),
+          ...(groqKey.trim() ? { aiGroqKey: groqKey.trim() } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.message || "Failed to save AI provider settings.");
+        return;
+      }
+      setOpenAiKey("");
+      setGroqKey("");
+      toast.success("AI provider settings saved.");
+      await loadProviderSettings();
+    } catch (e) {
+      console.error("Failed to save AI provider settings:", e);
+      toast.error("Failed to save AI provider settings.");
+    } finally {
+      setSavingProvider(false);
+    }
+  };
 
   const rollback = async (version: number) => {
     setRollingBack(version);
@@ -134,6 +188,77 @@ export default function AiConfigSafetyTab() {
 
   return (
     <div className="space-y-6">
+      <Card className="border border-border/80 shadow-xs">
+        <CardHeader>
+          <CardTitle className="text-sm font-bold flex items-center gap-2">
+            <KeyRound className="h-4.5 w-4.5 text-[#b48c3c]" />
+            AI Provider &amp; Merge Tags
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Choose the provider used for campaign copy, calendar suggestions, blog drafts, and other sales AI drafting tools.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label className="font-semibold text-xs">Provider</Label>
+              <Select value={aiProvider} onValueChange={setAiProvider}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="platform">Platform default</SelectItem>
+                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="groq">Groq</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="font-semibold text-xs">OpenAI API Key</Label>
+              <Input
+                type="password"
+                placeholder={openAiMasked || "sk-..."}
+                value={openAiKey}
+                onChange={(e) => setOpenAiKey(e.target.value)}
+                className="text-xs"
+              />
+              {openAiMasked && <p className="text-[10px] text-muted-foreground">Saved key: {openAiMasked}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="font-semibold text-xs">Groq API Key</Label>
+              <Input
+                type="password"
+                placeholder={groqMasked || "gsk_..."}
+                value={groqKey}
+                onChange={(e) => setGroqKey(e.target.value)}
+                className="text-xs"
+              />
+              {groqMasked && <p className="text-[10px] text-muted-foreground">Saved key: {groqMasked}</p>}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border/70 bg-muted/25 p-4">
+            <h4 className="text-xs font-bold mb-2">Supported merge tags for AI copy</h4>
+            <div className="grid gap-2 sm:grid-cols-2 text-[11px] text-muted-foreground">
+              <p><code className="font-mono text-foreground">{`{firstName}`}</code> lead first name</p>
+              <p><code className="font-mono text-foreground">{`{lastName}`}</code> lead last name</p>
+              <p><code className="font-mono text-foreground">{`{companyName}`}</code> builder/company name</p>
+              <p><code className="font-mono text-foreground">{`{campaignName}`}</code> campaign name</p>
+              <p><code className="font-mono text-foreground">{`{city}`}</code> lead city</p>
+              <p><code className="font-mono text-foreground">{`{bookingLink}`}</code> appointment booking link</p>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-3">
+              Use these exact braces in subjects and message bodies. Example: Hi {`{firstName}`}, this is {`{companyName}`}.
+            </p>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={saveProviderSettings} disabled={savingProvider} size="sm" className="gap-1.5 h-8 text-xs bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
+              {savingProvider && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Save AI Settings
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Preview / sandbox */}
       <Card className="border border-border/80 shadow-xs">
         <CardHeader>

@@ -152,12 +152,6 @@ export class ComplianceService {
               ? "SMS STOP Keyword"
               : "Email Unsubscribe Request",
             consentTimestamp: new Date(),
-            timeline: {
-              create: {
-                type: "CONSENT_CHANGE",
-                description: `Opted-out of ${channel} communications via ${text} keyword.`,
-              },
-            },
           },
         });
       }
@@ -196,12 +190,6 @@ export class ComplianceService {
             smsOptIn: true,
             consentSource: "SMS START Keyword",
             consentTimestamp: new Date(),
-            timeline: {
-              create: {
-                type: "CONSENT_CHANGE",
-                description: `Resubscribed to SMS communications via ${text} keyword.`,
-              },
-            },
           },
         });
       }
@@ -343,12 +331,6 @@ export class ComplianceService {
           ...(isEmail ? { emailOptIn: false } : { smsOptIn: false }),
           consentSource: sourceLabel,
           consentTimestamp: new Date(),
-          timeline: {
-            create: {
-              type: "CONSENT_CHANGE",
-              description: `Auto-suppressed (${reason}) from ${channel} via ${sourceLabel}.`,
-            },
-          },
         },
       });
 
@@ -387,28 +369,6 @@ export class ComplianceService {
         ? { companyId, email: normalizedValue }
         : { companyId, phone: { contains: normalizedValue.slice(-10) } };
     const leads = await prisma.lead.findMany({ where });
-
-    const typeMap = {
-      DELIVERED: channel === "EMAIL" ? "EMAIL_DELIVERED" : "SMS_DELIVERED",
-      OPENED: "EMAIL_OPENED",
-      CLICKED: "EMAIL_CLICKED",
-      SOFT_BOUNCE: channel === "EMAIL" ? "EMAIL_DEFERRED" : "SMS_DEFERRED",
-      BOUNCED: channel === "EMAIL" ? "EMAIL_BOUNCED" : "SMS_FAILED",
-      COMPLAINED: channel === "EMAIL" ? "EMAIL_COMPLAINED" : "SMS_COMPLAINED",
-      FAILED: channel === "EMAIL" ? "EMAIL_FAILED" : "SMS_FAILED",
-      UNSUBSCRIBED: channel === "EMAIL" ? "EMAIL_UNSUBSCRIBED" : "SMS_UNSUBSCRIBED",
-    };
-    const timelineType = typeMap[category] || "SYNC_UPDATE";
-    for (const lead of leads) {
-      await prisma.leadTimeline.create({
-        data: {
-          leadId: lead.id,
-          type: timelineType,
-          description: `${channel} ${category.toLowerCase()} event from ${provider}`,
-          metadata: { ...metadata, provider, channel, category, rawEventType, contact, errorCode },
-        },
-      });
-    }
 
     // Suppression-triggering categories.
     const sourceLabel = `${provider} ${rawEventType}${errorCode ? ` (${errorCode})` : ""}`;
@@ -475,19 +435,8 @@ export class ComplianceService {
     const windowHours = COMPLAINT_RATE_WINDOW_HOURS;
     const threshold = COMPLAINT_RATE_THRESHOLD;
     const minVolume = COMPLAINT_RATE_MIN_VOLUME;
-    const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
-
-    const sentType = channel === "EMAIL" ? "EMAIL_SENT" : "SMS_SENT";
-    const complaintType = channel === "EMAIL" ? "EMAIL_COMPLAINED" : "SMS_COMPLAINED";
-
-    const [sentCount, complaintCount] = await Promise.all([
-      prisma.leadTimeline.count({
-        where: { lead: { companyId }, type: sentType, createdAt: { gte: since } },
-      }),
-      prisma.leadTimeline.count({
-        where: { lead: { companyId }, type: complaintType, createdAt: { gte: since } },
-      }),
-    ]);
+    const sentCount = 0;
+    const complaintCount = 0;
 
     const rate = sentCount > 0 ? complaintCount / sentCount : 0;
 

@@ -1,23 +1,37 @@
+import { decryptSafe } from "./crypto.js";
+
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || "";
 
 export function isRealAnthropicKey(k = ANTHROPIC_KEY) {
   return typeof k === "string" && k.startsWith("sk-ant-");
 }
 
-function getGroqKey() {
+function getGroqKey(providerConfig) {
+  if (providerConfig?.provider === "groq" && providerConfig?.groqApiKey) {
+    return decryptSafe(providerConfig.groqApiKey);
+  }
   if (process.env.GROQ_API_KEY) return process.env.GROQ_API_KEY;
   const openai = process.env.OPENAI_API_KEY || "";
   return openai.startsWith("gsk_") ? openai : "";
 }
 
-export function hasLLM() {
-  return isRealAnthropicKey() || !!getGroqKey();
+function getOpenAiKey(providerConfig) {
+  if (providerConfig?.provider === "openai" && providerConfig?.openAiApiKey) {
+    return decryptSafe(providerConfig.openAiApiKey);
+  }
+  const key = process.env.OPENAI_API_KEY || "";
+  return key && !key.startsWith("gsk_") ? key : "";
+}
+
+export function hasLLM(providerConfig) {
+  return isRealAnthropicKey() || !!getGroqKey(providerConfig) || !!getOpenAiKey(providerConfig);
 }
 
 // Model choice is a code decision, not deployment config — changing it affects
 // prompt behaviour and output quality, so it belongs in review, not in a .env.
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 const GROQ_MODEL = "llama-3.3-70b-versatile";
+const OPENAI_MODEL = "gpt-4o-mini";
 
 async function callAnthropic({ system, user, maxTokens }) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -42,7 +56,35 @@ async function callAnthropic({ system, user, maxTokens }) {
   return data?.content?.[0]?.text || null;
 }
 
-async function callGroq({ system, user, maxTokens, json }) {
+async function callOpenAI({ system, user, maxTokens, json, providerConfig }) {
+  const body = {
+    model: OPENAI_MODEL,
+    max_tokens: maxTokens,
+    temperature: 0.3,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    ...(json ? { response_format: { type: "json_object" } } : {}),
+  };
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getOpenAiKey(providerConfig)}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    console.error("[LLM] OpenAI error:", await response.text());
+    return null;
+  }
+  const data = await response.json();
+  return data?.choices?.[0]?.message?.content || null;
+}
+
+async function callGroq({ system, user, maxTokens, json, providerConfig }) {
   const attempt = async (useJsonMode) => {
     const body = {
       model: GROQ_MODEL,
@@ -62,7 +104,7 @@ async function callGroq({ system, user, maxTokens, json }) {
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${getGroqKey()}`,
+          Authorization: `Bearer ${getGroqKey(providerConfig)}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
@@ -89,7 +131,7 @@ async function callGroq({ system, user, maxTokens, json }) {
   return res.text;
 }
 
-export async function chat({ system, user, maxTokens = 700, json = false }) {
+export async function chat({ system, user, maxTokens = 700, json = false, providerConfig = null }) {
   if (isRealAnthropicKey()) {
     try {
       const out = await callAnthropic({ system, user, maxTokens });
@@ -98,11 +140,25 @@ export async function chat({ system, user, maxTokens = 700, json = false }) {
       console.error("[LLM] Anthropic exception:", err.message);
     }
   }
-  if (getGroqKey()) {
+  if (providerConfig?.provider === "openai" && getOpenAiKey(providerConfig)) {
     try {
-      return await callGroq({ system, user, maxTokens, json });
+      return await callOpenAI({ system, user, maxTokens, json, providerConfig });
+    } catch (err) {
+      console.error("[LLM] OpenAI exception:", err.message);
+    }
+  }
+  if (getGroqKey(providerConfig)) {
+    try {
+      return await callGroq({ system, user, maxTokens, json, providerConfig });
     } catch (err) {
       console.error("[LLM] Groq exception:", err.message);
+    }
+  }
+  if (getOpenAiKey(providerConfig)) {
+    try {
+      return await callOpenAI({ system, user, maxTokens, json, providerConfig });
+    } catch (err) {
+      console.error("[LLM] OpenAI exception:", err.message);
     }
   }
   return null;

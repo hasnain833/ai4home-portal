@@ -8,6 +8,8 @@ import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { deadLetter } from "../../lib/dead-letter.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
+import { getOrCreateLeadBookingToken } from "../../lib/public-tokens.js";
+import { LEAD_STATUS } from "../../lib/lead-statuses.js";
 
 // Helper function to calculate delay
 const calculateDelayTime = (value, unit) => {
@@ -27,7 +29,7 @@ export const runNurtureCampaign = inngest.createFunction(
   {
     id: "run-nurture-campaign-v4",
     idempotency: "event.data.enrollmentId",
-    concurrency: [{ key: "event.data.enrollmentId", limit: 1 }],
+    concurrency: [{ key: "event.data.campaignId", limit: 2 }],
     triggers: [{ event: "campaign.enrollment.started" }],
     onFailure: async ({ event, error }) =>
       deadLetterJob({ functionId: "run-nurture-campaign-v4", event, error }),
@@ -140,14 +142,6 @@ export const runNurtureCampaign = inngest.createFunction(
       if (!complianceCheck.allowed) {
 
         await step.run(`skip-step-${currentStep.position}`, async () => {
-          await prisma.leadTimeline.create({
-            data: {
-              leadId: lead.id,
-              type: "SYNC_UPDATE",
-              description: `Skipped ${currentStep.type} step ${currentStep.position} for this lead: ${complianceCheck.reason}`,
-              metadata: { campaignId: campaign.id, stepPosition: currentStep.position, reason: complianceCheck.reason, skipped: true },
-            },
-          });
           await prisma.campaignEnrollment.update({
             where: { id: enrollment.id },
             data: { currentStepPosition: currentStep.position },
@@ -158,7 +152,14 @@ export const runNurtureCampaign = inngest.createFunction(
       }
 
       const sendResult = await step.run(`send-step-${currentStep.position}`, async () => {
-        const bookingLink = `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/sales/scheduling?leadId=${lead.id}`;
+        if (lead.status === LEAD_STATUS.NEW) {
+          await prisma.lead.update({
+            where: { id: lead.id },
+            data: { status: LEAD_STATUS.NURTURING },
+          });
+        }
+        const bookingToken = await getOrCreateLeadBookingToken(lead.id);
+        const bookingLink = `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/book/${bookingToken}`;
         const variables = {
           firstName: lead.firstName || "",
           lastName: lead.lastName || "",
@@ -166,6 +167,7 @@ export const runNurtureCampaign = inngest.createFunction(
           phone: lead.phone || "",
           city: lead.city || "",
           companyName: lead.company?.name || "",
+          campaignName: campaign.name || "",
           bookingLink,
         };
         const renderText = (templateText, html = false) =>
@@ -269,22 +271,6 @@ export const runNurtureCampaign = inngest.createFunction(
 
       await step.run(`record-step-${currentStep.position}`, async () => {
         if (sendResult.attempted && sendResult.channel === "EMAIL") {
-          await prisma.leadTimeline.create({
-            data: sendResult.success
-              ? {
-                leadId: lead.id,
-                type: "EMAIL_SENT",
-                description: `Sent campaign email: "${sendResult.subject}"`,
-                metadata: { subject: sendResult.subject, body: sendResult.body, campaignId: campaign.id, stepPosition: currentStep.position, messageId: sendResult.messageId },
-              }
-              : {
-                leadId: lead.id,
-                type: "EMAIL_FAILED",
-                description: `Failed to send campaign email: ${sendResult.error}`,
-                metadata: { subject: sendResult.subject, body: sendResult.body, campaignId: campaign.id, stepPosition: currentStep.position, error: sendResult.error },
-              },
-          });
-
           if (sendResult.success) {
             await prisma.campaignStep.update({
               where: { id: currentStep.id },
@@ -292,22 +278,6 @@ export const runNurtureCampaign = inngest.createFunction(
             });
           }
         } else if (sendResult.attempted && sendResult.channel === "SMS") {
-          await prisma.leadTimeline.create({
-            data: sendResult.success
-              ? {
-                leadId: lead.id,
-                type: "SMS_SENT",
-                description: `Sent campaign SMS: "${sendResult.body.slice(0, 50)}${sendResult.body.length > 50 ? "..." : ""}"`,
-                metadata: { body: sendResult.body, campaignId: campaign.id, stepPosition: currentStep.position },
-              }
-              : {
-                leadId: lead.id,
-                type: "SMS_FAILED",
-                description: `Failed to send campaign SMS: ${sendResult.error}`,
-                metadata: { body: sendResult.body, error: sendResult.error, campaignId: campaign.id, stepPosition: currentStep.position },
-              },
-          });
-
           if (sendResult.success) {
             await prisma.campaignStep.update({
               where: { id: currentStep.id },
@@ -335,14 +305,6 @@ export const runNurtureCampaign = inngest.createFunction(
         data: { status: "COMPLETED" },
       });
 
-      await prisma.leadTimeline.create({
-        data: {
-          leadId,
-          type: "SYNC_UPDATE",
-          description: `Completed nurture campaign: "${campaign.name}"`,
-          metadata: { campaignId: campaign.id }
-        },
-      });
       const activeCount = await prisma.campaignEnrollment.count({
         where: { campaignId, status: { in: ["ACTIVE", "PAUSED"] } }
       });
@@ -402,15 +364,6 @@ export const handleCampaignExit = inngest.createFunction(
             });
           }
         }
-
-        await prisma.leadTimeline.create({
-          data: {
-            leadId,
-            type: "SYNC_UPDATE",
-            description: `Exited campaign "${enrollment.campaign.name}". Reason: ${reason}`,
-            metadata: { campaignId: enrollment.campaignId }
-          },
-        });
 
         const activeCount = await prisma.campaignEnrollment.count({
           where: { campaignId: enrollment.campaignId, status: { in: ["ACTIVE", "PAUSED"] } }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -70,7 +70,7 @@ export default function ContentCalendarPage() {
   const [view, setView] = useState<ViewMode>("month");
   const [draggedId, setDraggedId] = useState<string | null>(null);
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     try {
       const res = await fetch("/api/sales/calendar");
       if (res.ok) {
@@ -81,11 +81,14 @@ export default function ContentCalendarPage() {
     } catch (err) {
       console.error("Failed to fetch calendar events", err);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchEvents();
-  }, []);
+    const timeout = window.setTimeout(() => {
+      fetchEvents();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [fetchEvents]);
 
   const handleGenerateSuggestions = async () => {
     setIsGenerating(true);
@@ -105,14 +108,22 @@ export default function ContentCalendarPage() {
 
   const handleApproveSuggestion = async (id: string) => {
     try {
+      const suggestion = suggestions.find((s) => s.id === id);
       const res = await fetch(`/api/sales/calendar/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "Draft" })
       });
       if (res.ok) {
-        toast.success("Suggestion approved and converted to draft calendar slot!");
-        fetchEvents();
+        const updated = await res.json().catch(() => null);
+        const approvedDate = updated?.scheduledAt || suggestion?.scheduledAt;
+        if (approvedDate && !isNaN(new Date(approvedDate).getTime())) {
+          setCurrentDate(new Date(approvedDate));
+        }
+        setView("list");
+        setShowSuggestions(false);
+        toast.success("Suggestion approved as a draft on the calendar.");
+        await fetchEvents();
       } else {
         toast.error("Failed to approve suggestion.");
       }

@@ -39,7 +39,7 @@ export const handleCsvImport = inngest.createFunction(
       });
     });
 
-    const chunkSize = 250;
+    const chunkSize = 25;
     const totals = {
       createdCount: job.createdCount || 0,
       updatedCount: job.updatedCount || 0,
@@ -113,14 +113,6 @@ export const handleCsvImport = inngest.createFunction(
                   smsOptIn: lead.smsOptIn !== undefined ? smsOptIn : duplicateLead.smsOptIn,
                   consentSource: optInSource || duplicateLead.consentSource,
                   consentTimestamp: optInTimestamp || duplicateLead.consentTimestamp,
-                  timeline: {
-                    create: {
-                      type: "SYNC_UPDATE",
-                      description: isCrmOwned
-                        ? `CSV import merged into Salesforce-owned lead by ${userName} (CRM fields preserved).`
-                        : `Lead details updated via CSV import by ${userName}.`,
-                    },
-                  },
                 },
               });
               updatedCount++;
@@ -147,12 +139,6 @@ export const handleCsvImport = inngest.createFunction(
               smsOptIn,
               consentSource: optInSource,
               consentTimestamp: optInTimestamp,
-              timeline: {
-                create: {
-                  type: "IMPORT",
-                  description: `Lead imported via CSV file by ${userName}`,
-                },
-              },
             },
           });
           createdCount++;

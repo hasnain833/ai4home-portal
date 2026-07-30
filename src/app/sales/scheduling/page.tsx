@@ -785,17 +785,6 @@ export default function AppointmentsPage() {
                             busy/free sync + Google Meet links active
                           </p>
                         )}
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Microsoft Outlook 365</span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[10px]"
-                            disabled
-                            title="Coming soon">
-                            Coming soon
-                          </Button>
-                        </div>
                       </div>
 
                       <Button

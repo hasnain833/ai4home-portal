@@ -4,6 +4,7 @@ import { chat, hasLLM } from "../lib/llm.js";
 import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
+import { LEAD_STATUS } from "../lib/lead-statuses.js";
 
 const CAMPAIGN_BATCH_SIZE = 500;
 
@@ -426,7 +427,7 @@ export const enrollCampaign = async (req, res) => {
       const leadsById = new Map(leads.map((lead) => [lead.id, lead]));
       const existingByLeadId = new Map(existingEnrollments.map((enrollment) => [enrollment.leadId, enrollment]));
       const concurrentLeadIds = new Set(otherActiveEnrollments.map((enrollment) => enrollment.leadId));
-      const timelineRows = [];
+      const newlyEnrolledLeadIds = [];
 
       for (const leadId of batchIds) {
         try {
@@ -476,11 +477,7 @@ export const enrollCampaign = async (req, res) => {
             enrollmentsToStart.push(enrollment);
           }
 
-          timelineRows.push({
-            leadId,
-            type: "SYNC_UPDATE",
-            description: `Enrolled in nurture campaign "${campaign.name}"`,
-          });
+          newlyEnrolledLeadIds.push(leadId);
 
           enrolledCount++;
         } catch (err) {
@@ -488,8 +485,11 @@ export const enrollCampaign = async (req, res) => {
         }
       }
 
-      if (timelineRows.length > 0) {
-        await prisma.leadTimeline.createMany({ data: timelineRows });
+      if (newlyEnrolledLeadIds.length > 0) {
+        await prisma.lead.updateMany({
+          where: { id: { in: newlyEnrolledLeadIds }, companyId: req.user.companyId, status: LEAD_STATUS.NEW },
+          data: { status: LEAD_STATUS.NURTURING },
+        });
       }
     }
 
@@ -540,17 +540,6 @@ export const unenrollCampaign = async (req, res) => {
       },
       data: { status: "EXITED", exitedReason: "MANUAL" },
     });
-
-    for (const leadId of leadIds) {
-      await prisma.leadTimeline.create({
-        data: {
-          leadId,
-          type: "SYNC_UPDATE",
-          description: `Manually removed from campaign "${campaign.name}".`,
-          metadata: { campaignId: id },
-        },
-      });
-    }
 
     const activeCount = await prisma.campaignEnrollment.count({
       where: { campaignId: id, status: { in: ["ACTIVE", "PAUSED"] } },
@@ -646,10 +635,21 @@ The {companyName} Team`;
   return { emailSubject, emailBody, smsBody };
 }
 
+function getAiProviderConfig(company) {
+  const integrations = company?.integrations || [];
+  const active = integrations.find((i) => i.isActive);
+  return {
+    provider: active?.platform?.toLowerCase() || "platform",
+    openAiApiKey: integrations.find((i) => i.platform === "OPENAI")?.apiKey,
+    groqApiKey: integrations.find((i) => i.platform === "GROQ")?.apiKey,
+  };
+}
+
 async function generateNewsCampaignCopy(news, company) {
   const fallback = buildFallbackNewsCopy(news);
+  const providerConfig = getAiProviderConfig(company);
 
-  if (!hasLLM()) {
+  if (!hasLLM(providerConfig)) {
     return { ...fallback, aiGenerated: false };
   }
 
@@ -689,6 +689,7 @@ Rules:
       user: userPrompt,
       maxTokens: 700,
       json: true,
+      providerConfig,
     });
     const parsed = parseJsonBlock(text || "");
     if (parsed && parsed.emailSubject && parsed.emailBody && parsed.smsBody) {
@@ -724,7 +725,15 @@ export const createCampaignFromNews = async (req, res) => {
 
     const company = await prisma.company.findUnique({
       where: { id: companyId },
-      select: { name: true, voiceProfile: true, salesBrandProfile: true },
+      select: {
+        name: true,
+        voiceProfile: true,
+        salesBrandProfile: true,
+        integrations: {
+          where: { platform: { in: ["OPENAI", "GROQ"] } },
+          select: { platform: true, apiKey: true, isActive: true },
+        },
+      },
     });
 
     const copy = await generateNewsCampaignCopy(news, company);
@@ -774,17 +783,26 @@ export const generateCampaignCopy = async (req, res) => {
         .json({ message: "Goal and stepType are required" });
     }
 
-    if (!hasLLM()) {
-      return res.status(500).json({
-        message:
-          "No AI provider is configured (set ANTHROPIC_API_KEY or a Groq key).",
-      });
-    }
-
     const company = await prisma.company.findUnique({
       where: { id: req.user.companyId },
-      select: { name: true, voiceProfile: true, salesBrandProfile: true },
+      select: {
+        name: true,
+        voiceProfile: true,
+        salesBrandProfile: true,
+        integrations: {
+          where: { platform: { in: ["OPENAI", "GROQ"] } },
+          select: { platform: true, apiKey: true, isActive: true },
+        },
+      },
     });
+    const providerConfig = getAiProviderConfig(company);
+
+    if (!hasLLM(providerConfig)) {
+      return res.status(500).json({
+        message:
+          "No AI provider is configured. Add an OpenAI or Groq key in Sales Settings > AI Config.",
+      });
+    }
     const brandLines = buildBrandContext(company, { brandVoice });
 
     // SW-KB-002: ground nurture copy in the tenant KB (brand voice / product / FAQ),
@@ -811,13 +829,15 @@ Goal of this message: ${goal}.
 Additional Context: ${contextInfo || "None"}
 
 Rules:
-${stepType === "SMS" ? "- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}. No other placeholders." : "- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do NOT invent other placeholders."}
-Output your draft clearly.`;
+${stepType === "SMS" ? "- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}, {campaignName}. No other placeholders." : "- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {campaignName}, {bookingLink}. Do NOT invent other placeholders."}
+Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body":"..."}. For SMS, use an empty string for subject.`;
 
     const content = await chat({
       system: systemPrompt,
       user: "Please generate the draft copy based on the provided parameters.",
       maxTokens: 500,
+      json: true,
+      providerConfig,
     });
 
     if (!content) {
@@ -826,7 +846,17 @@ Output your draft clearly.`;
         .json({ message: "Failed to generate copy from AI provider" });
     }
 
-    return res.json({ success: true, draft: content, kbCitations });
+    const parsed = parseJsonBlock(content || "");
+    const subject = parsed?.subject ? String(parsed.subject).slice(0, 200) : "";
+    const body = parsed?.body ? String(parsed.body) : content;
+
+    return res.json({
+      success: true,
+      draft: body,
+      subject,
+      body,
+      kbCitations,
+    });
   } catch (error) {
     console.error("[Generate Copy] Error:", error);
     return res.status(500).json({ message: "Internal server error" });

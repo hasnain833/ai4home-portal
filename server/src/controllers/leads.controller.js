@@ -2,9 +2,11 @@ import prisma from "../lib/prisma.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { findDuplicateLead, resolveMergedField } from "../lib/lead-dedup.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
+import { DEFAULT_LEAD_STATUSES, LEAD_STATUS } from "../lib/lead-statuses.js";
 
 const LEADS_DEFAULT_PAGE_SIZE = 25;
 const LEADS_MAX_PAGE_SIZE = 200;
+const ALLOWED_LEAD_STATUSES = new Set(DEFAULT_LEAD_STATUSES);
 
 function qs(value, fallback = "") {
   if (value === undefined || value === null) return fallback;
@@ -126,6 +128,10 @@ export const createLead = async (req, res) => {
         .json({ message: "First name and last name are required." });
     }
 
+    if (status && !ALLOWED_LEAD_STATUSES.has(status)) {
+      return res.status(400).json({ message: "Invalid lead status." });
+    }
+
     const lead = await prisma.lead.create({
       data: {
         companyId: req.user.companyId,
@@ -138,7 +144,7 @@ export const createLead = async (req, res) => {
         city: city || null,
         state: state || null,
         zipCode: zipCode || null,
-        status: status || "New",
+        status: status || LEAD_STATUS.NEW,
         ownerId: req.user.id,
         tags: tags || [],
         emailOptIn: !!emailOptIn,
@@ -147,14 +153,6 @@ export const createLead = async (req, res) => {
           consentSource || (emailOptIn || smsOptIn ? "Manual Form" : null),
         consentTimestamp: emailOptIn || smsOptIn ? new Date() : null,
         customFields: customFields || null,
-        timeline: {
-          create: {
-            type: "IMPORT",
-            description: `Lead created manually by ${
-              req.user.name || req.user.email
-            }`,
-          },
-        },
       },
     });
     await triggerAutomation({
@@ -293,14 +291,6 @@ export const importLeads = async (req, res) => {
               consentSource: optInSource || duplicateLead.consentSource,
               consentTimestamp:
                 optInTimestamp || duplicateLead.consentTimestamp,
-              timeline: {
-                create: {
-                  type: "SYNC_UPDATE",
-                  description: `Lead details updated via CSV import by ${
-                    req.user.name || req.user.email
-                  }`,
-                },
-              },
             },
           });
           updatedCount++;
@@ -321,21 +311,13 @@ export const importLeads = async (req, res) => {
           city: city || null,
           state: state || null,
           zipCode: zipCode || null,
-          status: "New",
+          status: LEAD_STATUS.NEW,
           ownerId: req.user.id,
           tags: tags || [],
           emailOptIn: !!emailOptIn,
           smsOptIn: !!smsOptIn,
           consentSource: optInSource,
           consentTimestamp: optInTimestamp,
-          timeline: {
-            create: {
-              type: "IMPORT",
-              description: `Lead imported via CSV file by ${
-                req.user.name || req.user.email
-              }`,
-            },
-          },
         },
       });
 
@@ -430,6 +412,9 @@ export const updateLead = async (req, res) => {
     if (email && !emailRegex.test(email)) {
       return res.status(400).json({ message: "Invalid email format." });
     }
+    if (status !== undefined && !ALLOWED_LEAD_STATUSES.has(status)) {
+      return res.status(400).json({ message: "Invalid lead status." });
+    }
 
     const updateData = {};
     if (firstName !== undefined) updateData.firstName = firstName;
@@ -456,26 +441,6 @@ export const updateLead = async (req, res) => {
         updateData.consentSource = "Manual Update";
       }
     }
-
-    const timelineEntries = [];
-
-    if (status !== undefined && status !== lead.status) {
-      timelineEntries.push({
-        type: "STATUS_CHANGE",
-        description: `Lead status changed from '${lead.status}' to '${status}' by ${req.user.name || req.user.email}`,
-      });
-    }
-
-    if (timelineEntries.length === 0) {
-      timelineEntries.push({
-        type: "SYNC_UPDATE",
-        description: `Lead updated by ${req.user.name || req.user.email}`,
-      });
-    }
-
-    updateData.timeline = {
-      create: timelineEntries,
-    };
 
     const updatedLead = await prisma.lead.update({
       where: { id },
@@ -523,35 +488,3 @@ export const updateLead = async (req, res) => {
   }
 };
 
-export const getLeadTimeline = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const lead = await prisma.lead.findUnique({
-      where: { id },
-    });
-
-    if (!lead || lead.companyId !== req.user.companyId) {
-      return res.status(404).json({ message: "Lead not found." });
-    }
-
-    if (
-      req.user.role.toUpperCase() === "HOMEOWNER" &&
-      lead.ownerId !== req.user.id
-    ) {
-      return res.status(403).json({
-        message: "You do not have permission to view this lead's timeline.",
-      });
-    }
-
-    const timeline = await prisma.leadTimeline.findMany({
-      where: { leadId: id },
-      orderBy: { createdAt: "desc" },
-    });
-
-    return res.json(timeline);
-  } catch (error) {
-    console.error("Get lead timeline error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-};

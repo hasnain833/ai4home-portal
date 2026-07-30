@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const botColor = searchParams.get("botColor");
   const botName = searchParams.get("botName");
+  const companyName = searchParams.get("companyName");
   const botLogo = searchParams.get("botLogo");
 
   const base = await getBaseConfig();
@@ -52,16 +53,30 @@ export async function GET(req: NextRequest) {
     themeMode: "light",
     headerVariant: "solid",
     variant: "solid",
+    embeddedChatId: EMBED_CONTAINER_ID,
   };
   if (botColor) {
     configurationOverrides.color = botColor;
     config.configuration.color = botColor;
   }
-  Object.assign(config.configuration, configurationOverrides);
-  if (botName) config.configuration.botName = botName;
-  if (botLogo) config.configuration.botAvatar = botLogo;
+  if (botName) {
+    configurationOverrides.botName = botName;
+    config.configuration.botName = botName;
+  }
+  if (companyName) {
+    const botDescription = `You are the Warranty Care Assistant for ${companyName}.`;
+    configurationOverrides.botDescription = botDescription;
+    configurationOverrides.description = botDescription;
+    config.configuration.botDescription = botDescription;
+    config.configuration.description = botDescription;
+  }
+  if (botLogo) {
+    configurationOverrides.botAvatar = botLogo;
+    config.configuration.botAvatar = botLogo;
+  }
   // Force inline rendering into the portal container.
   config.configuration.embeddedChatId = EMBED_CONTAINER_ID;
+  Object.assign(config.configuration, configurationOverrides);
 
   const js = `(function initBotpress(attempt) {
   if (window.botpress && typeof window.botpress.init === "function") {

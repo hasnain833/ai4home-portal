@@ -7,11 +7,15 @@ export const getDashboardStats = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const oneWeekAgo = new Date();
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    const period = req.query.period || "7d";
+    const days = period === "30d" ? 30 : period === "90d" ? 90 : 7;
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - days);
+    const periodCreatedAt = { createdAt: { gte: sinceDate } };
 
     // Scope all queries to the admin/staff's companyId
     const companyScope = { homeowner: { companyId: session.companyId } };
+    const periodScope = { ...companyScope, ...periodCreatedAt };
 
     // Fetch stats in parallel
     const [
@@ -20,33 +24,33 @@ export const getDashboardStats = async (req, res) => {
       inProgressTickets,
       resolvedTickets,
       escalatedTickets,
-      resolvedThisWeek,
+      resolvedThisPeriod,
       resolvedTicketsData,
       recentTickets,
       activeIntegration,
       kbDocsCount,
       lastEscalationTicket
     ] = await prisma.$transaction([
-      prisma.ticket.count({ where: companyScope }),
-      prisma.ticket.count({ where: { status: "OPEN", ...companyScope } }),
-      prisma.ticket.count({ where: { status: "IN_PROGRESS", ...companyScope } }),
-      prisma.ticket.count({ where: { status: "RESOLVED", ...companyScope } }),
-      prisma.ticket.count({ where: { status: "ESCALATED", ...companyScope } }),
+      prisma.ticket.count({ where: periodScope }),
+      prisma.ticket.count({ where: { status: "OPEN", ...periodScope } }),
+      prisma.ticket.count({ where: { status: "IN_PROGRESS", ...periodScope } }),
+      prisma.ticket.count({ where: { status: "RESOLVED", ...periodScope } }),
+      prisma.ticket.count({ where: { status: "ESCALATED", ...periodScope } }),
       prisma.ticket.count({
         where: {
           status: "RESOLVED",
-          updatedAt: { gte: oneWeekAgo },
+          updatedAt: { gte: sinceDate },
           ...companyScope
         }
       }),
       prisma.ticket.findMany({
-        where: { status: "RESOLVED", ...companyScope },
+        where: { status: "RESOLVED", ...periodScope },
         select: { createdAt: true, updatedAt: true }
       }),
       prisma.ticket.findMany({
         take: 5,
         orderBy: { createdAt: "desc" },
-        where: companyScope,
+        where: periodScope,
         include: { 
           homeowner: { select: { name: true, email: true } },
           property: { select: { address: true } }
@@ -61,7 +65,8 @@ export const getDashboardStats = async (req, res) => {
       prisma.ticket.findFirst({
         where: {
           status: { in: ["ESCALATED", "RESOLVED"] },
-          homeowner: { companyId: session.companyId || "demo-company" }
+          homeowner: { companyId: session.companyId || "demo-company" },
+          updatedAt: { gte: sinceDate }
         },
         orderBy: { updatedAt: "desc" }
       })
@@ -107,10 +112,9 @@ export const getDashboardStats = async (req, res) => {
       openTickets,
       inProgressTickets,
       escalatedTickets,
-      resolvedThisWeek,
+      resolvedThisPeriod,
       resolutionRate: totalTickets > 0 ? Math.round((resolvedTickets / totalTickets) * 100) : 0,
       avgResolutionTime: avgResolutionTimeStr,
-      tokenConsumption: 0, // Not tracked in DB directly yet
       recentTickets: recentTickets.map(t => ({
         id: t.id,
         homeowner: { name: t.homeowner?.name || "Unknown", email: t.homeowner?.email || "" },

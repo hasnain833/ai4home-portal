@@ -680,12 +680,6 @@ export const bulkImport = async (req, res) => {
             data: {
               ...leadData,
               source: "SALESFORCE",
-              timeline: {
-                create: {
-                  type: "SYNC_UPDATE",
-                  description: "Lead updated via Salesforce Bulk API import",
-                },
-              },
             },
           });
           updatedCount++;
@@ -710,12 +704,6 @@ export const bulkImport = async (req, res) => {
               consentSource: leadData.emailOptIn || leadData.smsOptIn ? "Salesforce Sync" : null,
               consentTimestamp: leadData.emailOptIn || leadData.smsOptIn ? new Date() : null,
               customFields: leadData.customFields || null,
-              timeline: {
-                create: {
-                  type: "IMPORT",
-                  description: "Lead imported via Salesforce Bulk API sync",
-                },
-              },
             },
           });
           createdCount++;

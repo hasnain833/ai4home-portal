@@ -33,7 +33,8 @@ export default function AIChatPage() {
   const [embedMode, setEmbedMode] = useState<"widget" | "fullscreen">("widget");
   const [themeColor, setThemeColor] = useState("#0F3B3D");
 
-  const botName = user?.companyName ? `${user.companyName} Assistant` : "Aiforhomebuilder Assistant";
+  const companyName = user?.companyName || "Aiforhomebuilder";
+  const botName = `${companyName} Assistant`;
   const botLogoUrl = user?.companyLogo || (typeof window !== "undefined" ? window.location.origin + "/logo.png" : "");
 
   useEffect(() => {
@@ -63,7 +64,7 @@ export default function AIChatPage() {
     injectScript.src = INJECT_URL;
     injectScript.async = true;
 
-    const params = new URLSearchParams({ botColor: themeColor, botName });
+    const params = new URLSearchParams({ botColor: themeColor, botName, companyName });
     if (botLogoUrl) params.set("botLogo", botLogoUrl);
     params.set("v", Date.now().toString());
     const configScript = document.createElement("script");
@@ -91,7 +92,7 @@ export default function AIChatPage() {
                   name: user.name || "",
                   role: user.role || "",
                   companyId: user.companyId || "",
-                  companyName: user.companyName || "",
+                  companyName,
                 },
                 tags: {
                   email: user.email || "",
@@ -99,7 +100,7 @@ export default function AIChatPage() {
                   name: user.name || "",
                   role: user.role || "",
                   companyId: user.companyId || "",
-                  companyName: user.companyName || "",
+                  companyName,
                 },
               });
             } catch (err) {
@@ -131,7 +132,7 @@ export default function AIChatPage() {
         // Ignore — inject.js may define it as non-configurable.
       }
     };
-  }, [user, isLoading, themeColor, botName, botLogoUrl]);
+  }, [user, isLoading, themeColor, botName, botLogoUrl, companyName]);
 
   const portalUrl =
     process.env.NEXT_PUBLIC_URL ||
@@ -309,6 +310,26 @@ export default function AIChatPage() {
           </div>
 
           <div className="flex-1 w-full overflow-hidden rounded-3xl border border-slate-800 shadow-2xl bg-[#020617] p-0 flex flex-col min-h-0">
+            <style jsx global>{`
+              #bp-embedded-webchat [class*="fab"],
+              #bp-embedded-webchat [class*="Fab"],
+              #bp-embedded-webchat [class*="launcher"],
+              #bp-embedded-webchat [class*="Launcher"],
+              #bp-embedded-webchat button[aria-label*="Open"],
+              #bp-embedded-webchat button[aria-label*="open"],
+              body > [class*="bpFab"],
+              body > [class*="bp-fab"],
+              body > button[aria-label*="Open"],
+              body > button[aria-label*="open"] {
+                display: none !important;
+              }
+
+              #bp-embedded-webchat,
+              #bp-embedded-webchat > * {
+                width: 100% !important;
+                height: 100% !important;
+              }
+            `}</style>
             <div
               id="bp-embedded-webchat"
               className="w-full h-full bg-[#020617]"

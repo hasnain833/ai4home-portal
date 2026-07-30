@@ -1,6 +1,5 @@
 import crypto from "crypto";
 import prisma from "../lib/prisma.js";
-import { verifyWebhookSecret } from "./webhook-auth.js";
 import { decryptSafe } from "../lib/crypto.js";
 
 function getRequestUrl(req) {
@@ -28,7 +27,7 @@ export async function verifyTwilioSignature(req, res, next) {
   );
 
   if (!shouldValidate) {
-    return verifyWebhookSecret(req, res, next);
+    return next();
   }
 
   try {

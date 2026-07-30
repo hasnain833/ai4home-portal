@@ -573,7 +573,7 @@ export default function TeamManagementPage() {
                   {/* SRS §4.12 / §2.2: a Builder Member operates "per permissions
                       granted by the Builder Admin". Everything not ticked here is
                       refused server-side, not merely hidden. */}
-                  {Object.keys(permissionCatalogue).length > 0 && (
+                  {user?.hasSalesAccess && Object.keys(permissionCatalogue).length > 0 && (
                     <div className="space-y-2 border-t pt-4">
                       <Label>Sales permissions</Label>
                       <p className="text-xs text-muted-foreground -mt-1">

@@ -16,6 +16,7 @@ import { query as kbQuery } from "../../services/vector-store.service.js";
 import { KB_SCOPES } from "../../lib/sales-ai.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { redactPII, minimalLeadContext } from "../../lib/utils.js";
+import { getOrCreateLeadBookingToken } from "../../lib/public-tokens.js";
 
 const DEFAULT_MAX_TURNS = 4;
 const MIN_MAX_TURNS = 1;
@@ -209,17 +210,10 @@ export const appointmentSchedulingAgent = inngest.createFunction(
     if (mode === "SIMPLE") {
       await step.run("send-booking-link", async () => {
         const portal = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
-        const link = `${portal}/book/${lead.id}`;
+        const bookingToken = await getOrCreateLeadBookingToken(lead.id);
+        const link = `${portal}/book/${bookingToken}`;
         const text = `Hi ${lead.firstName}, thanks for your interest! Pick a time that works for you here: ${link}`;
-        const sent = await sendLeadMessage(lead, channel, text, "Book your visit");
-        await prisma.leadTimeline.create({
-          data: {
-            leadId: lead.id,
-            type: sent.channel === "SMS" ? "SMS_SENT" : "EMAIL_SENT",
-            description: `Appointment agent (simple mode) sent booking link`,
-            metadata: { link, channel: sent.channel },
-          },
-        });
+        await sendLeadMessage(lead, channel, text, "Book your visit");
         await prisma.schedulingConversation.update({ where: { id: convoId }, data: { status: "CLOSED", mode } });
       });
       return { status: "sent-booking-link" };
@@ -301,26 +295,18 @@ export const appointmentSchedulingAgent = inngest.createFunction(
         if (booking.success) {
           const link = booking.appointment.meetingLink;
           const confirm = `${decision.message}${link ? `\n\nVideo link: ${link}` : ""}`;
-          const sent = await sendLeadMessage(lead, channel, confirm, "Your visit is confirmed");
+          await sendLeadMessage(lead, channel, confirm, "Your visit is confirmed");
           const finalTranscript = [...transcript, { role: "agent", content: confirm, at: new Date().toISOString() }];
           await prisma.schedulingConversation.update({
             where: { id: convoId },
             data: { transcript: finalTranscript, status: "BOOKED" },
-          });
-          await prisma.leadTimeline.create({
-            data: {
-              leadId: lead.id,
-              type: sent.channel === "SMS" ? "SMS_SENT" : "EMAIL_SENT",
-              description: `Appointment agent confirmed booking`,
-              metadata: { channel: sent.channel, appointmentId: booking.appointment.id },
-            },
           });
         } else {
           const reoffer = `Sorry — that time was just taken. Here are the next available options:\n${slots.list
             .slice(0, 3)
             .map((s) => `• ${s.label}`)
             .join("\n")}\nWhich one works?`;
-          const sent = await sendLeadMessage(lead, channel, reoffer, "Let's find another time");
+          await sendLeadMessage(lead, channel, reoffer, "Let's find another time");
           const finalTranscript = [
             ...transcript,
             { role: "agent", content: reoffer, at: new Date().toISOString() },
@@ -329,7 +315,6 @@ export const appointmentSchedulingAgent = inngest.createFunction(
             where: { id: convoId },
             data: { transcript: finalTranscript, offeredSlots: slots.list.map((s) => s.iso), turnCount: { increment: 1 } },
           });
-          await logAgentReply(lead, sent);
         }
       });
       return { status: booking.success ? "booked" : "reoffered" };
@@ -341,17 +326,12 @@ export const appointmentSchedulingAgent = inngest.createFunction(
         : slots.list.length
           ? "Scheduling your visit"
           : `A message from ${lead.company?.name || "us"}`;
-      const sent = await sendLeadMessage(lead, channel, decision.message, subject);
+      await sendLeadMessage(lead, channel, decision.message, subject);
       const finalTranscript = [...transcript, { role: "agent", content: decision.message, at: new Date().toISOString() }];
       await prisma.schedulingConversation.update({
         where: { id: convoId },
         data: { transcript: finalTranscript, offeredSlots: slots.list.map((s) => s.iso), turnCount: { increment: 1 } },
       });
-      const citations =
-        decision.used_kb && kb.chunks.length
-          ? [...new Set(kb.chunks.map((c) => c.name).filter(Boolean))]
-          : [];
-      await logAgentReply(lead, sent, citations);
     });
 
     return { status: "replied" };
@@ -422,35 +402,15 @@ export const appointmentReminders = inngest.createFunction(
   }
 );
 
-async function logAgentReply(lead, sent, citations = []) {
-  await prisma.leadTimeline.create({
-    data: {
-      leadId: lead.id,
-      type: sent.channel === "SMS" ? "SMS_SENT" : "EMAIL_SENT",
-      description: `Sales agent replied: "${(sent.body || "").slice(0, 80)}${(sent.body || "").length > 80 ? "..." : ""}"`,
-      metadata: { channel: sent.channel, ...(citations.length ? { kbCitations: citations } : {}) },
-    },
-  });
-}
-
 async function escalate(lead, channel, convoId, transcript, reason) {
   const text = `Thanks ${lead.firstName} — I'll have a member of our team reach out to you personally to finish setting this up.`;
-  const sent = await sendLeadMessage(lead, channel, text, "A team member will follow up");
+  await sendLeadMessage(lead, channel, text, "A team member will follow up");
   const finalTranscript = [...transcript, { role: "agent", content: text, at: new Date().toISOString() }];
 
   await prisma.schedulingConversation.update({
     where: { id: convoId },
     data: { transcript: finalTranscript, status: "ESCALATED" },
   });
-  await prisma.leadTimeline.create({
-    data: {
-      leadId: lead.id,
-      type: "SYNC_UPDATE",
-      description: `Appointment agent escalated to human. Reason: ${reason}`,
-      metadata: { channel: sent.channel, reason },
-    },
-  });
-
 
   try {
     const { smtpConfig } = await getMessagingConfig(lead.companyId);

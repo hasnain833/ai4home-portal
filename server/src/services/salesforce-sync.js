@@ -108,12 +108,6 @@ export async function runIncrementalSync(companyId) {
             source: "SALESFORCE",
             archived: false,
             archivedAt: null,
-            timeline: {
-              create: {
-                type: "SYNC_UPDATE",
-                description: "Lead updated via Salesforce incremental sync",
-              },
-            },
           },
         });
         updatedCount++;
@@ -131,12 +125,6 @@ export async function runIncrementalSync(companyId) {
               externalId,
               archived: false,
               archivedAt: null,
-              timeline: {
-                create: {
-                  type: "SYNC_LINK",
-                  description: `Linked existing ${crossMatch.source} lead to Salesforce record ${externalId} (Salesforce is now the system-of-record).`,
-                },
-              },
             },
           });
           updatedCount++;
@@ -166,12 +154,6 @@ export async function runIncrementalSync(companyId) {
             consentTimestamp:
               leadData.emailOptIn || leadData.smsOptIn ? new Date() : null,
             customFields: leadData.customFields || null,
-            timeline: {
-              create: {
-                type: "IMPORT",
-                description: "Lead imported via Salesforce incremental sync",
-              },
-            },
           },
         });
         createdCount++;

@@ -77,6 +77,16 @@ function getSeasonalContext(now = new Date()) {
   return `Season: ${seasons[month]}. Notable seasonal / marketing moments around now: ${SEASONAL_MOMENTS[month]}.`;
 }
 
+function getAiProviderConfig(company) {
+  const integrations = company?.integrations || [];
+  const active = integrations.find((i) => i.isActive);
+  return {
+    provider: active?.platform?.toLowerCase() || "platform",
+    openAiApiKey: integrations.find((i) => i.platform === "OPENAI")?.apiKey,
+    groqApiKey: integrations.find((i) => i.platform === "GROQ")?.apiKey,
+  };
+}
+
 function getHourInTz(date, tz) {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
@@ -326,8 +336,15 @@ export const getCalendarSuggestions = async (req, res) => {
 
     const company = await prisma.company.findUnique({
       where: { id: companyId },
-      include: { communities: { select: { name: true } } },
+      include: {
+        communities: { select: { name: true } },
+        integrations: {
+          where: { platform: { in: ["OPENAI", "GROQ"] } },
+          select: { platform: true, apiKey: true, isActive: true },
+        },
+      },
     });
+    const providerConfig = getAiProviderConfig(company);
 
     const voiceProfile = company?.voiceProfile || "professional";
 
@@ -358,12 +375,12 @@ export const getCalendarSuggestions = async (req, res) => {
 
     const seasonalContextText = getSeasonalContext();
 
-    if (!hasLLM()) {
+    if (!hasLLM(providerConfig)) {
       return res
         .status(500)
         .json({
           message:
-            "No LLM provider configured. Set ANTHROPIC_API_KEY or GROQ_API_KEY.",
+            "No AI provider configured. Add an OpenAI or Groq key in Sales Settings > AI Config.",
         });
     }
 
@@ -478,6 +495,7 @@ Requirements:
       user: "Generate the suggestions as raw JSON.",
       maxTokens: 1500,
       json: true,
+      providerConfig,
     });
 
     if (!text) {

@@ -138,17 +138,6 @@ export async function replayDeadLetter(companyId, id) {
     data: { status: "REPLAYED", replayedAt: new Date(), attempts: { increment: 1 } },
   });
 
-  if (row.leadId) {
-    await prisma.leadTimeline.create({
-      data: {
-        leadId: row.leadId,
-        type: row.channel === "SMS" ? "SMS_SENT" : "EMAIL_SENT",
-        description: `Replayed a previously failed ${row.channel.toLowerCase()} send`,
-        metadata: { deadLetterId: id, source: row.source, refId: row.refId },
-      },
-    });
-  }
-
   return { success: true };
 }
 

@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DEFAULT_LEAD_STATUSES, statusColor, resolveLeadStatuses } from "@/lib/lead-statuses";
-import { useQuery, fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
+import { DEFAULT_LEAD_STATUSES, statusColor } from "@/lib/lead-statuses";
+import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
 import {
   Select,
   SelectContent,
@@ -43,7 +43,6 @@ import {
   RefreshCw,
   Upload,
   CheckCircle2,
-  Clock,
   ShieldCheck,
   Trash2,
   Download,
@@ -94,7 +93,6 @@ const ITEMS_PER_PAGE = 25;
 export default function LeadsPage() {
   const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
-  // `statuses` is derived from the cached company record — see below.
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -213,9 +211,6 @@ export default function LeadsPage() {
   const [newTemplateName, setNewTemplateName] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
 
-  const [timelineLead, setTimelineLead] = useState<Lead | null>(null);
-  const [timelineEvents, setTimelineEvents] = useState<any[]>([]);
-  const [loadingTimeline, setLoadingTimeline] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -272,15 +267,7 @@ export default function LeadsPage() {
     fetchSegments();
   }, [fetchSegments]);
 
-  // NFR-P-001: /api/company is read by most pages. Going through the shared
-  // cache means navigating between them reuses one response instead of
-  // re-requesting it on every mount. Derived rather than copied into state, so
-  // the tenant's configured statuses apply on the render they arrive.
-  const { data: company } = useQuery<{ leadStatuses?: unknown }>(QUERY_KEYS.company);
-  const statuses = useMemo(
-    () => (company ? resolveLeadStatuses(company.leadStatuses) : DEFAULT_LEAD_STATUSES),
-    [company],
-  );
+  const statuses = DEFAULT_LEAD_STATUSES;
 
   const uniqueTags = useMemo(() => {
     if (serverTags.length > 0) return serverTags;
@@ -599,7 +586,7 @@ export default function LeadsPage() {
     };
 
     poll();
-    const timer = window.setInterval(poll, 2500);
+    const timer = window.setInterval(poll, 750);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -614,25 +601,6 @@ export default function LeadsPage() {
     if (csvStep === 3 && csvRows.length > 0) runValidation();
   }, [csvStep]);
 
-  const openTimeline = async (lead: Lead) => {
-    setTimelineLead(lead);
-    setTimelineEvents([]);
-    setLoadingTimeline(true);
-    try {
-      const res = await fetch(`/api/sales/leads/${lead.id}/timeline`);
-      if (res.ok) {
-        const data = await res.json();
-        setTimelineEvents(data);
-      } else {
-        showToast("Failed to load timeline.");
-      }
-    } catch {
-      showToast("Error loading timeline.");
-    } finally {
-      setLoadingTimeline(false);
-    }
-  };
-
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
       <PortalLayout workspace="sales">
@@ -644,7 +612,7 @@ export default function LeadsPage() {
                 Leads Directory
               </h1>
               <p className="text-muted-foreground text-sm mt-1">
-                View detailed profiles of builder prospects, track activity logs, and import lists.
+                View detailed profiles of builder prospects and import lists.
               </p>
             </div>
             <div className="flex gap-2">
@@ -897,9 +865,6 @@ export default function LeadsPage() {
                           </TableCell>
                           <TableCell className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300 font-medium align-middle">{lead.owner?.name || "Unassigned"}</TableCell>
                           <TableCell className="py-3 px-4 text-right pr-6 space-x-1 align-middle">
-                            <Button variant="ghost" size="sm" onClick={() => openTimeline(lead)} className="text-slate-500 hover:bg-slate-500/10 text-xs px-2" title="View activity timeline">
-                              <Clock className="h-3.5 w-3.5" />
-                            </Button>
                             <Button variant="ghost" size="sm" onClick={() => setLeadToDelete(lead.id)} className="text-red-500 hover:bg-red-500/10 text-xs px-2">
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -1088,7 +1053,7 @@ export default function LeadsPage() {
 
         {/* CSV Import Wizard Dialog */}
         <Dialog open={csvModalOpen} onOpenChange={closeCSVWizard}>
-          <DialogContent className="sm:max-w-xl">
+          <DialogContent className="no-scrollbar max-h-[92vh] overflow-y-auto overflow-x-hidden sm:max-w-xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Upload className="h-5 w-5 text-[#b48c3c]" />
@@ -1137,7 +1102,7 @@ export default function LeadsPage() {
 
             {/* STEP 2: Map Columns */}
             {csvStep === 2 && (
-              <div className="space-y-4 pt-2 max-h-[60vh] overflow-y-auto pr-2">
+              <div className="no-scrollbar space-y-4 pt-2 max-h-[60vh] overflow-y-auto overflow-x-hidden pr-1">
                 <Label className="font-semibold text-sm">Map CSV Headers to Lead Data Model</Label>
                 <p className="text-xs text-muted-foreground mt-0.5">Assign your CSV columns to the appropriate fields. Leftover columns will be omitted.</p>
 
@@ -1406,47 +1371,6 @@ export default function LeadsPage() {
                 })()}
               </div>
             )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Lead Timeline Dialog */}
-        <Dialog open={timelineLead !== null} onOpenChange={(open) => { if (!open) setTimelineLead(null); }}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-[#b48c3c]" />
-                Prospect Activity Timeline
-              </DialogTitle>
-              {timelineLead && (
-                <DialogDescription>
-                  Activity timeline for <span className="font-semibold text-foreground">{timelineLead.firstName} {timelineLead.lastName}</span>
-                </DialogDescription>
-              )}
-            </DialogHeader>
-
-            <div className="space-y-4 my-2 pr-1 max-h-[50vh] overflow-y-auto">
-              {loadingTimeline ? (
-                <div className="p-8 text-center"><Skeleton className="h-20 w-full" /></div>
-              ) : timelineEvents.length > 0 ? (
-                <div className="relative border-l border-slate-200 dark:border-slate-800 ml-3.5 pl-6 space-y-6">
-                  {timelineEvents.map((evt, idx) => (
-                    <div key={idx} className="relative">
-                      {/* Timeline Dot */}
-                      <span className="absolute left-7.75 top-1 h-3.5 w-3.5 rounded-full bg-white dark:bg-slate-950 border-2 border-[#b48c3c] flex items-center justify-center">
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#b48c3c]" />
-                      </span>
-                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">{evt.description}</p>
-                      <p className="text-[10px] text-slate-400 mt-1">{new Date(evt.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground text-center py-6">No timeline logged for this prospect.</p>
-              )}
-            </div>
-            <DialogFooter>
-              <Button onClick={() => setTimelineLead(null)} className="h-9">Close</Button>
-            </DialogFooter>
           </DialogContent>
         </Dialog>
 

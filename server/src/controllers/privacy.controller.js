@@ -144,7 +144,6 @@ async function buildLeadExport(companyId, leadId) {
   const lead = await prisma.lead.findFirst({
     where: { id: leadId, companyId },
     include: {
-      timeline: { orderBy: { createdAt: "asc" } },
       appointments: { orderBy: { time: "asc" } },
       campaignEnrollments: { include: { campaign: { select: { id: true, name: true } } } },
       schedulingConversations: true,
@@ -211,12 +210,6 @@ async function buildLeadExport(companyId, leadId) {
       })),
     },
     activity: {
-      timeline: lead.timeline.map((t) => ({
-        type: t.type,
-        description: t.description,
-        metadata: t.metadata,
-        createdAt: t.createdAt,
-      })),
       appointments: lead.appointments.map((a) => ({
         title: a.title,
         time: a.time,
@@ -377,17 +370,16 @@ async function eraseLead(companyId, leadId, mode) {
   }
 
   if (mode === "delete") {
-    // Timeline, appointments, enrolments and scheduling conversations all
-    // cascade from Lead, so this removes the whole footprint.
+    // Appointments, enrolments and scheduling conversations all cascade from
+    // Lead, so this removes the whole footprint.
     await prisma.lead.delete({ where: { id: leadId } });
-    return { mode: "delete", removed: ["lead", "timeline", "appointments", "enrollments", "conversations"] };
+    return { mode: "delete", removed: ["lead", "appointments", "enrollments", "conversations"] };
   }
 
   // Anonymise: keep the row so campaign and conversion counts stay accurate,
   // but strip everything that identifies a person. Free-text history is deleted
   // outright rather than scrubbed — message bodies and transcripts cannot be
   // reliably de-identified in place.
-  await prisma.leadTimeline.deleteMany({ where: { leadId } });
   await prisma.schedulingConversation.deleteMany({ where: { leadId } });
   await prisma.salesAppointment.updateMany({
     where: { leadId },
@@ -417,7 +409,7 @@ async function eraseLead(companyId, leadId, mode) {
     },
   });
 
-  return { mode: "anonymize", cleared: ["identity", "address", "timeline", "conversations", "appointmentNotes"] };
+  return { mode: "anonymize", cleared: ["identity", "address", "conversations", "appointmentNotes"] };
 }
 
 async function eraseHomeowner(companyId, userId, mode) {

@@ -20,7 +20,7 @@ function splitLabel(label: string) {
 }
 
 export default function PublicBookingPage({ params }: { params: Promise<{ leadId: string }> }) {
-  const { leadId } = use(params);
+  const { leadId: bookingToken } = use(params);
   const [data, setData] = useState<BookingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -34,7 +34,7 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/sales/scheduling/public/lead/${leadId}`);
+        const res = await fetch(`/api/sales/scheduling/public/lead/${bookingToken}`);
         if (!res.ok) {
           setNotFound(true);
           return;
@@ -46,7 +46,7 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
         setLoading(false);
       }
     })();
-  }, [leadId]);
+  }, [bookingToken]);
 
   const book = async () => {
     if (!selected) return;
@@ -56,14 +56,14 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
       const res = await fetch("/api/sales/scheduling/public/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadId, startTime: selected, locationType: "VIRTUAL", title: "Model Home Visit" }),
+        body: JSON.stringify({ bookingToken, startTime: selected, locationType: "VIRTUAL", title: "Model Home Visit" }),
       });
       const result = await res.json();
       if (!res.ok) {
         // 409 = slot just taken; refresh availability.
         if (res.status === 409) {
           setError("Sorry, that time was just taken. Please pick another.");
-          const refresh = await fetch(`/api/sales/scheduling/public/lead/${leadId}`);
+          const refresh = await fetch(`/api/sales/scheduling/public/lead/${bookingToken}`);
           if (refresh.ok) setData(await refresh.json());
           setSelected("");
         } else {

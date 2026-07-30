@@ -348,34 +348,19 @@ export default function MessagingSettingsTab() {
                   <Mail className="h-4 w-4 text-blue-600" /> Set up Brevo webhooks
                 </DialogTitle>
                 <DialogDescription>
-                  These let the portal receive delivery events and replies, so campaign
-                  analytics and automatic unsubscribes stay accurate.
+                  This lets the portal receive replies, so leads are exited from active
+                  sequences automatically.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-5 pt-2 text-sm">
                 <div className="space-y-2">
-                  <p className="font-semibold text-slate-800 dark:text-slate-100">1. Event webhook (delivered / opened / clicked / bounced / spam)</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    In Brevo go to <strong>Transactional → Settings → Webhook</strong> (or{" "}
-                    <strong>Settings → Webhooks</strong>), add a webhook, paste the URL below,
-                    and enable: delivered, opened, click, hard &amp; soft bounce, spam/complaint,
-                    and unsubscribe.
-                  </p>
-                  <WebhookUrl label="Event webhook URL" url={`${origin}/api/sales/compliance/events/email?token=<INBOUND_WEBHOOK_SECRET>`} />
-                </div>
-                <div className="space-y-2">
-                  <p className="font-semibold text-slate-800 dark:text-slate-100">2. Inbound replies</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-100">Inbound replies</p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     In Brevo <strong>Inbound Parsing</strong>, add a route pointing to the URL
                     below. When a lead replies, they&apos;re exited from active sequences.
                   </p>
-                  <WebhookUrl label="Inbound email URL" url={`${origin}/api/sales/compliance/inbound/email?token=<INBOUND_WEBHOOK_SECRET>`} />
+                  <WebhookUrl label="Inbound email URL" url={`${origin}/api/sales/compliance/inbound/email`} />
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900/40 p-3">
-                  Replace <code>&lt;INBOUND_WEBHOOK_SECRET&gt;</code> with the shared webhook token
-                  configured on the server (env <code>INBOUND_WEBHOOK_SECRET</code>). Ask your
-                  administrator if you don&apos;t have it — the token prevents forged webhook calls.
-                </p>
               </div>
             </>
           )}

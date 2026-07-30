@@ -21,11 +21,13 @@ export default function WidgetPage() {
   const companyId = (params?.companyId as string) || "demo-company";
   const qColor = searchParams.get("botColor");
   const qName = searchParams.get("botName");
+  const qCompanyName = searchParams.get("companyName");
   const qLogo = searchParams.get("botLogo");
   const mode = searchParams.get("mode") === "fullscreen" ? "fullscreen" : "widget";
   const hasBrandingParams = !!(qColor || qName || qLogo);
   const [themeColor, setThemeColor] = useState(qColor || "#0F3B3D");
   const [botName, setBotName] = useState(qName || "AI Assistant");
+  const [companyName, setCompanyName] = useState(qCompanyName || qName?.replace(/\s+Assistant$/, "") || "your company");
   const [botLogoUrl, setBotLogoUrl] = useState(qLogo || "");
   const [loading, setLoading] = useState(!hasBrandingParams);
   useEffect(() => {
@@ -41,7 +43,10 @@ export default function WidgetPage() {
           const data = await response.json();
           if (data) {
             if (data.botColor) setThemeColor(data.botColor);
-            if (data.name) setBotName(`${data.name} Assistant`);
+            if (data.name) {
+              setCompanyName(data.name);
+              setBotName(`${data.name} Assistant`);
+            }
             if (data.logo) setBotLogoUrl(data.logo);
           }
         }
@@ -82,7 +87,7 @@ export default function WidgetPage() {
     injectScript.src = INJECT_URL;
     injectScript.async = true;
 
-    const params = new URLSearchParams({ botColor: themeColor, botName });
+    const params = new URLSearchParams({ botColor: themeColor, botName, companyName });
     if (botLogoUrl) params.set("botLogo", botLogoUrl);
     params.set("v", Date.now().toString());
     const configScript = document.createElement("script");
@@ -102,8 +107,8 @@ export default function WidgetPage() {
           if (bp.updateUser) {
             try {
               bp.updateUser({
-                data: { companyId, role: "staff" },
-                tags: { companyId, role: "staff" },
+                data: { companyId, companyName, role: "staff" },
+                tags: { companyId, companyName, role: "staff" },
               });
             } catch (err) {
               console.error("Failed to update user in Botpress:", err);
@@ -133,7 +138,7 @@ export default function WidgetPage() {
       } catch {
       }
     };
-  }, [loading, companyId, themeColor, botName, botLogoUrl]);
+  }, [loading, companyId, themeColor, botName, botLogoUrl, companyName]);
 
   if (loading) {
     return (
@@ -145,6 +150,26 @@ export default function WidgetPage() {
 
   return (
     <div className={`w-screen h-screen overflow-hidden ${mode === "fullscreen" ? "bg-white" : "bg-transparent"}`}>
+      <style jsx global>{`
+        #bp-embedded-webchat [class*="fab"],
+        #bp-embedded-webchat [class*="Fab"],
+        #bp-embedded-webchat [class*="launcher"],
+        #bp-embedded-webchat [class*="Launcher"],
+        #bp-embedded-webchat button[aria-label*="Open"],
+        #bp-embedded-webchat button[aria-label*="open"],
+        body > [class*="bpFab"],
+        body > [class*="bp-fab"],
+        body > button[aria-label*="Open"],
+        body > button[aria-label*="open"] {
+          display: none !important;
+        }
+
+        #bp-embedded-webchat,
+        #bp-embedded-webchat > * {
+          width: 100% !important;
+          height: 100% !important;
+        }
+      `}</style>
       <div
         id="bp-embedded-webchat"
         className={`w-full h-full ${mode === "fullscreen" ? "bg-white" : "bg-transparent"}`}
