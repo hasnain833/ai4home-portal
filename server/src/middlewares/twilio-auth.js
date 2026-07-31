@@ -1,4 +1,4 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import { decryptSafe } from "../lib/crypto.js";
 
@@ -22,14 +22,7 @@ function computeSignature(authToken, url, params) {
 }
 
 export async function verifyTwilioSignature(req, res, next) {
-  const shouldValidate = ["1", "true", "yes"].includes(
-    String(process.env.TWILIO_VALIDATE_SIGNATURE || "").toLowerCase()
-  );
-
-  if (!shouldValidate) {
-    return next();
-  }
-
+  // Signature validation is strictly enforced for all inbound webhooks.
   try {
     const signature = req.header("X-Twilio-Signature");
     if (!signature) {

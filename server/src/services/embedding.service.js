@@ -11,15 +11,10 @@ async function getPipeline() {
     loadingPromise = (async () => {
       try {
         const { pipeline, env } = await import("@xenova/transformers");
-        // On a read-only serverless filesystem (Vercel) the default cache dir
-        // (node_modules/.cache) can't be written, so the model download fails and
-        // retrieval silently falls back to FTS. Point the cache at a writable path
-        // (/tmp on serverless) so semantic search actually works there. Locally the
-        // default cache is fine unless TRANSFORMERS_CACHE is set.
-        if (process.env.TRANSFORMERS_CACHE) {
-          env.cacheDir = process.env.TRANSFORMERS_CACHE;
-        } else if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+        if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
           env.cacheDir = "/tmp/transformers-cache";
+        } else {
+          env.cacheDir = "./.cache/transformers";
         }
         env.allowLocalModels = false; // always fetch/cache the remote model
         console.log(`[Embedding] Loading model ${MODEL_NAME} (cacheDir=${env.cacheDir})...`);

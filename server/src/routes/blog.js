@@ -12,7 +12,6 @@ import {
   publishBlogPost,
   unpublishBlogPost,
   exportBlogPost,
-  scheduleBlogPost,
 } from "../controllers/blog.controller.js";
 
 const router = Router();
@@ -39,6 +38,5 @@ router.post(
 router.post("/:id/approve", requireAuth, staff, canManage, approveBlogPost);
 router.post("/:id/publish", requireAuth, staff, canManage, publishBlogPost);
 router.post("/:id/unpublish", requireAuth, staff, canManage, unpublishBlogPost);
-router.post("/:id/schedule", requireAuth, staff, canManage, scheduleBlogPost);
 
 export default router;

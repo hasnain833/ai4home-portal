@@ -10,7 +10,6 @@ import {
   unsubscribeByLead,
   processBrevoInboundEmail,
   processTwilioInboundSms,
-  processTwilioSmsStatus,
 } from "../controllers/compliance.controller.js";
 
 const router = Router();
@@ -24,6 +23,5 @@ router.post("/unsubscribe", unsubscribeWebhook);
 router.post("/unsubscribe-link/:leadId", unsubscribeByLead);
 router.post("/inbound/email", processBrevoInboundEmail);
 router.post("/inbound/sms", verifyTwilioSignature, processTwilioInboundSms);
-router.post("/events/sms", verifyTwilioSignature, processTwilioSmsStatus);
 
 export default router;
