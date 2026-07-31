@@ -503,13 +503,6 @@ model CampaignStep {
   body            String?
   templateId      String?
   template        EmailTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  sentCount       Int            @default(0)
-  deliveredCount  Int            @default(0)
-  openedCount     Int            @default(0)
-  clickedCount    Int            @default(0)
-  repliedCount    Int            @default(0)
-  bouncedCount    Int            @default(0)
-  complaintCount  Int            @default(0)
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -663,12 +656,6 @@ model Announcement {
   scheduledAt       DateTime?
   sentAt            DateTime?
   audienceCount     Int       @default(0)
-  sentCount         Int       @default(0)
-  deliveredCount    Int       @default(0)
-  failedCount       Int       @default(0)
-  openedCount       Int       @default(0)
-  clickedCount      Int       @default(0)
-  unsubscribedCount Int       @default(0)
   createdById       String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -678,7 +665,6 @@ model Announcement {
 
 enum CalendarProvider {
   GOOGLE
-  MICROSOFT
 }
 
 model AvailabilitySetting {
@@ -758,7 +744,6 @@ enum BlogStatus {
   DRAFT
   PENDING_REVIEW
   APPROVED
-  SCHEDULED
   PUBLISHED
 }
 
@@ -784,7 +769,6 @@ model BlogPost {
   sourceNewsIds   String[]   @default([])
   approvedAt      DateTime?
   approvedById    String?
-  scheduledAt     DateTime?
   publishedAt     DateTime?
   calendarEventId String?
   authorId        String?

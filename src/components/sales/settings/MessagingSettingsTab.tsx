@@ -392,11 +392,6 @@ export default function MessagingSettingsTab() {
                     sends, so delivered/failed counts update automatically.
                   </p>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-relaxed rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900/40 p-3">
-                  Twilio requests are verified by signature. In production, set{" "}
-                  <code>TWILIO_VALIDATE_SIGNATURE=1</code> on the server so only genuine Twilio
-                  calls are accepted.
-                </p>
               </div>
             </>
           )}

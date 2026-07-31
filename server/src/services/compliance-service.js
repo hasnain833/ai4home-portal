@@ -465,7 +465,7 @@ export class ComplianceService {
   }
 
   static async sendComplaintRateAlert(companyId, metrics) {
-    const to = process.env.COMPLIANCE_ALERT_EMAIL;
+    const to = process.env.ADMIN_NOTIFY_EMAIL;
     if (!to) return;
 
     try {

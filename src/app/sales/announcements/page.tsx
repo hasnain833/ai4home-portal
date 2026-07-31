@@ -51,12 +51,6 @@ type Announcement = {
   scheduledAt: string | null;
   sentAt: string | null;
   audienceCount: number;
-  sentCount: number;
-  deliveredCount: number;
-  failedCount: number;
-  openedCount: number;
-  clickedCount: number;
-  unsubscribedCount: number;
   createdAt: string;
 };
 
@@ -359,10 +353,6 @@ export default function AnnouncementsPage() {
     }
   };
 
-  const totalReached = announcements.reduce((s, a) => s + a.sentCount, 0);
-  const totalDelivered = announcements.reduce((s, a) => s + a.deliveredCount, 0);
-  const totalClicks = announcements.reduce((s, a) => s + a.clickedCount, 0);
-  const deliveryRate = totalReached > 0 ? ((totalDelivered / totalReached) * 100).toFixed(1) : "0.0";
 
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
@@ -401,39 +391,6 @@ export default function AnnouncementsPage() {
 
           {activeTab === "past" ? (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Broadcast statistics cards */}
-              <div className="lg:col-span-3 grid gap-4 grid-cols-1 sm:grid-cols-3">
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-xs font-semibold text-gray-500 uppercase">Recipients Reached</CardTitle>
-                    <Users className="h-4 w-4 text-[#b48c3c]" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{totalReached.toLocaleString()}</div>
-                    <p className="text-[10px] text-muted-foreground mt-1">Emails successfully sent across all broadcasts</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-xs font-semibold text-gray-500 uppercase">Delivery Rate</CardTitle>
-                    <Send className="h-4 w-4 text-[#0F3B3D]" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{deliveryRate}%</div>
-                    <p className="text-[10px] text-muted-foreground mt-1">{totalDelivered.toLocaleString()} confirmed delivered</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-xs font-semibold text-gray-500 uppercase">CTA Engagement</CardTitle>
-                    <TrendingUp className="h-4 w-4 text-green-500" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{totalClicks.toLocaleString()} clicks</div>
-                    <p className="text-[10px] text-muted-foreground mt-1">Link clicks tracked via webhooks</p>
-                  </CardContent>
-                </Card>
-              </div>
 
               {/* History list */}
               <div className="lg:col-span-3">
@@ -457,9 +414,6 @@ export default function AnnouncementsPage() {
                             <th className="py-3 px-6">Subject / Topic</th>
                             <th className="py-3 px-4">Status</th>
                             <th className="py-3 px-4">Audience</th>
-                            <th className="py-3 px-4">Sent</th>
-                            <th className="py-3 px-4">Failed</th>
-                            <th className="py-3 px-4">Clicks</th>
                             <th className="py-3 px-6">Date</th>
                             <th className="py-3 px-4"></th>
                           </tr>
@@ -475,23 +429,7 @@ export default function AnnouncementsPage() {
                                 <Badge className={statusStyles[a.status] || statusStyles.Draft}>{a.status}</Badge>
                               </td>
                               <td className="py-3.5 px-4 text-xs font-medium">{a.audienceCount || "—"}</td>
-                              <td className="py-3.5 px-4 text-xs font-semibold">{a.sentCount}</td>
-                              <td className="py-3.5 px-4 text-xs">
-                                {a.failedCount > 0 ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => openFailures(a)}
-                                    className="inline-flex items-center gap-1 font-semibold text-red-500 hover:text-red-600 hover:underline"
-                                    title="View failed sends"
-                                  >
-                                    <AlertTriangle className="h-3 w-3" />
-                                    {a.failedCount}
-                                  </button>
-                                ) : (
-                                  <span className="text-red-500 font-medium">—</span>
-                                )}
-                              </td>
-                              <td className="py-3.5 px-4 text-xs text-green-600 font-bold">{a.clickedCount || "—"}</td>
+
                               <td className="py-3.5 px-6 text-xs text-slate-400">
                                 {a.sentAt
                                   ? new Date(a.sentAt).toLocaleDateString()

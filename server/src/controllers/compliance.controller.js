@@ -450,41 +450,6 @@ export const unsubscribeWebhook = async (req, res) => {
 };
 
 
-export const processTwilioSmsStatus = async (req, res) => {
-  try {
-    const companyId = req.query.companyId || req.body?.companyId;
-    if (!companyId) {
-      return res.status(400).json({ message: "companyId is required." });
-    }
-
-    const phone = req.body.To || req.body.to;
-    const status = req.body.MessageStatus || req.body.SmsStatus || req.body.status || "";
-    if (!phone || !status) {
-      return res.status(200).json({ success: true, handled: 0 });
-    }
-
-    const result = await ComplianceService.handleMessageEvent({
-      companyId,
-      channel: "SMS",
-      provider: "TWILIO_SMS",
-      contact: phone,
-      rawEventType: status,
-      errorCode: req.body.ErrorCode || null,
-      metadata: {
-        messageId: req.body.MessageSid || req.body.SmsSid,
-        reason: req.body.ErrorMessage,
-        tag: req.query.tag || null,
-      },
-    });
-
-    return res.status(200).json({ success: true, handled: result.handled ? 1 : 0 });
-  } catch (error) {
-    console.error("[Twilio SMS Status] Error:", error);
-    return res.status(500).json({ message: error.message || "Internal server error" });
-  }
-};
-
-
 
 export const processBrevoInboundEmail = async (req, res) => {
   try {

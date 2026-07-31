@@ -64,7 +64,7 @@ interface BlogPost {
   citations?: { title: string; url: string }[] | null;
   kbCitations?: { documentId: string | null; name: string; category: string }[] | null;
   approvedAt?: string | null;
-  scheduledAt?: string | null;
+
   publishedAt?: string | null;
   slug?: string | null;
   readTime?: string;
@@ -144,8 +144,7 @@ export default function BlogDraftingPage() {
   const [selectedNewsIds, setSelectedNewsIds] = useState<string[]>([]);
 
   // Schedule modal
-  const [scheduleFor, setScheduleFor] = useState<BlogPost | null>(null);
-  const [scheduleDate, setScheduleDate] = useState("");
+
 
   // Note: no synchronous setState here (loading starts true) so this is safe to
   // call directly from an effect without triggering cascading renders.
@@ -297,21 +296,6 @@ export default function BlogDraftingPage() {
       URL.revokeObjectURL(url);
     });
 
-  const submitSchedule = async () => {
-    if (!scheduleFor) return;
-    if (!scheduleDate) return toast.error("Pick a date.");
-    await withBusy(scheduleFor.id, async () => {
-      await api(`/${scheduleFor.id}/schedule`, {
-        method: "POST",
-        body: JSON.stringify({ scheduledAt: new Date(scheduleDate).toISOString() }),
-      });
-      toast.success("Scheduled and added to the content calendar.");
-      setScheduleFor(null);
-      setScheduleDate("");
-      await fetchPosts();
-    });
-  };
-
   const filtered = posts.filter((post) => {
     const s = searchTerm.toLowerCase();
     const matches =
@@ -365,7 +349,6 @@ export default function BlogDraftingPage() {
                       <TabsTrigger value="all" className="text-xs rounded-md">All</TabsTrigger>
                       <TabsTrigger value="draft" className="text-xs rounded-md">Drafts</TabsTrigger>
                       <TabsTrigger value="approved" className="text-xs rounded-md">Approved</TabsTrigger>
-                      <TabsTrigger value="scheduled" className="text-xs rounded-md">Scheduled</TabsTrigger>
                       <TabsTrigger value="published" className="text-xs rounded-md">Published</TabsTrigger>
                     </TabsList>
                   </Tabs>
@@ -429,7 +412,6 @@ export default function BlogDraftingPage() {
                                 <p className="flex items-center gap-1 md:justify-end">
                                   <Calendar className="h-3 w-3" />
                                   {post.publishedAt ? `Published ${new Date(post.publishedAt).toLocaleDateString()}`
-                                    : post.scheduledAt ? `Scheduled ${new Date(post.scheduledAt).toLocaleDateString()}`
                                     : "Not scheduled"}
                                 </p>
                               </div>
@@ -447,14 +429,9 @@ export default function BlogDraftingPage() {
                                     <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
                                   </Button>
                                 )}
-                                {(post.status === "APPROVED" || post.status === "SCHEDULED") && (
+                                {(post.status === "APPROVED") && (
                                   <Button variant="ghost" size="sm" disabled={busyId === post.id} className="h-7 px-2 text-green-600 hover:bg-green-500/10 text-[11px]" onClick={() => handlePublish(post)} title="Publish to hosted blog">
                                     <Send className="h-3.5 w-3.5 mr-1" /> Publish
-                                  </Button>
-                                )}
-                                {post.approvedAt && post.status !== "PUBLISHED" && (
-                                  <Button variant="ghost" size="sm" disabled={busyId === post.id} className="h-7 px-2 text-purple-600 hover:bg-purple-500/10 text-[11px]" onClick={() => { setScheduleFor(post); setScheduleDate(""); }} title="Schedule on the content calendar">
-                                    <Calendar className="h-3.5 w-3.5 mr-1" /> Schedule
                                   </Button>
                                 )}
                                 {post.approvedAt && (
@@ -634,23 +611,7 @@ export default function BlogDraftingPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Schedule modal */}
-        <Dialog open={!!scheduleFor} onOpenChange={(o) => !o && setScheduleFor(null)}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Calendar className="h-5 w-5 text-purple-600" /> Schedule Post</DialogTitle>
-              <DialogDescription>Adds this approved post to your content calendar as a Blog item.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-1.5 pt-2">
-              <Label className="font-semibold text-xs">Publish date</Label>
-              <Input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} />
-            </div>
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="ghost" onClick={() => setScheduleFor(null)}>Cancel</Button>
-              <Button onClick={submitSchedule} className="bg-purple-600 text-white">Schedule</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+
       </PortalLayout>
     </ProtectedRoute>
   );

@@ -1,32 +1,22 @@
 # AI4Home — Warranty Care Portal
 
-A multi-tenant SaaS portal for home-builder / warranty companies. It hosts **two
-workspaces** behind one login, each independently entitled per tenant:
+## Overview
 
-- **Warranty workspace** — homeowner warranty support. The conversational AI
-  (intake, diagnosis, escalation) lives in **Botpress**; the portal owns the
-  ticket dashboard, ERP/CRM sync, knowledge-base management, company/widget
-  branding, and KPI reporting.
-- **Sales workspace** — AI-assisted outbound sales. Runs on a **native
-  Claude + Inngest** runtime: lead management, nurture campaigns, Salesforce
-  sync, announcements, appointment scheduling, a blog-drafting agent, and a
-  semantic knowledge base.
+A multi-tenant SaaS portal for home-builder / warranty companies. It hosts **two workspaces** behind one login, each independently entitled per tenant:
 
-Feature-level status is tracked in detail in
-[`warranty-workspace.md`](./warranty-workspace.md) and
-[`sales-workspace.md`](./sales-workspace.md). A technical-audit log lives in
-[`AUDIT.md`](./AUDIT.md).
+- **Warranty workspace** — homeowner warranty support. The conversational AI (intake, diagnosis, escalation) lives in **Botpress**; the portal owns the ticket dashboard, ERP/CRM sync, knowledge-base management, company/widget branding, and KPI reporting.
+- **Sales workspace** — AI-assisted outbound sales. Runs on a **native Claude + Inngest** runtime: lead management, nurture campaigns, Salesforce sync, announcements, appointment scheduling, a blog-drafting agent, and a semantic knowledge base.
 
 ---
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────┐        /api/* (proxied in dev,           ┌──────────────────────────┐
-│  Next.js 16 frontend     │  ───▶  api/index.js on Vercel)   ───▶    │  Express 5 backend        │
-│  (src/) — React 19       │                                          │  (server/src/)            │
-│  App Router, Tailwind 4   │  ◀──   JSON                              │  controllers/routes/      │
-└─────────────────────────┘                                          │  services + Inngest jobs   │
+│  Next.js 16 frontend    │  ───▶  api/index.js on Vercel)   ───▶    │  Express 5 backend       │
+│  (src/) — React 19      │                                          │  (server/src/)           │
+│  App Router, Tailwind 4 │  ◀──   JSON                              │  controllers/routes/     │
+└─────────────────────────┘                                          │  services + Inngest jobs │
         │                                                             └──────────────────────────┘
         │ Supabase Auth (SSR cookies)                                          │
         ▼                                                                      ▼
@@ -35,34 +25,23 @@ Feature-level status is tracked in detail in
                                                                 Botpress (warranty bot, embedded widget)
 ```
 
-- **Frontend** (`src/`): Next.js App Router. Talks to the backend exclusively
-  over `/api/*`. In development, `next.config.ts` rewrites `/api/*` to
-  the `BACKEND_URL` configured in `.env`. The frontend does **not** access the database
-  directly — all data access goes through the Express API.
-- **Backend** (`server/`): a standalone Express app (`server/src/index.js`).
-  Route groups are guarded by `requireAuth` + `requireWorkspace("sales"|"warranty")`.
-  Background/async work (campaign sends, CSV import, scheduling, news scraping,
-  Salesforce cron, KB ingest) runs as **Inngest** functions.
-- **Serverless entry** (`api/index.js`): re-exports the Express app so Vercel
-  serves the whole backend as one function (`vercel.json` rewrites `/api/(.*)`).
-- **Auth**: Supabase email/password for normal users; a separate env-only
-  **Super Admin** session (server-side cookie) for the platform admin.
-- **Database**: single Postgres (Supabase), accessed via Prisma 7 with the
-  `@prisma/adapter-pg` driver adapter over a `pg` pool. Schema:
-  `prisma/schema.prisma`.
-
-### Tech stack
-Next.js 16 · React 19 · TypeScript 5 · Tailwind CSS 4 · Radix UI / shadcn ·
-Express 5 · Prisma 7 · PostgreSQL (Supabase) · Supabase Auth · Inngest ·
-Botpress (warranty bot) · Salesforce & Google Calendar integrations ·
-Twilio (SMS) · Brevo/SMTP (email) · local `@xenova/transformers` embeddings +
-pgvector (Sales KB).
+- **Frontend** (`src/`): Next.js App Router. Talks to the backend exclusively over `/api/*`. In development, `next.config.ts` rewrites `/api/*` to the `BACKEND_URL` configured in `.env`. The frontend does **not** access the database directly — all data access goes through the Express API.
+- **Backend** (`server/`): a standalone Express app (`server/src/index.js`). Route groups are guarded by `requireAuth` + `requireWorkspace("sales"|"warranty")`. Background/async work (campaign sends, CSV import, scheduling, news scraping, Salesforce cron, KB ingest) runs as **Inngest** functions.
+- **Serverless entry** (`api/index.js`): re-exports the Express app so Vercel serves the whole backend as one function (`vercel.json` rewrites `/api/(.*)`).
+- **Auth**: Supabase email/password for normal users; a separate env-only **Super Admin** session (server-side cookie) for the platform admin.
+- **Database**: single Postgres (Supabase), accessed via Prisma 7 with the `@prisma/adapter-pg` driver adapter over a `pg` pool. Schema: `prisma/schema.prisma`.
 
 ---
 
-## Project structure
+## Tech Stack
 
-```
+Next.js 16 · React 19 · TypeScript 5 · Tailwind CSS 4 · Radix UI / shadcn · Express 5 · Prisma 7 · PostgreSQL (Supabase) · Supabase Auth · Inngest · Botpress (warranty bot) · Salesforce & Google Calendar integrations · Twilio (SMS) · Brevo/SMTP (email) · local `@xenova/transformers` embeddings + pgvector (Sales KB).
+
+---
+
+## Project Structure
+
+```text
 src/                      Next.js frontend
   app/                    App Router pages (admin, warranty/*, sales/*, blog, widget, ...)
   components/             UI + layout + auth components (ui/ = shadcn primitives)
@@ -84,17 +63,9 @@ prisma/
 
 ---
 
-## Prerequisites
-
-- Node.js 20+
-- A PostgreSQL database (Supabase recommended)
-- A Supabase project (for auth)
-- Optional per-feature: Botpress bot, Anthropic or Groq API key, Salesforce
-  connected app, Google OAuth app, Twilio, Brevo/SMTP, Inngest account.
-
----
-
 ## Setup
+
+**Prerequisites:** Node.js 20+, PostgreSQL database (Supabase recommended), Supabase Auth project. Optional integrations: Botpress, Anthropic API key, Salesforce app, Google OAuth, Twilio, Brevo, Inngest.
 
 ```bash
 # 1. Install frontend deps (repo root)
@@ -116,7 +87,11 @@ npx prisma db push                 # creates/updates tables (additive)
 #    then POST /api/sales/kb/reindex until remaining=0.
 ```
 
-### Running locally (two processes)
+---
+
+## Running
+
+The system requires both the Next.js frontend and Express backend running concurrently in development.
 
 ```bash
 # Terminal 1 — backend on :5000
@@ -126,46 +101,52 @@ cd server && npm run dev
 npm run dev
 ```
 
-Open the URL shown by the Next.js dev server.
+Open the URL `http://localhost:3000` to view the portal.
 
 ---
 
-## Environment variables
+## Env's
 
-There are **two** env files. Locally the frontend reads root `.env` and the
-backend reads `server/.env`. On Vercel everything runs from one deployment, so
-the **root environment must contain the backend variables too** — use
-`server/.env.example` as the authoritative list of backend keys.
+The following represents the complete list of environment variables used across the frontend and backend codebase. Locally, the frontend reads from root `.env` and the backend from `server/.env`. On deployment platforms like Vercel, all variables must be configured in a single environment.
 
-**Frontend (`.env` — see `.env.example`)**
-
-| Variable | Purpose |
-|---|---|
-| `NEXT_PUBLIC_URL` | Public portal URL (CORS + redirect base) |
-| `DATABASE_URL` | Postgres URL (used by `prisma generate`/`db push`) |
-| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase auth (client) |
-| `NEXT_PUBLIC_BOTPRESS_BOT_ID` / `_INJECT_URL` / `_CONFIG_URL` | Warranty chat widget |
-
-**Backend (`server/.env` — see `server/.env.example`)** — highlights:
-
-| Variable | Purpose |
-|---|---|
-| `PORT` | Backend port (default 5000) |
-| `DATABASE_URL` | Postgres connection |
-| `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase auth verification |
-| `SESSION_SECRET` | Super Admin session signing |
-| `APP_ENCRYPTION_KEY` | **AES-256-GCM key for integration secrets at rest**. Must be a strong 32-char value in production — a startup warning fires if left at the default. |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Primary LLM (Sales). Falls back to Groq if not a real `sk-ant-` key. |
-| `GROQ_API_KEY` / `GROQ_MODEL` | Groq LLM fallback (`OPENAI_API_KEY` holding a `gsk_` key is also accepted for back-compat; it is **not** used for embeddings) |
-| `SMTP_*` / `SENDER_EMAIL` | Transactional + campaign email (Brevo) |
-| `BREVO_API_KEY` / `BREVO_SMS_SENDER` | Platform/admin SMS notifications through Brevo |
-| `GOOGLE_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` | Google Calendar / Meet |
-| `INBOUND_WEBHOOK_SECRET` | Shared secret for Brevo/Twilio inbound webhooks |
-| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` / `INNGEST_DEV` | Inngest background jobs |
-| `COMPLAINT_RATE_*`, `COMPLIANCE_ALERT_EMAIL` | Messaging compliance thresholds |
-
-> Secrets live only in `.env` files, which are git-ignored. Never commit real
-> credentials; only `.env.example` files are tracked.
+| Variable | Scope | Description |
+|---|---|---|
+| `NEXT_PUBLIC_URL` | Frontend & Backend | Public portal URL used for CORS, redirects, and link generation |
+| `NEXT_PUBLIC_SUPABASE_URL` | Frontend & Backend | Supabase instance URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend & Backend | Public anonymous access key |
+| `NEXT_PUBLIC_BOTPRESS_INJECT_URL` | Frontend | For homeowner support bot |
+| `NEXT_PUBLIC_BOTPRESS_CONFIG_URL` | Frontend | For homeowner support bot |
+| `PORT` | Backend | Express server port (5000) |
+| `NODE_ENV` | Backend | Environment mode (`development` / `production`) |
+| `VERCEL` | Backend | Detects serverless deployment |
+| `AWS_LAMBDA_FUNCTION_NAME` | Backend | Detects AWS serverless deployment |
+| `DATABASE_URL` | Backend | Postgres connection string for Prisma |
+| `APP_ENCRYPTION_KEY` | Backend | AES-256-GCM key for encrypting integration secrets at rest |
+| `SESSION_SECRET` | Backend | Signs Super Admin session cookies |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend | Secure key for admin-level database bypass |
+| `INNGEST_EVENT_KEY` | Backend | Key for publishing events to Inngest |
+| `INNGEST_SIGNING_KEY` | Backend | Validates webhook requests from Inngest |
+| `INNGEST_DEV` | Backend | Local dev mode toggle (`1`) |
+| `BREVO_API_KEY` | Backend | Platform SMS & notifications |
+| `BREVO_SMS_SENDER` | Backend | Platform SMS & notifications |
+| `SENDER_EMAIL` | Backend | Transactional emails sender address |
+| `SMTP_HOST` | Backend | Transactional emails SMTP host |
+| `SMTP_PORT` | Backend | Transactional emails SMTP port |
+| `SMTP_USER` | Backend | Transactional emails SMTP user |
+| `SMTP_PASS` | Backend | Transactional emails SMTP password |
+| `TWILIO_ACCOUNT_SID` | Backend | Inbound SMS fallback / sending |
+| `TWILIO_AUTH_TOKEN` | Backend | Inbound SMS fallback / sending |
+| `TWILIO_FROM_NUMBER` | Backend | Inbound SMS fallback / sending |
+| `TWILIO_WEBHOOK_BASE_URL` | Backend | Base URL for receiving Twilio webhooks |
+| `TWILIO_STATUS_CALLBACK_URL` | Backend | URL for SMS delivery status webhooks |
+| `ANTHROPIC_API_KEY` | Backend | Platform-wide primary LLM (Claude) |
+| `GOOGLE_CLIENT_ID` | Backend | Google Cloud OAuth for Calendar/Meet |
+| `GOOGLE_CLIENT_SECRET` | Backend | Google Cloud OAuth for Calendar/Meet |
+| `GOOGLE_REDIRECT_URI` | Backend | Google Cloud OAuth for Calendar/Meet |
+| `SUPERADMIN_EMAIL` | Backend | Default super admin login email |
+| `SUPERADMIN_PASSWORD` | Backend | Default super admin login password |
+| `ADMIN_NOTIFY_EMAIL` | Backend | Target email for new tenant registration alerts |
+| `ADMIN_NOTIFY_PHONE` | Backend | Target phone for new tenant registration alerts |
 
 ---
 
@@ -179,7 +160,7 @@ the **root environment must contain the backend variables too** — use
 | `npm run build` | `prisma generate` + production build |
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint |
-| `npx tsc --noEmit` | Type-check (currently clean) |
+| `npx tsc --noEmit` | Type-check |
 
 **Backend (`server/`):**
 
@@ -188,19 +169,20 @@ the **root environment must contain the backend variables too** — use
 | `npm run dev` | Nodemon + Inngest dev mode |
 | `npm run start` | Start the Express server |
 
-**Database:** `npx prisma generate`, `npx prisma db push`, `npx prisma studio`.
+**Database:** 
+`npx prisma generate` (Creates client), `npx prisma db push` (Pushes schema), `npx prisma studio` (UI for viewing DB).
 
 ---
 
-## Deployment (Vercel)
+## Deployment
 
 - `api/index.js` exposes the Express app; `vercel.json` routes `/api/(.*)` to it.
-- The root `package.json` must declare every backend runtime dependency (the
-  server folder is not separately installed on Vercel).
-- Set all backend env vars in the Vercel project environment.
-- `@xenova/transformers` is included in the root deps so the Sales KB embedding
-  model loads on Vercel. Semantic search still requires the one-time
-  `prisma/pgvector-setup.sql`; without it the code degrades gracefully to
-  full-text search. See [Known limitations](#known-limitations).
+- The root `package.json` must declare every backend runtime dependency (the server folder is not separately installed on Vercel).
+- Set all backend env vars in the deployment environment.
+- `@xenova/transformers` is included in the root deps so the Sales KB embedding model loads in production. Semantic search still requires the one-time `prisma/pgvector-setup.sql`; without it the code degrades gracefully to full-text search.
 
 ---
+
+## Summary
+
+The AI4Home platform encapsulates conversational AI for both Warranty and Sales, operating within a modern Next.js/Express monolith backed by Supabase and Inngest. It provides builders with deep integrations into Salesforce and Botpress, allowing them to manage homeowners efficiently through automated AI pipelines.

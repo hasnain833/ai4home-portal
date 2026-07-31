@@ -156,7 +156,7 @@ export const updateBlogPost = async (req, res) => {
     if (headings !== undefined) data.headings = Array.isArray(headings) ? headings : [];
 
     const contentChanged = data.title !== undefined || data.content !== undefined || data.excerpt !== undefined;
-    if (contentChanged && ["APPROVED", "SCHEDULED", "PUBLISHED"].includes(existing.status)) {
+    if (contentChanged && ["APPROVED", "PUBLISHED"].includes(existing.status)) {
       data.status = "PENDING_REVIEW";
       data.approvedAt = null;
       data.approvedById = null;
@@ -191,7 +191,7 @@ export const generateBlogDraft = async (req, res) => {
   try {
     const { companyId, id: userId } = req.user;
     if (!companyId) return res.status(403).json({ message: "No company associated" });
-    if (!hasLLM()) return res.status(503).json({ message: "No LLM provider configured (set ANTHROPIC_API_KEY or GROQ_API_KEY)." });
+    if (!hasLLM()) return res.status(503).json({ message: "No LLM provider configured. Set up an AI provider key in Sales Settings > AI Config." });
 
     const { topic, tone, keywords, targetAudience, targetLength, category, newsIds } = req.body;
     if (!topic || !topic.trim()) return res.status(400).json({ message: "A topic prompt is required." });
@@ -344,7 +344,7 @@ export const publishBlogPost = async (req, res) => {
     const post = await prisma.blogPost.findUnique({ where: { id: req.params.id } });
     if (!post || post.companyId !== companyId) return res.status(404).json({ message: "Post not found" });
     // SW-BLOG-004: explicit approval required before publish.
-    if (!post.approvedAt || !["APPROVED", "SCHEDULED"].includes(post.status)) {
+    if (!post.approvedAt || !["APPROVED"].includes(post.status)) {
       return res.status(400).json({ message: "Post must be approved before it can be published." });
     }
     const slug = post.slug || (await uniqueSlug(companyId, post.title));
@@ -425,58 +425,6 @@ ${markdownToHtml(post.content)}
   } catch (e) {
     console.error("[Blog] export failed:", e);
     return res.status(500).json({ message: "Failed to export post" });
-  }
-};
-
-// SW-BLOG-006: schedule an approved post onto the content calendar.
-export const scheduleBlogPost = async (req, res) => {
-  try {
-    const { companyId, id: userId } = req.user;
-    const post = await prisma.blogPost.findUnique({ where: { id: req.params.id } });
-    if (!post || post.companyId !== companyId) return res.status(404).json({ message: "Post not found" });
-    if (!post.approvedAt) return res.status(400).json({ message: "Post must be approved before scheduling." });
-
-    const { scheduledAt } = req.body;
-    const when = new Date(scheduledAt);
-    if (isNaN(when.getTime())) return res.status(400).json({ message: "A valid scheduledAt date is required." });
-
-    // Upsert the linked calendar item.
-    let calendarEventId = post.calendarEventId;
-    if (calendarEventId) {
-      const exists = await prisma.contentCalendar.findFirst({ where: { id: calendarEventId, companyId } });
-      if (exists) {
-        await prisma.contentCalendar.update({
-          where: { id: calendarEventId },
-          data: { title: post.title, scheduledAt: when, content: post.excerpt || post.title, status: "Scheduled" },
-        });
-      } else {
-        calendarEventId = null;
-      }
-    }
-    if (!calendarEventId) {
-      const event = await prisma.contentCalendar.create({
-        data: {
-          companyId,
-          title: post.title,
-          channel: "Blog",
-          scheduledAt: when,
-          status: "Scheduled",
-          content: post.excerpt || post.title,
-          isAiSuggested: false,
-          ownerId: userId,
-        },
-      });
-      calendarEventId = event.id;
-    }
-
-    const updated = await prisma.blogPost.update({
-      where: { id: post.id },
-      data: { status: "SCHEDULED", scheduledAt: when, calendarEventId },
-    });
-    return res.json(serializePost(updated));
-  } catch (e) {
-    console.error("[Blog] schedule failed:", e);
-    return res.status(500).json({ message: "Failed to schedule post" });
   }
 };
 

@@ -370,7 +370,7 @@ export const rollbackBrandProfileVersion = async (req, res) => {
 export const previewAiOutput = async (req, res) => {
   try {
     if (!hasLLM()) {
-      return res.status(503).json({ message: "No LLM provider configured (set ANTHROPIC_API_KEY or GROQ_API_KEY)." });
+      return res.status(503).json({ message: "No LLM provider configured. Set up an AI provider key in Sales Settings > AI Config." });
     }
 
     const { feature = "nurture", config = {}, sample = {} } = req.body || {};

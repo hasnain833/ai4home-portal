@@ -10,17 +10,14 @@ function getGroqKey(providerConfig) {
   if (providerConfig?.provider === "groq" && providerConfig?.groqApiKey) {
     return decryptSafe(providerConfig.groqApiKey);
   }
-  if (process.env.GROQ_API_KEY) return process.env.GROQ_API_KEY;
-  const openai = process.env.OPENAI_API_KEY || "";
-  return openai.startsWith("gsk_") ? openai : "";
+  return "";
 }
 
 function getOpenAiKey(providerConfig) {
   if (providerConfig?.provider === "openai" && providerConfig?.openAiApiKey) {
     return decryptSafe(providerConfig.openAiApiKey);
   }
-  const key = process.env.OPENAI_API_KEY || "";
-  return key && !key.startsWith("gsk_") ? key : "";
+  return "";
 }
 
 export function hasLLM(providerConfig) {
