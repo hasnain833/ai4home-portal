@@ -111,7 +111,7 @@ export const saveSmsSettings = async (req, res) => {
     await prisma.integration.deleteMany({
       where: {
         companyId,
-        platform: { in: ["TWILIO_SMS", "BREVO_SMS"] },
+        platform: { in: ["TWILIO_SMS"] },
       },
     });
 

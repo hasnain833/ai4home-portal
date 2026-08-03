@@ -75,10 +75,6 @@ type CampaignMetrics = {
   active: number;
   converted: number;
   conversionRate: number;
-  sent: number;
-  opened: number;
-  clicked: number;
-  replied: number;
 };
 
 type CalendarItem = {
@@ -555,36 +551,7 @@ export default function SalesDashboardPage() {
                             }}
                           />
                         </div>
-                        {/* Step-level totals (SW-NUR-008). Only meaningful once
-                            something has actually gone out. */}
-                        {seq.sent > 0 && (
-                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-0.5">
-                            <span>
-                              Sent{" "}
-                              <strong className="text-foreground">
-                                {seq.sent}
-                              </strong>
-                            </span>
-                            <span>
-                              Opened{" "}
-                              <strong className="text-foreground">
-                                {seq.opened}
-                              </strong>
-                            </span>
-                            <span>
-                              Clicked{" "}
-                              <strong className="text-foreground">
-                                {seq.clicked}
-                              </strong>
-                            </span>
-                            <span>
-                              Replied{" "}
-                              <strong className="text-foreground">
-                                {seq.replied}
-                              </strong>
-                            </span>
-                          </div>
-                        )}
+
                       </div>
                     ))
                   )}

@@ -40,6 +40,7 @@ import homeownersRouter from "./routes/homeowners.js";
 import usersRouter from "./routes/users.js";
 import deadLetterRouter from "./routes/dead-letter.js";
 import privacyRouter from "./routes/privacy.js";
+import salesAgentRouter from "./routes/sales-agent.js";
 
 import { serve } from "inngest/express";
 import { inngest } from "./lib/inngest.js";
@@ -108,6 +109,7 @@ app.use("/api/sales/automations", ...salesGuard, automationsRouter);
 app.use("/api/sales/blog", ...salesGuard, blogRouter);
 app.use("/api/sales/privacy", ...salesGuard, privacyRouter);
 app.use("/api/public/blog", publicBlogRouter);
+app.use("/api/public/sales-agent", salesAgentRouter);
 
 const warrantyGuard = [
   requireAuth,

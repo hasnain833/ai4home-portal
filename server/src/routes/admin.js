@@ -21,6 +21,7 @@ import {
   getSupportAccessLog,
   getSecurityPosture,
 } from "../admin/platform.controller.js";
+import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
 
 const router = express.Router();
 
@@ -44,5 +45,7 @@ router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);
 router.put("/staff", requireAuth, updateStaff);
 router.delete("/staff", requireAuth, deleteStaff);
+
+router.get("/sales-agent-appointments", requireAuth, getSalesAgentAppointments);
 
 export default router;
