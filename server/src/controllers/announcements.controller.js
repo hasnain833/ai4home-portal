@@ -41,12 +41,6 @@ export const getAnnouncements = async (req, res) => {
       scheduledAt: a.scheduledAt,
       sentAt: a.sentAt,
       audienceCount: a.audienceCount,
-      sentCount: a.sentCount,
-      deliveredCount: a.deliveredCount,
-      failedCount: a.failedCount,
-      openedCount: a.openedCount,
-      clickedCount: a.clickedCount,
-      unsubscribedCount: a.unsubscribedCount,
       createdAt: a.createdAt,
     }));
 

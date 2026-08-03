@@ -228,11 +228,7 @@ export const sendAnnouncement = inngest.createFunction(
           }
         }
 
-        // Persist running metrics per chunk for near-real-time reporting (SW-ANN-005).
-        await prisma.announcement.update({
-          where: { id: announcementId },
-          data: { sentCount: { increment: sent }, failedCount: { increment: failed } },
-        });
+        // Note: sentCount/failedCount columns not yet in schema; skipping metric persistence.
 
         return { sent, failed, skipped };
       });

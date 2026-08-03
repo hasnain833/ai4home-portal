@@ -1,12 +1,22 @@
 const TWILIO_API_BASE = "https://api.twilio.com/2010-04-01";
 
-// Resolve usable Twilio credentials from the per-company config (preferred)
-// or from environment variables (fallback for single-tenant / local setups).
+// Resolve usable Twilio credentials. If 'SYSTEM' is passed, it uses the env variables.
+// Otherwise, it strictly requires tenant-specific configuration.
 function resolveTwilioConfig(smsConfig) {
-  const accountSid = smsConfig?.accountSid || process.env.TWILIO_ACCOUNT_SID;
-  const authToken = smsConfig?.authToken || process.env.TWILIO_AUTH_TOKEN;
-  const from = smsConfig?.from || process.env.TWILIO_FROM_NUMBER;
-  const statusCallbackUrl = smsConfig?.statusCallbackUrl || process.env.TWILIO_STATUS_CALLBACK_URL || null;
+  if (smsConfig === "SYSTEM") {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const from = process.env.TWILIO_FROM_NUMBER;
+    const statusCallbackUrl = process.env.TWILIO_STATUS_CALLBACK_URL || null;
+    
+    if (!accountSid || !authToken || !from) return null;
+    return { accountSid, authToken, from, statusCallbackUrl };
+  }
+
+  const accountSid = smsConfig?.accountSid;
+  const authToken = smsConfig?.authToken;
+  const from = smsConfig?.from;
+  const statusCallbackUrl = smsConfig?.statusCallbackUrl || null;
 
   if (!accountSid || !authToken || !from) return null;
   return { accountSid, authToken, from, statusCallbackUrl };

@@ -270,21 +270,9 @@ export const runNurtureCampaign = inngest.createFunction(
       });
 
       await step.run(`record-step-${currentStep.position}`, async () => {
-        if (sendResult.attempted && sendResult.channel === "EMAIL") {
-          if (sendResult.success) {
-            await prisma.campaignStep.update({
-              where: { id: currentStep.id },
-              data: { sentCount: { increment: 1 } }
-            });
-          }
-        } else if (sendResult.attempted && sendResult.channel === "SMS") {
-          if (sendResult.success) {
-            await prisma.campaignStep.update({
-              where: { id: currentStep.id },
-              data: { sentCount: { increment: 1 } }
-            });
-          }
-        } else {
+        if (sendResult.attempted && sendResult.success) {
+          console.log(`[Nurture] Step ${currentStep.position}: ${sendResult.channel} sent successfully.`);
+        } else if (!sendResult.attempted) {
           console.log(`[Nurture] Step ${currentStep.position}: no ${currentStep.type} contact channel on lead; nothing sent.`);
         }
 

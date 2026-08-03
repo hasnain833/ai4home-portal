@@ -7,7 +7,7 @@ const UPCOMING_CALENDAR_STATUSES = ["Draft", "Approved", "Scheduled"];
 const CONVERSION_EXIT_REASONS = ["REPLY", "APPOINTMENT"];
 
 const round1 = (n) => Math.round(n * 10) / 10;
-function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups, stepSums) {
+function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups) {
   return campaigns.map((c) => {
     const groups = enrollmentGroups.filter((g) => g.campaignId === c.id);
     const countFor = (statuses) =>
@@ -18,7 +18,6 @@ function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups, step
     const enrolled = groups.reduce((sum, g) => sum + (g._count?._all || 0), 0);
     const converted =
       convertedGroups.find((g) => g.campaignId === c.id)?._count?._all || 0;
-    const sums = stepSums.find((g) => g.campaignId === c.id)?._sum || {};
 
     return {
       id: c.id,
@@ -31,11 +30,6 @@ function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups, step
       exited: countFor(["EXITED"]),
       converted,
       conversionRate: enrolled > 0 ? round1((converted / enrolled) * 100) : 0,
-      sent: sums.sentCount || 0,
-      delivered: sums.deliveredCount || 0,
-      opened: sums.openedCount || 0,
-      clicked: sums.clickedCount || 0,
-      replied: sums.repliedCount || 0,
     };
   });
 }
@@ -108,7 +102,7 @@ export const getDashboardStats = async (req, res) => {
     ]);
 
     const campaignIds = activeCampaigns.map((c) => c.id);
-    const [enrollmentGroups, convertedGroups, stepSums] = campaignIds.length
+    const [enrollmentGroups, convertedGroups] = campaignIds.length
       ? await Promise.all([
           prisma.campaignEnrollment.groupBy({
             by: ["campaignId", "status"],
@@ -124,19 +118,8 @@ export const getDashboardStats = async (req, res) => {
             },
             _count: { _all: true },
           }),
-          prisma.campaignStep.groupBy({
-            by: ["campaignId"],
-            where: { campaignId: { in: campaignIds } },
-            _sum: {
-              sentCount: true,
-              deliveredCount: true,
-              openedCount: true,
-              clickedCount: true,
-              repliedCount: true,
-            },
-          }),
         ])
-      : [[], [], []];
+      : [[], []];
 
     return res.json({
       leads: {
@@ -153,7 +136,6 @@ export const getDashboardStats = async (req, res) => {
           activeCampaigns,
           enrollmentGroups,
           convertedGroups,
-          stepSums,
         ),
       },
       upcomingAppointments,
@@ -195,23 +177,12 @@ const EXPORTERS = {
       where: { companyId },
       orderBy: { createdAt: "desc" },
       include: {
-        steps: {
-          select: {
-            sentCount: true,
-            deliveredCount: true,
-            openedCount: true,
-            clickedCount: true,
-            repliedCount: true,
-            bouncedCount: true,
-            complaintCount: true,
-          },
-        },
+        steps: { select: { id: true } },
         enrollments: { select: { status: true, exitedReason: true } },
       },
     });
 
     return campaigns.map((c) => {
-      const sum = (field) => c.steps.reduce((a, s) => a + (s[field] || 0), 0);
       const enrolled = c.enrollments.length;
       const converted = c.enrollments.filter(
         (e) => e.status === "EXITED" && CONVERSION_EXIT_REASONS.includes(e.exitedReason),
@@ -229,13 +200,6 @@ const EXPORTERS = {
         Exited: c.enrollments.filter((e) => e.status === "EXITED").length,
         Converted: converted,
         ConversionRatePct: enrolled > 0 ? round1((converted / enrolled) * 100) : 0,
-        Sent: sum("sentCount"),
-        Delivered: sum("deliveredCount"),
-        Opened: sum("openedCount"),
-        Clicked: sum("clickedCount"),
-        Replied: sum("repliedCount"),
-        Bounced: sum("bouncedCount"),
-        Complaints: sum("complaintCount"),
         CreatedAt: c.createdAt.toISOString(),
       };
     });
@@ -256,13 +220,6 @@ const EXPORTERS = {
       Subject: s.subject || "",
       DelayValue: s.delayValue ?? "",
       DelayUnit: s.delayUnit || "",
-      Sent: s.sentCount,
-      Delivered: s.deliveredCount,
-      Opened: s.openedCount,
-      Clicked: s.clickedCount,
-      Replied: s.repliedCount,
-      Bounced: s.bouncedCount,
-      Complaints: s.complaintCount,
     }));
   },
 
@@ -280,12 +237,6 @@ const EXPORTERS = {
       Status: a.status,
       AudienceType: a.audienceType,
       AudienceSize: a.audienceCount,
-      Sent: a.sentCount,
-      Delivered: a.deliveredCount,
-      Failed: a.failedCount,
-      Opened: a.openedCount,
-      Clicked: a.clickedCount,
-      Unsubscribed: a.unsubscribedCount,
       ScheduledAt: a.scheduledAt ? a.scheduledAt.toISOString() : "",
       SentAt: a.sentAt ? a.sentAt.toISOString() : "",
       CreatedAt: a.createdAt.toISOString(),

@@ -795,3 +795,14 @@ model ScrapedNews {
 
   @@index([companyId, publishedAt])
 }
+
+model SalesAgentAppointment {
+  id            String   @id @default(cuid())
+  name          String
+  email         String
+  phone         String
+  preferredTime String
+  status        String   @default("CONFIRMED")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}

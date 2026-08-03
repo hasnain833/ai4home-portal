@@ -22,6 +22,7 @@ import {
   PlugZap,
   Newspaper,
   LifeBuoy,
+  CalendarRange,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -34,6 +35,7 @@ const adminNavItems = [
   { name: "CRM Health", href: "/admin/crm-health", icon: PlugZap },
   { name: "News Defaults", href: "/admin/news-defaults", icon: Newspaper },
   { name: "Support Access", href: "/admin/support", icon: LifeBuoy },
+  { name: "Appointments", href: "/admin/sales-agent-appointments", icon: CalendarRange },
 ];
 
 export default function AdminLayout({
@@ -128,11 +130,10 @@ export default function AdminLayout({
                   <motion.div
                     whileHover={{ x: 4 }}
                     transition={{ duration: 0.2 }}
-                    className={`flex items-center space-x-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                      isActive
+                    className={`flex items-center space-x-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${isActive
                         ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
                         : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200 border border-transparent"
-                    }`}>
+                      }`}>
                     <item.icon
                       className={`h-5 w-5 shrink-0 ${isActive ? "text-[#b48c3c]" : ""}`}
                     />
@@ -268,11 +269,10 @@ export default function AdminLayout({
                           href={item.href}
                           onClick={closeMobileSidebar}>
                           <div
-                            className={`flex items-center space-x-3 rounded-xl px-3 py-3 text-sm font-medium transition-all ${
-                              isActive
+                            className={`flex items-center space-x-3 rounded-xl px-3 py-3 text-sm font-medium transition-all ${isActive
                                 ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
                                 : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
-                            }`}>
+                              }`}>
                             <item.icon className="h-5 w-5 shrink-0" />
                             <span>{item.name}</span>
                           </div>

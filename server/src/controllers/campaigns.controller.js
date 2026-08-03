@@ -117,24 +117,9 @@ export const getCampaignDetail = async (req, res) => {
       },
     };
 
-    const stepAnalytics = {};
-    for (const step of campaign.steps) {
-      stepAnalytics[step.id] = {
-        sent: step.sentCount || 0,
-        delivered: step.deliveredCount || 0,
-        opened: step.openedCount || 0,
-        clicked: step.clickedCount || 0,
-        replied: step.repliedCount || 0,
-        bounced: step.bouncedCount || 0,
-        complaint: step.complaintCount || 0,
-        unsubscribed: 0,
-      };
-    }
-
     return res.json({
       ...campaign,
       analytics,
-      stepAnalytics,
     });
   } catch (error) {
     console.error("[Campaign Detail] Error:", error);
@@ -150,8 +135,6 @@ export const createCampaign = async (req, res) => {
       return res.status(400).json({ message: "Campaign name is required" });
     }
 
-    // SW-NUR: inherit the company-wide campaign behavior (exit conditions +
-    // version policy) so a new campaign starts aligned with the global setting.
     const company = await prisma.company.findUnique({
       where: { id: req.user.companyId },
       select: { campaignExitConditions: true, campaignVersionPolicy: true },

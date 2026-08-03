@@ -5,7 +5,7 @@ import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import { createSuperadminSessionToken } from "../lib/superadmin-session.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
-import { sendBrevoSms } from "../services/brevo-sms.service.js";
+import { sendSms } from "../services/sms.service.js";
 
 const safeEqual = (a, b) => {
   const ab = Buffer.from(String(a ?? ""), "utf8");
@@ -460,10 +460,11 @@ export const signup = async (req, res) => {
       }
 
       if (adminNotifyPhone) {
-        await sendBrevoSms({
+        await sendSms({
           to: adminNotifyPhone,
           tag: "tenant-registration",
           body: `New tenant registered: ${companyName}. Email: ${companyEmail}. Phone: ${companyPhone || "not provided"}. Please schedule an onboarding appointment.`,
+          smsConfig: "SYSTEM",
         });
       } else {
         console.warn(

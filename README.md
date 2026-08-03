@@ -127,8 +127,7 @@ The following represents the complete list of environment variables used across 
 | `INNGEST_EVENT_KEY` | Backend | Key for publishing events to Inngest |
 | `INNGEST_SIGNING_KEY` | Backend | Validates webhook requests from Inngest |
 | `INNGEST_DEV` | Backend | Local dev mode toggle (`1`) |
-| `BREVO_API_KEY` | Backend | Platform SMS & notifications |
-| `BREVO_SMS_SENDER` | Backend | Platform SMS & notifications |
+
 | `SENDER_EMAIL` | Backend | Transactional emails sender address |
 | `SMTP_HOST` | Backend | Transactional emails SMTP host |
 | `SMTP_PORT` | Backend | Transactional emails SMTP port |
