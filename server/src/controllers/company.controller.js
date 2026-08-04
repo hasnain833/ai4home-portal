@@ -4,6 +4,7 @@ import { encrypt, decryptSafe } from "../lib/crypto.js";
 import { normalizeNewsSources } from "../lib/news-sources.js";
 import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
 import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
+import { Templates } from "../services/templates.js";
 
 export const getCompany = async (req, res) => {
   try {
@@ -237,15 +238,7 @@ export const submitVerificationDocument = async (req, res) => {
         await MailService.sendEmail({
           to: superAdminEmail,
           subject: `Verification document submitted: ${company.name}`,
-          html: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-              <h2 style="color: #b48c3c;">Verification Document Submitted</h2>
-              <p><strong>${company.name}</strong> (${company.email || "no email"}) uploaded a verification document and is awaiting your approval.</p>
-              <div style="text-align: center; margin: 24px 0;">
-                <a href="${adminUrl}" style="background-color: #b48c3c; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Review &amp; Approve</a>
-              </div>
-            </div>
-          `,
+          html: Templates.getAdminVerificationDocEmail(company.name, adminUrl),
         });
       }
     } catch (mailErr) {

@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { getLeadTimezone } from "../lib/timezone.js";
+import { Templates } from "./templates.js";
 
 // Spam-complaint monitoring thresholds. 0.1% over a rolling 24 hours is the
 // figure the major mailbox providers publish, so these are fixed rather than
@@ -477,16 +478,14 @@ export class ComplianceService {
       await MailService.sendEmail({
         to,
         subject: `[ALERT] High ${metrics.channel} complaint rate (${ratePct}%) — ${company?.name || companyId}`,
-        html: `
-          <div style="font-family: sans-serif; line-height: 1.6;">
-            <h2 style="color: #b91c1c;">Complaint-rate threshold exceeded (NFR-O-001)</h2>
-            <p><strong>Company:</strong> ${company?.name || "(unknown)"} (${companyId})</p>
-            <p><strong>Channel:</strong> ${metrics.channel}</p>
-            <p><strong>Complaint rate:</strong> ${ratePct}% (threshold ${thresholdPct}%)</p>
-            <p><strong>Volume:</strong> ${metrics.complaintCount} complaints / ${metrics.sentCount} sent in the last ${metrics.windowHours}h</p>
-            <p>Review recent campaigns and sending lists. Affected contacts are auto-suppressed.</p>
-          </div>
-        `,
+        html: Templates.getComplianceReportEmail(
+          `<p><strong>Company:</strong> ${company?.name || "(unknown)"} (${companyId})</p>
+          <p><strong>Channel:</strong> ${metrics.channel}</p>
+          <p><strong>Complaint rate:</strong> ${ratePct}% (threshold ${thresholdPct}%)</p>
+          <p><strong>Volume:</strong> ${metrics.complaintCount} complaints / ${metrics.sentCount} sent in the last ${metrics.windowHours}h</p>
+          <p>Review recent campaigns and sending lists. Affected contacts are auto-suppressed.</p>`,
+          "Complaint-rate threshold exceeded (NFR-O-001)"
+        ),
       });
     } catch (error) {
       console.error("[Compliance] Failed to send complaint-rate alert email:", error?.message || error);

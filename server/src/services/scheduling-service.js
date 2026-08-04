@@ -5,6 +5,7 @@ import * as GoogleCalendar from "./google-calendar.service.js";
 import { MailService } from "./mail-service.js";
 import { sendSms } from "./sms.service.js";
 import { ComplianceService } from "./compliance-service.js";
+import { Templates, SmsTemplates } from "./templates.js";
 import { getMessagingConfig } from "../lib/messaging-config.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "./salesforce-writeback.js";
@@ -191,19 +192,12 @@ async function sendConfirmations(lead, appointment, tz) {
   const { smtpConfig, smsConfig } = await getMessagingConfig(lead.companyId);
 
   if (lead.email) {
-    const html = `
-      <div style="font-family:'Helvetica Neue',Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #eaeaea;border-radius:12px;overflow:hidden;">
-        <div style="background:#0F3B3D;padding:28px 40px;text-align:center;border-bottom:3px solid #b48c3c;">
-          <h1 style="color:#fff;margin:0;font-size:22px;">Appointment Confirmed</h1>
-        </div>
-        <div style="padding:36px 40px;color:#334155;line-height:1.7;font-size:16px;">
-          <p>Hi ${lead.firstName},</p>
-          <p>Your <strong>${appointment.title}</strong> is confirmed for:</p>
-          <p style="font-size:18px;font-weight:600;color:#0F3B3D;">${when}</p>
-          ${meet ? `<p>Join the video meeting here:<br/><a href="${meet}" style="color:#b48c3c;font-weight:600;">${meet}</a></p>` : ""}
-          <p style="margin-top:24px;font-size:14px;color:#64748b;">Need to change it? <a href="${rescheduleUrl}" style="color:#b48c3c;">Reschedule or cancel</a>.</p>
-        </div>
-      </div>`;
+    const html = Templates.getAppointmentConfirmationEmail(
+      "homeowner",
+      appointment,
+      when,
+      rescheduleUrl
+    );
     await MailService.sendEmail({
       to: lead.email,
       subject: `Confirmed: ${appointment.title} — ${when}`,
@@ -281,11 +275,12 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
       await MailService.sendEmail({
         to: appt.lead.email,
         subject: `Cancelled: ${appt.title} — ${when}`,
-        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
-          <p>Hi ${appt.lead.firstName},</p>
-          <p>Your <strong>${appt.title}</strong> scheduled for <strong>${when}</strong> has been cancelled.</p>
-          <p>Reply to this email if you'd like to rebook — we're happy to find another time.</p>
-        </div>`,
+        html: Templates.getAppointmentCancellationEmail(
+          "homeowner",
+          appt,
+          when,
+          null
+        ),
         fromName: appt.lead.company?.name || undefined,
         smtpConfig,
       });
@@ -293,7 +288,7 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
     if (appt.lead.phone) {
       await sendSms({
         to: appt.lead.phone,
-        body: ComplianceService.addSmsOptOutSuffix(`Your ${appt.title} for ${when} has been cancelled. Reply to rebook.`),
+        body: `Your ${appt.title} for ${when} has been cancelled. Reply to rebook.`,
         smsConfig,
       }).catch(() => { });
     }

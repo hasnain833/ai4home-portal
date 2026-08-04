@@ -89,6 +89,10 @@ export default function PortalLayout({
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
+    const stored = localStorage.getItem("sidebar-expanded");
+    if (stored !== null) {
+      setSidebarExpanded(stored === "true");
+    }
     const frame = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(frame);
   }, []);
@@ -139,7 +143,11 @@ export default function PortalLayout({
   };
 
 
-  const toggleSidebar = () => setSidebarExpanded(!sidebarExpanded);
+  const toggleSidebar = () => {
+    const newVal = !sidebarExpanded;
+    setSidebarExpanded(newVal);
+    localStorage.setItem("sidebar-expanded", String(newVal));
+  };
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
 
   // Sidebar width based on expansion state

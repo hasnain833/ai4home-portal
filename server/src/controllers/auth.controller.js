@@ -6,6 +6,7 @@ import prisma from "../lib/prisma.js";
 import { createSuperadminSessionToken } from "../lib/superadmin-session.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
 import { sendSms } from "../services/sms.service.js";
+import { Templates, SmsTemplates } from "../services/templates.js";
 
 const safeEqual = (a, b) => {
   const ab = Buffer.from(String(a ?? ""), "utf8");
@@ -382,17 +383,7 @@ export const signup = async (req, res) => {
         to: companyEmail,
         subject: "Verify Your Account",
         text: `Please verify your account by clicking this link: ${actionLink}`,
-        html: `
-          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-            <h2 style="color: #c59b4c;">Welcome to Aiforhomebuilder!</h2>
-            <p>Hi ${companyName},</p>
-            <p>Thank you for signing up. Please click the button below to verify your email address and activate your account:</p>
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${actionLink}" style="background-color: #c59b4c; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Verify Email Address</a>
-            </div>
-            <p style="color: #666; font-size: 12px; margin-top: 20px;">If you did not request this, please safely ignore this email.</p>
-          </div>
-        `,
+        html: Templates.getSignupVerificationEmail(companyName, actionLink),
       });
     } catch (mailError) {
       console.error(
@@ -437,21 +428,7 @@ export const signup = async (req, res) => {
           to: adminNotifyEmail,
           subject: `New tenant registration: ${companyName}`,
           text: `A new company "${companyName}" (${companyEmail}) just signed up. Phone: ${companyPhone || "not provided"}. Schedule an onboarding appointment and review it at ${adminUrl}`,
-          html: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-              <h2 style="color: #b48c3c;">New Tenant Registration</h2>
-              <p>A new company just signed up. Please schedule an onboarding appointment with the new tenant.</p>
-              <table style="margin: 16px 0; font-size: 14px; color: #333;">
-                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Company</td><td>${companyName}</td></tr>
-                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Email</td><td>${companyEmail}</td></tr>
-                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Phone</td><td>${companyPhone || "—"}</td></tr>
-              </table>
-              <p>You can review the tenant verification status here:</p>
-              <div style="text-align: center; margin: 24px 0;">
-                <a href="${adminUrl}" style="background-color: #b48c3c; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Open Verifications</a>
-              </div>
-            </div>
-          `,
+          html: Templates.getAdminNewTenantEmail(companyName, companyEmail, companyPhone, adminUrl),
         });
       } else {
         console.warn(
@@ -463,7 +440,7 @@ export const signup = async (req, res) => {
         await sendSms({
           to: adminNotifyPhone,
           tag: "tenant-registration",
-          body: `New tenant registered: ${companyName}. Email: ${companyEmail}. Phone: ${companyPhone || "not provided"}. Please schedule an onboarding appointment.`,
+          body: SmsTemplates.getAdminNewTenantSms(companyName, companyEmail, companyPhone),
           smsConfig: "SYSTEM",
         });
       } else {
@@ -541,17 +518,7 @@ export const forgotPassword = async (req, res) => {
       to: email,
       subject: "Password Reset Request",
       text: `Please reset your password by clicking this link: ${actionLink}`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-          <h2 style="color: #c59b4c;">Aiforhomebuilder</h2>
-          <p>Hi,</p>
-          <p>We received a request to reset your password. Click the button below to choose a new password:</p>
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${actionLink}" style="background-color: #c59b4c; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Reset Password</a>
-          </div>
-          <p style="color: #666; font-size: 12px; margin-top: 20px;">If you did not request a password reset, please safely ignore this email.</p>
-        </div>
-      `,
+      html: Templates.getForgotPasswordEmail(actionLink),
     });
 
     return res.json({ message: "Password reset link sent successfully" });
