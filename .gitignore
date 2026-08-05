@@ -10,6 +10,7 @@ node_modules
 !.yarn/releases
 !.yarn/versions
 .agents
+.cache
 
 # testing
 /coverage
@@ -44,3 +45,4 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+.env*.local

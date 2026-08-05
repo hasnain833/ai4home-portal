@@ -10,6 +10,7 @@ import { deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
 import { getOrCreateLeadBookingToken } from "../../lib/public-tokens.js";
 import { LEAD_STATUS } from "../../lib/lead-statuses.js";
+import { Templates } from "../../services/templates.js";
 
 // Helper function to calculate delay
 const calculateDelayTime = (value, unit) => {
@@ -183,23 +184,10 @@ export const runNurtureCampaign = inngest.createFunction(
           const body = renderText(currentStep.body || "", true);
           console.log(`[Nurture] Sending EMAIL to ${lead.email}, subject="${subject}"`);
 
-          const formattedHtml = `
-            <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #eaeaea;">
-              <div style="background-color: #0F3B3D; padding: 30px 40px; text-align: center; border-bottom: 3px solid #b48c3c;">
-                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
-                  ${escapeHtml(lead.company?.name || "Warranty Care & Sales Portal")}
-                </h1>
-              </div>
-              <div style="padding: 40px; color: #334155; line-height: 1.8; font-size: 16px;">
-                ${body.replace(/\n/g, "<br />")}
-              </div>
-            </div>
-            <div style="text-align: center; margin-top: 20px;">
-              <span style="font-family: sans-serif; font-size: 11px; color: #94a3b8;">
-                Powered by AI4Home Warranty Care
-              </span>
-            </div>
-          `;
+          const formattedHtml = Templates.getNurtureEmail(
+            body.replace(/\n/g, "<br />"),
+            escapeHtml(lead.company?.name || "Warranty Care & Sales Portal")
+          );
 
           const unsubscribeUrl = `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/unsubscribe/${lead.id}`;
           const finalHtml = ComplianceService.addEmailUnsubscribeFooter(

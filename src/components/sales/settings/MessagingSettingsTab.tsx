@@ -71,10 +71,15 @@ export default function MessagingSettingsTab() {
   // Webhook setup help dialogs.
   const [helpOpen, setHelpOpen] = useState<null | "email" | "sms">(null);
   const [origin, setOrigin] = useState("https://your-portal-domain");
+  const [companyId, setCompanyId] = useState("");
 
   useEffect(() => {
     fetchSettings();
-    if (typeof window !== "undefined") setOrigin(window.location.origin);
+    if (process.env.NEXT_PUBLIC_URL) {
+      setOrigin(process.env.NEXT_PUBLIC_URL);
+    } else if (typeof window !== "undefined") {
+      setOrigin(window.location.origin);
+    }
   }, []);
 
   const fetchSettings = async () => {
@@ -82,6 +87,7 @@ export default function MessagingSettingsTab() {
       const res = await fetch("/api/sales/settings/messaging", {credentials: "include"});
       if (res.ok) {
         const data = await res.json();
+        if (data.companyId) setCompanyId(data.companyId);
         if (data.email) {
           setEmailConfig(prev => ({
             ...prev,
@@ -359,7 +365,7 @@ export default function MessagingSettingsTab() {
                     In Brevo <strong>Inbound Parsing</strong>, add a route pointing to the URL
                     below. When a lead replies, they&apos;re exited from active sequences.
                   </p>
-                  <WebhookUrl label="Inbound email URL" url={`${origin}/api/sales/compliance/inbound/email`} />
+                  <WebhookUrl label="Inbound email URL" url={`${origin}/api/sales/compliance/inbound/email${companyId ? `?companyId=${companyId}` : ""}`} />
                 </div>
               </div>
             </>
@@ -383,7 +389,7 @@ export default function MessagingSettingsTab() {
                     [your number]</strong>. Under <strong>Messaging → &quot;A message comes in&quot;</strong>,
                     set the webhook to <strong>HTTP POST</strong> with the URL below.
                   </p>
-                  <WebhookUrl label="Inbound SMS URL" url={`${origin}/api/sales/compliance/inbound/sms`} />
+                  <WebhookUrl label="Inbound SMS URL" url={`${origin}/api/sales/compliance/inbound/sms${companyId ? `?companyId=${companyId}` : ""}`} />
                 </div>
                 <div className="space-y-2">
                   <p className="font-semibold text-slate-800 dark:text-slate-100">2. Delivery status callbacks</p>

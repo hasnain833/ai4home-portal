@@ -1,6 +1,7 @@
 import prisma from "./prisma.js";
 import { MailService } from "../services/mail-service.js";
 import { getMessagingConfig } from "./messaging-config.js";
+import { Templates } from "../services/templates.js";
 
 const ALERT_ACTION = "FAILURE_ALERT";
 
@@ -34,31 +35,14 @@ function alertHtml({ companyName, streak, action, lastMessage, lastErrors }) {
         .join("")}</ul>`
     : "";
 
-  return `
-    <div style="font-family:'Helvetica Neue',Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #eaeaea;border-radius:12px;overflow:hidden;">
-      <div style="background:#7f1d1d;padding:24px 40px;">
-        <h1 style="color:#fff;margin:0;font-size:20px;">Salesforce sync is failing</h1>
-      </div>
-      <div style="padding:32px 40px;color:#334155;line-height:1.7;font-size:15px;">
-        <p><strong>${companyName || "Your account"}</strong> has had
-        <strong>${streak} consecutive ${action} failures</strong>. New and updated
-        leads are <strong>not reaching the portal</strong> until this is resolved.</p>
-        <p style="margin-top:20px;"><strong>Most recent error</strong></p>
-        <p style="background:#f8fafc;border-left:3px solid #b91c1c;padding:12px 16px;margin:8px 0 0 0;color:#475569;font-size:14px;">
-          ${String(lastMessage || "No message recorded").slice(0, 400)}
-        </p>
-        ${errorList}
-        <p style="margin-top:24px;"><strong>What to check</strong></p>
-        <ul style="padding-left:18px;color:#475569;">
-          <li>Has the Salesforce connection expired or been revoked? Reconnect it in Settings → Integrations.</li>
-          <li>Did the connected app's credentials or permissions change?</li>
-          <li>Is the org over its API request limit?</li>
-        </ul>
-        <p style="margin-top:24px;font-size:13px;color:#94a3b8;">
-          You'll only get one of these every ${cooldownHours()}h while the failure persists.
-        </p>
-      </div>
-    </div>`;
+  return Templates.getSyncAlertEmail(
+    companyName,
+    streak,
+    action,
+    String(lastMessage || "No message recorded").slice(0, 400),
+    errorList,
+    cooldownHours()
+  );
 }
 
 export async function maybeAlertOnSyncFailure(companyId, { action = "sync" } = {}) {

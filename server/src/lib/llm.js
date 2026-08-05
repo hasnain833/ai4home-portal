@@ -24,8 +24,6 @@ export function hasLLM(providerConfig) {
   return isRealAnthropicKey() || !!getGroqKey(providerConfig) || !!getOpenAiKey(providerConfig);
 }
 
-// Model choice is a code decision, not deployment config — changing it affects
-// prompt behaviour and output quality, so it belongs in review, not in a .env.
 const ANTHROPIC_MODEL = "claude-sonnet-5";
 const GROQ_MODEL = "llama-3.3-70b-versatile";
 const OPENAI_MODEL = "gpt-4o-mini";
@@ -92,8 +90,6 @@ async function callGroq({ system, user, maxTokens, json, providerConfig }) {
         { role: "user", content: user },
       ],
     };
-    // Groq's JSON mode requires the word "json" in the prompt (our JSON callers
-    // already instruct "return JSON"), so only enable it when asked.
     if (useJsonMode) body.response_format = { type: "json_object" };
 
     const response = await fetch(
@@ -115,8 +111,6 @@ async function callGroq({ system, user, maxTokens, json, providerConfig }) {
   };
 
   let res = await attempt(json);
-  // Strict JSON mode can hard-fail on a minor model formatting slip — retry once
-  // in plain mode and let the caller parse leniently instead of failing outright.
   if (!res.ok && json) {
     console.error("[LLM] Groq JSON mode failed, retrying plain:", (res.err || "").slice(0, 160));
     res = await attempt(false);
@@ -161,11 +155,6 @@ export async function chat({ system, user, maxTokens = 700, json = false, provid
   return null;
 }
 
-// ─── Tool / function calling ──────────────────────────────────────────────────
-// Single-tool forced call, provider-agnostic. `tool` uses the Anthropic shape
-// ({ name, description, input_schema }); it's adapted to Groq/OpenAI function
-// calling automatically. `messages` is [{ role: "user"|"assistant", content }].
-// Returns the parsed tool-input object, or null if no provider is available.
 
 async function anthropicToolCall({ system, messages, tool, maxTokens }) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {

@@ -163,18 +163,11 @@ export default function AdminVerificationsPage() {
                         href={company.verificationDocUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="group relative block h-full w-full"
+                        className="group relative flex h-full w-full flex-col items-center justify-center bg-slate-50 hover:bg-slate-100 transition dark:bg-slate-800 dark:hover:bg-slate-700"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={company.verificationDocUrl}
-                          alt={`${company.name} verification document`}
-                          className="h-full w-full object-contain"
-                        />
-                        <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">
-                          <span className="flex items-center gap-1.5 rounded-md bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-800">
-                            <ExternalLink className="h-3.5 w-3.5" /> View full
-                          </span>
+                        <FileImage className="h-10 w-10 text-slate-400 mb-2 group-hover:text-[#b48c3c] transition-colors" />
+                        <span className="text-sm font-medium text-slate-600 dark:text-slate-300 group-hover:text-[#b48c3c]">
+                          View PDF Invoice
                         </span>
                       </a>
                     ) : (

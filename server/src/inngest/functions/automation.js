@@ -4,7 +4,8 @@ import { MailService } from "../../services/mail-service.js";
 import { MessagingService } from "../../services/messaging-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
-import { renderMergeFields, leadMergeVars } from "../../lib/utils.js";
+import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
+import { Templates } from "../../services/templates.js";
 import { DEFAULT_LEAD_STATUSES, LEAD_STATUS } from "../../lib/lead-statuses.js";
 
 
@@ -141,10 +142,12 @@ export async function executeAction(action, lead, ctx = {}) {
       await MailService.sendEmail({
         to,
         subject: `[Automation] Follow up: ${lead.firstName} ${lead.lastName}`,
-        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
-          <p>An automation flagged <strong>${escapeHtml(lead.firstName)} ${escapeHtml(lead.lastName)}</strong> (${escapeHtml(lead.email || lead.phone || "no contact")}).</p>
-          <p>${escapeHtml(params.message || "Please review this lead in the Sales workspace.")}</p>
-        </div>`,
+        html: Templates.getNotifyOwnerEmail(
+          `${escapeHtml(lead.firstName)} ${escapeHtml(lead.lastName)}`,
+          escapeHtml(lead.email || lead.phone || "no contact"),
+          escapeHtml(params.message || "Please review this lead in the Sales workspace."),
+          lead.company?.name
+        ),
         smtpConfig,
       });
       return { type, notified: to };

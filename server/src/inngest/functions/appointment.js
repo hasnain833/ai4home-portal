@@ -4,6 +4,7 @@ import prisma from "../../lib/prisma.js";
 import { MailService } from "../../services/mail-service.js";
 import { sendSms } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
+import { Templates } from "../../services/templates.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
 import {
   getAvailableSlots,
@@ -29,16 +30,7 @@ export function clampMaxTurns(value) {
 }
 
 function brandedEmail(companyName, bodyText) {
-  return `
-    <div style="font-family:'Helvetica Neue',Arial,sans-serif;max-width:600px;margin:0 auto;background:#fff;border:1px solid #eaeaea;border-radius:12px;overflow:hidden;">
-      <div style="background:#0F3B3D;padding:24px 40px;border-bottom:3px solid #b48c3c;">
-        <h1 style="color:#fff;margin:0;font-size:20px;">${companyName}</h1>
-      </div>
-      <div style="padding:32px 40px;color:#334155;line-height:1.7;font-size:16px;">
-        ${bodyText.replace(/\n/g, "<br />")}
-      </div>
-      <div style="padding:0 40px 24px;color:#94a3b8;font-size:12px;">This is an automated scheduling assistant.</div>
-    </div>`;
+  return Templates.getBrandedAgentEmail(bodyText, companyName);
 }
 
 async function sendLeadMessage(lead, channel, text, subject) {
@@ -421,11 +413,11 @@ async function escalate(lead, channel, convoId, transcript, reason) {
       await MailService.sendEmail({
         to,
         subject: `Action needed: scheduling handoff for ${lead.firstName} ${lead.lastName}`,
-        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
-          <p>The scheduling assistant could not finish booking <strong>${lead.firstName} ${lead.lastName}</strong> (${lead.email || lead.phone || "no contact"}).</p>
-          <p><strong>Reason:</strong> ${reason}</p>
-          <p>Please follow up to complete the appointment.</p>
-        </div>`,
+        html: Templates.getEscalationEmail(
+          `${lead.firstName} ${lead.lastName}`,
+          lead.email || lead.phone || "no contact",
+          reason
+        ),
         smtpConfig,
       });
     }

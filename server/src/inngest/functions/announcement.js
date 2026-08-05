@@ -9,6 +9,7 @@ import { htmlToText, looksLikeHtml } from "../../lib/sanitize-html.js";
 import { withActiveLeadFilter } from "../../lib/lead-audience.js";
 import { deadLetter } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml, safeUrl } from "../../lib/utils.js";
+import { Templates } from "../../services/templates.js";
 
 const CHUNK_SIZE = 50;
 
@@ -61,26 +62,13 @@ function renderText(templateText, lead, html = false) {
 }
 
 function buildEmailHtml(announcement, lead, body) {
-  // NFR-S-008: ctaLink went straight into href with no escaping or scheme check
-  // — a `javascript:` URL or a quote breakout would both have landed in every
-  // recipient's inbox. safeUrl returns null for anything not http/https/mailto,
-  // in which case the button is simply omitted.
   const ctaHref = safeUrl(announcement.ctaLink);
-  const cta = ctaHref
-    ? `<div style="text-align:center;margin-top:28px;">
-         <a href="${ctaHref}" style="background-color:#b48c3c;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:14px;display:inline-block;">Learn more</a>
-       </div>`
-    : "";
-  return `
-    <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 15px rgba(0,0,0,0.05);border:1px solid #eaeaea;">
-      <div style="background-color:#0F3B3D;padding:30px 40px;text-align:center;border-bottom:3px solid #b48c3c;">
-        <h1 style="color:#ffffff;margin:0;font-size:24px;font-weight:600;letter-spacing:0.5px;">${escapeHtml(lead.companyName || "Warranty Care & Sales Portal")}</h1>
-      </div>
-      <div style="padding:40px;color:#334155;line-height:1.8;font-size:16px;">
-        ${looksLikeHtml(body) ? body : body.replace(/\n/g, "<br />")}
-        ${cta}
-      </div>
-    </div>`;
+  const bodyHtml = looksLikeHtml(body) ? body : body.replace(/\n/g, "<br />");
+  return Templates.getAnnouncementEmail(
+    bodyHtml,
+    escapeHtml(lead.companyName || "Warranty Care & Sales Portal"),
+    ctaHref
+  );
 }
 
 // Has this announcement already been sent to this lead on this channel? (idempotency)

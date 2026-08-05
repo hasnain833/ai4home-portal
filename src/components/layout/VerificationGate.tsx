@@ -49,8 +49,8 @@ export default function VerificationGate() {
     setError(null);
     const selected = e.target.files?.[0];
     if (!selected) return;
-    if (!selected.type.startsWith("image/")) {
-      setError("Please select an image file (JPG, PNG, etc.).");
+    if (selected.type !== "application/pdf") {
+      setError("Please select a PDF file.");
       return;
     }
     if (selected.size > 10 * 1024 * 1024) {
@@ -109,19 +109,17 @@ export default function VerificationGate() {
               Verification in review
             </h2>
             <p className="mx-auto mt-2 max-w-md text-sm text-slate-500 dark:text-slate-400">
-              Thanks! Your document has been submitted. Our team is reviewing it
+              Thanks! Your invoice has been submitted. Our team is reviewing it
               and your Warranty Care workspace will unlock automatically once
               it&apos;s approved.
             </p>
 
             {docUrl && (
-              <div className="mx-auto mt-5 max-w-xs overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={docUrl}
-                  alt="Submitted verification document"
-                  className="max-h-48 w-full object-contain bg-slate-50 dark:bg-slate-800"
-                />
+              <div className="mx-auto mt-5 max-w-xs flex flex-col items-center justify-center p-4 rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+                <FileImage className="h-10 w-10 text-slate-400 mb-2" />
+                <a href={docUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-[#b48c3c] hover:underline">
+                  View Submitted PDF
+                </a>
               </div>
             )}
 
@@ -151,8 +149,7 @@ export default function VerificationGate() {
             </h2>
             <p className="mx-auto mt-2 max-w-md text-sm text-slate-500 dark:text-slate-400">
               Your Warranty Care workspace is locked while we verify your
-              business. Please upload a clear photo or scan of your verification
-              document (e.g. business license or invoice) and submit it for
+              business. Please upload your invoice in PDF format and submit it for
               review.
             </p>
 
@@ -160,7 +157,7 @@ export default function VerificationGate() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="application/pdf"
                 className="hidden"
                 onChange={handleFileSelect}
               />
@@ -170,26 +167,20 @@ export default function VerificationGate() {
                 onClick={() => fileInputRef.current?.click()}
                 className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-slate-500 transition hover:border-[#b48c3c] hover:bg-[#b48c3c]/5 dark:border-slate-600 dark:bg-slate-800/40 dark:text-slate-400"
               >
-                {preview ? (
+                {file ? (
                   <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={preview}
-                      alt="Document preview"
-                      className="max-h-40 rounded-md object-contain"
-                    />
+                    <FileImage className="h-10 w-10 text-[#b48c3c]" />
                     <span className="mt-1 flex items-center gap-1.5 text-xs font-medium text-[#b48c3c]">
-                      <FileImage className="h-3.5 w-3.5" />
-                      {file?.name} — click to change
+                      {file.name} — click to change
                     </span>
                   </>
                 ) : (
                   <>
                     <UploadCloud className="h-8 w-8" />
                     <span className="text-sm font-semibold">
-                      Click to upload a document image
+                      Click to upload your PDF invoice
                     </span>
-                    <span className="text-xs">JPG or PNG, up to 10 MB</span>
+                    <span className="text-xs">PDF, up to 10 MB</span>
                   </>
                 )}
               </button>

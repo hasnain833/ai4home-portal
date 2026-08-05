@@ -23,6 +23,8 @@ import {
   Newspaper,
   LifeBuoy,
   CalendarRange,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -51,7 +53,13 @@ export default function AdminLayout({
   const { user, logout, isLoading } = useAuth();
   const { theme, setTheme } = useTheme();
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const stored = localStorage.getItem("sidebar-expanded");
+    if (stored !== null) {
+      setSidebarExpanded(stored === "true");
+    }
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!isLoading && mounted) {
@@ -63,7 +71,11 @@ export default function AdminLayout({
     }
   }, [user, isLoading, mounted, router]);
 
-  const toggleSidebar = () => setSidebarExpanded(!sidebarExpanded);
+  const toggleSidebar = () => {
+    const newVal = !sidebarExpanded;
+    setSidebarExpanded(newVal);
+    localStorage.setItem("sidebar-expanded", String(newVal));
+  };
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
 
   const sidebarWidth = sidebarExpanded ? 256 : 80;
@@ -83,7 +95,7 @@ export default function AdminLayout({
         initial={false}
         animate={{ width: sidebarWidth }}
         transition={{ duration: 0.2, ease: "easeInOut" }}
-        className="fixed inset-y-0 left-0 z-50 hidden md:block bg-sidebar text-sidebar-foreground shadow-xl border-r border-sidebar-border">
+        className="fixed inset-y-0 left-0 z-50 hidden md:block bg-sidebar text-white shadow-xl">
         <div className="flex h-full flex-col">
           {/* Header */}
           <div className="flex h-16 items-center justify-between px-4 mt-2">
@@ -108,11 +120,11 @@ export default function AdminLayout({
               variant="ghost"
               size="icon"
               onClick={toggleSidebar}
-              className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-white/5">
+              className="text-white hover:bg-white/10">
               {sidebarExpanded ? (
-                <ChevronLeft className="h-4 w-4" />
+                <PanelLeftClose size={16} />
               ) : (
-                <ChevronRight className="h-4 w-4" />
+                <PanelLeftOpen size={16} />
               )}
             </Button>
           </div>
@@ -130,12 +142,12 @@ export default function AdminLayout({
                   <motion.div
                     whileHover={{ x: 4 }}
                     transition={{ duration: 0.2 }}
-                    className={`flex items-center space-x-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${isActive
-                        ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
-                        : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200 border border-transparent"
+                    className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${isActive
+                        ? "bg-white/10 text-white font-semibold"
+                        : "text-white/80 hover:bg-white/10 hover:text-white border border-transparent"
                       }`}>
                     <item.icon
-                      className={`h-5 w-5 shrink-0 ${isActive ? "text-[#b48c3c]" : ""}`}
+                      className="h-5 w-5 shrink-0"
                     />
                     {sidebarExpanded && <span>{item.name}</span>}
                   </motion.div>
@@ -150,7 +162,7 @@ export default function AdminLayout({
               variant="ghost"
               size="sm"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="w-full justify-start text-zinc-400 hover:bg-white/5 hover:text-zinc-200">
+              className="w-full justify-start text-white/80 hover:bg-white/10 hover:text-white">
               {theme === "dark" ? (
                 <Sun className="h-4 w-4 mr-3" />
               ) : (
@@ -167,10 +179,10 @@ export default function AdminLayout({
                 </div>
                 {sidebarExpanded && (
                   <div className="flex-1 text-left overflow-hidden">
-                    <p className="text-xs font-semibold text-zinc-200 truncate">
+                    <p className="text-xs font-semibold text-white truncate">
                       {user?.name || "System Admin"}
                     </p>
-                    <p className="text-[10px] text-[#b48c3c] uppercase tracking-wider">
+                    <p className="text-[10px] text-white/60 uppercase tracking-wider">
                       Root Access
                     </p>
                   </div>
@@ -181,7 +193,7 @@ export default function AdminLayout({
                   variant="ghost"
                   size="icon"
                   onClick={logout}
-                  className="h-8 w-8 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 shrink-0"
+                  className="h-8 w-8 text-white/80 hover:text-white hover:bg-white/10 shrink-0"
                   title="Logout">
                   <LogOut className="h-4 w-4" />
                 </Button>
@@ -229,7 +241,7 @@ export default function AdminLayout({
                 animate={{ x: 0 }}
                 exit={{ x: "-100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                className="fixed top-0 left-0 z-50 h-full w-72 bg-sidebar text-sidebar-foreground shadow-2xl md:hidden">
+                className="fixed top-0 left-0 z-50 h-full w-72 bg-sidebar text-white shadow-2xl md:hidden">
                 <div className="flex h-full flex-col">
                   <div className="flex h-16 items-center justify-between px-4 mt-2">
                     <div className="flex items-center gap-3">
@@ -269,9 +281,9 @@ export default function AdminLayout({
                           href={item.href}
                           onClick={closeMobileSidebar}>
                           <div
-                            className={`flex items-center space-x-3 rounded-xl px-3 py-3 text-sm font-medium transition-all ${isActive
-                                ? "bg-[#b48c3c]/10 border border-[#b48c3c]/20 text-[#b48c3c]"
-                                : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+                            className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${isActive
+                                ? "bg-white/10 text-white font-semibold"
+                                : "text-white/80 hover:bg-white/10 hover:text-white border border-transparent"
                               }`}>
                             <item.icon className="h-5 w-5 shrink-0" />
                             <span>{item.name}</span>
@@ -298,7 +310,7 @@ export default function AdminLayout({
                     <Button
                       variant="ghost"
                       onClick={logout}
-                      className="w-full justify-start text-zinc-400 hover:text-red-400 hover:bg-red-500/10">
+                      className="w-full justify-start text-white/80 hover:bg-white/10 hover:text-white">
                       <LogOut className="h-4 w-4 mr-3" />
                       Logout
                     </Button>

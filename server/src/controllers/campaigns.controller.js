@@ -208,17 +208,7 @@ export const updateCampaign = async (req, res) => {
 
       if (enrollments.length > 0) {
         const { inngest } = await import("../lib/inngest.js");
-        console.log(
-          `[Campaign Controller] Campaign ${id} launch: sending Inngest events for ${enrollments.length} enrolled leads.`,
-        );
         await sendCampaignEnrollmentEvents(inngest, enrollments, id);
-        console.log(
-          `[Campaign Controller] Sent ${enrollments.length} Inngest events successfully.`,
-        );
-      } else {
-        console.log(
-          `[Campaign Controller] Campaign ${id} launch: no active enrollments found to trigger.`,
-        );
       }
     }
 

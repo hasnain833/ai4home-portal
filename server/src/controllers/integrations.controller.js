@@ -379,9 +379,7 @@ export const botpressTicket = async (req, res) => {
     const portalUrl = process.env.NEXT_PUBLIC_URL;
     const ticketUrl = `${portalUrl}/warranty/tickets/${ticket.id}`;
 
-    console.log(
-      `[BOTPRESS INTEGRATION] Ticket #${ticket.id} generated successfully for ${email}`,
-    );
+    console.log(`[Integration] Ticket #${ticket.id} generated for ${email}`);
 
     return res.json({
       success: true,
