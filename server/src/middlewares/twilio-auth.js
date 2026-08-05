@@ -1,10 +1,10 @@
-﻿import crypto from "crypto";
+import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import { decryptSafe } from "../lib/crypto.js";
 
 function getRequestUrl(req) {
-  if (process.env.TWILIO_WEBHOOK_BASE_URL) {
-    return `${process.env.TWILIO_WEBHOOK_BASE_URL.replace(/\/$/, "")}${req.originalUrl}`;
+  if (process.env.NEXT_PUBLIC_URL) {
+    return `${process.env.NEXT_PUBLIC_URL.replace(/\/$/, "")}${req.originalUrl}`;
   }
   const proto = req.headers["x-forwarded-proto"] || req.protocol;
   const host = req.headers["x-forwarded-host"] || req.get("host");

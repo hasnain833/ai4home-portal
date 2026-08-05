@@ -21,6 +21,7 @@ export const getMessagingSettings = async (req, res) => {
     });
 
     const settings = {
+      companyId: session.companyId || "demo-company",
       email: null,
       sms: null,
     };

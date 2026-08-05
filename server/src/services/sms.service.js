@@ -5,7 +5,7 @@ function resolveTwilioConfig(smsConfig) {
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const from = process.env.TWILIO_FROM_NUMBER;
-    const statusCallbackUrl = process.env.TWILIO_STATUS_CALLBACK_URL || null;
+    const statusCallbackUrl = process.env.NEXT_PUBLIC_URL ? `${process.env.NEXT_PUBLIC_URL.replace(/\/$/, "")}/api/sales/compliance/inbound/sms-status` : null;
 
     if (!accountSid || !authToken || !from) return null;
     return { accountSid, authToken, from, statusCallbackUrl };
@@ -14,7 +14,7 @@ function resolveTwilioConfig(smsConfig) {
   const accountSid = smsConfig?.accountSid;
   const authToken = smsConfig?.authToken;
   const from = smsConfig?.from;
-  const statusCallbackUrl = smsConfig?.statusCallbackUrl || null;
+  const statusCallbackUrl = process.env.NEXT_PUBLIC_URL ? `${process.env.NEXT_PUBLIC_URL.replace(/\/$/, "")}/api/sales/compliance/inbound/sms-status` : null;
 
   if (!accountSid || !authToken || !from) return null;
   return { accountSid, authToken, from, statusCallbackUrl };

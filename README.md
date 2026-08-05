@@ -136,8 +136,6 @@ The following represents the complete list of environment variables used across 
 | `TWILIO_ACCOUNT_SID` | Backend | Inbound SMS fallback / sending |
 | `TWILIO_AUTH_TOKEN` | Backend | Inbound SMS fallback / sending |
 | `TWILIO_FROM_NUMBER` | Backend | Inbound SMS fallback / sending |
-| `TWILIO_WEBHOOK_BASE_URL` | Backend | Base URL for receiving Twilio webhooks |
-| `TWILIO_STATUS_CALLBACK_URL` | Backend | URL for SMS delivery status webhooks |
 | `ANTHROPIC_API_KEY` | Backend | Platform-wide primary LLM (Claude) |
 | `GOOGLE_CLIENT_ID` | Backend | Google Cloud OAuth for Calendar/Meet |
 | `GOOGLE_CLIENT_SECRET` | Backend | Google Cloud OAuth for Calendar/Meet |
