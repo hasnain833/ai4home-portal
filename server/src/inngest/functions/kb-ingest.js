@@ -35,7 +35,7 @@ export function chunkText(text) {
   return chunks.filter((c) => c.length > 20);
 }
 
-async function extractText(url, name) {
+export async function extractText(url, name) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch document (${res.status})`);
   const buffer = Buffer.from(await res.arrayBuffer());
