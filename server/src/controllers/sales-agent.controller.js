@@ -1,7 +1,10 @@
 import prisma from "../lib/prisma.js";
 import { sendSms } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
-
+import { runClaudeTurn } from "../inngest/functions/appointment.js";
+import { query as kbQuery } from "../services/vector-store.service.js";
+import { KB_SCOPES } from "../lib/sales-ai.js";
+import { getAvailableSlots, getAvailabilitySetting } from "../services/scheduling-service.js";
 export const bookAppointment = async (req, res) => {
   try {
     const { name, email, phone, preferredTime } = req.body;
@@ -95,6 +98,92 @@ export const bookAppointment = async (req, res) => {
   } catch (error) {
     console.error("[Sales Agent Booking] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+
+export const chatDemo = async (req, res) => {
+  try {
+    const { messages = [] } = req.body;
+    
+    // We fetch a dummy/default company for the demo.
+    const company = await prisma.company.findFirst();
+    if (!company) {
+      return res.status(500).json({ message: "No company found for demo" });
+    }
+
+    // Mock lead object
+    const lead = {
+      id: "demo-lead",
+      companyId: company.id,
+      company: company,
+      firstName: "Guest",
+      lastName: "User",
+      email: "demo@example.com"
+    };
+
+    const latestMessage = messages[messages.length - 1]?.content || "";
+
+    // KB Retrieval
+    let kbChunks = [];
+    try {
+      kbChunks = await kbQuery(company.id, latestMessage, 5, KB_SCOPES.scheduling, "appointment-agent");
+    } catch (e) {
+      console.error("[Demo Chat] KB retrieval failed:", e.message);
+    }
+
+    // Fetch slots
+    const setting = await getAvailabilitySetting(company.id);
+    const tz = setting?.timezone || "America/Los_Angeles";
+    const s = await getAvailableSlots({ companyId: company.id, agentId: null, days: 14, limit: 8, displayTz: tz });
+    const slots = s.map((x) => ({ iso: x.iso, label: x.label }));
+
+    const response = await runClaudeTurn({
+      lead,
+      company,
+      channel: "WEBCHAT",
+      transcript: messages,
+      slots,
+      timezone: tz,
+      kbChunks
+    });
+
+    return res.json({
+      action: response.action,
+      message: response.message,
+      slot_iso: response.slot_iso
+    });
+
+  } catch (error) {
+    console.error("[Sales Agent Demo Chat] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const simulateInbound = async (req, res) => {
+  try {
+    const { leadId = "demo-lead", body = "I am interested in a home.", channel = "SMS" } = req.body;
+    
+    // We fetch a dummy/default company for the demo.
+    const company = await prisma.company.findFirst();
+    if (!company) {
+      return res.status(500).json({ message: "No company found for demo" });
+    }
+
+    const { inngest } = await import("../lib/inngest.js");
+    
+    await inngest.send({ name: "campaign.exit", data: { leadId, reason: "REPLY" } });
+    
+    await inngest.send({
+      name: "lead.reply.received",
+      data: { leadId, companyId: company.id, channel, body, sender: "+1234567890" },
+    });
+    
+    return res.json({ message: "Inbound message simulated and Inngest agent triggered successfully." });
+  } catch (error) {
+    console.error("[Simulate Inbound] Error:", error);
+    return res.status(500).json({ message: error.message || "Failed to trigger Inngest event. Make sure Inngest Dev Server is running." });
   }
 };
 
