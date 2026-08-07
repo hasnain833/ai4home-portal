@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -43,6 +50,51 @@ function WebhookUrl({ label, url }: { label: string; url: string }) {
   );
 }
 
+type SmsProvider = "TWILIO_SMS" | "TELNYX_SMS";
+
+// The Integration row stores generic credentials (apiKey / secretKey / senderName);
+// each provider just labels them differently.
+const SMS_PROVIDERS: Record<
+  SmsProvider,
+  {
+    label: string;
+    description: string;
+    keyLabel: string;
+    keyPlaceholder: string;
+    secretLabel: string;
+    secretPlaceholder: string;
+    secretHint: string;
+    senderLabel: string;
+    senderPlaceholder: string;
+    senderHint: string;
+  }
+> = {
+  TWILIO_SMS: {
+    label: "Twilio",
+    description: "Configure Twilio credentials for sending and receiving SMS.",
+    keyLabel: "Account SID",
+    keyPlaceholder: "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    secretLabel: "Auth Token",
+    secretPlaceholder: "••••••••",
+    secretHint: "Also used to verify inbound webhook signatures.",
+    senderLabel: "From Number / Messaging Service SID",
+    senderPlaceholder: "+15551234567 or MGxxxxxxxx",
+    senderHint: 'A Twilio phone number in E.164 format, or a Messaging Service SID (starts with "MG").',
+  },
+  TELNYX_SMS: {
+    label: "Telnyx",
+    description: "Configure Telnyx credentials for sending and receiving SMS.",
+    keyLabel: "API Key",
+    keyPlaceholder: "KEYxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    secretLabel: "Public Key",
+    secretPlaceholder: "Base64 public key from Telnyx",
+    secretHint: "From Telnyx → Account Settings → Keys & Credentials → Public Key. Required to verify inbound webhooks.",
+    senderLabel: "From Number / Messaging Profile ID",
+    senderPlaceholder: "+15551234567 or a profile UUID",
+    senderHint: "A Telnyx number in E.164 format, or a Messaging Profile ID (UUID) to send from its number pool.",
+  },
+};
+
 export default function MessagingSettingsTab() {
   const [loading, setLoading] = useState(true);
   const [savingEmail, setSavingEmail] = useState(false);
@@ -61,12 +113,14 @@ export default function MessagingSettingsTab() {
   });
 
   const [smsConfig, setSmsConfig] = useState({
-    provider: "TWILIO_SMS",
-    apiKey: "", // Twilio Account SID
-    apiSecret: "", // Twilio Auth Token
-    senderName: "", // Twilio phone number (E.164) or Messaging Service SID
+    provider: "TWILIO_SMS" as SmsProvider,
+    apiKey: "", // Twilio Account SID / Telnyx API Key / Brevo API Key
+    apiSecret: "", // Twilio Auth Token / Telnyx Public Key / unused for Brevo
+    senderName: "", // Sender number, Messaging Service SID, profile id, or sender name
     testPhone: "",
   });
+
+  const smsMeta = SMS_PROVIDERS[smsConfig.provider] ?? SMS_PROVIDERS.TWILIO_SMS;
 
   // Webhook setup help dialogs.
   const [helpOpen, setHelpOpen] = useState<null | "email" | "sms">(null);
@@ -102,7 +156,7 @@ export default function MessagingSettingsTab() {
         if (data.sms) {
           setSmsConfig(prev => ({
             ...prev,
-            provider: data.sms.provider || "TWILIO_SMS",
+            provider: (data.sms.provider as SmsProvider) || "TWILIO_SMS",
             apiKey: data.sms.apiKey || "",
             apiSecret: data.sms.apiSecret || "",
             senderName: data.sms.senderName || "",
@@ -300,28 +354,44 @@ export default function MessagingSettingsTab() {
                 <HelpCircle className="h-4 w-4" /> Webhook setup
               </Button>
             </div>
-            <CardDescription>Configure Twilio credentials for sending and receiving SMS.</CardDescription>
+            <CardDescription>{smsMeta.description}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 pt-6 flex-1">
             <div className="space-y-2">
               <Label>SMS Provider</Label>
-              <Input value="Twilio" disabled className="bg-slate-50 dark:bg-slate-900/40" />
+              <Select
+                value={smsConfig.provider}
+                onValueChange={(value) =>
+                  // Credentials aren't portable between providers — clear them on switch.
+                  setSmsConfig({ ...smsConfig, provider: value as SmsProvider, apiKey: "", apiSecret: "", senderName: "" })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(SMS_PROVIDERS) as SmsProvider[]).map((key) => (
+                    <SelectItem key={key} value={key}>{SMS_PROVIDERS[key].label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
-              <Label>Account SID</Label>
-              <Input type="password" value={smsConfig.apiKey} onChange={e => setSmsConfig({...smsConfig, apiKey: e.target.value})} placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+              <Label>{smsMeta.keyLabel}</Label>
+              <Input type="password" value={smsConfig.apiKey} onChange={e => setSmsConfig({...smsConfig, apiKey: e.target.value})} placeholder={smsMeta.keyPlaceholder} />
             </div>
 
             <div className="space-y-2">
-              <Label>Auth Token</Label>
-              <Input type="password" value={smsConfig.apiSecret} onChange={e => setSmsConfig({...smsConfig, apiSecret: e.target.value})} placeholder="••••••••" />
+              <Label>{smsMeta.secretLabel}</Label>
+              <Input type="password" value={smsConfig.apiSecret} onChange={e => setSmsConfig({...smsConfig, apiSecret: e.target.value})} placeholder={smsMeta.secretPlaceholder} />
+              <p className="text-xs text-slate-500">{smsMeta.secretHint}</p>
             </div>
 
             <div className="space-y-2">
-              <Label>From Number / Messaging Service SID</Label>
-              <Input value={smsConfig.senderName} onChange={e => setSmsConfig({...smsConfig, senderName: e.target.value})} placeholder="+15551234567 or MGxxxxxxxx" />
-              <p className="text-xs text-slate-500">A Twilio phone number in E.164 format, or a Messaging Service SID (starts with &quot;MG&quot;).</p>
+              <Label>{smsMeta.senderLabel}</Label>
+              <Input value={smsConfig.senderName} onChange={e => setSmsConfig({...smsConfig, senderName: e.target.value})} placeholder={smsMeta.senderPlaceholder} />
+              <p className="text-xs text-slate-500">{smsMeta.senderHint}</p>
             </div>
 
             <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800">
@@ -374,7 +444,7 @@ export default function MessagingSettingsTab() {
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-green-600" /> Set up Twilio webhook
+                  <MessageSquare className="h-4 w-4 text-green-600" /> Set up {smsMeta.label} webhook
                 </DialogTitle>
                 <DialogDescription>
                   This lets the portal receive SMS replies and opt-outs (STOP), so leads are
@@ -382,17 +452,38 @@ export default function MessagingSettingsTab() {
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-5 pt-2 text-sm">
+                {smsConfig.provider === "TWILIO_SMS" && (
+                  <div className="space-y-2">
+                    <p className="font-semibold text-slate-800 dark:text-slate-100">Inbound messages (replies &amp; STOP)</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      In the Twilio Console go to <strong>Phone Numbers → Manage → Active numbers →
+                      [your number]</strong>. Under <strong>Messaging → &quot;A message comes in&quot;</strong>,
+                      set the webhook to <strong>HTTP POST</strong> with the URL below.
+                    </p>
+                    <WebhookUrl label="Inbound SMS URL" url={`${origin}/api/sales/compliance/inbound/sms${companyId ? `?companyId=${companyId}` : ""}`} />
+                  </div>
+                )}
+
+                {smsConfig.provider === "TELNYX_SMS" && (
+                  <div className="space-y-2">
+                    <p className="font-semibold text-slate-800 dark:text-slate-100">Inbound messages (replies &amp; STOP)</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      In the Telnyx Portal go to <strong>Messaging → Messaging Profiles →
+                      [your profile] → Outbound/Inbound Webhooks</strong>. Set the
+                      <strong> Webhook URL</strong> to the URL below (API version <strong>V2</strong>),
+                      then make sure your number is assigned to that profile.
+                    </p>
+                    <WebhookUrl label="Inbound SMS URL" url={`${origin}/api/sales/compliance/inbound/sms/telnyx${companyId ? `?companyId=${companyId}` : ""}`} />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Telnyx signs every webhook, so the <strong>Public Key</strong> field above must be
+                      filled in or inbound messages will be rejected. STOP/HELP auto-replies are sent by
+                      Telnyx itself.
+                    </p>
+                  </div>
+                )}
+
                 <div className="space-y-2">
-                  <p className="font-semibold text-slate-800 dark:text-slate-100">1. Inbound messages (replies &amp; STOP)</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    In the Twilio Console go to <strong>Phone Numbers → Manage → Active numbers →
-                    [your number]</strong>. Under <strong>Messaging → &quot;A message comes in&quot;</strong>,
-                    set the webhook to <strong>HTTP POST</strong> with the URL below.
-                  </p>
-                  <WebhookUrl label="Inbound SMS URL" url={`${origin}/api/sales/compliance/inbound/sms${companyId ? `?companyId=${companyId}` : ""}`} />
-                </div>
-                <div className="space-y-2">
-                  <p className="font-semibold text-slate-800 dark:text-slate-100">2. Delivery status callbacks</p>
+                  <p className="font-semibold text-slate-800 dark:text-slate-100">Delivery status</p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     No manual setup needed — the portal attaches a status callback to every SMS it
                     sends, so delivered/failed counts update automatically.

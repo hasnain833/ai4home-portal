@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireRoles } from "../middlewares/auth.js";
 import { verifyTwilioSignature } from "../middlewares/twilio-auth.js";
+import { verifyTelnyxSignature } from "../middlewares/telnyx-auth.js";
 import {
   getSuppressions,
   addSuppression,
@@ -10,6 +11,7 @@ import {
   unsubscribeByLead,
   processBrevoInboundEmail,
   processTwilioInboundSms,
+  processTelnyxInboundSms,
 } from "../controllers/compliance.controller.js";
 
 const router = Router();
@@ -23,5 +25,6 @@ router.post("/unsubscribe", unsubscribeWebhook);
 router.post("/unsubscribe-link/:leadId", unsubscribeByLead);
 router.post("/inbound/email", processBrevoInboundEmail);
 router.post("/inbound/sms", verifyTwilioSignature, processTwilioInboundSms);
+router.post("/inbound/sms/telnyx", verifyTelnyxSignature, processTelnyxInboundSms);
 
 export default router;

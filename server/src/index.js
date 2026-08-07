@@ -75,7 +75,16 @@ app.use(
   }),
 );
 
-app.use(express.json({ limit: "10mb" }));
+// rawBody is kept so webhook signatures (Telnyx Ed25519) can be verified against
+// the exact bytes the provider signed.
+app.use(
+  express.json({
+    limit: "10mb",
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.use("/api/auth", authRouter);

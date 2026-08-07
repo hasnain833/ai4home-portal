@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
-import { sendSms } from "../services/sms.service.js";
+import { sendSms, SMS_PROVIDERS, RETIRED_SMS_PROVIDERS } from "../services/sms.service.js";
 import { encrypt, decryptSafe } from "../lib/crypto.js";
 
 const last4 = (value) => {
@@ -16,7 +16,7 @@ export const getMessagingSettings = async (req, res) => {
     const integrations = await prisma.integration.findMany({
       where: {
         companyId: session.companyId || "demo-company",
-        platform: { in: ["BREVO_EMAIL", "TWILIO_SMS"] },
+        platform: { in: ["BREVO_EMAIL", ...SMS_PROVIDERS] },
       },
     });
 
@@ -40,7 +40,7 @@ export const getMessagingSettings = async (req, res) => {
       };
     }
 
-    const smsInt = integrations.find(i => i.platform === "TWILIO_SMS");
+    const smsInt = integrations.find(i => SMS_PROVIDERS.includes(i.platform));
     if (smsInt) {
       settings.sms = {
         id: smsInt.id,
@@ -105,14 +105,16 @@ export const saveSmsSettings = async (req, res) => {
     const { provider, apiKey, apiSecret, senderName, isActive } = req.body;
     const companyId = session.companyId || "demo-company";
 
-    if (provider !== "TWILIO_SMS") {
+    if (!SMS_PROVIDERS.includes(provider)) {
       return res.status(400).json({ message: "Invalid SMS provider" });
     }
 
+    // Exactly one SMS provider is active per company — drop the others, plus any
+    // rows left behind by a provider that's no longer offered.
     await prisma.integration.deleteMany({
       where: {
         companyId,
-        platform: { in: ["TWILIO_SMS"] },
+        platform: { in: [...SMS_PROVIDERS.filter((p) => p !== provider), ...RETIRED_SMS_PROVIDERS] },
       },
     });
 
@@ -198,24 +200,27 @@ export const testSms = async (req, res) => {
     const { to, config } = req.body;
     if (!to) return res.status(400).json({ message: "Recipient phone number required" });
     
+    const provider = SMS_PROVIDERS.includes(config?.provider) ? config.provider : "TWILIO_SMS";
+
     let smsConfig;
     if (config.apiKey?.includes("••••") || config.apiSecret?.includes("••••")) {
       const existing = await prisma.integration.findFirst({
-        where: { companyId: req.user?.companyId || "demo-company", platform: "TWILIO_SMS" },
+        where: { companyId: req.user?.companyId || "demo-company", platform: provider },
       });
       if (!existing) return res.status(400).json({ message: "SMS settings not found in database to test" });
 
       smsConfig = {
-        provider: "TWILIO_SMS",
-        accountSid: decryptSafe(existing.apiKey),
-        authToken: decryptSafe(existing.secretKey),
-        from: existing.senderName,
+        provider,
+        // Masked fields fall back to what's stored; unmasked ones use what was typed.
+        apiKey: config.apiKey?.includes("••••") ? decryptSafe(existing.apiKey) : config.apiKey,
+        apiSecret: config.apiSecret?.includes("••••") ? decryptSafe(existing.secretKey) : config.apiSecret,
+        from: config.senderName || existing.senderName,
       };
     } else {
       smsConfig = {
-        provider: "TWILIO_SMS",
-        accountSid: config.apiKey,
-        authToken: config.apiSecret,
+        provider,
+        apiKey: config.apiKey,
+        apiSecret: config.apiSecret,
         from: config.senderName,
       };
     }
@@ -225,6 +230,18 @@ export const testSms = async (req, res) => {
       body: "This is a test SMS from Warranty Care Portal to verify your configuration.",
       smsConfig,
     });
+
+    // sendSms degrades to a simulated send when credentials are missing or the
+    // provider rejects the message — surface that instead of a false success.
+    if (result?.provider?.endsWith("_SIMULATED")) {
+      return res.status(400).json({
+        success: false,
+        message: result.error
+          ? `${provider.replace("_SMS", "")} rejected the message: ${result.error}`
+          : "SMS was not delivered — the provider rejected it or credentials are incomplete.",
+        result,
+      });
+    }
 
     return res.json({ success: true, message: "Test SMS sent successfully!", result });
   } catch (error) {
