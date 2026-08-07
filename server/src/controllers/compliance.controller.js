@@ -523,6 +523,50 @@ function twiml(message) {
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`;
 }
 
+// Provider-agnostic handling of one inbound SMS: opt-out/opt-in keywords first,
+// then reply-detection (exit sequences + wake the AI agent) for matching leads.
+// Returns { complianceReply } when a keyword was handled, else {}.
+async function routeInboundSms({ companyId, sender, body, toNumber, provider }) {
+  console.log(`[SMS IN] ← inbound SMS (${provider}) | company=${companyId} from=${sender || "?"} to=${toNumber || "?"} | body="${(body || "").replace(/\s+/g, " ").slice(0, 160)}"`);
+
+  if (!sender || !body) {
+    console.warn("[SMS IN] Missing From/Body, skipping.");
+    return {};
+  }
+
+  const normalizedContact = sender.replace(/\D/g, "");
+
+  const result = await ComplianceService.handleInboundKeyword(companyId, sender, body, "SMS");
+
+  if (result.isComplianceAction) {
+    console.log(`[SMS IN] compliance keyword handled (${result.action || "opt-out/opt-in"}) — no agent trigger.`);
+    return { complianceReply: result.replyText };
+  }
+
+  const leads = await prisma.lead.findMany({
+    where: {
+      companyId,
+      phone: { contains: normalizedContact.slice(-10) },
+    },
+  });
+
+  console.log(`[SMS IN] matched ${leads.length} lead(s) for ${sender} in company ${companyId}${leads.length === 0 ? " — no lead with this phone, nothing to trigger" : ""}.`);
+
+  for (const lead of leads) {
+    const { inngest } = await import("../lib/inngest.js");
+    await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
+    await inngest.send({
+      name: "lead.reply.received",
+      data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
+    });
+    await markLeadEngaged(lead.id);
+    await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "SMS" } });
+    console.log(`[SMS IN] → triggered AI agent (lead.reply.received) for lead=${lead.id} (${lead.firstName || ""} ${lead.lastName || ""})`);
+  }
+
+  return {};
+}
+
 export const processTwilioInboundSms = async (req, res) => {
   const sendTwiml = (message) => res.status(200).type("text/xml").send(twiml(message));
 
@@ -532,55 +576,57 @@ export const processTwilioInboundSms = async (req, res) => {
       return res.status(400).json({ message: "companyId is required." });
     }
 
-    const sender = req.body.From || req.body.from || req.body.sender;
-    const body = req.body.Body || req.body.body || req.body.text || "";
-    const toNumber = req.body.To || req.body.to || "";
-
-    console.log(`[SMS IN] ← inbound SMS | company=${companyId} from=${sender || "?"} to=${toNumber || "?"} | body="${(body || "").replace(/\s+/g, " ").slice(0, 160)}"`);
-
-    if (!sender || !body) {
-      console.warn("[SMS IN] Missing From/Body, skipping.");
-      return sendTwiml();
-    }
-
-    const normalizedContact = sender.replace(/\D/g, "");
-
-    const result = await ComplianceService.handleInboundKeyword(
+    const { complianceReply } = await routeInboundSms({
       companyId,
-      sender,
-      body,
-      "SMS"
-    );
-
-    if (result.isComplianceAction) {
-      console.log(`[SMS IN] compliance keyword handled (${result.action || "opt-out/opt-in"}) — replying via TwiML, no agent trigger.`);
-      return sendTwiml(result.replyText);
-    }
-
-    const leads = await prisma.lead.findMany({
-      where: {
-        companyId,
-        phone: { contains: normalizedContact.slice(-10) },
-      },
+      sender: req.body.From || req.body.from || req.body.sender,
+      body: req.body.Body || req.body.body || req.body.text || "",
+      toNumber: req.body.To || req.body.to || "",
+      provider: "TWILIO_SMS",
     });
 
-    console.log(`[SMS IN] matched ${leads.length} lead(s) for ${sender} in company ${companyId}${leads.length === 0 ? " — no lead with this phone, nothing to trigger" : ""}.`);
-
-    for (const lead of leads) {
-      const { inngest } = await import("../lib/inngest.js");
-      await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
-      await inngest.send({
-        name: "lead.reply.received",
-        data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
-      });
-      await markLeadEngaged(lead.id);
-      await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "SMS" } });
-      console.log(`[SMS IN] → triggered AI agent (lead.reply.received) for lead=${lead.id} (${lead.firstName || ""} ${lead.lastName || ""})`);
-    }
-
-    return sendTwiml();
+    return sendTwiml(complianceReply);
   } catch (error) {
     console.error("[Twilio SMS Webhook] Error processing inbound SMS:", error);
     return res.status(200).type("text/xml").send(twiml());
+  }
+};
+
+export const processTelnyxInboundSms = async (req, res) => {
+  try {
+    const companyId = req.query.companyId || req.body?.companyId;
+    if (!companyId) {
+      return res.status(400).json({ message: "companyId is required." });
+    }
+
+    const event = req.body?.data;
+    const eventType = event?.event_type;
+
+    // The messaging profile posts delivery events (message.sent/message.finalized)
+    // to the same URL — acknowledge and ignore anything that isn't an inbound message.
+    if (eventType !== "message.received") {
+      console.log(`[SMS IN] Telnyx event "${eventType || "unknown"}" ignored.`);
+      return res.status(200).json({ received: true });
+    }
+
+    const payload = event.payload || {};
+
+    // Telnyx has no TwiML equivalent, and it auto-responds to STOP/HELP at the
+    // carrier level, so a compliance reply is recorded but not sent from here.
+    const { complianceReply } = await routeInboundSms({
+      companyId,
+      sender: payload.from?.phone_number,
+      body: payload.text || "",
+      toNumber: payload.to?.[0]?.phone_number || "",
+      provider: "TELNYX_SMS",
+    });
+
+    if (complianceReply) {
+      console.log(`[SMS IN] Telnyx handles the keyword auto-reply — suppressed our own: "${complianceReply}"`);
+    }
+
+    return res.status(200).json({ received: true });
+  } catch (error) {
+    console.error("[Telnyx SMS Webhook] Error processing inbound SMS:", error);
+    return res.status(200).json({ received: true });
   }
 };

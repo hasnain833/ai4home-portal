@@ -1,5 +1,6 @@
 import prisma from "./prisma.js";
 import { decryptSafe } from "./crypto.js";
+import { SMS_PROVIDERS } from "../services/sms.service.js";
 
 function isPubliclyReachable(hostname) {
   const h = hostname.toLowerCase();
@@ -34,7 +35,7 @@ export async function getMessagingConfig(companyId) {
     where: {
       companyId,
       isActive: true,
-      platform: { in: ["BREVO_EMAIL", "TWILIO_SMS"] },
+      platform: { in: ["BREVO_EMAIL", ...SMS_PROVIDERS] },
     },
   });
 
@@ -53,14 +54,15 @@ export async function getMessagingConfig(companyId) {
     };
   }
 
-  const smsInt = integrations.find((i) => i.platform === "TWILIO_SMS");
+  // Only one SMS provider is active per company (saving one deactivates the others).
+  const smsInt = integrations.find((i) => SMS_PROVIDERS.includes(i.platform));
   if (smsInt) {
     smsConfig = {
-      provider: "TWILIO_SMS",
-      accountSid: decryptSafe(smsInt.apiKey),
-      authToken: decryptSafe(smsInt.secretKey),
+      provider: smsInt.platform,
+      apiKey: decryptSafe(smsInt.apiKey),
+      apiSecret: decryptSafe(smsInt.secretKey),
       from: smsInt.senderName,
-      statusCallbackUrl: buildSmsWebhookUrl("/api/sales/compliance/events/sms", companyId),
+      statusCallbackUrl: buildSmsWebhookUrl("/api/sales/compliance/inbound/sms-status", companyId),
     };
   }
 
