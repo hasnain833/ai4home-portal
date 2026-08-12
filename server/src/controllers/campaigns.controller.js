@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { buildPrismaWhereClause } from "./segments.controller.js";
-import { chat, hasLLM } from "../lib/llm.js";
+import { chat, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
@@ -8,7 +8,9 @@ import { LEAD_STATUS } from "../lib/lead-statuses.js";
 
 const CAMPAIGN_BATCH_SIZE = 500;
 
-async function sendCampaignEnrollmentEvents(inngest, enrollments, campaignId) {
+// companyId travels on the event so a failed run can actually be recorded — the
+// dead-letter handler drops anything it cannot attribute to a company.
+async function sendCampaignEnrollmentEvents(inngest, enrollments, campaignId, companyId) {
   for (let i = 0; i < enrollments.length; i += CAMPAIGN_BATCH_SIZE) {
     const batch = enrollments.slice(i, i + CAMPAIGN_BATCH_SIZE);
     await inngest.send(
@@ -18,6 +20,7 @@ async function sendCampaignEnrollmentEvents(inngest, enrollments, campaignId) {
           leadId: enrollment.leadId,
           campaignId,
           enrollmentId: enrollment.id,
+          companyId,
         },
       })),
     );
@@ -208,7 +211,7 @@ export const updateCampaign = async (req, res) => {
 
       if (enrollments.length > 0) {
         const { inngest } = await import("../lib/inngest.js");
-        await sendCampaignEnrollmentEvents(inngest, enrollments, id);
+        await sendCampaignEnrollmentEvents(inngest, enrollments, id, req.user.companyId);
       }
     }
 
@@ -218,6 +221,30 @@ export const updateCampaign = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+
+// Saving and enrolling only warn — a tenant must still be able to draft SMS steps
+// before Twilio is set up. Only an actual send is blocked (see announcements).
+async function unsendableChannelWarnings(companyId, steps) {
+  const types = new Set((steps || []).map((s) => String(s?.type || "").toUpperCase()));
+  if (!types.has("EMAIL") && !types.has("SMS")) return [];
+
+  const { getMessagingCapabilities } = await import("../lib/messaging-config.js");
+  const caps = await getMessagingCapabilities(companyId);
+
+  const warnings = [];
+  if (types.has("SMS") && !caps.sms.configured) {
+    warnings.push(
+      "SMS is not configured, so the SMS steps in this campaign will not be delivered. Set it up in Settings > Messaging.",
+    );
+  }
+  if (types.has("EMAIL") && !caps.email.configured) {
+    warnings.push(
+      "Email is not configured, so the email steps in this campaign will not be delivered. Set it up in Settings > Messaging.",
+    );
+  }
+  return warnings;
+}
 
 export const updateCampaignSteps = async (req, res) => {
   try {
@@ -289,7 +316,11 @@ export const updateCampaignSteps = async (req, res) => {
         where: { id: targetCampaignId },
         include: { steps: { orderBy: { position: "asc" } } },
       });
-      return res.json({ newVersion: true, campaign: updatedCampaign });
+      return res.json({
+        newVersion: true,
+        campaign: updatedCampaign,
+        warnings: await unsendableChannelWarnings(req.user.companyId, steps),
+      });
     }
 
     await prisma.$transaction([
@@ -323,7 +354,10 @@ export const updateCampaignSteps = async (req, res) => {
       include: { steps: { orderBy: { position: "asc" } } },
     });
 
-    return res.json(updatedCampaign);
+    return res.json({
+      ...updatedCampaign,
+      warnings: await unsendableChannelWarnings(req.user.companyId, steps),
+    });
   } catch (error) {
     console.error("[Campaign Steps Update] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -365,6 +399,8 @@ export const enrollCampaign = async (req, res) => {
 
     const campaign = await prisma.campaign.findFirst({
       where: { id, companyId: req.user.companyId },
+      // Step types drive the "this channel will not be delivered" warning below.
+      include: { steps: { select: { type: true } } },
     });
 
     if (!campaign) {
@@ -470,11 +506,12 @@ export const enrollCampaign = async (req, res) => {
       console.log(
         `[Campaign Controller] Sending campaign enrollment events for ${enrollmentsToStart.length} leads in batches.`,
       );
-      await sendCampaignEnrollmentEvents(inngest, enrollmentsToStart, id);
+      await sendCampaignEnrollmentEvents(inngest, enrollmentsToStart, id, req.user.companyId);
     }
     return res.json({
       success: true,
       enrolledCount,
+      warnings: await unsendableChannelWarnings(req.user.companyId, campaign.steps),
       skippedDuplicatesCount: skippedDuplicates.length,
       // SW-ANN-001: archived or closed/unsubscribed leads dropped from this enroll.
       skippedInactiveCount: skippedInactive.length,
@@ -608,21 +645,10 @@ The {companyName} Team`;
   return { emailSubject, emailBody, smsBody };
 }
 
-function getAiProviderConfig(company) {
-  const integrations = company?.integrations || [];
-  const active = integrations.find((i) => i.isActive);
-  return {
-    provider: active?.platform?.toLowerCase() || "platform",
-    openAiApiKey: integrations.find((i) => i.platform === "OPENAI")?.apiKey,
-    groqApiKey: integrations.find((i) => i.platform === "GROQ")?.apiKey,
-  };
-}
-
 async function generateNewsCampaignCopy(news, company) {
   const fallback = buildFallbackNewsCopy(news);
-  const providerConfig = getAiProviderConfig(company);
 
-  if (!hasLLM(providerConfig)) {
+  if (!(await hasLLM(company?.id))) {
     return { ...fallback, aiGenerated: false };
   }
 
@@ -662,7 +688,7 @@ Rules:
       user: userPrompt,
       maxTokens: 700,
       json: true,
-      providerConfig,
+      companyId: company?.id,
     });
     const parsed = parseJsonBlock(text || "");
     if (parsed && parsed.emailSubject && parsed.emailBody && parsed.smsBody) {
@@ -702,10 +728,6 @@ export const createCampaignFromNews = async (req, res) => {
         name: true,
         voiceProfile: true,
         salesBrandProfile: true,
-        integrations: {
-          where: { platform: { in: ["OPENAI", "GROQ"] } },
-          select: { platform: true, apiKey: true, isActive: true },
-        },
       },
     });
 
@@ -762,18 +784,11 @@ export const generateCampaignCopy = async (req, res) => {
         name: true,
         voiceProfile: true,
         salesBrandProfile: true,
-        integrations: {
-          where: { platform: { in: ["OPENAI", "GROQ"] } },
-          select: { platform: true, apiKey: true, isActive: true },
-        },
       },
     });
-    const providerConfig = getAiProviderConfig(company);
-
-    if (!hasLLM(providerConfig)) {
-      return res.status(500).json({
-        message:
-          "No AI provider is configured. Add an OpenAI or Groq key in Sales Settings > AI Config.",
+    if (!(await hasLLM(companyId))) {
+      return res.status(503).json({
+        message: await aiUnavailableMessage(companyId),
       });
     }
     const brandLines = buildBrandContext(company, { brandVoice });
@@ -810,7 +825,7 @@ Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body"
       user: "Please generate the draft copy based on the provided parameters.",
       maxTokens: 500,
       json: true,
-      providerConfig,
+      companyId,
     });
 
     if (!content) {

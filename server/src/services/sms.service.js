@@ -43,7 +43,9 @@ function resolveSystemConfig() {
   return null;
 }
 
-function isComplete(cfg) {
+// Exported so the capabilities endpoint reports exactly what the sender would do
+// — "SMS is configured" in the UI must mean the same thing as it does here.
+export function isComplete(cfg) {
   if (!cfg?.apiKey || !cfg?.from) return false;
   // Only Twilio needs a second credential to authenticate outbound sends.
   if (cfg.provider === "TWILIO_SMS" && !cfg.apiSecret) return false;

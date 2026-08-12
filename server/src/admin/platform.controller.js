@@ -6,6 +6,13 @@ import {
   normalizeNewsSources,
 } from "../lib/news-sources.js";
 import { decryptDetailed, encryptionKeyStatus, isEncrypted } from "../lib/crypto.js";
+import {
+  PLATFORM_AI_PROVIDERS,
+  TENANT_AI_PROVIDERS,
+  getPlatformAiKeyStatus,
+  savePlatformAiKey,
+  invalidateAiConfigCache,
+} from "../lib/ai-config.js";
 
 function denyUnlessSuperAdmin(req, res) {
   if (!req.user?.isSuperAdmin) {
@@ -217,6 +224,128 @@ export const updateDefaultNewsSources = async (req, res) => {
     });
   } catch (error) {
     console.error("[Platform updateDefaultNewsSources] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+export const getAiKeySettings = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+    if (!prisma.platformSetting) {
+      return res.status(503).json({
+        message:
+          "PlatformSetting table is not available yet. Run `npx prisma db push`.",
+      });
+    }
+
+    const [platformKeys, companies, aiIntegrations] = await Promise.all([
+      getPlatformAiKeyStatus(),
+      prisma.company.findMany({
+        select: { id: true, name: true, aiPlatformGrant: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.integration.findMany({
+        where: { isActive: true, platform: { in: TENANT_AI_PROVIDERS } },
+        select: { companyId: true, platform: true, apiKey: true },
+      }),
+    ]);
+
+    const ownKeyByCompany = new Map();
+    for (const row of aiIntegrations) {
+      if (row.apiKey && !ownKeyByCompany.has(row.companyId)) {
+        ownKeyByCompany.set(row.companyId, row.platform);
+      }
+    }
+
+    return res.json({
+      providers: PLATFORM_AI_PROVIDERS,
+      platformKeys,
+      companies: companies.map((c) => ({
+        id: c.id,
+        name: c.name,
+        grant: c.aiPlatformGrant || null,
+        ownKeyProvider: ownKeyByCompany.get(c.id) || null,
+      })),
+    });
+  } catch (error) {
+    console.error("[Platform getAiKeySettings] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const updatePlatformAiKey = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+
+    const { provider, apiKey } = req.body || {};
+    if (!PLATFORM_AI_PROVIDERS.includes(provider)) {
+      return res.status(400).json({
+        message: `provider must be one of: ${PLATFORM_AI_PROVIDERS.join(", ")}`,
+      });
+    }
+
+    const result = await savePlatformAiKey(provider, apiKey);
+
+    await writeAuditLog({
+      req,
+      action: result.configured
+        ? "PLATFORM_AI_KEY_SET"
+        : "PLATFORM_AI_KEY_CLEARED",
+      targetType: "PlatformSetting",
+      targetId: `ai.platformKeys:${provider}`,
+      metadata: { provider },
+    });
+
+    return res.json({ ...result, platformKeys: await getPlatformAiKeyStatus() });
+  } catch (error) {
+    console.error("[Platform updatePlatformAiKey] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/** Grant or revoke one tenant's access to a platform AI key. */
+export const updateCompanyAiGrant = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+
+    const { companyId } = req.params;
+    const raw = req.body?.grant;
+    // null / "" / "NONE" all mean "revoke".
+    const grant =
+      raw === null || raw === undefined || raw === "" || raw === "NONE"
+        ? null
+        : String(raw).toUpperCase();
+
+    if (grant !== null && !PLATFORM_AI_PROVIDERS.includes(grant)) {
+      return res.status(400).json({
+        message: `grant must be null or one of: ${PLATFORM_AI_PROVIDERS.join(", ")}`,
+      });
+    }
+
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, name: true },
+    });
+    if (!company) return res.status(404).json({ message: "Company not found" });
+
+    await prisma.company.update({
+      where: { id: companyId },
+      data: { aiPlatformGrant: grant },
+    });
+    invalidateAiConfigCache(companyId);
+
+    await writeAuditLog({
+      req,
+      action: grant ? "COMPANY_AI_GRANT_SET" : "COMPANY_AI_GRANT_REVOKED",
+      targetType: "Company",
+      targetId: companyId,
+      metadata: { companyName: company.name, grant },
+    });
+
+    return res.json({ companyId, grant });
+  } catch (error) {
+    console.error("[Platform updateCompanyAiGrant] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

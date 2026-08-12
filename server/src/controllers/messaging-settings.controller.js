@@ -2,6 +2,7 @@ import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
 import { sendSms, SMS_PROVIDERS, RETIRED_SMS_PROVIDERS } from "../services/sms.service.js";
 import { encrypt, decryptSafe } from "../lib/crypto.js";
+import { getMessagingCapabilities } from "../lib/messaging-config.js";
 
 const last4 = (value) => {
   const plain = decryptSafe(value);
@@ -55,6 +56,26 @@ export const getMessagingSettings = async (req, res) => {
     return res.json(settings);
   } catch (error) {
     console.error("[MessagingSettings] GET failed:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/**
+ * What this tenant can actually deliver on. No secrets, so unlike the settings
+ * endpoint above this is readable by any signed-in staff member — the campaign
+ * and announcement builders use it to gate their channel pickers.
+ */
+export const getCapabilities = async (req, res) => {
+  try {
+    const session = req.user;
+    if (!session) return res.status(401).json({ message: "Unauthorized" });
+
+    const capabilities = await getMessagingCapabilities(
+      session.companyId || "demo-company",
+    );
+    return res.json(capabilities);
+  } catch (error) {
+    console.error("[MessagingSettings] Capabilities failed:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

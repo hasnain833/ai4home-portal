@@ -65,8 +65,9 @@ export async function scrapeNewsForCompany(
     fresh,
     SUMMARY_CONCURRENCY,
     async ({ item }) => {
-      if (!hasLLM()) return null;
+      if (!(await hasLLM(company.id))) return null;
       return chat({
+        companyId: company.id,
         system:
           "You are an expert real estate content marketer. You rewrite news snippets into engaging, 2-3 sentence summaries that are easy to read for homeowners and leads. Always maintain a professional, helpful tone.",
         user: `Title: ${item.title}\nSnippet: ${item.contentSnippet || ""}\n\nPlease write a short, engaging summary of this news.`,

@@ -1,43 +1,17 @@
-import { decryptSafe } from "./crypto.js";
+import { resolveAiConfig, recordAiUsage } from "./ai-config.js";
 
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || "";
+export { hasAi as hasLLM, aiUnavailableMessage } from "./ai-config.js";
 
-export function isRealAnthropicKey(k = ANTHROPIC_KEY) {
-  return typeof k === "string" && k.startsWith("sk-ant-");
-}
-
-function getGroqKey(providerConfig) {
-  if (providerConfig?.provider === "groq" && providerConfig?.groqApiKey) {
-    return decryptSafe(providerConfig.groqApiKey);
-  }
-  return "";
-}
-
-function getOpenAiKey(providerConfig) {
-  if (providerConfig?.provider === "openai" && providerConfig?.openAiApiKey) {
-    return decryptSafe(providerConfig.openAiApiKey);
-  }
-  return "";
-}
-
-export function hasLLM(providerConfig) {
-  return isRealAnthropicKey() || !!getGroqKey(providerConfig) || !!getOpenAiKey(providerConfig);
-}
-
-const ANTHROPIC_MODEL = "claude-sonnet-5";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
-const OPENAI_MODEL = "gpt-4o-mini";
-
-async function callAnthropic({ system, user, maxTokens }) {
+async function callAnthropic({ cfg, companyId, system, user, maxTokens }) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": ANTHROPIC_KEY,
+      "x-api-key": cfg.apiKey,
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
+      model: cfg.model,
       max_tokens: maxTokens,
       system,
       messages: [{ role: "user", content: user }],
@@ -48,41 +22,15 @@ async function callAnthropic({ system, user, maxTokens }) {
     return null;
   }
   const data = await response.json();
+  recordAiUsage(companyId, cfg, data?.usage);
   return data?.content?.[0]?.text || null;
 }
 
-async function callOpenAI({ system, user, maxTokens, json, providerConfig }) {
-  const body = {
-    model: OPENAI_MODEL,
-    max_tokens: maxTokens,
-    temperature: 0.3,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-    ...(json ? { response_format: { type: "json_object" } } : {}),
-  };
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${getOpenAiKey(providerConfig)}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    console.error("[LLM] OpenAI error:", await response.text());
-    return null;
-  }
-  const data = await response.json();
-  return data?.choices?.[0]?.message?.content || null;
-}
-
-async function callGroq({ system, user, maxTokens, json, providerConfig }) {
+// The OpenAI chat-completions contract.
+async function callOpenAiCompatible({ cfg, companyId, endpoint, label, system, user, maxTokens, json }) {
   const attempt = async (useJsonMode) => {
     const body = {
-      model: GROQ_MODEL,
+      model: cfg.model,
       max_tokens: maxTokens,
       temperature: 0.3,
       messages: [
@@ -92,80 +40,67 @@ async function callGroq({ system, user, maxTokens, json, providerConfig }) {
     };
     if (useJsonMode) body.response_format = { type: "json_object" };
 
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${getGroqKey(providerConfig)}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.apiKey}`,
+        "Content-Type": "application/json",
       },
-    );
-    if (!response.ok) {
-      return { ok: false, err: await response.text() };
-    }
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) return { ok: false, err: await response.text() };
     const data = await response.json();
+    recordAiUsage(companyId, cfg, data?.usage);
     return { ok: true, text: data?.choices?.[0]?.message?.content || null };
   };
 
   let res = await attempt(json);
   if (!res.ok && json) {
-    console.error("[LLM] Groq JSON mode failed, retrying plain:", (res.err || "").slice(0, 160));
+    console.error(`[LLM] ${label} JSON mode failed, retrying plain:`, (res.err || "").slice(0, 160));
     res = await attempt(false);
   }
   if (!res.ok) {
-    console.error("[LLM] Groq error:", res.err);
+    console.error(`[LLM] ${label} error:`, res.err);
     return null;
   }
   return res.text;
 }
 
-export async function chat({ system, user, maxTokens = 700, json = false, providerConfig = null }) {
-  if (isRealAnthropicKey()) {
-    try {
-      const out = await callAnthropic({ system, user, maxTokens });
-      if (out) return out;
-    } catch (err) {
-      console.error("[LLM] Anthropic exception:", err.message);
-    }
+const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+
+export async function chat({ companyId, system, user, maxTokens = 700, json = false }) {
+  const cfg = await resolveAiConfig(companyId);
+  if (!cfg.provider) {
+    console.warn(`[LLM] No AI provider for company=${companyId} (${cfg.reason}).`);
+    return null;
   }
-  if (providerConfig?.provider === "openai" && getOpenAiKey(providerConfig)) {
-    try {
-      return await callOpenAI({ system, user, maxTokens, json, providerConfig });
-    } catch (err) {
-      console.error("[LLM] OpenAI exception:", err.message);
+  try {
+    switch (cfg.provider) {
+      case "ANTHROPIC":
+        return await callAnthropic({ cfg, companyId, system, user, maxTokens });
+      case "OPENAI":
+        return await callOpenAiCompatible({
+          cfg, companyId, endpoint: OPENAI_CHAT_URL, label: "OpenAI", system, user, maxTokens, json,
+        });
+      default:
+        return null;
     }
+  } catch (err) {
+    console.error(`[LLM] ${cfg.provider} exception:`, err.message);
+    return null;
   }
-  if (getGroqKey(providerConfig)) {
-    try {
-      return await callGroq({ system, user, maxTokens, json, providerConfig });
-    } catch (err) {
-      console.error("[LLM] Groq exception:", err.message);
-    }
-  }
-  if (getOpenAiKey(providerConfig)) {
-    try {
-      return await callOpenAI({ system, user, maxTokens, json, providerConfig });
-    } catch (err) {
-      console.error("[LLM] OpenAI exception:", err.message);
-    }
-  }
-  return null;
 }
 
-
-async function anthropicToolCall({ system, messages, tool, maxTokens }) {
+async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens }) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": ANTHROPIC_KEY,
+      "x-api-key": cfg.apiKey,
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
+      model: cfg.model,
       max_tokens: maxTokens,
       system,
       tools: [tool],
@@ -178,13 +113,15 @@ async function anthropicToolCall({ system, messages, tool, maxTokens }) {
     return null;
   }
   const data = await response.json();
+  recordAiUsage(companyId, cfg, data?.usage);
   const block = data?.content?.find((b) => b.type === "tool_use" && b.name === tool.name);
   return block?.input || null;
 }
 
-async function groqToolCall({ system, messages, tool, maxTokens }) {
+// OpenAI exposes Anthropic-style tools as "functions".
+async function openAiCompatibleToolCall({ cfg, companyId, endpoint, label, system, messages, tool, maxTokens }) {
   const body = {
-    model: GROQ_MODEL,
+    model: cfg.model,
     max_tokens: maxTokens,
     temperature: 0.3,
     messages: [{ role: "system", content: system }, ...messages],
@@ -200,44 +137,49 @@ async function groqToolCall({ system, messages, tool, maxTokens }) {
     ],
     tool_choice: { type: "function", function: { name: tool.name } },
   };
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${getGroqKey()}`,
+      Authorization: `Bearer ${cfg.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
   if (!response.ok) {
-    console.error("[LLM] Groq tool error:", await response.text());
+    console.error(`[LLM] ${label} tool error:`, await response.text());
     return null;
   }
   const data = await response.json();
+  recordAiUsage(companyId, cfg, data?.usage);
   const args = data?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
   if (!args) return null;
   try {
     return typeof args === "string" ? JSON.parse(args) : args;
   } catch (e) {
-    console.error("[LLM] Groq tool args parse failed:", e.message);
+    console.error(`[LLM] ${label} tool args parse failed:`, e.message);
     return null;
   }
 }
 
-export async function toolCall({ system, messages, tool, maxTokens = 700 }) {
-  if (isRealAnthropicKey()) {
-    try {
-      const out = await anthropicToolCall({ system, messages, tool, maxTokens });
-      if (out) return out;
-    } catch (err) {
-      console.error("[LLM] Anthropic tool exception:", err.message);
-    }
+export async function toolCall({ companyId, system, messages, tool, maxTokens = 700 }) {
+  const cfg = await resolveAiConfig(companyId);
+  if (!cfg.provider) {
+    console.warn(`[LLM] No AI provider for company=${companyId} (${cfg.reason}).`);
+    return null;
   }
-  if (getGroqKey()) {
-    try {
-      return await groqToolCall({ system, messages, tool, maxTokens });
-    } catch (err) {
-      console.error("[LLM] Groq tool exception:", err.message);
+  try {
+    switch (cfg.provider) {
+      case "ANTHROPIC":
+        return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens });
+      case "OPENAI":
+        return await openAiCompatibleToolCall({
+          cfg, companyId, endpoint: OPENAI_CHAT_URL, label: "OpenAI", system, messages, tool, maxTokens,
+        });
+      default:
+        return null;
     }
+  } catch (err) {
+    console.error(`[LLM] ${cfg.provider} tool exception:`, err.message);
+    return null;
   }
-  return null;
 }

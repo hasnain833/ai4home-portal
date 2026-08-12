@@ -136,7 +136,6 @@ The following represents the complete list of environment variables used across 
 | `TWILIO_ACCOUNT_SID` | Backend | Inbound SMS fallback / sending |
 | `TWILIO_AUTH_TOKEN` | Backend | Inbound SMS fallback / sending |
 | `TWILIO_FROM_NUMBER` | Backend | Inbound SMS fallback / sending |
-| `ANTHROPIC_API_KEY` | Backend | Platform-wide primary LLM (Claude) |
 | `GOOGLE_CLIENT_ID` | Backend | Google Cloud OAuth for Calendar/Meet |
 | `GOOGLE_CLIENT_SECRET` | Backend | Google Cloud OAuth for Calendar/Meet |
 | `GOOGLE_REDIRECT_URI` | Backend | Google Cloud OAuth for Calendar/Meet |
@@ -144,6 +143,15 @@ The following represents the complete list of environment variables used across 
 | `SUPERADMIN_PASSWORD` | Backend | Default super admin login password |
 | `ADMIN_NOTIFY_EMAIL` | Backend | Target email for new tenant registration alerts |
 | `ADMIN_NOTIFY_PHONE` | Backend | Target phone for new tenant registration alerts |
+
+### AI provider keys
+
+AI keys are **not** environment variables. Each tenant saves its own key under
+Sales Settings → AI Config (Claude or OpenAI). Platform-owned Claude and
+OpenAI keys are set by a superadmin under Admin → AI Keys and granted to
+individual tenants; a tenant's own key always takes priority over the granted
+platform key. A tenant with neither has AI drafting switched off — there is no
+environment fallback.
 
 ---
 

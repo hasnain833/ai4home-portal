@@ -235,7 +235,7 @@ Always reply by calling the 'respond' tool.`;
   );
   if (messages.length === 0) messages.push({ role: "user", content: "(the lead replied to our outreach expressing interest)" });
 
-  const input = await toolCall({ system, messages, tool: RESPOND_TOOL, maxTokens: 700 });
+  const input = await toolCall({ companyId: company?.id, system, messages, tool: RESPOND_TOOL, maxTokens: 700 });
   if (!input || !input.action) {
     return { action: "reply", message: "Happy to help — tell me a bit about what you're looking for and I'll point you in the right direction." };
   }

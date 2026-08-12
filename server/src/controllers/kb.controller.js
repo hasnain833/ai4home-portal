@@ -11,7 +11,7 @@ import {
 } from "../lib/storage.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { runKbIngestion } from "../inngest/functions/kb-ingest.js";
-import { chat, hasLLM } from "../lib/llm.js";
+import { chat, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations } from "../lib/sales-ai.js";
 import {
   snapshotSalesConfig,
@@ -369,12 +369,13 @@ export const rollbackBrandProfileVersion = async (req, res) => {
 
 export const previewAiOutput = async (req, res) => {
   try {
-    if (!hasLLM()) {
-      return res.status(503).json({ message: "No LLM provider configured. Set up an AI provider key in Sales Settings > AI Config." });
-    }
-
     const { feature = "nurture", config = {}, sample = {} } = req.body || {};
     const companyId = req.user.companyId;
+
+    if (!(await hasLLM(companyId))) {
+      return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
+    }
+
     const company = await prisma.company.findUnique({
       where: { id: companyId },
       select: { name: true, voiceProfile: true, salesBrandProfile: true },
@@ -430,7 +431,7 @@ Audience: ${sample.audience || "Homebuyers or existing homeowners"}.
 ${stepType === "SMS" ? "Keep it under 160 characters." : "Provide a Subject Line and Email Body."}`;
     }
 
-    const draft = await chat({ system, user, maxTokens: 700 });
+    const draft = await chat({ companyId, system, user, maxTokens: 700 });
     if (!draft) {
       return res.status(502).json({ message: "The AI provider returned nothing. Please try again." });
     }

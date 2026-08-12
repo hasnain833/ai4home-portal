@@ -21,6 +21,7 @@ import {
   Loader2,
   PlugZap,
   Newspaper,
+  KeyRound,
   LifeBuoy,
   CalendarRange,
   PanelLeftClose,
@@ -36,6 +37,7 @@ const adminNavItems = [
   { name: "Users & Access", href: "/admin/users", icon: Users },
   { name: "CRM Health", href: "/admin/crm-health", icon: PlugZap },
   { name: "News Defaults", href: "/admin/news-defaults", icon: Newspaper },
+  { name: "AI Keys", href: "/admin/ai-keys", icon: KeyRound },
   { name: "Support Access", href: "/admin/support", icon: LifeBuoy },
   { name: "Appointments", href: "/admin/sales-agent-appointments", icon: CalendarRange },
 ];
