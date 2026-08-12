@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useQuery, QUERY_KEYS } from "@/lib/use-query";
+import { useMessagingCapabilities } from "@/lib/use-messaging-capabilities";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -83,6 +84,7 @@ const statusStyles: Record<string, string> = {
 };
 
 export default function AnnouncementsPage() {
+  const { emailConfigured, smsConfigured } = useMessagingCapabilities();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   // Segments come straight from the shared query cache — see below.
   const [loading, setLoading] = useState(true);
@@ -389,6 +391,26 @@ export default function AnnouncementsPage() {
             </div>
           </div>
 
+          {(!emailConfigured || !smsConfigured) && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                <strong>
+                  {!emailConfigured && !smsConfigured
+                    ? "Email and SMS are not configured."
+                    : !smsConfigured
+                      ? "SMS is not configured."
+                      : "Email is not configured."}
+                </strong>{" "}
+                Broadcasts on that channel cannot be sent. Set it up in{" "}
+                <a href="/sales/settings" className="font-semibold underline underline-offset-2">
+                  Settings &rarr; Messaging
+                </a>
+                .
+              </span>
+            </div>
+          )}
+
           {activeTab === "past" ? (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -535,9 +557,17 @@ export default function AnnouncementsPage() {
                       <Select value={form.channel} onValueChange={(val) => setForm((f) => ({ ...f, channel: val }))}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="EMAIL">Email only</SelectItem>
-                          <SelectItem value="SMS">SMS only</SelectItem>
-                          <SelectItem value="BOTH">Email &amp; SMS</SelectItem>
+                          <SelectItem value="EMAIL" disabled={!emailConfigured}>
+                            {emailConfigured ? "Email only" : "Email only — not configured"}
+                          </SelectItem>
+                          <SelectItem value="SMS" disabled={!smsConfigured}>
+                            {smsConfigured ? "SMS only" : "SMS only — not configured"}
+                          </SelectItem>
+                          <SelectItem value="BOTH" disabled={!emailConfigured || !smsConfigured}>
+                            {emailConfigured && smsConfigured
+                              ? "Email & SMS"
+                              : "Email & SMS — needs both configured"}
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

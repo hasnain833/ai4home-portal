@@ -70,6 +70,9 @@ export async function executeAction(action, lead, ctx = {}) {
   const type = String(action?.type || "").toUpperCase();
   const params = action?.params || {};
   const budget = ctx.sendBudget;
+  // One credential read per run instead of one per action: this used to hit the
+  // database and decrypt on every single action for every single lead.
+  const loadMessaging = ctx.loadMessaging || (() => getMessagingConfig(lead.companyId));
 
   switch (type) {
     case "PAUSE_CAMPAIGNS": {
@@ -108,7 +111,7 @@ export async function executeAction(action, lead, ctx = {}) {
       if (campaign.status === "Active") {
         await inngest.send({
           name: "campaign.enrollment.started",
-          data: { leadId: lead.id, campaignId, enrollmentId: enrollment.id },
+          data: { leadId: lead.id, campaignId, enrollmentId: enrollment.id, companyId: lead.companyId },
         });
       }
       return { type, enrolled: campaignId };
@@ -138,7 +141,7 @@ export async function executeAction(action, lead, ctx = {}) {
         : null;
       const to = owner?.email || lead.company?.email;
       if (!to) return { type, skipped: "no owner/company email" };
-      const { smtpConfig } = await getMessagingConfig(lead.companyId);
+      const { smtpConfig } = await loadMessaging();
       await MailService.sendEmail({
         to,
         subject: `[Automation] Follow up: ${lead.firstName} ${lead.lastName}`,
@@ -160,7 +163,7 @@ export async function executeAction(action, lead, ctx = {}) {
       if (budget && budget.remaining <= 0) return { type, skipped: "daily cap reached" };
       const subject = mergeFields(params.subject || "A quick note", lead, false);
       const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">${mergeFields(params.body || "", lead, true)}</div>`;
-      const { smtpConfig } = await getMessagingConfig(lead.companyId);
+      const { smtpConfig } = await loadMessaging();
       const r = await MessagingService.sendEmail({ companyId: lead.companyId, to: lead.email, subject, html, smtpConfig });
       if (r && (r.blocked || r.success === false)) return { type, skipped: r.reason || "send blocked" };
       if (budget) budget.remaining -= 1;
@@ -173,7 +176,8 @@ export async function executeAction(action, lead, ctx = {}) {
       if (budget && budget.remaining <= 0) return { type, skipped: "daily cap reached" };
       const body = mergeFields(params.body || "", lead, false);
       if (!body.trim()) return { type, skipped: "empty body" };
-      const { smsConfig } = await getMessagingConfig(lead.companyId);
+      const { smsConfig } = await loadMessaging();
+      if (!smsConfig) return { type, skipped: "sms not configured" };
       const r = await MessagingService.sendSms({ companyId: lead.companyId, to: lead.phone, body, smsConfig });
       if (r && r.blocked) return { type, skipped: r.reason || "send blocked" };
       if (budget) budget.remaining -= 1;
@@ -243,6 +247,9 @@ export async function evaluateRulesForTrigger({ companyId, leadId, triggerEvent 
     take: 10000,
   });
   const sendBudget = { remaining: Math.max(0, cap - countSentActions(todaysRuns)) };
+  // Lazily loaded once, then shared by every action this trigger runs.
+  let messagingPromise = null;
+  const loadMessaging = () => (messagingPromise ||= getMessagingConfig(companyId));
 
   let executed = 0;
   for (const rule of rules) {
@@ -273,7 +280,7 @@ export async function evaluateRulesForTrigger({ companyId, leadId, triggerEvent 
     try {
       if (lead) {
         for (const action of rule.actions || []) {
-          actionsTaken.push(await executeAction(action, lead, { sendBudget }));
+          actionsTaken.push(await executeAction(action, lead, { sendBudget, loadMessaging }));
         }
       }
     } catch (e) {

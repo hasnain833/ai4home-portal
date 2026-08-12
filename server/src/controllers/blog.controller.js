@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { chat, hasLLM } from "../lib/llm.js";
+import { chat, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
 
@@ -191,7 +191,7 @@ export const generateBlogDraft = async (req, res) => {
   try {
     const { companyId, id: userId } = req.user;
     if (!companyId) return res.status(403).json({ message: "No company associated" });
-    if (!hasLLM()) return res.status(503).json({ message: "No LLM provider configured. Set up an AI provider key in Sales Settings > AI Config." });
+    if (!(await hasLLM(companyId))) return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
 
     const { topic, tone, keywords, targetAudience, targetLength, category, newsIds } = req.body;
     if (!topic || !topic.trim()) return res.status(400).json({ message: "A topic prompt is required." });
@@ -240,7 +240,7 @@ Target audience: ${targetAudience || "prospective homebuyers"}
 Target length: ${targetLength || "800-1000 words"}
 Keywords to work in naturally: ${keywordStr || "(none specified)"}`;
 
-    const raw = await chat({ system, user, maxTokens: 2000, json: true });
+    const raw = await chat({ companyId, system, user, maxTokens: 2000, json: true });
     if (!raw) return res.status(502).json({ message: "The AI provider returned nothing. Please try again." });
 
     const parsed = parseLlmJson(raw);
@@ -281,7 +281,7 @@ Keywords to work in naturally: ${keywordStr || "(none specified)"}`;
 export const regenerateSection = async (req, res) => {
   try {
     const { companyId } = req.user;
-    if (!hasLLM()) return res.status(503).json({ message: "No LLM provider configured." });
+    if (!(await hasLLM(companyId))) return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
     const post = await prisma.blogPost.findUnique({ where: { id: req.params.id } });
     if (!post || post.companyId !== companyId) return res.status(404).json({ message: "Post not found" });
 
@@ -303,7 +303,7 @@ export const regenerateSection = async (req, res) => {
     const system = `You rewrite a single section of a blog post for ${company?.name || "a homebuilder"}, preserving the section heading and matching this brand voice:\n${brandVoiceContext(company)}\nReturn ONLY the rewritten Markdown for that one section (keep the "## ${heading}" heading line). Do not add other sections.`;
     const user = `Current section:\n${currentSection}\n\nInstruction: ${instruction || "Improve clarity and engagement while keeping the meaning."}`;
 
-    const rewritten = await chat({ system, user, maxTokens: 900 });
+    const rewritten = await chat({ companyId, system, user, maxTokens: 900 });
     if (!rewritten) return res.status(502).json({ message: "Regeneration returned nothing." });
 
     const newSection = rewritten.replace(/```markdown/gi, "").replace(/```/g, "").trim();

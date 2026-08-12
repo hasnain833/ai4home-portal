@@ -20,6 +20,9 @@ import {
   getSupportLeads,
   getSupportAccessLog,
   getSecurityPosture,
+  getAiKeySettings,
+  updatePlatformAiKey,
+  updateCompanyAiGrant,
 } from "../admin/platform.controller.js";
 import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
 
@@ -40,6 +43,10 @@ router.put("/news-defaults", requireAuth, updateDefaultNewsSources);
 router.get("/support/leads/:companyId", requireAuth, getSupportLeads);
 router.get("/support/access-log", requireAuth, getSupportAccessLog);
 router.get("/security-posture", requireAuth, getSecurityPosture);
+
+router.get("/ai-keys", requireAuth, getAiKeySettings);
+router.put("/ai-keys/platform", requireAuth, updatePlatformAiKey);
+router.patch("/ai-keys/companies/:companyId", requireAuth, updateCompanyAiGrant);
 
 router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);

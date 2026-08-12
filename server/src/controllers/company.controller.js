@@ -5,6 +5,7 @@ import { normalizeNewsSources } from "../lib/news-sources.js";
 import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
 import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
 import { Templates } from "../services/templates.js";
+import { TENANT_AI_PROVIDERS, invalidateAiConfigCache } from "../lib/ai-config.js";
 
 export const getCompany = async (req, res) => {
   try {
@@ -19,7 +20,7 @@ export const getCompany = async (req, res) => {
     const aiIntegrations = await prisma.integration.findMany({
       where: {
         companyId: session.companyId || "demo-company",
-        platform: { in: ["OPENAI", "GROQ"] },
+        platform: { in: TENANT_AI_PROVIDERS },
       },
       select: { platform: true, apiKey: true, isActive: true },
     });
@@ -27,6 +28,8 @@ export const getCompany = async (req, res) => {
       const plain = decryptSafe(value || "");
       return plain ? `••••${plain.slice(-4)}` : "";
     };
+    const keyOf = (platform) =>
+      aiIntegrations.find((i) => i.platform === platform)?.apiKey;
     const activeProvider =
       aiIntegrations.find((i) => i.isActive)?.platform?.toLowerCase() ||
       "platform";
@@ -34,8 +37,9 @@ export const getCompany = async (req, res) => {
     return res.json({
       ...(company || {}),
       aiProvider: activeProvider,
-      aiOpenAiKeyMasked: mask(aiIntegrations.find((i) => i.platform === "OPENAI")?.apiKey),
-      aiGroqKeyMasked: mask(aiIntegrations.find((i) => i.platform === "GROQ")?.apiKey),
+      aiPlatformGrant: company?.aiPlatformGrant || null,
+      aiAnthropicKeyMasked: mask(keyOf("ANTHROPIC")),
+      aiOpenAiKeyMasked: mask(keyOf("OPENAI")),
     });
   } catch (error) {
     console.error("Error fetching company details:", error);
@@ -79,11 +83,13 @@ export const updateCompany = async (req, res) => {
       data.newsSources = normalizeNewsSources(data.newsSources);
     }
 
-    const aiProvider = ["platform", "openai", "groq"].includes(req.body.aiProvider)
+    const aiProvider = ["platform", "anthropic", "openai"].includes(req.body.aiProvider)
       ? req.body.aiProvider
       : undefined;
-    const aiOpenAiKey = typeof req.body.aiOpenAiKey === "string" ? req.body.aiOpenAiKey.trim() : undefined;
-    const aiGroqKey = typeof req.body.aiGroqKey === "string" ? req.body.aiGroqKey.trim() : undefined;
+    const aiKeys = {
+      ANTHROPIC: typeof req.body.aiAnthropicKey === "string" ? req.body.aiAnthropicKey.trim() : undefined,
+      OPENAI: typeof req.body.aiOpenAiKey === "string" ? req.body.aiOpenAiKey.trim() : undefined,
+    };
 
     const clampHour = (v, fallback) => {
       const n = Number(v);
@@ -102,9 +108,16 @@ export const updateCompany = async (req, res) => {
       data,
     });
 
-    if (aiProvider !== undefined || aiOpenAiKey || aiGroqKey) {
-      await saveAiIntegration(companyId, "OPENAI", aiProvider === "openai", aiOpenAiKey);
-      await saveAiIntegration(companyId, "GROQ", aiProvider === "groq", aiGroqKey);
+    if (aiProvider !== undefined || Object.values(aiKeys).some(Boolean)) {
+      for (const platform of TENANT_AI_PROVIDERS) {
+        await saveAiIntegration(
+          companyId,
+          platform,
+          aiProvider === platform.toLowerCase(),
+          aiKeys[platform],
+        );
+      }
+      invalidateAiConfigCache(companyId);
     }
 
     if (

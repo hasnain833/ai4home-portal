@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { chat, hasLLM } from "../lib/llm.js";
+import { chat, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { getNextValidSendWindow } from "../lib/timezone.js";
 import { inngest } from "../lib/inngest.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
@@ -75,16 +75,6 @@ function getSeasonalContext(now = new Date()) {
     "Winter",
   ];
   return `Season: ${seasons[month]}. Notable seasonal / marketing moments around now: ${SEASONAL_MOMENTS[month]}.`;
-}
-
-function getAiProviderConfig(company) {
-  const integrations = company?.integrations || [];
-  const active = integrations.find((i) => i.isActive);
-  return {
-    provider: active?.platform?.toLowerCase() || "platform",
-    openAiApiKey: integrations.find((i) => i.platform === "OPENAI")?.apiKey,
-    groqApiKey: integrations.find((i) => i.platform === "GROQ")?.apiKey,
-  };
 }
 
 function getHourInTz(date, tz) {
@@ -174,7 +164,8 @@ export const getCalendarEvents = async (req, res) => {
           }
         } else {
           const dateString = currentSimTime.toISOString().split("T")[0];
-          const isCompleted = step.position <= enrollment.currentStepPosition;
+          // currentStepPosition is the next step to run, so anything before it is done.
+          const isCompleted = step.position < enrollment.currentStepPosition;
           const key = `${enrollment.campaignId}_${step.id}_${dateString}_${isCompleted}`;
 
           if (!groupedCampaigns[key]) {
@@ -338,13 +329,8 @@ export const getCalendarSuggestions = async (req, res) => {
       where: { id: companyId },
       include: {
         communities: { select: { name: true } },
-        integrations: {
-          where: { platform: { in: ["OPENAI", "GROQ"] } },
-          select: { platform: true, apiKey: true, isActive: true },
-        },
       },
     });
-    const providerConfig = getAiProviderConfig(company);
 
     const voiceProfile = company?.voiceProfile || "professional";
 
@@ -375,13 +361,8 @@ export const getCalendarSuggestions = async (req, res) => {
 
     const seasonalContextText = getSeasonalContext();
 
-    if (!hasLLM(providerConfig)) {
-      return res
-        .status(500)
-        .json({
-          message:
-            "No AI provider configured. Add an OpenAI or Groq key in Sales Settings > AI Config.",
-        });
+    if (!(await hasLLM(companyId))) {
+      return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
     }
 
     const kbQueryText =
@@ -495,7 +476,7 @@ Requirements:
       user: "Generate the suggestions as raw JSON.",
       maxTokens: 1500,
       json: true,
-      providerConfig,
+      companyId,
     });
 
     if (!text) {

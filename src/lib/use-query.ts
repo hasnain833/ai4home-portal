@@ -131,4 +131,5 @@ export function useQuery<T = unknown>(
 export const QUERY_KEYS = {
   company: "/api/company",
   segments: "/api/sales/segments",
+  messagingCapabilities: "/api/messaging-settings/capabilities",
 } as const;

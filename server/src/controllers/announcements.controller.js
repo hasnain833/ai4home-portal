@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { resolveAnnouncementAudience } from "../inngest/functions/announcement.js";
 import { sanitizeAnnouncementHtml } from "../lib/sanitize-html.js";
+import { missingChannelsFor } from "../lib/messaging-config.js";
 
 function normalizeChannel(channel) {
   const c = String(channel || "EMAIL").toUpperCase();
@@ -113,6 +114,20 @@ export const createAnnouncement = async (req, res) => {
       return res.status(400).json({ message: "scheduledAt must be a valid future date" });
     }
 
+    // Checked before anything is queued: a send on a channel the tenant cannot
+    // deliver on would otherwise churn the whole audience and report zeros.
+    if (action === "send" || wantsSchedule) {
+      const missing = await missingChannelsFor(req.user.companyId, resolvedChannel);
+      if (missing.length) {
+        return res.status(400).json({
+          message:
+            `${missing.join(" and ")} is not configured, so this announcement cannot be ` +
+            `delivered. Set it up in Settings > Messaging, or save this as a draft.`,
+          missingChannels: missing,
+        });
+      }
+    }
+
     let status = "Draft";
     if (action === "send") status = "Queued";
     else if (wantsSchedule) status = "Scheduled";
@@ -204,6 +219,16 @@ export const sendAnnouncement = async (req, res) => {
     const scheduledDate = scheduledAt ? new Date(scheduledAt) : null;
     if (scheduledDate && (isNaN(scheduledDate) || scheduledDate.getTime() <= Date.now())) {
       return res.status(400).json({ message: "scheduledAt must be a valid future date" });
+    }
+
+    const missing = await missingChannelsFor(req.user.companyId, announcement.channel);
+    if (missing.length) {
+      return res.status(400).json({
+        message:
+          `${missing.join(" and ")} is not configured, so this announcement cannot be ` +
+          `delivered. Set it up in Settings > Messaging.`,
+        missingChannels: missing,
+      });
     }
 
     const updated = await prisma.announcement.update({

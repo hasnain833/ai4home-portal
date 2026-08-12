@@ -50,15 +50,22 @@ interface PreviewResult {
   kbCitations: { documentId: string | null; name: string; category: string }[];
 }
 
+const PROVIDER_LABELS: Record<string, string> = {
+  ANTHROPIC: "Claude",
+  OPENAI: "OpenAI",
+};
+
 export default function AiConfigSafetyTab() {
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [rollingBack, setRollingBack] = useState<number | null>(null);
   const [aiProvider, setAiProvider] = useState("platform");
+  const [anthropicKey, setAnthropicKey] = useState("");
   const [openAiKey, setOpenAiKey] = useState("");
-  const [groqKey, setGroqKey] = useState("");
+  const [anthropicMasked, setAnthropicMasked] = useState("");
   const [openAiMasked, setOpenAiMasked] = useState("");
-  const [groqMasked, setGroqMasked] = useState("");
+  // Which platform key an administrator has granted this workspace, if any.
+  const [platformGrant, setPlatformGrant] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState(false);
 
   // Preview state
@@ -90,8 +97,9 @@ export default function AiConfigSafetyTab() {
       if (!res.ok) return;
       const data = await res.json();
       setAiProvider(data.aiProvider || "platform");
+      setPlatformGrant(data.aiPlatformGrant || null);
+      setAnthropicMasked(data.aiAnthropicKeyMasked || "");
       setOpenAiMasked(data.aiOpenAiKeyMasked || "");
-      setGroqMasked(data.aiGroqKeyMasked || "");
     } catch (e) {
       console.error("Failed to load AI provider settings:", e);
     }
@@ -114,8 +122,8 @@ export default function AiConfigSafetyTab() {
         credentials: "include",
         body: JSON.stringify({
           aiProvider,
+          ...(anthropicKey.trim() ? { aiAnthropicKey: anthropicKey.trim() } : {}),
           ...(openAiKey.trim() ? { aiOpenAiKey: openAiKey.trim() } : {}),
-          ...(groqKey.trim() ? { aiGroqKey: groqKey.trim() } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -123,8 +131,8 @@ export default function AiConfigSafetyTab() {
         toast.error(data.message || "Failed to save AI provider settings.");
         return;
       }
+      setAnthropicKey("");
       setOpenAiKey("");
-      setGroqKey("");
       toast.success("AI provider settings saved.");
       await loadProviderSettings();
     } catch (e) {
@@ -195,45 +203,67 @@ export default function AiConfigSafetyTab() {
             AI Provider &amp; Merge Tags
           </CardTitle>
           <CardDescription className="text-xs">
-            Choose the provider used for campaign copy, calendar suggestions, blog drafts, and other sales AI drafting tools.
+            Choose the provider used for campaign copy, calendar suggestions, blog drafts, and other sales AI drafting tools. Enter your own key, or use the platform key if your administrator has granted your workspace one.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label className="font-semibold text-xs">Provider</Label>
-              <Select value={aiProvider} onValueChange={setAiProvider}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="platform">Platform default</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
-                  <SelectItem value="groq">Groq</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold text-xs">OpenAI API Key</Label>
-              <Input
-                type="password"
-                placeholder={openAiMasked || "sk-..."}
-                value={openAiKey}
-                onChange={(e) => setOpenAiKey(e.target.value)}
-                className="text-xs"
-              />
-              {openAiMasked && <p className="text-[10px] text-muted-foreground">Saved key: {openAiMasked}</p>}
-            </div>
-            <div className="space-y-1.5">
-              <Label className="font-semibold text-xs">Groq API Key</Label>
-              <Input
-                type="password"
-                placeholder={groqMasked || "gsk_..."}
-                value={groqKey}
-                onChange={(e) => setGroqKey(e.target.value)}
-                className="text-xs"
-              />
-              {groqMasked && <p className="text-[10px] text-muted-foreground">Saved key: {groqMasked}</p>}
-            </div>
+          <div className="space-y-1.5 max-w-xs">
+            <Label className="font-semibold text-xs">Provider</Label>
+            <Select value={aiProvider} onValueChange={setAiProvider}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="platform" disabled={!platformGrant}>
+                  {platformGrant
+                    ? "Platform key (" + (PROVIDER_LABELS[platformGrant] || platformGrant) + ")"
+                    : "Platform key \u2014 not granted to your workspace"}
+                </SelectItem>
+                <SelectItem value="anthropic">Claude (Anthropic) &mdash; my own key</SelectItem>
+                <SelectItem value="openai">OpenAI &mdash; my own key</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+
+          {aiProvider === "platform" ? (
+            <div className="rounded-lg border border-border/70 bg-muted/25 p-4 text-[11px] text-muted-foreground">
+              {platformGrant ? (
+                <>
+                  Your workspace uses the platform&apos;s {PROVIDER_LABELS[platformGrant] || platformGrant} key,
+                  granted by your administrator &mdash; no key of your own is needed. To use your own instead,
+                  pick a provider above and save its key.
+                </>
+              ) : (
+                <>
+                  Your administrator has not granted your workspace a platform key, so AI drafting is
+                  currently switched off. Pick a provider above and enter your own key to turn it on.
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="font-semibold text-xs">Claude (Anthropic) API Key</Label>
+                <Input
+                  type="password"
+                  placeholder={anthropicMasked || "sk-ant-..."}
+                  value={anthropicKey}
+                  onChange={(e) => setAnthropicKey(e.target.value)}
+                  className="text-xs"
+                />
+                {anthropicMasked && <p className="text-[10px] text-muted-foreground">Saved key: {anthropicMasked}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label className="font-semibold text-xs">OpenAI API Key</Label>
+                <Input
+                  type="password"
+                  placeholder={openAiMasked || "sk-..."}
+                  value={openAiKey}
+                  onChange={(e) => setOpenAiKey(e.target.value)}
+                  className="text-xs"
+                />
+                {openAiMasked && <p className="text-[10px] text-muted-foreground">Saved key: {openAiMasked}</p>}
+              </div>
+            </div>
+          )}
 
           <div className="rounded-lg border border-border/70 bg-muted/25 p-4">
             <h4 className="text-xs font-bold mb-2">Supported merge tags for AI copy</h4>
@@ -302,7 +332,7 @@ export default function AiConfigSafetyTab() {
           ) : (
             <div className="space-y-1.5">
               <Label className="font-semibold text-xs">Sample goal</Label>
-              <Textarea value={goal} onChange={(e) => setGoal(e.target.value)} className="text-xs min-h-[60px]" />
+              <Textarea value={goal} onChange={(e) => setGoal(e.target.value)} className="text-xs min-h-15" />
             </div>
           )}
 

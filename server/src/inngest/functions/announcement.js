@@ -216,8 +216,6 @@ export const sendAnnouncement = inngest.createFunction(
           }
         }
 
-        // Note: sentCount/failedCount columns not yet in schema; skipping metric persistence.
-
         return { sent, failed, skipped };
       });
 
@@ -229,7 +227,13 @@ export const sendAnnouncement = inngest.createFunction(
     await step.run("finalize", async () => {
       await prisma.announcement.update({
         where: { id: announcementId },
-        data: { status: "Sent", sentAt: new Date() },
+        data: {
+          status: "Sent",
+          sentAt: new Date(),
+          sentCount: totals.sent,
+          failedCount: totals.failed,
+          skippedCount: totals.skipped,
+        },
       });
     });
 

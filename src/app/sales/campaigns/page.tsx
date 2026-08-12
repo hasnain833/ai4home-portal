@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { fetchKey, QUERY_KEYS } from "@/lib/use-query";
+import { useMessagingCapabilities, NOT_CONFIGURED_HINT } from "@/lib/use-messaging-capabilities";
 import { DEFAULT_LEAD_STATUSES, statusColor } from "@/lib/lead-statuses";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ import {
   Activity,
   Sparkles,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -79,6 +81,8 @@ const buildDefaultEmailStep = () => ({
 });
 
 export default function CampaignsPage() {
+  const { emailConfigured, smsConfigured } = useMessagingCapabilities();
+
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [activeSeq, setActiveSeq] = useState<any>(null);
   const [activeSeqDetail, setActiveSeqDetail] = useState<any>(null);
@@ -233,6 +237,7 @@ export default function CampaignsPage() {
         body: JSON.stringify({ steps: newSteps })
       });
       if (res.ok) {
+        const saved = await res.json().catch(() => ({}));
         setAddStepModalOpen(false);
         setEditingStepIndex(null);
         setNewStep(buildDefaultEmailStep());
@@ -243,6 +248,9 @@ export default function CampaignsPage() {
         }
         fetchCampaigns();
         toast.success(editingStepIndex !== null ? "Step updated successfully." : "Step added successfully.");
+        // Saving is never blocked — a tenant can draft SMS steps before Twilio
+        // exists — but they are told the step will not be delivered.
+        for (const w of saved.warnings || []) toast.warning(w, { duration: 8000 });
       } else {
         toast.error("Failed to save step.");
       }
@@ -432,6 +440,8 @@ export default function CampaignsPage() {
         const enrolled = r.enrolledCount ?? 0;
         const skipped = r.skippedDuplicatesCount ?? 0;
         toast.success(`Enrolled ${enrolled} lead${enrolled === 1 ? "" : "s"}${skipped ? ` (${skipped} already enrolled, skipped)` : ""}.`);
+        // The campaign may contain steps on a channel this workspace cannot send.
+        for (const w of r.warnings || []) toast.warning(w, { duration: 8000 });
         fetchCampaigns();
         const rd = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
         if (rd.ok) setActiveSeqDetail(await rd.json());
@@ -464,6 +474,26 @@ export default function CampaignsPage() {
               <Plus className="h-4 w-4" /> Create Campaign
             </Button>
           </div>
+
+          {(!emailConfigured || !smsConfigured) && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                <strong>
+                  {!emailConfigured && !smsConfigured
+                    ? "Email and SMS are not configured."
+                    : !smsConfigured
+                      ? "SMS is not configured."
+                      : "Email is not configured."}
+                </strong>{" "}
+                Steps on that channel will not be delivered. Set it up in{" "}
+                <a href="/sales/settings" className="font-semibold underline underline-offset-2">
+                  Settings &rarr; Messaging
+                </a>
+                .
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Panel: List of Campaigns */}
@@ -563,7 +593,9 @@ export default function CampaignsPage() {
                         activeSeqDetail.steps.map((step: any, index: number) => {
                           const isRunning = activeSeq.status === "Active" || activeSeq.status === "Paused" || activeSeq.status === "Completed";
                           const totalEnrollments = activeSeqDetail?.enrollments?.length || 0;
-                          const completedCount = activeSeqDetail?.enrollments?.filter((e: any) => e.currentStepPosition >= step.position).length || 0;
+                          // currentStepPosition is the next step to run, so a step counts
+                          // as done only once the pointer has moved past it.
+                          const completedCount = activeSeqDetail?.enrollments?.filter((e: any) => e.currentStepPosition > step.position).length || 0;
                           const isFullyCompleted = isRunning && totalEnrollments > 0 && completedCount === totalEnrollments;
 
                           return (
@@ -578,6 +610,15 @@ export default function CampaignsPage() {
                                       {step.type === "EMAIL" ? <Mail className="h-4 w-4 text-[#b48c3c]" /> : step.type === "SMS" ? <MessageSquare className="h-4 w-4 text-cyan-600" /> : <Clock className="h-4 w-4 text-slate-500" />}
                                     </div>
                                     {step.type === "DELAY" ? "Wait Condition" : `${step.type === "EMAIL" ? `Email: "${step.subject || "No Subject"}"` : "SMS"}`}
+                                    {((step.type === "SMS" && !smsConfigured) ||
+                                      (step.type === "EMAIL" && !emailConfigured)) && (
+                                      <Badge
+                                        variant="outline"
+                                        title={NOT_CONFIGURED_HINT}
+                                        className="text-[9px] px-1.5 py-0 gap-1 border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">
+                                        <AlertTriangle className="h-2.5 w-2.5" /> will not send
+                                      </Badge>
+                                    )}
                                   </span>
                                   <div className="flex items-center gap-3">
                                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -708,8 +749,12 @@ export default function CampaignsPage() {
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="EMAIL">Email</SelectItem>
-                    <SelectItem value="SMS">SMS</SelectItem>
+                    <SelectItem value="EMAIL" disabled={!emailConfigured}>
+                      {emailConfigured ? "Email" : "Email — not configured"}
+                    </SelectItem>
+                    <SelectItem value="SMS" disabled={!smsConfigured}>
+                      {smsConfigured ? "SMS" : "SMS — not configured"}
+                    </SelectItem>
                     <SelectItem value="DELAY">Wait Condition</SelectItem>
                   </SelectContent>
                 </Select>

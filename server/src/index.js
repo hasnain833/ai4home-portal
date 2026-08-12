@@ -47,6 +47,7 @@ import { inngest } from "./lib/inngest.js";
 import {
   runNurtureCampaign,
   handleCampaignExit,
+  resumeStalledEnrollments,
 } from "./inngest/functions/nurture.js";
 import { handleCsvImport } from "./inngest/functions/csv-import.js";
 import {
@@ -147,6 +148,7 @@ app.use(
     functions: [
       runNurtureCampaign,
       handleCampaignExit,
+      resumeStalledEnrollments,
       handleCsvImport,
       appointmentSchedulingAgent,
       appointmentReminders,
