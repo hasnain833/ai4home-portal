@@ -52,6 +52,14 @@ function WebhookUrl({ label, url }: { label: string; url: string }) {
 
 type SmsProvider = "TWILIO_SMS" | "TELNYX_SMS";
 
+interface SmsCredentials {
+  apiKey: string;
+  apiSecret: string;
+  senderName: string;
+}
+
+const EMPTY_SMS_CREDENTIALS: SmsCredentials = { apiKey: "", apiSecret: "", senderName: "" };
+
 // The Integration row stores generic credentials (apiKey / secretKey / senderName);
 // each provider just labels them differently.
 const SMS_PROVIDERS: Record<
@@ -120,6 +128,26 @@ export default function MessagingSettingsTab() {
     testPhone: "",
   });
 
+  // Credentials are not portable between providers, so each keeps its own set.
+  // Switching the dropdown parks what is on screen and restores the other
+  // provider's — looking at Telnyx must never cost you your saved Twilio setup.
+  const [smsDrafts, setSmsDrafts] = useState<Record<SmsProvider, SmsCredentials>>(() => ({
+    TWILIO_SMS: { ...EMPTY_SMS_CREDENTIALS },
+    TELNYX_SMS: { ...EMPTY_SMS_CREDENTIALS },
+  }));
+
+  const handleProviderChange = (next: SmsProvider) => {
+    if (next === smsConfig.provider) return;
+    const parked: SmsCredentials = {
+      apiKey: smsConfig.apiKey,
+      apiSecret: smsConfig.apiSecret,
+      senderName: smsConfig.senderName,
+    };
+    setSmsDrafts((drafts) => ({ ...drafts, [smsConfig.provider]: parked }));
+    const restored = smsDrafts[next] ?? EMPTY_SMS_CREDENTIALS;
+    setSmsConfig((config) => ({ ...config, provider: next, ...restored }));
+  };
+
   const smsMeta = SMS_PROVIDERS[smsConfig.provider] ?? SMS_PROVIDERS.TWILIO_SMS;
 
   // Webhook setup help dialogs.
@@ -152,6 +180,24 @@ export default function MessagingSettingsTab() {
             senderEmail: data.email.senderEmail || "",
             senderName: data.email.senderName || "",
           }));
+        }
+        // Seed a draft per saved provider so switching back restores it without
+        // another round trip.
+        const saved: { provider: SmsProvider; apiKey?: string; apiSecret?: string; senderName?: string }[] =
+          data.smsProviders || (data.sms ? [data.sms] : []);
+        if (saved.length) {
+          setSmsDrafts(drafts => {
+            const next = { ...drafts };
+            for (const row of saved) {
+              if (!row?.provider || !(row.provider in next)) continue;
+              next[row.provider] = {
+                apiKey: row.apiKey || "",
+                apiSecret: row.apiSecret || "",
+                senderName: row.senderName || "",
+              };
+            }
+            return next;
+          });
         }
         if (data.sms) {
           setSmsConfig(prev => ({
@@ -198,6 +244,15 @@ export default function MessagingSettingsTab() {
         credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to save SMS settings");
+      // Keep this provider's draft in step with what was just persisted.
+      setSmsDrafts(drafts => ({
+        ...drafts,
+        [smsConfig.provider]: {
+          apiKey: smsConfig.apiKey,
+          apiSecret: smsConfig.apiSecret,
+          senderName: smsConfig.senderName,
+        },
+      }));
       toast.success("SMS settings saved successfully");
     } catch (error: any) {
       toast.error(error.message);
@@ -361,10 +416,7 @@ export default function MessagingSettingsTab() {
               <Label>SMS Provider</Label>
               <Select
                 value={smsConfig.provider}
-                onValueChange={(value) =>
-                  // Credentials aren't portable between providers — clear them on switch.
-                  setSmsConfig({ ...smsConfig, provider: value as SmsProvider, apiKey: "", apiSecret: "", senderName: "" })
-                }
+                onValueChange={(value) => handleProviderChange(value as SmsProvider)}
               >
                 <SelectTrigger>
                   <SelectValue />

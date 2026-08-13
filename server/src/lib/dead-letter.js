@@ -1,4 +1,5 @@
 import prisma from "./prisma.js";
+import { smsSent } from "../services/sms.service.js";
 
 export async function deadLetter({
   companyId,
@@ -109,6 +110,16 @@ export async function replayDeadLetter(companyId, id) {
       if (result?.blocked) {
         return { success: false, reason: result.reason || "Blocked by compliance" };
       }
+      if (!smsSent(result)) {
+        await prisma.deadLetter.update({
+          where: { id },
+          data: {
+            attempts: { increment: 1 },
+            error: String(result?.error || "Send failed again").slice(0, 2000),
+          },
+        });
+        return { success: false, reason: result?.error || "Send failed again" };
+      }
     } else {
       result = await MessagingService.sendEmail({
         companyId,
@@ -122,6 +133,13 @@ export async function replayDeadLetter(companyId, id) {
         return { success: false, reason: result.reason || "Blocked by compliance" };
       }
       if (!result?.success) {
+        await prisma.deadLetter.update({
+          where: { id },
+          data: {
+            attempts: { increment: 1 },
+            error: String(result?.error || "Send failed again").slice(0, 2000),
+          },
+        });
         return { success: false, reason: result?.error || "Send failed again" };
       }
     }

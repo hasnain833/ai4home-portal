@@ -95,6 +95,9 @@ export async function maybeAlertOnSyncFailure(companyId, { action = "sync" } = {
         lastErrors,
       }),
       smtpConfig,
+      // An integration-broken alert has to reach the admin even when the reason
+      // the workspace is misconfigured is that it never set up SMTP either.
+      allowPlatformSender: true,
     });
 
     await prisma.syncLog.create({

@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { sendSms } from "../services/sms.service.js";
+import { sendSms, smsSent } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { runClaudeTurn } from "../inngest/functions/appointment.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
@@ -22,14 +22,19 @@ export const bookAppointment = async (req, res) => {
       },
     });
 
-    // Notify User - SMS
-    try {
-      await sendSms({
-        to: phone,
-        body: `Hi ${name}, your appointment with AI4Homebuilders is confirmed for ${preferredTime}. We look forward to speaking with you!`,
-      });
-    } catch (smsError) {
-      console.error("[Sales Agent Booking] Failed to send SMS to user:", smsError);
+    // Notify User - SMS. This booking belongs to AI4Homebuilders itself, not to a
+    // tenant workspace, so it sends on the platform credentials — the same
+    // "SYSTEM" marker the admin notification below already uses.
+    const customerSms = await sendSms({
+      to: phone,
+      body: `Hi ${name}, your appointment with AI4Homebuilders is confirmed for ${preferredTime}. We look forward to speaking with you!`,
+      smsConfig: "SYSTEM",
+      tag: "sales-agent-booking",
+    });
+    if (!smsSent(customerSms)) {
+      console.error(
+        `[Sales Agent Booking] Confirmation SMS to ${phone} not delivered (${customerSms.outcome}): ${customerSms.error}`,
+      );
     }
 
     // Notify User - Email
@@ -37,6 +42,7 @@ export const bookAppointment = async (req, res) => {
       await MailService.sendEmail({
         to: email,
         subject: "Appointment Confirmed - AI4Homebuilders",
+        allowPlatformSender: true,
         html: `
           <h3>Appointment Confirmed</h3>
           <p>Hi ${name},</p>
@@ -55,14 +61,15 @@ export const bookAppointment = async (req, res) => {
     const adminEmail = process.env.ADMIN_NOTIFY_EMAIL;
 
     if (adminPhone) {
-      try {
-        await sendSms({
-          to: adminPhone,
-          body: `New Appointment! Name: ${name}, Phone: ${phone}, Time: ${preferredTime}`,
-          smsConfig: "SYSTEM"
-        });
-      } catch (adminSmsError) {
-        console.error("[Sales Agent Booking] Failed to send SMS to admin:", adminSmsError);
+      const adminSms = await sendSms({
+        to: adminPhone,
+        body: `New Appointment! Name: ${name}, Phone: ${phone}, Time: ${preferredTime}`,
+        smsConfig: "SYSTEM",
+      });
+      if (!smsSent(adminSms)) {
+        console.error(
+          `[Sales Agent Booking] Admin SMS not delivered (${adminSms.outcome}): ${adminSms.error}`,
+        );
       }
     } else {
       console.log("[Sales Agent Booking] ADMIN_NOTIFY_PHONE not set. Skipping admin SMS notification.");
@@ -83,6 +90,7 @@ export const bookAppointment = async (req, res) => {
               <li><strong>Preferred Time:</strong> ${preferredTime}</li>
             </ul>
           `,
+          allowPlatformSender: true,
         });
       } catch (adminEmailError) {
         console.error("[Sales Agent Booking] Failed to send Email to admin:", adminEmailError);

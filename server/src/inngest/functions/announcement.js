@@ -1,7 +1,7 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
-import { MailService } from "../../services/mail-service.js";
-import { sendSms } from "../../services/sms.service.js";
+import { MailService, mailShouldPark } from "../../services/mail-service.js";
+import { sendSms, smsSent, smsShouldPark } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { buildPrismaWhereClause } from "../../controllers/segments.controller.js";
@@ -166,7 +166,7 @@ export const sendAnnouncement = inngest.createFunction(
                 });
                 if (result.success) {
                   sent += 1;
-                } else {
+                } else if (mailShouldPark(result)) {
                   failed += 1;
                   await deadLetter({
                     companyId: announcement.companyId,
@@ -177,6 +177,9 @@ export const sendAnnouncement = inngest.createFunction(
                     payload: { to: lead.email, subject, html: finalHtml, fromName: lead.companyName || null },
                     error: result.error,
                   });
+                } else {
+                  // Nothing to retry when the workspace has no sender configured.
+                  skipped += 1;
                 }
               }
             }
@@ -195,12 +198,11 @@ export const sendAnnouncement = inngest.createFunction(
                 const base = looksLikeHtml(rendered) ? htmlToText(rendered) : rendered;
                 const withCta = announcement.ctaLink ? `${base} ${announcement.ctaLink}` : base;
                 const smsBody = ComplianceService.addSmsOptOutSuffix(withCta);
-                try {
-                  await sendSms({ to: lead.phone, body: smsBody, smsConfig, tag });
+                const smsResult = await sendSms({ to: lead.phone, body: smsBody, smsConfig, tag });
+                if (smsSent(smsResult)) {
                   sent += 1;
-                } catch (smsError) {
+                } else if (smsShouldPark(smsResult)) {
                   failed += 1;
-                  // SW-ANN-002: park the failed SMS for inspection/replay.
                   await deadLetter({
                     companyId: announcement.companyId,
                     source: "ANNOUNCEMENT",
@@ -208,8 +210,10 @@ export const sendAnnouncement = inngest.createFunction(
                     leadId: lead.id,
                     refId: announcementId,
                     payload: { to: lead.phone, body: smsBody },
-                    error: smsError.message || "Unknown error",
+                    error: smsResult.error || "Unknown error",
                   });
+                } else {
+                  skipped += 1;
                 }
               }
             }

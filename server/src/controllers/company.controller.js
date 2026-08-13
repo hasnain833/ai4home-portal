@@ -40,6 +40,7 @@ export const getCompany = async (req, res) => {
       aiPlatformGrant: company?.aiPlatformGrant || null,
       aiAnthropicKeyMasked: mask(keyOf("ANTHROPIC")),
       aiOpenAiKeyMasked: mask(keyOf("OPENAI")),
+      aiGroqKeyMasked: mask(keyOf("GROQ")),
     });
   } catch (error) {
     console.error("Error fetching company details:", error);
@@ -83,12 +84,15 @@ export const updateCompany = async (req, res) => {
       data.newsSources = normalizeNewsSources(data.newsSources);
     }
 
-    const aiProvider = ["platform", "anthropic", "openai"].includes(req.body.aiProvider)
+    const aiProvider = ["platform", ...TENANT_AI_PROVIDERS.map((p) => p.toLowerCase())].includes(
+      req.body.aiProvider,
+    )
       ? req.body.aiProvider
       : undefined;
     const aiKeys = {
       ANTHROPIC: typeof req.body.aiAnthropicKey === "string" ? req.body.aiAnthropicKey.trim() : undefined,
       OPENAI: typeof req.body.aiOpenAiKey === "string" ? req.body.aiOpenAiKey.trim() : undefined,
+      GROQ: typeof req.body.aiGroqKey === "string" ? req.body.aiGroqKey.trim() : undefined,
     };
 
     const clampHour = (v, fallback) => {
@@ -252,6 +256,8 @@ export const submitVerificationDocument = async (req, res) => {
           to: superAdminEmail,
           subject: `Verification document submitted: ${company.name}`,
           html: Templates.getAdminVerificationDocEmail(company.name, adminUrl),
+          // Platform-to-superadmin notice, not tenant mail.
+          allowPlatformSender: true,
         });
       }
     } catch (mailErr) {

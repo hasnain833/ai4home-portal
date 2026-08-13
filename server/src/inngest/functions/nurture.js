@@ -1,7 +1,7 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
-import { MailService } from "../../services/mail-service.js";
-import { sendSms } from "../../services/sms.service.js";
+import { MailService, MAIL_OUTCOME, mailShouldPark } from "../../services/mail-service.js";
+import { sendSms, smsSent, smsShouldPark } from "../../services/sms.service.js";
 import { getLeadTimezone, getNextValidSendWindow } from "../../lib/timezone.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
@@ -279,7 +279,9 @@ export const runNurtureCampaign = inngest.createFunction(
             smtpConfig,
             headers: { "X-Mailin-Tag": currentStep.id },
           });
-          if (!emailResult.success) {
+          // Only a real failure is worth parking — a workspace with no SMTP
+          // config has nothing to replay, so it is skipped with a reason.
+          if (mailShouldPark(emailResult)) {
             await deadLetter({
               companyId: lead.companyId,
               source: "CAMPAIGN",
@@ -299,6 +301,7 @@ export const runNurtureCampaign = inngest.createFunction(
           return {
             channel: "EMAIL",
             attempted: true,
+            outcome: emailResult.outcome || (emailResult.success ? MAIL_OUTCOME.SENT : MAIL_OUTCOME.FAILED),
             success: !!emailResult.success,
             messageId: emailResult.messageId || null,
             error: emailResult.success ? null : (emailResult.error || "Unknown error"),
@@ -309,14 +312,11 @@ export const runNurtureCampaign = inngest.createFunction(
           const rawBody = renderText(currentStep.body || "");
           const finalBody = ComplianceService.addSmsOptOutSuffix(rawBody);
 
-          try {
-            console.log(`[Nurture] Step ${currentStep.position}: Triggering sendSms to ${lead.phone}...`);
-            await sendSms({ to: lead.phone, body: finalBody, smsConfig, tag: currentStep.id });
-            console.log(`[Nurture] Step ${currentStep.position}: sendSms completed successfully!`);
-            return { channel: "SMS", attempted: true, success: true, error: null, body: finalBody };
-          } catch (smsError) {
-            console.error(`[Nurture] Step ${currentStep.position}: sendSms failed with error:`, smsError);
-            // SW-ANN-002: park the failed step SMS for inspection/replay.
+          console.log(`[Nurture] Step ${currentStep.position}: Triggering sendSms to ${lead.phone}...`);
+          const smsResult = await sendSms({ to: lead.phone, body: finalBody, smsConfig, tag: currentStep.id });
+
+          // SW-ANN-002: park the failed step SMS for inspection/replay.
+          if (smsShouldPark(smsResult)) {
             await deadLetter({
               companyId: lead.companyId,
               source: "CAMPAIGN",
@@ -324,10 +324,18 @@ export const runNurtureCampaign = inngest.createFunction(
               leadId: lead.id,
               refId: campaign.id,
               payload: { to: lead.phone, body: finalBody },
-              error: smsError.message || "Unknown error",
+              error: smsResult.error || "Unknown error",
             });
-            return { channel: "SMS", attempted: true, success: false, error: smsError.message || "Unknown error", body: finalBody };
           }
+
+          return {
+            channel: "SMS",
+            attempted: true,
+            outcome: smsResult.outcome,
+            success: smsSent(smsResult),
+            error: smsSent(smsResult) ? null : (smsResult.error || "Unknown error"),
+            body: finalBody,
+          };
         }
         return { channel: currentStep.type, attempted: false };
       });
@@ -335,7 +343,12 @@ export const runNurtureCampaign = inngest.createFunction(
       await step.run(`record-step-${currentStep.position}`, async () => {
         if (sendResult.attempted && sendResult.success) {
           console.log(`[Nurture] Step ${currentStep.position}: ${sendResult.channel} sent successfully.`);
-        } else if (!sendResult.attempted) {
+        } else if (sendResult.attempted) {
+          const verb = sendResult.outcome === "not_configured" ? "skipped" : "failed";
+          console.warn(
+            `[Nurture] Step ${currentStep.position}: ${sendResult.channel} ${verb} (${sendResult.outcome}) — ${sendResult.error}`,
+          );
+        } else {
           console.log(`[Nurture] Step ${currentStep.position}: no ${currentStep.type} contact channel on lead; nothing sent.`);
         }
 

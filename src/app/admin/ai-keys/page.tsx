@@ -38,6 +38,13 @@ interface CompanyGrant {
 const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: "Claude (Anthropic)",
   OPENAI: "OpenAI",
+  GROQ: "Groq",
+};
+
+const KEY_PLACEHOLDERS: Record<string, string> = {
+  ANTHROPIC: "sk-ant-...",
+  OPENAI: "sk-...",
+  GROQ: "gsk_...",
 };
 
 const label = (p: string | null) => (p ? PROVIDER_LABELS[p] || p : "");
@@ -169,7 +176,7 @@ export default function AdminAiKeysPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     type="password"
-                    placeholder={k.provider === "ANTHROPIC" ? "sk-ant-..." : "sk-..."}
+                    placeholder={KEY_PLACEHOLDERS[k.provider] || "sk-..."}
                     value={drafts[k.provider] || ""}
                     onChange={(e) =>
                       setDrafts((d) => ({ ...d, [k.provider]: e.target.value }))

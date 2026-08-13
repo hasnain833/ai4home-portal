@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
-import { sendSms, SMS_PROVIDERS, RETIRED_SMS_PROVIDERS } from "../services/sms.service.js";
+import { sendSms, smsSent, SMS_OUTCOME, SMS_PROVIDERS, RETIRED_SMS_PROVIDERS } from "../services/sms.service.js";
 import { encrypt, decryptSafe } from "../lib/crypto.js";
 import { getMessagingCapabilities } from "../lib/messaging-config.js";
 
@@ -41,17 +41,23 @@ export const getMessagingSettings = async (req, res) => {
       };
     }
 
-    const smsInt = integrations.find(i => SMS_PROVIDERS.includes(i.platform));
-    if (smsInt) {
-      settings.sms = {
-        id: smsInt.id,
-        provider: smsInt.platform,
-        senderName: smsInt.senderName,
-        apiKey: last4(smsInt.apiKey),
-        apiSecret: last4(smsInt.secretKey),
-        isActive: smsInt.isActive,
-      };
-    }
+    // Credentials for a provider are kept after switching away from it, so report
+    // every saved provider — the settings form restores them when you switch back.
+    const smsInts = integrations.filter(i => SMS_PROVIDERS.includes(i.platform));
+    const describeSms = (row) => ({
+      id: row.id,
+      provider: row.platform,
+      senderName: row.senderName,
+      apiKey: last4(row.apiKey),
+      apiSecret: last4(row.secretKey),
+      isActive: row.isActive,
+    });
+
+    settings.smsProviders = smsInts.map(describeSms);
+
+    // `sms` stays the active provider — the one a send would actually use.
+    const activeSms = smsInts.find(i => i.isActive) || smsInts[0];
+    if (activeSms) settings.sms = describeSms(activeSms);
 
     return res.json(settings);
   } catch (error) {
@@ -130,13 +136,19 @@ export const saveSmsSettings = async (req, res) => {
       return res.status(400).json({ message: "Invalid SMS provider" });
     }
 
-    // Exactly one SMS provider is active per company — drop the others, plus any
-    // rows left behind by a provider that's no longer offered.
-    await prisma.integration.deleteMany({
+    // Exactly one SMS provider is active per company, but the others keep their
+    // credentials — switching provider and back must not force a re-entry.
+    await prisma.integration.updateMany({
       where: {
         companyId,
-        platform: { in: [...SMS_PROVIDERS.filter((p) => p !== provider), ...RETIRED_SMS_PROVIDERS] },
+        platform: { in: SMS_PROVIDERS.filter((p) => p !== provider) },
       },
+      data: { isActive: false },
+    });
+
+    // Rows left behind by a provider that is no longer offered are not coming back.
+    await prisma.integration.deleteMany({
+      where: { companyId, platform: { in: RETIRED_SMS_PROVIDERS } },
     });
 
     const existing = await prisma.integration.findFirst({
@@ -252,14 +264,18 @@ export const testSms = async (req, res) => {
       smsConfig,
     });
 
-    // sendSms degrades to a simulated send when credentials are missing or the
-    // provider rejects the message — surface that instead of a false success.
-    if (result?.provider?.endsWith("_SIMULATED")) {
+    if (result.outcome === SMS_OUTCOME.NOT_CONFIGURED) {
       return res.status(400).json({
         success: false,
-        message: result.error
-          ? `${provider.replace("_SMS", "")} rejected the message: ${result.error}`
-          : "SMS was not delivered — the provider rejected it or credentials are incomplete.",
+        message: "SMS was not sent — these credentials are missing or incomplete.",
+        result,
+      });
+    }
+
+    if (!smsSent(result)) {
+      return res.status(400).json({
+        success: false,
+        message: `${provider.replace("_SMS", "")} rejected the message: ${result.error}`,
         result,
       });
     }

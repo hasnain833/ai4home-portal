@@ -2,13 +2,24 @@ import prisma from "./prisma.js";
 import { encrypt, decryptSafe } from "./crypto.js";
 
 export const AI_PLATFORM_KEYS_SETTING = "ai.platformKeys";
-export const TENANT_AI_PROVIDERS = ["ANTHROPIC", "OPENAI"];
-export const PLATFORM_AI_PROVIDERS = ["ANTHROPIC", "OPENAI"];
+export const TENANT_AI_PROVIDERS = ["ANTHROPIC", "OPENAI", "GROQ"];
+export const PLATFORM_AI_PROVIDERS = ["ANTHROPIC", "OPENAI", "GROQ"];
 
 export const DEFAULT_MODELS = {
   ANTHROPIC: "claude-sonnet-5",
   OPENAI: "gpt-4o-mini",
+  GROQ: "llama-3.3-70b-versatile",
 };
+
+export const AI_PROVIDER_CAPABILITIES = {
+  ANTHROPIC: { chat: true, tools: true, jsonMode: false, embeddings: false },
+  OPENAI: { chat: true, tools: true, jsonMode: true, embeddings: false },
+  GROQ: { chat: true, tools: true, jsonMode: true, embeddings: false },
+};
+
+export function providerSupports(provider, capability) {
+  return !!AI_PROVIDER_CAPABILITIES[provider]?.[capability];
+}
 
 export const AI_UNAVAILABLE = {
   NO_COMPANY: "No company context for this request.",

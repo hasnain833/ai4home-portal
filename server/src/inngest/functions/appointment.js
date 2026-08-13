@@ -2,7 +2,7 @@ import { toolCall } from "../../lib/llm.js";
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { MailService } from "../../services/mail-service.js";
-import { sendSms } from "../../services/sms.service.js";
+import { sendSms, smsSent } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { Templates } from "../../services/templates.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
@@ -37,18 +37,28 @@ async function sendLeadMessage(lead, channel, text, subject) {
   const { smtpConfig, smsConfig } = await getMessagingConfig(lead.companyId);
   if (channel === "SMS" && lead.phone) {
     const body = ComplianceService.addSmsOptOutSuffix(text);
-    await sendSms({ to: lead.phone, body, smsConfig });
-    return { channel: "SMS", body };
+    const result = await sendSms({ to: lead.phone, body, smsConfig });
+    if (!smsSent(result)) {
+      console.warn(
+        `[Appointment Agent] SMS to ${lead.phone} not delivered (${result.outcome}): ${result.error}`,
+      );
+    }
+    return { channel: "SMS", body, delivered: smsSent(result), outcome: result.outcome };
   }
   if (lead.email) {
-    await MailService.sendEmail({
+    const result = await MailService.sendEmail({
       to: lead.email,
       subject: subject || "Scheduling your visit",
       html: brandedEmail(lead.company?.name || "Scheduling", text),
       fromName: lead.company?.name || undefined,
       smtpConfig,
     });
-    return { channel: "EMAIL", body: text };
+    if (!result.success) {
+      console.warn(
+        `[Appointment Agent] Email to ${lead.email} not delivered (${result.outcome}): ${result.error}`,
+      );
+    }
+    return { channel: "EMAIL", body: text, delivered: !!result.success, outcome: result.outcome };
   }
   return { channel, body: text, skipped: true };
 }

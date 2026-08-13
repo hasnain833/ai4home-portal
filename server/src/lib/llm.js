@@ -67,6 +67,7 @@ async function callOpenAiCompatible({ cfg, companyId, endpoint, label, system, u
 }
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export async function chat({ companyId, system, user, maxTokens = 700, json = false }) {
   const cfg = await resolveAiConfig(companyId);
@@ -81,6 +82,10 @@ export async function chat({ companyId, system, user, maxTokens = 700, json = fa
       case "OPENAI":
         return await callOpenAiCompatible({
           cfg, companyId, endpoint: OPENAI_CHAT_URL, label: "OpenAI", system, user, maxTokens, json,
+        });
+      case "GROQ":
+        return await callOpenAiCompatible({
+          cfg, companyId, endpoint: GROQ_CHAT_URL, label: "Groq", system, user, maxTokens, json,
         });
       default:
         return null;
@@ -174,6 +179,10 @@ export async function toolCall({ companyId, system, messages, tool, maxTokens = 
       case "OPENAI":
         return await openAiCompatibleToolCall({
           cfg, companyId, endpoint: OPENAI_CHAT_URL, label: "OpenAI", system, messages, tool, maxTokens,
+        });
+      case "GROQ":
+        return await openAiCompatibleToolCall({
+          cfg, companyId, endpoint: GROQ_CHAT_URL, label: "Groq", system, messages, tool, maxTokens,
         });
       default:
         return null;

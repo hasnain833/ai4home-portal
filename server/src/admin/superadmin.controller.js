@@ -160,7 +160,6 @@ export const verifyCompany = async (req, res) => {
       return res.json(company);
     }
 
-    // Default: approve.
     const company = await prisma.company.update({
       where: { id: companyId },
       data: {
@@ -170,7 +169,6 @@ export const verifyCompany = async (req, res) => {
       },
     });
 
-    // Best-effort welcome / activation email to the tenant.
     try {
       if (company.email) {
         const portalUrl = `${process.env.NEXT_PUBLIC_URL || ""}/warranty/dashboard`;
@@ -178,6 +176,7 @@ export const verifyCompany = async (req, res) => {
           to: company.email,
           subject: "Your invoice is approved – workspace active",
           html: Templates.getWorkspaceActiveEmail(company.name, portalUrl),
+          allowPlatformSender: true,
         });
       }
     } catch (mailErr) {
