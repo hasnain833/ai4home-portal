@@ -70,13 +70,23 @@ function resolveConfig(smsConfig) {
   return isComplete(cfg) ? cfg : null;
 }
 
-const preview = (text, n = 160) =>
-  (text || "").replace(/\s+/g, " ").slice(0, n) + ((text || "").length > n ? "…" : "");
-
-const simulated = (to, body, provider, error) => {
-  console.log(`[SMS] ⚠️ SIMULATED (${provider}) to=${to} | "${preview(body)}"`);
-  return { messageId: "SIMULATED_MSG_ID", status: "delivered", to, body, provider: `${provider}_SIMULATED`, error };
+/**
+ * Every send reports exactly one of these. SENT means the provider accepted the
+ * message; FAILED means it rejected it or the request never got through, and is
+ * worth parking for retry; NOT_CONFIGURED means the tenant has no usable
+ * credentials, so there is nothing to retry and the caller should skip with a
+ * reason. Nothing here ever pretends a message went out.
+ */
+export const SMS_OUTCOME = {
+  SENT: "sent",
+  FAILED: "failed",
+  NOT_CONFIGURED: "not_configured",
 };
+
+export const smsSent = (result) => result?.outcome === SMS_OUTCOME.SENT;
+
+/** Only genuine failures are worth a dead-letter row — missing config is not. */
+export const smsShouldPark = (result) => result?.outcome === SMS_OUTCOME.FAILED;
 
 const withTag = (url, tag) => {
   if (!url || !tag) return url;
@@ -167,22 +177,32 @@ export const sendSms = async ({ to, body, smsConfig, tag }) => {
   const cfg = resolveConfig(smsConfig);
 
   if (!cfg) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    return simulated(to, body, smsConfig?.provider || "TWILIO_SMS", "SMS credentials are missing or incomplete.");
+    const provider = smsConfig === "SYSTEM" ? "SYSTEM" : smsConfig?.provider || null;
+    const error = "SMS credentials are missing or incomplete.";
+    console.warn(`[SMS] ⏭️ Not configured (${provider || "no provider"}) — nothing sent to ${to}.`);
+    return { outcome: SMS_OUTCOME.NOT_CONFIGURED, to, body, provider, error };
   }
 
   try {
     const result = await SENDERS[cfg.provider]({ to, body, cfg, tag });
 
     if (result.error) {
-      console.error(`[SMS] ❌ Rejected by ${cfg.provider} to ${to}: ${result.error}. SIMULATING INSTEAD.`);
-      return simulated(to, body, cfg.provider, result.error);
+      console.error(`[SMS] ❌ Rejected by ${cfg.provider} to ${to}: ${result.error}`);
+      return { outcome: SMS_OUTCOME.FAILED, to, body, provider: cfg.provider, error: result.error };
     }
 
     console.log(`[SMS] ✅ Sent via ${cfg.provider} to ${result.to} (ID: ${result.messageId})`);
-    return result;
+    return { outcome: SMS_OUTCOME.SENT, ...result };
   } catch (error) {
+    // A transport-level error is a failure to deliver, not a reason to abort the
+    // caller's flow — it is reported like a rejection so the send can be parked.
     console.error(`[SMS] ❌ Failed to send to ${to} via ${cfg.provider}: ${error.message}`);
-    throw error;
+    return {
+      outcome: SMS_OUTCOME.FAILED,
+      to,
+      body,
+      provider: cfg.provider,
+      error: error.message || "Network error",
+    };
   }
 };

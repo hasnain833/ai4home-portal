@@ -5,7 +5,8 @@ import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import { createSuperadminSessionToken } from "../lib/superadmin-session.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
-import { sendSms } from "../services/sms.service.js";
+import { sendSms, smsSent } from "../services/sms.service.js";
+import { MailService } from "../services/mail-service.js";
 import { Templates, SmsTemplates } from "../services/templates.js";
 
 const safeEqual = (a, b) => {
@@ -367,28 +368,18 @@ export const signup = async (req, res) => {
         .json({ message: "Failed to generate action link" });
     }
 
-    try {
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: false,
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-      });
+    // Registration mail is platform-owned — the tenant has no SMTP config yet.
+    const verificationMail = await MailService.sendEmail({
+      to: companyEmail,
+      subject: "Verify Your Account",
+      html: Templates.getSignupVerificationEmail(companyName, actionLink),
+      allowPlatformSender: true,
+    });
 
-      await transporter.sendMail({
-        from: `"Aiforhomebuilder" <${process.env.SENDER_EMAIL}>`,
-        to: companyEmail,
-        subject: "Verify Your Account",
-        text: `Please verify your account by clicking this link: ${actionLink}`,
-        html: Templates.getSignupVerificationEmail(companyName, actionLink),
-      });
-    } catch (mailError) {
+    if (!verificationMail.success) {
       console.error(
         "Email send failure, rolling back registration:",
-        mailError,
+        verificationMail.error,
       );
       await prisma.user.delete({ where: { email: companyEmail } });
       await prisma.company.delete({ where: { id: newCompany.id } });
@@ -412,37 +403,31 @@ export const signup = async (req, res) => {
       const adminNotifyPhone = process.env.ADMIN_NOTIFY_PHONE;
       const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/verifications`;
 
-      if (adminNotifyEmail && process.env.SMTP_USER && process.env.SMTP_PASS) {
-        const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST,
-          port: Number(process.env.SMTP_PORT) || 587,
-          secure: false,
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS,
-          },
-        });
-
-        await transporter.sendMail({
-          from: `"Aiforhomebuilder" <${process.env.SENDER_EMAIL}>`,
+      if (adminNotifyEmail) {
+        await MailService.sendEmail({
           to: adminNotifyEmail,
           subject: `New tenant registration: ${companyName}`,
-          text: `A new company "${companyName}" (${companyEmail}) just signed up. Phone: ${companyPhone || "not provided"}. Schedule an onboarding appointment and review it at ${adminUrl}`,
           html: Templates.getAdminNewTenantEmail(companyName, companyEmail, companyPhone, adminUrl),
+          allowPlatformSender: true,
         });
       } else {
         console.warn(
-          "[Signup] ADMIN_NOTIFY_EMAIL or SMTP creds missing - skipping admin email notification.",
+          "[Signup] ADMIN_NOTIFY_EMAIL missing - skipping admin email notification.",
         );
       }
 
       if (adminNotifyPhone) {
-        await sendSms({
+        const adminSms = await sendSms({
           to: adminNotifyPhone,
           tag: "tenant-registration",
           body: SmsTemplates.getAdminNewTenantSms(companyName, companyEmail, companyPhone),
           smsConfig: "SYSTEM",
         });
+        if (!smsSent(adminSms)) {
+          console.warn(
+            `[Signup] Admin SMS not delivered (${adminSms.outcome}): ${adminSms.error}`,
+          );
+        }
       } else {
         console.warn(
           "[Signup] ADMIN_NOTIFY_PHONE missing - skipping admin SMS notification.",

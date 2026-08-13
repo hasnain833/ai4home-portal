@@ -1,7 +1,8 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
-import { MailService } from "../../services/mail-service.js";
+import { MailService, MAIL_OUTCOME } from "../../services/mail-service.js";
 import { MessagingService } from "../../services/messaging-service.js";
+import { SMS_OUTCOME, smsSent } from "../../services/sms.service.js";
 import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
@@ -142,7 +143,7 @@ export async function executeAction(action, lead, ctx = {}) {
       const to = owner?.email || lead.company?.email;
       if (!to) return { type, skipped: "no owner/company email" };
       const { smtpConfig } = await loadMessaging();
-      await MailService.sendEmail({
+      const notifyResult = await MailService.sendEmail({
         to,
         subject: `[Automation] Follow up: ${lead.firstName} ${lead.lastName}`,
         html: Templates.getNotifyOwnerEmail(
@@ -153,6 +154,12 @@ export async function executeAction(action, lead, ctx = {}) {
         ),
         smtpConfig,
       });
+      if (notifyResult.outcome === MAIL_OUTCOME.NOT_CONFIGURED) {
+        return { type, skipped: "email not configured" };
+      }
+      if (!notifyResult.success) {
+        return { type, failed: true, to, error: notifyResult.error || "Unknown error" };
+      }
       return { type, notified: to };
     }
 
@@ -165,7 +172,9 @@ export async function executeAction(action, lead, ctx = {}) {
       const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">${mergeFields(params.body || "", lead, true)}</div>`;
       const { smtpConfig } = await loadMessaging();
       const r = await MessagingService.sendEmail({ companyId: lead.companyId, to: lead.email, subject, html, smtpConfig });
-      if (r && (r.blocked || r.success === false)) return { type, skipped: r.reason || "send blocked" };
+      if (r?.blocked) return { type, skipped: r.reason || "send blocked" };
+      if (r?.outcome === MAIL_OUTCOME.NOT_CONFIGURED) return { type, skipped: "email not configured" };
+      if (!r?.success) return { type, failed: true, to: lead.email, error: r?.error || "Unknown error" };
       if (budget) budget.remaining -= 1;
       return { type, sent: true, to: lead.email };
     }
@@ -179,7 +188,9 @@ export async function executeAction(action, lead, ctx = {}) {
       const { smsConfig } = await loadMessaging();
       if (!smsConfig) return { type, skipped: "sms not configured" };
       const r = await MessagingService.sendSms({ companyId: lead.companyId, to: lead.phone, body, smsConfig });
-      if (r && r.blocked) return { type, skipped: r.reason || "send blocked" };
+      if (r?.blocked) return { type, skipped: r.reason || "send blocked" };
+      if (r?.outcome === SMS_OUTCOME.NOT_CONFIGURED) return { type, skipped: "sms not configured" };
+      if (!smsSent(r)) return { type, failed: true, to: lead.phone, error: r?.error || "Unknown error" };
       if (budget) budget.remaining -= 1;
       return { type, sent: true, to: lead.phone };
     }

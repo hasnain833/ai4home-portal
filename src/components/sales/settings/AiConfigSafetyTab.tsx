@@ -53,6 +53,7 @@ interface PreviewResult {
 const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: "Claude",
   OPENAI: "OpenAI",
+  GROQ: "Groq",
 };
 
 export default function AiConfigSafetyTab() {
@@ -62,8 +63,10 @@ export default function AiConfigSafetyTab() {
   const [aiProvider, setAiProvider] = useState("platform");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [openAiKey, setOpenAiKey] = useState("");
+  const [groqKey, setGroqKey] = useState("");
   const [anthropicMasked, setAnthropicMasked] = useState("");
   const [openAiMasked, setOpenAiMasked] = useState("");
+  const [groqMasked, setGroqMasked] = useState("");
   // Which platform key an administrator has granted this workspace, if any.
   const [platformGrant, setPlatformGrant] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState(false);
@@ -100,6 +103,7 @@ export default function AiConfigSafetyTab() {
       setPlatformGrant(data.aiPlatformGrant || null);
       setAnthropicMasked(data.aiAnthropicKeyMasked || "");
       setOpenAiMasked(data.aiOpenAiKeyMasked || "");
+      setGroqMasked(data.aiGroqKeyMasked || "");
     } catch (e) {
       console.error("Failed to load AI provider settings:", e);
     }
@@ -124,6 +128,7 @@ export default function AiConfigSafetyTab() {
           aiProvider,
           ...(anthropicKey.trim() ? { aiAnthropicKey: anthropicKey.trim() } : {}),
           ...(openAiKey.trim() ? { aiOpenAiKey: openAiKey.trim() } : {}),
+          ...(groqKey.trim() ? { aiGroqKey: groqKey.trim() } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -133,6 +138,7 @@ export default function AiConfigSafetyTab() {
       }
       setAnthropicKey("");
       setOpenAiKey("");
+      setGroqKey("");
       toast.success("AI provider settings saved.");
       await loadProviderSettings();
     } catch (e) {
@@ -219,6 +225,7 @@ export default function AiConfigSafetyTab() {
                 </SelectItem>
                 <SelectItem value="anthropic">Claude (Anthropic) &mdash; my own key</SelectItem>
                 <SelectItem value="openai">OpenAI &mdash; my own key</SelectItem>
+                <SelectItem value="groq">Groq &mdash; my own key</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -262,8 +269,25 @@ export default function AiConfigSafetyTab() {
                 />
                 {openAiMasked && <p className="text-[10px] text-muted-foreground">Saved key: {openAiMasked}</p>}
               </div>
+              <div className="space-y-1.5">
+                <Label className="font-semibold text-xs">Groq API Key</Label>
+                <Input
+                  type="password"
+                  placeholder={groqMasked || "gsk_..."}
+                  value={groqKey}
+                  onChange={(e) => setGroqKey(e.target.value)}
+                  className="text-xs"
+                />
+                {groqMasked && <p className="text-[10px] text-muted-foreground">Saved key: {groqMasked}</p>}
+              </div>
             </div>
           )}
+
+          <p className="text-[11px] text-muted-foreground">
+            The provider above is used for text drafting only. Knowledge-base search runs on a
+            local embedding model that ships with the portal, so it is unaffected by this choice
+            &mdash; which is why Groq, which has no embeddings API, is still a valid pick here.
+          </p>
 
           <div className="rounded-lg border border-border/70 bg-muted/25 p-4">
             <h4 className="text-xs font-bold mb-2">Supported merge tags for AI copy</h4>

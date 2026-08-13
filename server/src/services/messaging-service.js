@@ -6,15 +6,15 @@ import { getMessagingConfig } from "../lib/messaging-config.js";
 
 export class MessagingService {
 
-  static async sendEmail({ companyId, to, subject, html, fromName, fromEmail, smtpConfig }) {
+  static async sendEmail({ companyId, to, subject, html, fromName, fromEmail, smtpConfig, allowPlatformSender = false }) {
     if (companyId && to) {
       const { suppressed, reason } = await ComplianceService.checkSuppression(companyId, "EMAIL", to);
       if (suppressed) {
         console.warn(`[Messaging] Email to ${to} blocked — on suppression list (${reason}).`);
-        return { success: false, blocked: true, reason: `Suppressed (${reason})` };
+        return { success: false, outcome: "blocked", blocked: true, reason: `Suppressed (${reason})` };
       }
     }
-    return MailService.sendEmail({ to, subject, html, fromName, fromEmail, smtpConfig });
+    return MailService.sendEmail({ to, subject, html, fromName, fromEmail, smtpConfig, allowPlatformSender });
   }
 
   static async sendSms({ companyId, to, body, smsConfig, addOptOut = true }) {
@@ -22,22 +22,22 @@ export class MessagingService {
       const { suppressed, reason } = await ComplianceService.checkSuppression(companyId, "SMS", to);
       if (suppressed) {
         console.warn(`[Messaging] SMS to ${to} blocked — on suppression list (${reason}).`);
-        return { blocked: true, reason: `Suppressed (${reason})` };
+        return { outcome: "blocked", blocked: true, reason: `Suppressed (${reason})` };
       }
     }
     const finalBody = addOptOut ? ComplianceService.addSmsOptOutSuffix(body) : body;
     return sendSms({ to, body: finalBody, smsConfig });
   }
 
-  static async sendTicketStatusUpdate({ companyId, to, homeownerName, ticketId, status, company, smtpConfig }) {
+  static async sendTicketStatusUpdate({ companyId, to, homeownerName, ticketId, status, company, smtpConfig, allowPlatformSender = false }) {
     if (companyId && to) {
       const { suppressed, reason } = await ComplianceService.checkSuppression(companyId, "EMAIL", to);
       if (suppressed) {
         console.warn(`[Messaging] Ticket-status email to ${to} blocked — on suppression list (${reason}).`);
-        return { success: false, blocked: true, reason: `Suppressed (${reason})` };
+        return { success: false, outcome: "blocked", blocked: true, reason: `Suppressed (${reason})` };
       }
     }
-    return MailService.sendTicketStatusUpdate(to, homeownerName, ticketId, status, company, smtpConfig);
+    return MailService.sendTicketStatusUpdate(to, homeownerName, ticketId, status, company, smtpConfig, allowPlatformSender);
   }
 
   // FR-16 proactive status reminders: send a status-change email for a ticket,

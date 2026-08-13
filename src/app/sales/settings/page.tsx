@@ -90,6 +90,45 @@ interface SyncLogEntry {
   createdAt: string;
 }
 
+interface GroupedSyncLog extends SyncLogEntry {
+  occurrences: number;
+  /** Oldest entry in the run; equals `createdAt` when the run is a single log. */
+  firstSeenAt: string;
+}
+
+/**
+ * A cron that keeps failing writes one identical row per attempt, which buries
+ * everything else in the feed. Runs of consecutive logs with the same action,
+ * status and message collapse into one row carrying a count and a time span.
+ *
+ * Only *consecutive* runs collapse: an error, then a success, then the same
+ * error again is two separate incidents and stays two rows. Counts are summed
+ * so a collapsed row still reports the true number of records and errors.
+ */
+function groupSyncLogs(logs: SyncLogEntry[]): GroupedSyncLog[] {
+  const grouped: GroupedSyncLog[] = [];
+  for (const log of logs) {
+    const prev = grouped[grouped.length - 1];
+    const sameIncident =
+      prev &&
+      prev.action === log.action &&
+      prev.status === log.status &&
+      prev.direction === log.direction &&
+      (prev.message || "") === (log.message || "");
+
+    if (sameIncident) {
+      prev.occurrences += 1;
+      prev.recordCount += log.recordCount || 0;
+      prev.errorCount += log.errorCount || 0;
+      // Logs arrive newest-first, so each repeat pushes the start time back.
+      prev.firstSeenAt = log.createdAt;
+    } else {
+      grouped.push({ ...log, occurrences: 1, firstSeenAt: log.createdAt });
+    }
+  }
+  return grouped;
+}
+
 const fadeInUp = {
   hidden: { opacity: 0, y: 15 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
@@ -948,22 +987,31 @@ function SettingsPageContent() {
                           No sync activity recorded yet.
                         </p>
                       ) : (
-                        syncLogs.map((log) => (
+                        groupSyncLogs(syncLogs).map((log) => (
                           <div key={log.id} className="p-2.5 border rounded-lg bg-slate-50/50 dark:bg-slate-900/10 text-[11px] space-y-1.5">
-                            <div className="flex justify-between items-center">
-                              <div className="flex items-center gap-1.5">
+                            <div className="flex justify-between items-center gap-2">
+                              <div className="flex items-center gap-1.5 min-w-0">
                                 {log.direction === "OUTBOUND" ? (
-                                  <ArrowUpFromLine className="h-3 w-3 text-blue-500" />
+                                  <ArrowUpFromLine className="h-3 w-3 shrink-0 text-blue-500" />
                                 ) : (
-                                  <ArrowDownToLine className="h-3 w-3 text-green-500" />
+                                  <ArrowDownToLine className="h-3 w-3 shrink-0 text-green-500" />
                                 )}
-                                <span className="font-semibold text-slate-700 dark:text-slate-300">{log.action.replace(/_/g, " ")}</span>
+                                <span className="font-semibold truncate text-slate-700 dark:text-slate-300">{log.action.replace(/_/g, " ")}</span>
+                                {log.occurrences > 1 && (
+                                  <Badge
+                                    variant="outline"
+                                    title={`${log.occurrences} identical attempts, most recent ${formatTimeAgo(log.createdAt)}`}
+                                    className="shrink-0 text-[9px] font-semibold tracking-tight px-1.5 py-0 tabular-nums"
+                                  >
+                                    &times;{log.occurrences}
+                                  </Badge>
+                                )}
                               </div>
-                              <Badge className={`text-[9px] font-semibold tracking-tight border-none ${getLogStatusColor(log.status)}`}>
+                              <Badge className={`shrink-0 text-[9px] font-semibold tracking-tight border-none ${getLogStatusColor(log.status)}`}>
                                 {log.status}
                               </Badge>
                             </div>
-                            <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
+                            <div className="flex justify-between gap-2 text-[10px] text-muted-foreground font-medium">
                               <span>
                                 {log.recordCount > 0 && (
                                   <>Ingested: <strong>{log.recordCount} leads</strong></>
@@ -972,7 +1020,11 @@ function SettingsPageContent() {
                                   <span className="text-red-500 ml-2">({log.errorCount} errors)</span>
                                 )}
                               </span>
-                              <span>{formatTimeAgo(log.createdAt)}</span>
+                              <span className="shrink-0 text-right">
+                                {log.occurrences > 1
+                                  ? `${formatTimeAgo(log.firstSeenAt)} → ${formatTimeAgo(log.createdAt)}`
+                                  : formatTimeAgo(log.createdAt)}
+                              </span>
                             </div>
                             {log.message && log.status !== "SUCCESS" && (
                               <p className="text-[10px] text-red-500 font-mono pt-1 border-t border-dashed leading-tight">

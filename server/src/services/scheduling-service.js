@@ -3,7 +3,7 @@ import { computeAvailableSlots, formatSlotLabel } from "../lib/scheduling.js";
 import { getLeadTimezone } from "../lib/timezone.js";
 import * as GoogleCalendar from "./google-calendar.service.js";
 import { MailService } from "./mail-service.js";
-import { sendSms } from "./sms.service.js";
+import { sendSms, smsSent } from "./sms.service.js";
 import { ComplianceService } from "./compliance-service.js";
 import { Templates, SmsTemplates } from "./templates.js";
 import { getMessagingConfig } from "../lib/messaging-config.js";
@@ -211,7 +211,12 @@ async function sendConfirmations(lead, appointment, tz) {
     const body = ComplianceService.addSmsOptOutSuffix(
       `Your ${appointment.title} is confirmed for ${when}.${meet ? ` Join: ${meet}` : ""} Manage: ${rescheduleUrl}`
     );
-    await sendSms({ to: lead.phone, body, smsConfig }).catch(() => { });
+    const result = await sendSms({ to: lead.phone, body, smsConfig });
+    if (!smsSent(result)) {
+      console.warn(
+        `[Scheduling] Confirmation SMS to ${lead.phone} not delivered (${result.outcome}): ${result.error}`,
+      );
+    }
   }
 }
 
@@ -286,11 +291,16 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
       });
     }
     if (appt.lead.phone) {
-      await sendSms({
+      const result = await sendSms({
         to: appt.lead.phone,
         body: `Your ${appt.title} for ${when} has been cancelled. Reply to rebook.`,
         smsConfig,
-      }).catch(() => { });
+      });
+      if (!smsSent(result)) {
+        console.warn(
+          `[Scheduling] Cancellation SMS to ${appt.lead.phone} not delivered (${result.outcome}): ${result.error}`,
+        );
+      }
     }
   } catch (e) {
     console.error("[Scheduling] cancel notification failed:", e.message);
