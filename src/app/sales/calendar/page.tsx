@@ -7,6 +7,13 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
   CalendarDays,
   CalendarRange,
   List,
@@ -32,8 +39,6 @@ type CalendarEvent = {
   outline?: string;
   reason?: string;
   isCompleted?: boolean;
-  // Discriminator: manual ContentCalendar items have no `type`; campaign
-  // aggregations use "campaign_aggregation"; announcements use "announcement".
   type?: string;
 };
 
@@ -42,12 +47,22 @@ type ViewMode = "month" | "week" | "list";
 const NON_EDITABLE = new Set(["Sent", "Published", "Dismissed"]);
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-// Only manual content-calendar items in an editable state can be dragged; campaign
-// sends and announcements are managed elsewhere and are read-only here.
 const isDraggable = (evt: CalendarEvent) =>
   !evt.type && !!evt.id && !NON_EDITABLE.has(evt.status || "");
 
-// Monday-based start of the week containing `d`.
+const describeSource = (evt: CalendarEvent) => {
+  if (evt.type === "announcement") return "Announcement sent to a lead audience";
+  if (evt.type === "campaign_aggregation") return "Campaign sends scheduled for this day";
+  if (evt.status === "Suggested") return "AI suggestion — not scheduled until you approve it";
+  return "Content calendar item";
+};
+
+const whereManaged = (evt: CalendarEvent) => {
+  if (evt.type === "announcement") return "Announcements";
+  if (evt.type === "campaign_aggregation") return "Campaigns";
+  return "This calendar";
+};
+
 const startOfWeek = (d: Date) => {
   const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const day = date.getDay();
@@ -69,6 +84,7 @@ export default function ContentCalendarPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [view, setView] = useState<ViewMode>("month");
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
 
   const fetchEvents = useCallback(async () => {
     try {
@@ -148,10 +164,6 @@ export default function ContentCalendarPage() {
       console.error(err);
     }
   };
-
-  // SW-CAL-004: drag an item onto another day to reschedule it. Preserves the
-  // original time-of-day and only moves the date; the backend re-validates the
-  // future-date + SMS quiet-hours rules and rejects invalid drops.
   const handleDropOnDay = async (targetDay: Date) => {
     const id = draggedId;
     setDraggedId(null);
@@ -189,7 +201,6 @@ export default function ContentCalendarPage() {
     }
   };
 
-  // ── Navigation adapts to the active view ──────────────────────────────────
   const shift = (dir: 1 | -1) => {
     if (view === "week") {
       setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() + dir * 7));
@@ -223,8 +234,17 @@ export default function ContentCalendarPage() {
           e.dataTransfer.effectAllowed = "move";
         }}
         onDragEnd={() => setDraggedId(null)}
-        title={draggable ? "Drag to another day to reschedule" : evt.title}
-        className={`text-[9px] p-1 rounded font-medium border flex items-center gap-0.5 truncate ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isDone
+        onClick={() => setDetailEvent(evt)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setDetailEvent(evt);
+          }
+        }}
+        title={draggable ? "Click to open · drag to another day to reschedule" : "Click to open"}
+        className={`text-[9px] p-1 rounded font-medium border flex items-center gap-0.5 truncate focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#b48c3c] ${draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${isDone
           ? "bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800/50 dark:text-slate-400 dark:border-slate-800"
           : isAnnouncement
             ? "bg-purple-50 text-purple-800 border-purple-100 dark:bg-purple-950/20 dark:text-purple-300 dark:border-purple-900/20"
@@ -257,7 +277,7 @@ export default function ContentCalendarPage() {
           if (draggedId) e.preventDefault();
         }}
         onDrop={() => handleDropOnDay(day)}
-        className={`border-r border-b dark:border-slate-800 p-2 text-left space-y-1.5 flex flex-col ${tall ? "min-h-[120px]" : ""} transition ${draggedId ? "hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10" : ""} ${isToday ? "bg-[#b48c3c]/5 dark:bg-[#b48c3c]/10 ring-1 ring-inset ring-[#b48c3c]/40" : "hover:bg-slate-50/20 dark:hover:bg-slate-900/10"}`}
+        className={`border-r border-b dark:border-slate-800 p-2 text-left space-y-1.5 flex flex-col ${tall ? "min-h-30" : ""} transition ${draggedId ? "hover:bg-indigo-50/40 dark:hover:bg-indigo-950/10" : ""} ${isToday ? "bg-[#b48c3c]/5 dark:bg-[#b48c3c]/10 ring-1 ring-inset ring-[#b48c3c]/40" : "hover:bg-slate-50/20 dark:hover:bg-slate-900/10"}`}
       >
         {isToday ? (
           <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-[#b48c3c] text-white text-[10px] font-bold">{day.getDate()}</span>
@@ -283,7 +303,7 @@ export default function ContentCalendarPage() {
         <div className="grid grid-cols-7 text-center border-b dark:border-slate-800 text-xs font-semibold text-slate-400 py-2">
           {WEEKDAYS.map((d) => <span key={d}>{d}</span>)}
         </div>
-        <div className="grid grid-cols-7 min-h-[650px]">
+        <div className="grid grid-cols-7 min-h-162.5">
           {Array.from({ length: startOffset }).map((_, i) => (
             <div key={`empty-${i}`} className="border-r border-b dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/5" />
           ))}
@@ -310,7 +330,7 @@ export default function ContentCalendarPage() {
             <span key={i}>{WEEKDAYS[i]} <span className="text-slate-300 dark:text-slate-600">{d.getDate()}</span></span>
           ))}
         </div>
-        <div className="grid grid-cols-7 min-h-[500px]">
+        <div className="grid grid-cols-7 min-h-125">
           {days.map((d, i) => <DayCell key={i} day={d} tall />)}
         </div>
       </>
@@ -339,7 +359,19 @@ export default function ContentCalendarPage() {
           const isAnnouncement = evt.type === "announcement";
           const isCampaign = evt.type === "campaign_aggregation";
           return (
-            <div key={evt.id} className="flex items-center gap-4 px-4 py-3 hover:bg-slate-50/40 dark:hover:bg-slate-900/10">
+            <div
+              key={evt.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setDetailEvent(evt)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setDetailEvent(evt);
+                }
+              }}
+              className="flex w-full items-center gap-4 px-4 py-3 text-left cursor-pointer hover:bg-slate-50/40 dark:hover:bg-slate-900/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[#b48c3c]"
+            >
               <div className="w-16 shrink-0 text-center">
                 <div className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{d.toLocaleString("default", { month: "short" })}</div>
                 <div className="text-lg font-bold text-slate-700 dark:text-slate-200">{d.getDate()}</div>
@@ -404,7 +436,7 @@ export default function ContentCalendarPage() {
                 </Button>
 
                 {showSuggestions && (
-                  <div className="absolute right-0 top-11 z-50 w-[320px] sm:w-[380px] bg-white dark:bg-slate-950 border dark:border-slate-800 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-2 fade-in duration-200">
+                  <div className="absolute right-0 top-11 z-50 w-[320px] sm:w-95 bg-white dark:bg-slate-950 border dark:border-slate-800 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-top-2 fade-in duration-200">
                     <div className="p-4 border-b dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
                       <h3 className="font-bold flex items-center gap-2 text-sm">
                         <Sparkles className="h-4 w-4 text-indigo-500" />
@@ -412,7 +444,7 @@ export default function ContentCalendarPage() {
                       </h3>
                       <p className="text-xs text-muted-foreground mt-1">Identified outreach gaps & local events</p>
                     </div>
-                    <div className="p-4 max-h-[400px] overflow-y-auto space-y-3">
+                    <div className="p-4 max-h-100 overflow-y-auto space-y-3">
                       {suggestions.length > 0 ? (
                         suggestions.map((s) => (
                           <div key={s.id} className="p-3 border dark:border-slate-800 bg-white dark:bg-slate-950 rounded-xl space-y-2 shadow-sm">
@@ -491,6 +523,80 @@ export default function ContentCalendarPage() {
             </div>
           </div>
         </div>
+
+        <Dialog open={!!detailEvent} onOpenChange={(open) => !open && setDetailEvent(null)}>
+          <DialogContent className="sm:max-w-lg">
+            {detailEvent && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="text-base pr-6">{detailEvent.title || detailEvent.topic || "Untitled item"}</DialogTitle>
+                  <DialogDescription className="text-xs">{describeSource(detailEvent)}</DialogDescription>
+                </DialogHeader>
+
+                <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2 text-xs">
+                  <dt className="font-semibold text-muted-foreground">Scheduled</dt>
+                  <dd>
+                    {detailEvent.scheduledAt
+                      ? new Date(detailEvent.scheduledAt).toLocaleString(undefined, {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                      : "Not scheduled"}
+                  </dd>
+
+                  <dt className="font-semibold text-muted-foreground">Channel</dt>
+                  <dd>{detailEvent.channel || "—"}</dd>
+
+                  <dt className="font-semibold text-muted-foreground">Status</dt>
+                  <dd>
+                    <Badge variant="outline" className="text-[10px]">
+                      {detailEvent.isCompleted ? "Completed" : detailEvent.status || "Scheduled"}
+                    </Badge>
+                  </dd>
+
+                  <dt className="font-semibold text-muted-foreground">Managed in</dt>
+                  <dd>{whereManaged(detailEvent)}</dd>
+                </dl>
+
+                {detailEvent.reason && (
+                  <div className="rounded-lg border border-border/70 bg-muted/25 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                      Why this was suggested
+                    </p>
+                    <p className="text-xs text-muted-foreground">{detailEvent.reason}</p>
+                  </div>
+                )}
+
+                {(detailEvent.content || detailEvent.outline) && (
+                  <div className="rounded-lg border border-border/70 bg-muted/25 p-3 max-h-64 overflow-y-auto">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                      {detailEvent.content ? "Content" : "Outline"}
+                    </p>
+                    <p className="text-xs whitespace-pre-wrap text-slate-700 dark:text-slate-300">
+                      {detailEvent.content || detailEvent.outline}
+                    </p>
+                  </div>
+                )}
+
+                {!detailEvent.content && !detailEvent.outline && !detailEvent.reason && (
+                  <p className="text-xs text-muted-foreground">
+                    No content is stored on this item — it is a scheduling entry only.
+                  </p>
+                )}
+
+                {isDraggable(detailEvent) && (
+                  <p className="text-[11px] text-muted-foreground border-t border-border/40 pt-2.5">
+                    Drag this item to another day in month or week view to reschedule it.
+                  </p>
+                )}
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
       </PortalLayout>
     </ProtectedRoute>
   );

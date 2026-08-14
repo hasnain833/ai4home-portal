@@ -8,8 +8,11 @@ const COLORS = {
   border: "#eaeaea"
 };
 
-function wrapEmail(content, title, companyName = "Aiforhomebuilder", headerColor = COLORS.primary) {
+function wrapEmail(content, title, companyName = "Aiforhomebuilder", headerColor = COLORS.primary, { replyable = false } = {}) {
   const currentYear = new Date().getFullYear();
+  const footerNote = replyable
+    ? "You're messaging an automated assistant. Reply to this email and it will pick up the conversation."
+    : "This is an automated message. Please do not reply directly to this email.";
 
   return `
     <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid ${COLORS.border};">
@@ -21,7 +24,7 @@ function wrapEmail(content, title, companyName = "Aiforhomebuilder", headerColor
       </div>
       <div style="background-color: ${COLORS.bgDark}; padding: 24px; text-align: center; color: ${COLORS.textMuted}; font-size: 13px;">
         <p style="margin: 0;">&copy; ${currentYear} ${companyName}. All rights reserved.</p>
-        <p style="margin: 8px 0 0 0; font-size: 11px;">This is an automated message. Please do not reply directly to this email.</p>
+        <p style="margin: 8px 0 0 0; font-size: 11px;">${footerNote}</p>
       </div>
     </div>
   `;
@@ -245,9 +248,11 @@ export const Templates = {
     const body = bodyText.replace(/\n/g, "<br />");
     const content = `
       ${body}
-      <p style="margin-top: 24px; font-size: 12px; color: ${COLORS.textMuted};">This is an automated scheduling assistant.</p>
+      <p style="margin-top: 24px; font-size: 12px; color: ${COLORS.textMuted};">This is an automated scheduling assistant. A member of the team can take over any time — just ask.</p>
     `;
-    return wrapEmail(content, companyName || "Scheduling", companyName || "Aiforhomebuilder");
+    return wrapEmail(content, companyName || "Scheduling", companyName || "Aiforhomebuilder", COLORS.primary, {
+      replyable: true,
+    });
   },
 
   getEscalationEmail: (leadName, contactInfo, reason) => {

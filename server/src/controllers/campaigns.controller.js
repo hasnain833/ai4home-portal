@@ -8,8 +8,6 @@ import { LEAD_STATUS } from "../lib/lead-statuses.js";
 
 const CAMPAIGN_BATCH_SIZE = 500;
 
-// companyId travels on the event so a failed run can actually be recorded — the
-// dead-letter handler drops anything it cannot attribute to a company.
 async function sendCampaignEnrollmentEvents(inngest, enrollments, campaignId, companyId) {
   for (let i = 0; i < enrollments.length; i += CAMPAIGN_BATCH_SIZE) {
     const batch = enrollments.slice(i, i + CAMPAIGN_BATCH_SIZE);
@@ -222,9 +220,6 @@ export const updateCampaign = async (req, res) => {
   }
 };
 
-
-// Saving and enrolling only warn — a tenant must still be able to draft SMS steps
-// before Twilio is set up. Only an actual send is blocked (see announcements).
 async function unsendableChannelWarnings(companyId, steps) {
   const types = new Set((steps || []).map((s) => String(s?.type || "").toUpperCase()));
   if (!types.has("EMAIL") && !types.has("SMS")) return [];
@@ -592,20 +587,16 @@ export const deleteCampaign = async (req, res) => {
   }
 };
 
-// --- Create a nurture campaign from a scraped news item (SW-NUR-001/005) ---
 
 function parseJsonBlock(text) {
   return parseLlmJson(text);
 }
 
-// Strip a trailing " - Source Name" / " — Source" suffix the scraper appends to
-// headlines, so it doesn't read awkwardly inside marketing copy.
 function cleanNewsTitle(title = "") {
   const cleaned = title.replace(/\s+[-–—]\s+[^-–—]+$/, "").trim();
   return cleaned || title.trim();
 }
 
-// A normalized fingerprint used to detect when the summary just repeats the title.
 function fingerprint(s = "") {
   return s
     .toLowerCase()
@@ -616,8 +607,6 @@ function fingerprint(s = "") {
 function buildFallbackNewsCopy(news) {
   const title = cleanNewsTitle(news.title || "");
   const summary = (news.summary || "").trim();
-  // Only include the summary if it actually adds detail beyond the headline —
-  // otherwise the email showed the same sentence twice.
   const summaryAddsDetail =
     summary && fingerprint(summary) !== fingerprint(title);
   const insight = summaryAddsDetail
@@ -770,6 +759,7 @@ export const createCampaignFromNews = async (req, res) => {
 
 export const generateCampaignCopy = async (req, res) => {
   try {
+    const { companyId } = req.user;
     const { goal, audience, brandVoice, stepType, contextInfo } = req.body;
 
     if (!goal || !stepType) {
@@ -779,7 +769,7 @@ export const generateCampaignCopy = async (req, res) => {
     }
 
     const company = await prisma.company.findUnique({
-      where: { id: req.user.companyId },
+      where: { id: companyId },
       select: {
         name: true,
         voiceProfile: true,
@@ -792,11 +782,8 @@ export const generateCampaignCopy = async (req, res) => {
       });
     }
     const brandLines = buildBrandContext(company, { brandVoice });
-
-    // SW-KB-002: ground nurture copy in the tenant KB (brand voice / product / FAQ),
-    // scoped per SW-KB-004. SW-KB-005: capture which docs were referenced.
     const kbQueryText = [goal, audience, contextInfo].filter(Boolean).join(" ");
-    const kbChunks = await kbQuery(req.user.companyId, kbQueryText, 5, KB_SCOPES.nurture).catch(() => []);
+    const kbChunks = await kbQuery(companyId, kbQueryText, 5, KB_SCOPES.nurture).catch(() => []);
     const kbContext = kbChunks.length
       ? kbChunks.map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`).join("\n\n")
       : "No knowledge-base context available.";
@@ -829,9 +816,10 @@ Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body"
     });
 
     if (!content) {
-      return res
-        .status(500)
-        .json({ message: "Failed to generate copy from AI provider" });
+      return res.status(502).json({
+        message:
+          "The AI provider returned nothing. This is usually a rejected API key, an expired plan, or a rate limit — check the key in Settings > AI Config, then try again.",
+      });
     }
 
     const parsed = parseJsonBlock(content || "");
@@ -847,6 +835,8 @@ Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body"
     });
   } catch (error) {
     console.error("[Generate Copy] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({
+      message: `Could not generate the copy: ${error.message}. Your draft has not been changed — check Settings > AI Config, and the server logs if this keeps happening.`,
+    });
   }
 };

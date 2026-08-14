@@ -121,8 +121,6 @@ export default function AppointmentsPage() {
     workingDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
     timezone: "America/New_York",
     appointmentMode: "AI",
-    // SW-APT-006: SRS default is 4 automated turns before human handoff.
-    agentMaxTurns: "4",
   });
   const [google, setGoogle] = useState({
     connected: false,
@@ -183,7 +181,6 @@ export default function AppointmentsPage() {
           .map((d: string) => d.trim()),
         timezone: s.timezone || "America/New_York",
         appointmentMode: data.appointmentMode || "AI",
-        agentMaxTurns: String(data.agentMaxTurns ?? 4),
       });
       setCanEdit(data.canEditAvailability !== false);
       setGoogle({
@@ -249,7 +246,6 @@ export default function AppointmentsPage() {
           ).join(","),
           timezone: settings.timezone,
           appointmentMode: settings.appointmentMode,
-          agentMaxTurns: Number(settings.agentMaxTurns),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).message || "Save failed");
@@ -705,37 +701,13 @@ export default function AppointmentsPage() {
                         </Select>
                       </div>
 
-                      {/* SW-APT-006: turn limit before human handoff. Only meaningful in
-                      AI mode — SIMPLE just sends a booking link, OFF does nothing. */}
                       {settings.appointmentMode === "AI" && (
-                        <div className="space-y-1.5">
-                          <Label className="font-semibold">
-                            Hand off to a human after…
-                          </Label>
-                          <div className="flex items-center gap-2">
-                            <Input
-                              type="number"
-                              min={1}
-                              max={20}
-                              value={settings.agentMaxTurns}
-                              onChange={(e) =>
-                                setSettings((s) => ({
-                                  ...s,
-                                  agentMaxTurns: e.target.value,
-                                }))
-                              }
-                              className="w-24"
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              agent replies without a booking
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-muted-foreground">
-                            The agent stops and offers a team member instead.
-                            Lower means a person steps in sooner. 1–20; the
-                            recommended default is 4.
-                          </p>
-                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          The agent keeps the conversation going for as long as it
+                          is useful. It hands over to a team member when someone
+                          asks to speak to a person, or raises a complaint or
+                          anything legal.
+                        </p>
                       )}
 
                       <div className="p-4 bg-slate-50 dark:bg-slate-900 border rounded-xl space-y-3">

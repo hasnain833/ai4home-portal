@@ -7,7 +7,7 @@ import { getMessagingConfig } from "../../lib/messaging-config.js";
 import { buildPrismaWhereClause } from "../../controllers/segments.controller.js";
 import { htmlToText, looksLikeHtml } from "../../lib/sanitize-html.js";
 import { withActiveLeadFilter } from "../../lib/lead-audience.js";
-import { deadLetter } from "../../lib/dead-letter.js";
+import { deadLetter, deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml, safeUrl } from "../../lib/utils.js";
 import { Templates } from "../../services/templates.js";
 

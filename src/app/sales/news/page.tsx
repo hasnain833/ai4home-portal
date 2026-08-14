@@ -111,7 +111,7 @@ export default function SalesNewsPage() {
                 Housing Market News
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                AI-summarized market news that powers your calendar suggestions and blog drafts. Nothing is sent to leads without your approval.
+                AI-summarized market news from the last 30 days, powering your calendar suggestions and blog drafts. Older stories drop off automatically so drafts stay current. Nothing is sent to leads without your approval.
               </p>
             </div>
             <div className="flex items-center gap-2">
