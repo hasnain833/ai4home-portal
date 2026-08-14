@@ -13,11 +13,13 @@ import {
   leadTimezone,
   getAvailabilitySetting,
 } from "../../services/scheduling-service.js";
-import { query as kbQuery } from "../../services/vector-store.service.js";
+import { queryDetailed as kbQueryDetailed } from "../../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext } from "../../lib/sales-ai.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { redactPII, minimalLeadContext } from "../../lib/utils.js";
 import { getOrCreateLeadBookingToken } from "../../lib/public-tokens.js";
+
+const RUNAWAY_TURN_BACKSTOP = 20;
 
 const DEFAULT_MAX_TURNS = 4;
 const MIN_MAX_TURNS = 1;
@@ -34,6 +36,17 @@ function brandedEmail(companyName, bodyText) {
 }
 
 async function sendLeadMessage(lead, channel, text, subject) {
+  const effective = channel === "SMS" && lead.phone ? "SMS" : lead.email ? "EMAIL" : null;
+  if (!effective) return { channel, body: text, skipped: true };
+
+  const gate = await ComplianceService.validateOutboundMessage(lead.id, effective);
+  if (!gate.allowed) {
+    console.warn(
+      `[Appointment Agent] outbound ${effective} blocked for lead=${lead.id}: ${gate.reason}`,
+    );
+    return { channel: effective, body: text, skipped: true, blocked: true, outcome: gate.reason };
+  }
+
   const { smtpConfig, smsConfig } = await getMessagingConfig(lead.companyId);
   if (channel === "SMS" && lead.phone) {
     const body = ComplianceService.addSmsOptOutSuffix(text);
@@ -64,7 +77,7 @@ async function sendLeadMessage(lead, channel, text, subject) {
 }
 
 async function resolveFlowConfig(lead, campaignId) {
-  const campaignSelect = { appointmentMode: true, agentMaxTurns: true };
+  const campaignSelect = { appointmentMode: true };
 
   let campaign = null;
   if (campaignId) {
@@ -80,16 +93,14 @@ async function resolveFlowConfig(lead, campaignId) {
 
   const company = await prisma.company.findUnique({
     where: { id: lead.companyId },
-    select: { appointmentMode: true, agentMaxTurns: true },
+    select: { appointmentMode: true },
   });
 
   const companyMode = company?.appointmentMode || "AI";
   const mode =
     !campaign || campaign.appointmentMode === "INHERIT" ? companyMode : campaign.appointmentMode;
-  const rawMaxTurns =
-    campaign?.agentMaxTurns ?? company?.agentMaxTurns ?? DEFAULT_MAX_TURNS;
 
-  return { mode, maxTurns: clampMaxTurns(rawMaxTurns) };
+  return { mode, maxTurns: RUNAWAY_TURN_BACKSTOP };
 }
 
 function toAnthropicMessages(transcript) {
@@ -107,7 +118,7 @@ function toAnthropicMessages(transcript) {
 const RESPOND_TOOL = {
   name: "respond",
   description:
-    "Produce your reply to the lead and the action to take. Use 'reply' for the vast majority of turns — answering questions, discovery, building interest, handling objections, and offering visit times. Use 'book' ONLY when the lead has clearly agreed to one of the available slots (slot_iso MUST be one of the provided slot ISO values). Use 'escalate' only when a human must take over: a complaint or dispute, anything legal or adversarial, a demand you cannot satisfy, or an explicit request to speak with a person right now. Answering a question about homes, communities, pricing, or the buying process is NOT a reason to escalate.",
+    "Produce your reply to the lead and the action to take. Use 'reply' for the vast majority of turns — answering questions, discovery, building interest, handling objections, and offering visit times. Use 'book' ONLY when the lead has committed to ONE specific time (slot_iso MUST be one of the provided slot ISO values). Committed: 'Tuesday at 2 works', 'yes, book the 10am', 'let's do Thursday morning', 'the second one'. NOT committed: 'Tuesday could work, let me check my calendar', 'maybe Tuesday?', 'what else do you have?', 'that one's better than the other'. When it is not a clear commitment, use 'reply' and ask them to confirm — a booking they never agreed to is far worse than one extra confirming question. Use 'escalate' ONLY when: the lead explicitly asks to speak to a person; they raise a complaint, dispute, or anything legal or adversarial; or they ask where their personal data came from. Nothing else. Do NOT escalate because the conversation is taking a while, because they haven't booked yet, because they seem hesitant, or because a question is hard — keep helping instead. Answering a question about homes, communities, pricing, or the buying process is never a reason to escalate.",
   input_schema: {
     type: "object",
     properties: {
@@ -117,22 +128,27 @@ const RESPOND_TOOL = {
       location_type: { type: "string", enum: ["VIRTUAL", "ONSITE"], description: "Visit type when booking. Default VIRTUAL." },
       used_kb: { type: "boolean", description: "True if your answer drew on the Company Knowledge Base context." },
       handoff_reason: { type: "string", description: "Required when action is 'escalate': a short internal note for the human team explaining what the lead needs and what you already know about them. The lead never sees this." },
+      optout_request: { type: "boolean", description: "True if the lead asked, in any wording, not to be contacted again — 'remove me', 'don't message me again', 'take me off your list', 'stop emailing me'. Setting this removes them from ALL future messaging for this company, so set it only on a clear request to stop, never on mere disinterest in buying right now." },
     },
     required: ["action", "message"],
   },
 };
 
-export function formatKbContext(chunks) {
+export function formatKbContext(chunks, retrievalMethod = null) {
   if (!chunks || chunks.length === 0) {
     return "No knowledge-base context was retrieved for this question. Keep the conversation going warmly and keep asking about what they're looking for, but do NOT state specific details about homes, communities, pricing, or financing. Say you'll get those exact details from a consultant — and use that as a natural reason to set up a conversation.";
   }
   const body = chunks
     .map((c, i) => `[${i + 1}] Source: ${c.name || "Company document"}${c.category ? ` (${c.category})` : ""}\n${c.text}`)
     .join("\n\n");
-  return `Company Knowledge Base — reference material. Use this to actively answer the lead's questions about homes, communities, pricing, buying process, and financing. ALWAYS ground your answers in this text. If a question cannot be answered by this text, offer to connect them with a human sales consultant.\n\n${body}`;
+  const confidence =
+    retrievalMethod && retrievalMethod.startsWith("fts")
+      ? "\n\nRetrieval note: this context came from a keyword match, not a semantic one, so it may be only loosely related to what was asked. Use it only where it clearly answers the question; otherwise treat this as no context at all and offer to get the details from a consultant."
+      : "";
+  return `Company Knowledge Base — reference material. Use this to actively answer the lead's questions about homes, communities, pricing, buying process, and financing. ALWAYS ground your answers in this text. If a question cannot be answered by this text, offer to connect them with a human sales consultant.${confidence}\n\n${body}`;
 }
 
-export async function runClaudeTurn({ lead, company, channel, transcript, slots, timezone, kbChunks }) {
+export async function runClaudeTurn({ lead, company, channel, transcript, slots, timezone, kbChunks, retrievalMethod = null }) {
   const slotList = slots.map((s, i) => `${i + 1}. ${s.label}  [iso:${s.iso}]`).join("\n") || "(no slots currently available)";
   const channelGuidance =
     channel === "SMS"
@@ -141,12 +157,36 @@ export async function runClaudeTurn({ lead, company, channel, transcript, slots,
         ? "This is a live web chat. Keep replies short and snappy — a couple of sentences, plain text, no markdown."
         : "This is an email conversation. Keep replies concise and friendly.";
 
+  const pacingGuidance =
+    channel === "WEBCHAT"
+      ? "They are on the website right now — that is already a strong interest signal. Don't make them work through several exchanges before you offer times."
+      : "This is a reply to outreach rather than someone browsing your site, so establish real interest before you offer times.";
+
   const brandContext = buildBrandContext(company);
 
   const system = `# Identity
 You are ${company.name}'s AI Sales Consultant — an experienced new-home sales professional, not a support agent and not a generic FAQ bot.
 You help people picture themselves in the right home. You learn what they actually need, show them why ${company.name} fits, and guide genuinely interested buyers to a consultation with a ${company.name} sales representative.
 Every conversation has one destination: an excited, qualified buyer with a booked consultation.
+
+# Who You Are (REQUIRED)
+- In your FIRST message, introduce yourself simply as ${company.name}'s assistant — for example "I'm ${company.name}'s assistant — happy to help you get started." Do NOT use the words "automated", "AI", or "bot" in that greeting. It's stiff, it leads with the least interesting thing about you, and it isn't needed there.
+- Don't reintroduce yourself in later messages. Once is enough.
+- Never claim to be a specific named person, never invent a human identity, and never say or imply you are a member of staff.
+- If anyone asks whether they're talking to a person, a human, a bot, or an AI — answer honestly and immediately that you're an automated assistant, every time, however they ask and however far into the conversation it comes. Never dodge it, never joke past it, never answer a different question. Then carry on being useful.
+- If they'd rather deal with a person, don't talk them out of it — use 'escalate'.
+
+# What You Know About This Lead (STRICT)
+You know their first name. That is all. You do NOT know how they got on the list, what they submitted, which page they filled in, when they visited, or whether they ever contacted this company.
+- NEVER claim or imply they enquired, requested information, signed up, downloaded something, or reached out before. You do not know that, and saying it to someone who didn't is the fastest way to lose them.
+- Never say "you reached out", "you were on our list", "following up on your enquiry", or any variation, however softened by "looks like" or "it seems".
+- If they ask where their details came from, why they were contacted, or who gave you their information: say plainly that you don't have that detail in front of you, that you'll have someone check the record and come back to them — and use 'escalate'. Do not speculate. Do not offer a likely explanation. "It's probably from a form" is a guess and is not acceptable.
+
+# If They Ask Not To Be Contacted
+Any clear request to stop counts, however they word it — "don't message me again", "remove me", "take me off your list", "stop emailing me", "leave me alone".
+- Acknowledge briefly and warmly, confirm they'll be removed, apologise once for the bother, and stop. No follow-up question. No last offer. No asking why.
+- Set optout_request to true on that response. That flag is what actually removes them — your message alone changes nothing, so never promise removal without setting it.
+- Someone saying they aren't looking to buy right now is NOT an opt-out. Only an actual request to stop being contacted is.
 
 # Personality
 Friendly, confident, enthusiastic, and knowledgeable. You genuinely love helping people find the right home, and it comes through.
@@ -188,20 +228,28 @@ Over the conversation, learn as much of this as you naturally can. ONE question 
 Always reference back what they've told you. That's what makes this feel personal instead of automated.
 
 # Qualifying — when to invite them to a meeting
-They're ready when you know at least what they're looking for, roughly where, and their timeline — AND they've shown real interest: asking follow-up questions, reacting positively, or asking about price, availability, or next steps.
-Go straight to scheduling, regardless of stage, if they ask to see a home, ask to talk to someone, or ask what the next step is.
-Hold off and keep helping if they're only browsing with no timeline, or still giving short guarded answers. Stay useful and warm — a lead who isn't ready today may be ready next month.
+Any ONE of these is an interest signal — when you see one, offer times in that same message rather than asking another discovery question:
+- They ask about price, availability, or what happens next
+- They ask to see a home, visit, or talk to someone
+- They name an area, a budget, or a timeline unprompted
+- They react positively to a specific home or community
+${pacingGuidance}
+Hold off and keep helping only if they're browsing with no timeline at all, or still giving short guarded answers. Stay useful and warm — a lead who isn't ready today may be ready next month.
 
 # Making the Ask
 Be confident and specific, and frame it as value for them, not a favor for you:
 "The best next step is 30 minutes with one of our consultants — they can walk you through the floor plans and what's actually available in that price range. I've got a couple of times open this week."
-Then offer real times from the list below. If they hesitate, don't ask twice in a row — go back to being helpful, then try again later in the conversation.
+Always name TWO specific times from the list below and ask them to pick one. Never ask an open "would you like to schedule something?" — a concrete choice converts far better than an open invitation, and it gives you a slot to confirm.
+If they hesitate on the times, do NOT repeat the same ask. Make the next step smaller and say what it actually costs them: "no pressure at all — it's half an hour, there's no obligation, and you'd leave knowing what's genuinely available in your range." Then offer two different times.
+Only ever lower the commitment with things you know are true — the length of the meeting, that it's an informal conversation, that there's no obligation to buy. Never invent cancellation policies, discounts, price holds, or incentives to make the next step feel easier.
 
 # Knowledge Base Rules
 Only state facts that come from the Knowledge Base. Never guess, never invent, never estimate a price, date, or availability.
 When you don't have something, turn the gap into a reason to meet: "I don't have that exact detail in front of me — our consultant can pull it up for you. Want me to set that up?"
+If the retrieved context answers only PART of what they asked, answer that part and say plainly which piece you don't have — don't stall on the whole question.
+If two retrieved sources disagree — two prices, two dates, two availability counts — do NOT pick one and state it as fact. Prefer the more recently dated source when both carry dates. If you cannot tell which is current, say you want to confirm the exact figure, and use 'escalate' with the conflict described in handoff_reason so a human can correct the documents.
 
-${formatKbContext(kbChunks)}
+${formatKbContext(kbChunks, retrievalMethod)}
 
 # Recommending Communities
 - Mention only ONE or TWO communities, with a short reason tied to what THEY told you. Wait for them to ask for more.
@@ -209,7 +257,12 @@ ${formatKbContext(kbChunks)}
 - Only claim benefits the Knowledge Base supports.
 
 # Objection Handling
-Empathize first, reframe with a real fact, then move forward. Common ones: price, timing, financing, waiting for rates, "just looking".
+Empathize first, reframe with a real fact, then move forward. Use the ONE move that fits what they actually said — never a list, never several at once.
+- "It's more than I wanted to spend" — don't defend the price. Ask what range they're working in, then point at what genuinely fits it, even if that's a smaller home or a different community. If nothing in the Knowledge Base fits their range, say so honestly rather than stretching.
+- "We're not ready yet" / "just looking" — agree that's sensible, then make the next step cost less: half an hour, no obligation, and they walk away with real numbers for their own situation. Browsing now is how people buy later.
+- "We're waiting for rates to come down" — acknowledge it's a fair consideration, then move to what is knowable today: what's available, what the buying process involves, how long a build actually takes. NEVER predict rates or tell them what the market will do.
+- "I need to talk to my partner" — treat that as completely reasonable, and offer times that would suit them both rather than pressing for a decision now.
+- "I want to look at other builders first" — encourage it, genuinely. Then position the consultation as what makes comparing easier, since they'll have real numbers for one option. Never comment on the other builders.
 Never argue, never pressure, never oversell. Create urgency ONLY where the Knowledge Base actually supports it — real remaining lot counts, a phase closing, a dated incentive. Never manufacture scarcity.
 
 # Stay in Your Lane
@@ -307,7 +360,7 @@ export const appointmentSchedulingAgent = inngest.createFunction(
           channel,
           convoId,
           transcript,
-          `Reached the ${maxTurns}-turn automated limit without booking.`,
+          `Safety backstop: the conversation reached ${maxTurns} agent replies without resolving. This is unusual — check whether the agent was answering properly.`,
         );
       });
       return { status: "escalated", reason: "max-turns", maxTurns };
@@ -324,14 +377,19 @@ export const appointmentSchedulingAgent = inngest.createFunction(
 
     const kb = await step.run("kb-retrieve", async () => {
       const q = (body || "").trim();
-      if (!q) return { chunks: [] };
+      if (!q) return { chunks: [], method: null };
       try {
-        // SW-KB-004: scope the scheduling agent to FAQs/policy/community docs.
-        const chunks = await kbQuery(lead.companyId, q, 5, KB_SCOPES.scheduling, "appointment-agent");
-        return { chunks };
+        const { method, results } = await kbQueryDetailed(lead.companyId, q, 5, KB_SCOPES.scheduling);
+        if (method && method.startsWith("fts")) {
+          console.warn(
+            `[Appointment Agent] retrieval degraded to ${method} for company ${lead.companyId}. ` +
+            `Semantic search needs the pgvector setup SQL + POST /api/sales/kb/reindex.`,
+          );
+        }
+        return { chunks: results, method };
       } catch (e) {
         console.error("[Appointment Agent] KB retrieval failed:", e.message);
-        return { chunks: [] };
+        return { chunks: [], method: null };
       }
     });
 
@@ -345,8 +403,45 @@ export const appointmentSchedulingAgent = inngest.createFunction(
         slots: slots.list,
         timezone: slots.tz,
         kbChunks: kb.chunks,
+        retrievalMethod: kb.method,
       });
     });
+
+    if (decision.optout_request) {
+      await step.run("act-optout", async () => {
+        const isSms = channel === "SMS" && !!lead.phone;
+        await sendLeadMessage(lead, channel, decision.message, "You've been removed from our list");
+
+        const normalizedValue = isSms
+          ? lead.phone.replace(/\D/g, "")
+          : (lead.email || "").trim().toLowerCase();
+
+        if (normalizedValue) {
+          await ComplianceService.suppressAndOptOut({
+            companyId: lead.companyId,
+            channel: isSms ? "SMS" : "EMAIL",
+            normalizedValue,
+            reason: "UNSUBSCRIBE",
+            sourceLabel: "Scheduling agent — plain-language opt-out request",
+          });
+        } else {
+          console.error(
+            `[Appointment Agent] lead=${lead.id} asked to opt out but has no usable ${isSms ? "phone" : "email"} to suppress.`,
+          );
+        }
+
+        const finalTranscript = [
+          ...transcript,
+          { role: "agent", content: decision.message, at: new Date().toISOString() },
+        ];
+        await prisma.schedulingConversation.update({
+          where: { id: convoId },
+          data: { transcript: finalTranscript, status: "CLOSED" },
+        });
+        console.warn(`[Appointment Agent] lead=${lead.id} requested opt-out — suppressed and conversation closed.`);
+      });
+      return { status: "opted-out" };
+    }
 
     if (decision.action === "escalate") {
       await step.run("act-escalate", async () => {
@@ -486,8 +581,6 @@ export const appointmentReminders = inngest.createFunction(
 );
 
 async function escalate(lead, channel, convoId, transcript, reason, leadMessage) {
-  // The agent's own wording is used when it has it (it acknowledges the specific concern —
-  // important for complaints, where the generic scheduling line reads as tone-deaf).
   const text =
     leadMessage?.trim() ||
     `Thanks ${lead.firstName} — I'll have a member of our team reach out to you personally to finish setting this up.`;

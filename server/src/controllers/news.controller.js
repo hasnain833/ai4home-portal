@@ -1,6 +1,12 @@
 import prisma from "../lib/prisma.js";
 import { scrapeNewsForCompany } from "../services/news-service.js";
 
+// Market news goes stale fast — a two-month-old "rates are climbing" headline is
+// worse than no headline, because campaign and calendar drafts are grounded in it.
+// Rows are hidden rather than deleted: BlogPost.sourceNewsIds cites them, and those
+// citations should keep resolving after the item drops off this list.
+const NEWS_MAX_AGE_DAYS = 30;
+
 export const getNews = async (req, res) => {
   try {
     const { companyId } = req.user;
@@ -10,16 +16,17 @@ export const getNews = async (req, res) => {
       return res.status(400).json({ error: "Company ID is required" });
     }
 
+    const cutoff = new Date(Date.now() - NEWS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000);
+    const where = { companyId, publishedAt: { gte: cutoff } };
+
     const news = await prisma.scrapedNews.findMany({
-      where: { companyId },
+      where,
       orderBy: { publishedAt: 'desc' },
       take: parseInt(limit),
       skip: parseInt(offset),
     });
 
-    const total = await prisma.scrapedNews.count({
-      where: { companyId },
-    });
+    const total = await prisma.scrapedNews.count({ where });
 
     return res.status(200).json({
       data: news,
@@ -27,6 +34,7 @@ export const getNews = async (req, res) => {
         total,
         limit: parseInt(limit),
         offset: parseInt(offset),
+        maxAgeDays: NEWS_MAX_AGE_DAYS,
       }
     });
   } catch (error) {

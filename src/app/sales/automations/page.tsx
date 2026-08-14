@@ -81,25 +81,49 @@ interface AutomationAnalytics {
 const initialRules: AutomationRule[] = [];
 
 const standardTriggers = [
-  { value: "LEAD_REPLIED", label: "Prospect Replied (Email/SMS)", desc: "Triggers when a client responds to outreach." },
-  { value: "CRM_INGEST", label: "Salesforce Lead Synchronized", desc: "Triggers when a record imports from CRM." },
-  { value: "STATUS_CHANGE", label: "Lead Status Shifted", desc: "Triggers when sales stage changes." },
-  { value: "MANUAL_CREATION", label: "Manual Contact Ingested", desc: "Triggers when a contact is added in the portal." },
-  { value: "APPOINTMENT_BOOKED", label: "Appointment Booked", desc: "Triggers when a lead books an appointment." },
-  { value: "DATE_BASED", label: "Date-based condition (daily)", desc: "Evaluated once a day against date conditions (e.g. created over N days ago)." }
+  { value: "LEAD_REPLIED", label: "A lead replies to you", desc: "Someone answers one of your emails or texts." },
+  { value: "CRM_INGEST", label: "A lead arrives from Salesforce", desc: "A record syncs in from your CRM." },
+  { value: "STATUS_CHANGE", label: "A lead's status changes", desc: "Someone moves to a different stage." },
+  { value: "MANUAL_CREATION", label: "Someone adds a lead by hand", desc: "A teammate creates a contact in the portal." },
+  { value: "APPOINTMENT_BOOKED", label: "A lead books an appointment", desc: "Someone confirms a visit." },
+  { value: "DATE_BASED", label: "A daily check on lead dates", desc: "Runs once a day — use it for things like \"added more than 7 days ago\"." }
 ];
 
 const standardActions = [
-  { value: "SEND_EMAIL", label: "Send Email to Lead", params: ["subject", "body"] },
-  { value: "SEND_SMS", label: "Send SMS to Lead", params: ["body"] },
-  { value: "CREATE_TASK", label: "Create Follow-up Task", params: ["title", "dueInDays"] },
-  { value: "DRAFT_ANNOUNCEMENT", label: "Draft Announcement", params: ["title", "subject", "body"] },
-  { value: "ENROLL_CAMPAIGN", label: "Enroll in Campaign", params: ["campaignId", "campaignName"] },
-  { value: "PAUSE_CAMPAIGNS", label: "Pause Active Campaigns", params: ["reason"] },
-  { value: "NOTIFY_OWNER", label: "Send Agent Alert Notification", params: ["message"] },
-  { value: "UPDATE_STATUS", label: "Modify Outreach Status", params: ["newStatus"] },
-  { value: "UPDATE_TAGS", label: "Add Tags", params: ["tags"] }
+  { value: "SEND_EMAIL", label: "Email the lead", params: ["subject", "body"] },
+  { value: "SEND_SMS", label: "Text the lead", params: ["body"] },
+  { value: "CREATE_TASK", label: "Create a follow-up task", params: ["title", "dueInDays"] },
+  { value: "DRAFT_ANNOUNCEMENT", label: "Draft an announcement", params: ["title", "subject", "body"] },
+  { value: "ENROLL_CAMPAIGN", label: "Add them to a campaign", params: ["campaignId", "campaignName"] },
+  { value: "PAUSE_CAMPAIGNS", label: "Pause their campaigns", params: ["reason"] },
+  { value: "NOTIFY_OWNER", label: "Alert the lead's owner", params: ["message"] },
+  { value: "UPDATE_STATUS", label: "Change their status", params: ["newStatus"] },
+  { value: "UPDATE_TAGS", label: "Add tags", params: ["tags"] }
 ];
+
+const triggerLabel = (value: string) =>
+  standardTriggers.find((t) => t.value === value)?.label || "something happens";
+
+const actionLabel = (value: string) =>
+  standardActions.find((a) => a.value === value)?.label || "do something";
+
+// Action params are stored under their raw keys; show people words instead.
+const PARAM_LABELS: Record<string, string> = {
+  subject: "Subject",
+  body: "Message",
+  title: "Title",
+  dueInDays: "Due in (days)",
+  campaignId: "Campaign ID",
+  campaignName: "Campaign name",
+  reason: "Reason",
+  message: "Message",
+  newStatus: "New status",
+  tags: "Tags (comma separated)",
+};
+
+const humanizeParam = (key: string) =>
+  PARAM_LABELS[key] ||
+  key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
 
 const fadeInUp = {
   hidden: { opacity: 0, y: 15 },
@@ -630,36 +654,58 @@ export default function AutomationsPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Settings className="h-5 w-5 text-[#b48c3c]" />
-                {selectedRule ? `Modify Rule: ${selectedRule.id}` : "Configure Automation Rule"}
+                {selectedRule ? "Edit this rule" : "New automation rule"}
               </DialogTitle>
               <DialogDescription>
-                Define the trigger, conditions, and sequential actions. Saving applies monitoring immediately.
+                Every rule reads the same way: when something happens, check a few things, then do
+                something. It starts working as soon as you save.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 pt-2">
+              {/* Plain-English read-back, so you can check the rule without parsing the form. */}
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed">
+                <span className="text-muted-foreground">This rule says: </span>
+                <span className="font-semibold">
+                  When {triggerLabel(ruleTrigger).toLowerCase()}
+                </span>
+                {ruleConditions.length > 0 && (
+                  <span className="font-semibold">
+                    , and {ruleConditions.length === 1 ? "one thing matches" : `all ${ruleConditions.length} filters match`}
+                  </span>
+                )}
+                <span className="font-semibold">
+                  , {ruleActions.length === 0
+                    ? "do nothing yet — add an action below."
+                    : `do ${ruleActions.length} thing${ruleActions.length > 1 ? "s" : ""}: ${ruleActions.map((a) => actionLabel(a.type).toLowerCase()).join(", then ")}.`}
+                </span>
+              </div>
+
               <div className="space-y-1.5">
-                <Label htmlFor="ruleName" className="font-semibold text-xs">Rule Name *</Label>
+                <Label htmlFor="ruleName" className="font-semibold text-xs">Name this rule *</Label>
                 <Input
                   id="ruleName"
-                  placeholder="e.g. Lead Status Shifted to Engaged Alert"
+                  placeholder="e.g. Text me when a hot lead replies"
                   value={ruleName}
                   onChange={(e) => setRuleName(e.target.value)}
                 />
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="ruleDesc" className="font-semibold text-xs">Rule Description</Label>
+                <Label htmlFor="ruleDesc" className="font-semibold text-xs">Notes (optional)</Label>
                 <Input
                   id="ruleDesc"
-                  placeholder="Explain what this automation manages..."
+                  placeholder="A line for your teammates about why this rule exists"
                   value={ruleDescription}
                   onChange={(e) => setRuleDescription(e.target.value)}
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="ruleTriggerSelect" className="font-semibold text-xs">Event Trigger *</Label>
+              <div className="space-y-1.5 border-t pt-3 border-border/80">
+                <Label htmlFor="ruleTriggerSelect" className="font-bold text-xs flex items-center gap-1.5">
+                  <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#0F3B3D] text-[9px] font-bold text-white">1</span>
+                  When this happens *
+                </Label>
                 <Select value={ruleTrigger} onValueChange={setRuleTrigger}>
                   <SelectTrigger id="ruleTriggerSelect"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -673,11 +719,12 @@ export default function AutomationsPage() {
               {/* Conditions Section */}
               <div className="space-y-2 border-t pt-3 border-border/80">
                 <div className="flex justify-between items-center">
-                  <Label className="font-bold text-xs text-amber-600 flex items-center gap-1">
-                    <GitFork className="h-3.5 w-3.5" /> Filter Conditions (AND matched)
+                  <Label className="font-bold text-xs flex items-center gap-1.5">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white">2</span>
+                    <GitFork className="h-3.5 w-3.5 text-amber-600" /> Only if… <span className="font-normal text-muted-foreground">(optional — every filter must match)</span>
                   </Label>
                   <Button type="button" variant="outline" size="sm" onClick={addConditionRow} className="h-7 text-xs gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add Filter
+                    <Plus className="h-3 w-3" /> Add filter
                   </Button>
                 </div>
 
@@ -718,7 +765,7 @@ export default function AutomationsPage() {
                     </div>
                   ))}
                   {ruleConditions.length === 0 && (
-                    <p className="text-[11px] text-muted-foreground italic py-1 pl-1">No filter criteria specified. Rule executes for all triggers.</p>
+                    <p className="text-[11px] text-muted-foreground py-1 pl-1">No filters — this runs every time the trigger fires. That&apos;s fine for most rules.</p>
                   )}
                 </div>
               </div>
@@ -726,11 +773,12 @@ export default function AutomationsPage() {
               {/* Actions Section */}
               <div className="space-y-2 border-t pt-3 border-border/80">
                 <div className="flex justify-between items-center">
-                  <Label className="font-bold text-xs text-green-600 flex items-center gap-1">
-                    <Play className="h-3.5 w-3.5" /> Ordered Pipeline Actions
+                  <Label className="font-bold text-xs flex items-center gap-1.5">
+                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-green-600 text-[9px] font-bold text-white">3</span>
+                    <Play className="h-3.5 w-3.5 text-green-600" /> Then do this <span className="font-normal text-muted-foreground">(in order, top to bottom)</span>
                   </Label>
                   <Button type="button" variant="outline" size="sm" onClick={addActionRow} className="h-7 text-xs gap-1 border-dashed">
-                    <Plus className="h-3 w-3" /> Add Action
+                    <Plus className="h-3 w-3" /> Add action
                   </Button>
                 </div>
 
@@ -744,9 +792,10 @@ export default function AutomationsPage() {
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
 
-                      <div className="grid grid-cols-2 gap-3 items-center">
+                      <span className="absolute left-3 top-3 text-[10px] font-bold text-slate-400">Step {idx + 1}</span>
+                      <div className="grid grid-cols-2 gap-3 items-center pt-4">
                         <div className="space-y-1">
-                          <Label className="text-[10px] text-slate-400 font-bold">Action Type</Label>
+                          <Label className="text-[10px] text-slate-400 font-bold">What to do</Label>
                           <Select value={act.type} onValueChange={(val) => handleActionChange(idx, val)}>
                             <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -760,9 +809,9 @@ export default function AutomationsPage() {
                         <div className="space-y-1">
                           {Object.keys(act.params).map((paramKey) => (
                             <div key={paramKey} className="space-y-1">
-                              <Label className="text-[10px] text-slate-400 font-bold uppercase">{paramKey}</Label>
+                              <Label className="text-[10px] text-slate-400 font-bold">{humanizeParam(paramKey)}</Label>
                               <Input
-                                placeholder={`Enter ${paramKey}...`}
+                                placeholder={`Enter ${humanizeParam(paramKey).toLowerCase()}...`}
                                 value={act.params[paramKey] || ""}
                                 onChange={(e) => handleActionParamChange(idx, paramKey, e.target.value)}
                                 className="h-8 text-xs"
@@ -774,7 +823,7 @@ export default function AutomationsPage() {
                     </div>
                   ))}
                   {ruleActions.length === 0 && (
-                    <p className="text-[11px] text-red-500 italic py-1 pl-1">! You must configure at least one action.</p>
+                    <p className="text-[11px] text-red-500 py-1 pl-1">Add at least one action — a rule that does nothing can&apos;t be saved.</p>
                   )}
                 </div>
               </div>
@@ -782,11 +831,15 @@ export default function AutomationsPage() {
               {/* Loop Safeguards Section */}
               <div className="space-y-2 border-t pt-3 border-border/80">
                 <Label className="font-bold text-xs text-[#b48c3c] flex items-center gap-1 mb-1">
-                  <ShieldCheck className="h-3.5 w-3.5" /> Rule Rate Limits & Cooldowns
+                  <ShieldCheck className="h-3.5 w-3.5" /> Safety limits
                 </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Caps how often this rule can fire, so a busy day can&apos;t flood anyone. The
+                  defaults are sensible — most people never change these.
+                </p>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">Execution Cap</Label>
+                    <Label className="text-[10px] text-muted-foreground">Run at most</Label>
                     <Input
                       type="number"
                       value={ruleRateLimitCount}
@@ -796,7 +849,7 @@ export default function AutomationsPage() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">Per Window</Label>
+                    <Label className="text-[10px] text-muted-foreground">Times per</Label>
                     <Select value={ruleRateLimitWindow} onValueChange={(val: any) => setRuleRateLimitWindow(val)}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -807,7 +860,7 @@ export default function AutomationsPage() {
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[10px] text-muted-foreground">Cooldown Period (Hours)</Label>
+                    <Label className="text-[10px] text-muted-foreground">Wait between runs (hours)</Label>
                     <Input
                       type="number"
                       value={ruleCooldown}
@@ -824,12 +877,12 @@ export default function AutomationsPage() {
             <DialogFooter className="pt-4 border-t">
               {selectedRule && (
                 <Button type="button" variant="ghost" className="text-red-500 mr-auto hover:bg-red-500/10" onClick={() => handleDeleteRule(selectedRule.id)}>
-                  Delete Rule
+                  Delete rule
                 </Button>
               )}
               <Button type="button" variant="ghost" onClick={() => setRuleModalOpen(false)}>Cancel</Button>
               <Button onClick={handleSaveRule} className="bg-[#0F3B3D] text-white">
-                {selectedRule ? "Update Automation" : "Launch Automation"}
+                {selectedRule ? "Save changes" : "Turn on this rule"}
               </Button>
             </DialogFooter>
           </DialogContent>

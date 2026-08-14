@@ -56,6 +56,41 @@ const PROVIDER_LABELS: Record<string, string> = {
   GROQ: "Groq",
 };
 
+// One provider serves every drafting tool, so the guidance is about which mix of
+// work a workspace does rather than which model to use per task.
+const PROVIDERS = [
+  {
+    value: "anthropic",
+    label: "Claude (Anthropic)",
+    model: "claude-sonnet-5",
+    keyLabel: "Claude (Anthropic) API Key",
+    placeholder: "sk-ant-...",
+    bestFor: "Blog drafts, brand voice, and the conversational sales agent",
+    detail:
+      "Strongest on long-form writing and on holding a brand voice across a whole post. This is the default, and the best pick if blog drafts and the sales agent matter most to you.",
+  },
+  {
+    value: "openai",
+    label: "OpenAI",
+    model: "gpt-4o-mini",
+    keyLabel: "OpenAI API Key",
+    placeholder: "sk-...",
+    bestFor: "A balance of cost and quality across everything",
+    detail:
+      "Cheaper than Claude and solid on both short copy and longer drafts. A reasonable middle if your workspace does a bit of everything.",
+  },
+  {
+    value: "groq",
+    label: "Groq",
+    model: "llama-3.3-70b-versatile",
+    keyLabel: "Groq API Key",
+    placeholder: "gsk_...",
+    bestFor: "Short copy — SMS, subject lines, news summaries",
+    detail:
+      "By far the fastest and cheapest, and more than good enough for short, structured writing. Weaker on long blog posts and on subtle brand voice, so pick it if most of your AI use is campaign steps and summaries rather than articles.",
+  },
+] as const;
+
 export default function AiConfigSafetyTab() {
   const [versions, setVersions] = useState<ConfigVersion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -149,6 +184,16 @@ export default function AiConfigSafetyTab() {
     }
   };
 
+  // Only the selected provider's key field is shown, so resolve which state pair
+  // that field is bound to.
+  const activeProvider = PROVIDERS.find((p) => p.value === aiProvider) || null;
+  const activeKey =
+    aiProvider === "openai"
+      ? { value: openAiKey, set: setOpenAiKey, masked: openAiMasked }
+      : aiProvider === "groq"
+        ? { value: groqKey, set: setGroqKey, masked: groqMasked }
+        : { value: anthropicKey, set: setAnthropicKey, masked: anthropicMasked };
+
   const rollback = async (version: number) => {
     setRollingBack(version);
     try {
@@ -223,9 +268,11 @@ export default function AiConfigSafetyTab() {
                     ? "Platform key (" + (PROVIDER_LABELS[platformGrant] || platformGrant) + ")"
                     : "Platform key \u2014 not granted to your workspace"}
                 </SelectItem>
-                <SelectItem value="anthropic">Claude (Anthropic) &mdash; my own key</SelectItem>
-                <SelectItem value="openai">OpenAI &mdash; my own key</SelectItem>
-                <SelectItem value="groq">Groq &mdash; my own key</SelectItem>
+                {PROVIDERS.map((p) => (
+                  <SelectItem key={p.value} value={p.value}>
+                    {p.label} &mdash; my own key
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -245,49 +292,49 @@ export default function AiConfigSafetyTab() {
                 </>
               )}
             </div>
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label className="font-semibold text-xs">Claude (Anthropic) API Key</Label>
-                <Input
-                  type="password"
-                  placeholder={anthropicMasked || "sk-ant-..."}
-                  value={anthropicKey}
-                  onChange={(e) => setAnthropicKey(e.target.value)}
-                  className="text-xs"
-                />
-                {anthropicMasked && <p className="text-[10px] text-muted-foreground">Saved key: {anthropicMasked}</p>}
-              </div>
-              <div className="space-y-1.5">
-                <Label className="font-semibold text-xs">OpenAI API Key</Label>
-                <Input
-                  type="password"
-                  placeholder={openAiMasked || "sk-..."}
-                  value={openAiKey}
-                  onChange={(e) => setOpenAiKey(e.target.value)}
-                  className="text-xs"
-                />
-                {openAiMasked && <p className="text-[10px] text-muted-foreground">Saved key: {openAiMasked}</p>}
-              </div>
-              <div className="space-y-1.5">
-                <Label className="font-semibold text-xs">Groq API Key</Label>
-                <Input
-                  type="password"
-                  placeholder={groqMasked || "gsk_..."}
-                  value={groqKey}
-                  onChange={(e) => setGroqKey(e.target.value)}
-                  className="text-xs"
-                />
-                {groqMasked && <p className="text-[10px] text-muted-foreground">Saved key: {groqMasked}</p>}
-              </div>
+          ) : activeProvider ? (
+            <div className="space-y-1.5 max-w-md">
+              <Label className="font-semibold text-xs">{activeProvider.keyLabel}</Label>
+              <Input
+                type="password"
+                placeholder={activeKey.masked || activeProvider.placeholder}
+                value={activeKey.value}
+                onChange={(e) => activeKey.set(e.target.value)}
+                className="text-xs"
+              />
+              {activeKey.masked ? (
+                <p className="text-[10px] text-muted-foreground">Saved key: {activeKey.masked}</p>
+              ) : (
+                <p className="text-[10px] text-muted-foreground">
+                  No key saved yet &mdash; AI drafting stays switched off until you add one.
+                </p>
+              )}
             </div>
-          )}
+          ) : null}
 
-          <p className="text-[11px] text-muted-foreground">
-            The provider above is used for text drafting only. Knowledge-base search runs on a
-            local embedding model that ships with the portal, so it is unaffected by this choice
-            &mdash; which is why Groq, which has no embeddings API, is still a valid pick here.
-          </p>
+          <div className="rounded-lg border border-border/70 bg-muted/25 p-4 space-y-3">
+            <h4 className="text-xs font-bold">Which provider should you pick?</h4>
+            <p className="text-[11px] text-muted-foreground">
+              This one choice covers every drafting tool &mdash; campaign copy, blog drafts,
+              calendar suggestions, news summaries, and the sales agent. You can&apos;t currently
+              use a different provider per task, so pick for the work you do most.
+            </p>
+            <ul className="space-y-2">
+              {PROVIDERS.map((p) => (
+                <li key={p.value} className="text-[11px]">
+                  <span className="font-semibold text-foreground">{p.label}</span>{" "}
+                  <code className="font-mono text-[10px] text-muted-foreground">{p.model}</code>
+                  <span className="text-muted-foreground"> &mdash; {p.bestFor}.</span>{" "}
+                  <span className="text-muted-foreground">{p.detail}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-[11px] text-muted-foreground border-t border-border/40 pt-2.5">
+              Knowledge-base search runs on a local embedding model that ships with the portal, so
+              it is unaffected by this choice &mdash; which is why Groq, which has no embeddings
+              API, is still a valid pick here.
+            </p>
+          </div>
 
           <div className="rounded-lg border border-border/70 bg-muted/25 p-4">
             <h4 className="text-xs font-bold mb-2">Supported merge tags for AI copy</h4>

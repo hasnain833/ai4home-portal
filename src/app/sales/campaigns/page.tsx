@@ -97,6 +97,7 @@ export default function CampaignsPage() {
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
   const [newStep, setNewStep] = useState<any>(buildDefaultEmailStep());
   const [generatingStepCopy, setGeneratingStepCopy] = useState(false);
+  const [aiReady, setAiReady] = useState(false);
 
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
   const [leadsForEnroll, setLeadsForEnroll] = useState<EnrollableLead[]>([]);
@@ -138,6 +139,30 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     fetchCampaigns();
+  }, []);
+
+  // The AI drafting button is useless without a configured provider, so find out
+  // up front rather than letting the request fail.
+  useEffect(() => {
+    const checkAi = async () => {
+      try {
+        const res = await fetch("/api/company", { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const ready =
+          data.aiProvider === "platform"
+            ? !!data.aiPlatformGrant
+            : data.aiProvider === "openai"
+              ? !!data.aiOpenAiKeyMasked
+              : data.aiProvider === "groq"
+                ? !!data.aiGroqKeyMasked
+                : !!data.aiAnthropicKeyMasked;
+        setAiReady(ready);
+      } catch {
+        /* leave AI disabled if we can't tell */
+      }
+    };
+    checkAi();
   }, []);
 
   useEffect(() => {
@@ -797,12 +822,22 @@ export default function CampaignsPage() {
                         size="icon"
                         className="h-8 w-8 border-[#b48c3c]/40 text-[#b48c3c] hover:bg-[#b48c3c]/10 hover:text-[#b48c3c]"
                         onClick={generateStepCopy}
-                        disabled={generatingStepCopy || !activeSeq}
-                        title={`Generate ${newStep.type === "SMS" ? "SMS" : "email"} copy with AI`}
+                        disabled={generatingStepCopy || !activeSeq || !aiReady}
+                        title={
+                          aiReady
+                            ? `Generate ${newStep.type === "SMS" ? "SMS" : "email"} copy with AI`
+                            : "Add an AI provider key in Settings > AI Config to use AI drafting"
+                        }
                       >
                         <Sparkles className={`h-4 w-4 ${generatingStepCopy ? "animate-pulse" : ""}`} />
                       </Button>
                     </div>
+                    {!aiReady && (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-500 leading-relaxed">
+                        AI drafting is off &mdash; no provider key is set for this workspace. Add one in
+                        Settings &gt; AI Config, or ask your administrator to grant the platform key.
+                      </p>
+                    )}
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
                       Merge tags: <code>{`{firstName}`}</code>, <code>{`{lastName}`}</code>, <code>{`{companyName}`}</code>, <code>{`{campaignName}`}</code>, <code>{`{city}`}</code>, <code>{`{bookingLink}`}</code>. Configure AI provider in Settings &gt; AI Config.
                     </p>
