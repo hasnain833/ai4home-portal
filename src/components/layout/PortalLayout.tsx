@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import VerificationGate from "@/components/layout/VerificationGate";
+import { BrandLogo } from "@/components/BrandLogo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -173,9 +174,13 @@ export default function PortalLayout({
                 className="flex min-w-0 items-center gap-3.5 hover:opacity-80 transition"
                 title={companyName}
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/95 p-1 ring-1 ring-white/15">
-                  <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-full w-full object-contain" />
-                </span>
+                {user?.companyLogo ? (
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/95 p-1 ring-1 ring-white/15">
+                    <img src={user.companyLogo} alt="Logo" className="h-full w-full object-contain" />
+                  </span>
+                ) : (
+                  <BrandLogo onDark alt="AI4HB" className="h-9 w-auto shrink-0 object-contain" />
+                )}
                 <span className="min-w-0 truncate text-xl font-bold tracking-tight">{sidebarCompanyName}</span>
               </button>
             ) : (
@@ -346,7 +351,7 @@ export default function PortalLayout({
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex items-center gap-3">
-            <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-7 w-auto object-contain rounded-sm" />
+            <BrandLogo src={user?.companyLogo} className="h-8 w-auto shrink-0 object-contain rounded-sm" />
             <span className="font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
           </div>
           <Button variant="ghost" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
@@ -375,7 +380,7 @@ export default function PortalLayout({
                 <div className="flex h-full flex-col">
                   <div className="flex h-16 items-center justify-between px-4">
                     <div className="flex items-center gap-3.5">
-                      <img src={user?.companyLogo || "/logo.png"} alt="Logo" className="h-9 w-auto object-contain rounded-md" />
+                      <BrandLogo src={user?.companyLogo} onDark className="h-9 w-auto shrink-0 object-contain rounded-md" />
                       <span className="text-xl font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
                     </div>
                     <Button variant="ghost" size="icon" onClick={closeMobileSidebar} className="text-white hover:bg-white/10">

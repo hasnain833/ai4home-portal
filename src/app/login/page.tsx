@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Shield,
   Mail,
   Lock,
   Eye,
@@ -25,6 +24,7 @@ import {
   Phone
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { BrandLogo } from "@/components/BrandLogo";
 
 const getPasswordStrength = (password: string) => {
   let score = 0;
@@ -219,14 +219,12 @@ function AuthContainer() {
       {/* Left Side: Clean, High-Contrast Minimalist Landing Experience */}
       <div className="hidden md:flex md:w-[48%] lg:w-[55%] relative overflow-hidden bg-[#04060a] flex-col justify-between p-8 lg:p-12 text-white border-r border-white/5">
         {/* Subtle radial-gradient glow */}
-        <div className="absolute top-[30%] left-[-10%] w-[400px] h-[400px] bg-[#c59b4c]/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-[20%] right-[-10%] w-[450px] h-[450px] bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute top-[30%] left-[-10%] w-100 h-100 bg-[#c59b4c]/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-[20%] right-[-10%] w-112.5 h-112.5 bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
 
         {/* Branding header */}
         <div className="relative z-10 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/2 border border-white/10 text-[#c59b4c] shadow-md">
-            <Shield className="h-5 w-5" />
-          </div>
+          <BrandLogo onDark alt="AI4HB — AI For Home Builders" className="h-12 w-auto shrink-0 object-contain" />
           <span className="text-lg font-bold tracking-tight text-zinc-100 font-serif">
             Aiforhomebuilder
           </span>
@@ -301,8 +299,8 @@ function AuthContainer() {
       {/* Right Side: Dynamic Glowing Auth Center */}
       <div className="flex-1 flex items-center justify-center p-6 md:p-12 lg:p-16 bg-[#06080d] relative overflow-hidden">
         {/* Soft, beautiful ambient glowing radial blurs */}
-        <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-[#c59b4c]/10 rounded-full blur-[140px] pointer-events-none" />
-        <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-emerald-500/5 rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute top-[-10%] right-[-10%] w-125 h-125 bg-[#c59b4c]/10 rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute bottom-[-10%] left-[-10%] w-125 h-125 bg-emerald-500/5 rounded-full blur-[140px] pointer-events-none" />
 
         <motion.div
           layout
@@ -311,9 +309,7 @@ function AuthContainer() {
         >
           {/* Mobile-only branding */}
           <div className="text-center mb-8 md:hidden">
-            <div className="inline-flex items-center justify-center p-4 bg-zinc-900 border border-white/10 text-[#c59b4c] rounded-2xl shadow-xl mb-4">
-              <Shield className="h-6 w-6" />
-            </div>
+            <BrandLogo onDark alt="AI4HB — AI For Home Builders" className="mx-auto mb-4 h-20 w-auto object-contain" />
             <h1 className="text-2xl font-bold tracking-tight text-zinc-50 font-serif">
               Aiforhomebuilder
             </h1>

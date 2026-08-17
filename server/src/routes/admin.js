@@ -25,6 +25,14 @@ import {
   updateCompanyAiGrant,
 } from "../admin/platform.controller.js";
 import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
+import {
+  getPromptLab,
+  savePromptVersion,
+  activatePromptVersion,
+  deletePromptVersion,
+  previewPrompt,
+  promptLabChat,
+} from "../admin/prompt-lab.controller.js";
 
 const router = express.Router();
 
@@ -54,5 +62,13 @@ router.put("/staff", requireAuth, updateStaff);
 router.delete("/staff", requireAuth, deleteStaff);
 
 router.get("/sales-agent-appointments", requireAuth, getSalesAgentAppointments);
+
+// Sales agent prompt lab (super admin only — enforced inside each handler).
+router.get("/prompt-lab", requireAuth, getPromptLab);
+router.post("/prompt-lab/versions", requireAuth, savePromptVersion);
+router.post("/prompt-lab/versions/:versionId/activate", requireAuth, activatePromptVersion);
+router.delete("/prompt-lab/versions/:versionId", requireAuth, deletePromptVersion);
+router.post("/prompt-lab/preview", requireAuth, previewPrompt);
+router.post("/prompt-lab/chat", requireAuth, promptLabChat);
 
 export default router;

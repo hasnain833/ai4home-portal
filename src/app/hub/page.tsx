@@ -7,6 +7,7 @@ import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { BrandLogo } from "@/components/BrandLogo";
 import { Bot, Layers, Sun, Moon, LogOut, CheckCircle2, Lock } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -62,7 +63,7 @@ export default function HubPage() {
       {/* Top Header */}
       <header className="max-w-5xl mx-auto w-full flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <img src={user.companyLogo || "/logo.png"} alt="Logo" className="h-9 w-auto object-contain rounded-md" />
+          <BrandLogo src={user.companyLogo} className="h-9 w-auto object-contain rounded-md" />
           <span className="text-xl font-bold tracking-tight text-[#0F3B3D] dark:text-[#a0c5c7]">
             {user.companyName || "Aiforhomebuilder"}
           </span>

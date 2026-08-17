@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
-  Shield,
   Lock,
   Eye,
   EyeOff,
@@ -23,6 +22,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { BrandLogo } from "@/components/BrandLogo";
 import { createClient } from "@/lib/supabase/client";
 
 interface PasswordRequirement {
@@ -187,9 +187,9 @@ export default function UpdatePasswordPage() {
             initial={{ scale: 0.8 }}
             animate={{ scale: 1 }}
             transition={{ duration: 0.3 }}
-            className="inline-flex items-center justify-center p-3 bg-[#0F3B3D] rounded-2xl shadow-lg mb-4"
+            className="inline-flex items-center justify-center mb-4"
           >
-            <Shield className="h-8 w-8 text-[#E8B86B]" />
+            <BrandLogo alt="AI4HB — AI For Home Builders" className="h-20 w-auto object-contain" />
           </motion.div>
           <h1 className="text-2xl font-bold text-gray-900">
             Aiforhomebuilder

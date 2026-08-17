@@ -53,14 +53,14 @@ export async function GET() {
       console.warn('[Widget] Using default branding due to error:', err);
       initializeWidget({
         name: 'AI Assistant',
-        logo: portalUrl + '/logo.png',
+        logo: portalUrl + '/logo-light.svg',
         botColor: '#0F3B3D'
       });
     });
 
   function initializeWidget(branding) {
     var botColor = branding.botColor || '#0F3B3D';
-    var logo = branding.logo || (portalUrl + '/logo.png');
+    var logo = branding.logo || (portalUrl + '/logo-light.svg');
     var companyName = branding.name || 'your company';
     var botName = companyName === 'your company' ? 'AI Assistant' : (companyName + ' Assistant');
 

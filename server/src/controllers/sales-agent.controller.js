@@ -1,10 +1,9 @@
 import prisma from "../lib/prisma.js";
 import { sendSms, smsSent } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
-import { runClaudeTurn } from "../inngest/functions/appointment.js";
-import { query as kbQuery } from "../services/vector-store.service.js";
-import { KB_SCOPES } from "../lib/sales-ai.js";
-import { getAvailableSlots, getAvailabilitySetting } from "../services/scheduling-service.js";
+import { ComplianceService } from "../services/compliance-service.js";
+import { Templates } from "../services/templates.js";
+
 export const bookAppointment = async (req, res) => {
   try {
     const { name, email, phone, preferredTime } = req.body;
@@ -111,64 +110,6 @@ export const bookAppointment = async (req, res) => {
 
 
 
-export const chatDemo = async (req, res) => {
-  try {
-    const { messages = [] } = req.body;
-    
-    // We fetch a dummy/default company for the demo.
-    const company = await prisma.company.findFirst();
-    if (!company) {
-      return res.status(500).json({ message: "No company found for demo" });
-    }
-
-    // Mock lead object
-    const lead = {
-      id: "demo-lead",
-      companyId: company.id,
-      company: company,
-      firstName: "Guest",
-      lastName: "User",
-      email: "demo@example.com"
-    };
-
-    const latestMessage = messages[messages.length - 1]?.content || "";
-
-    // KB Retrieval
-    let kbChunks = [];
-    try {
-      kbChunks = await kbQuery(company.id, latestMessage, 5, KB_SCOPES.scheduling, "appointment-agent");
-    } catch (e) {
-      console.error("[Demo Chat] KB retrieval failed:", e.message);
-    }
-
-    // Fetch slots
-    const setting = await getAvailabilitySetting(company.id);
-    const tz = setting?.timezone || "America/Los_Angeles";
-    const s = await getAvailableSlots({ companyId: company.id, agentId: null, days: 14, limit: 8, displayTz: tz });
-    const slots = s.map((x) => ({ iso: x.iso, label: x.label }));
-
-    const response = await runClaudeTurn({
-      lead,
-      company,
-      channel: "WEBCHAT",
-      transcript: messages,
-      slots,
-      timezone: tz,
-      kbChunks
-    });
-
-    return res.json({
-      action: response.action,
-      message: response.message,
-      slot_iso: response.slot_iso
-    });
-
-  } catch (error) {
-    console.error("[Sales Agent Demo Chat] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-};
-
 export const simulateInbound = async (req, res) => {
   try {
     const { leadId = "demo-lead", body = "I am interested in a home.", channel = "SMS" } = req.body;
@@ -195,3 +136,118 @@ export const simulateInbound = async (req, res) => {
   }
 };
 
+
+/* ------------------------------------------------------------------ *
+ * Botpress outbound messaging.
+ *
+ * Botpress decides what to say and who to say it to; delivery is ours.
+ * Everything here sends on the platform's own credentials — Telnyx/Twilio for
+ * SMS, Brevo for email — never a tenant's integration, because these messages
+ * come from AI4Homebuilders rather than from any one workspace.
+ * ------------------------------------------------------------------ */
+
+const MAX_MESSAGE_CHARS = 1600;
+const EMAIL_RE = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/;
+const PLATFORM_SENDER_NAME = "AI4Homebuilders";
+
+function normalizePhone(value) {
+  return String(value || "").replace(/[^\d+]/g, "");
+}
+
+function isValidPhone(value) {
+  return /^\+?\d{10,15}$/.test(normalizePhone(value));
+}
+
+/**
+ * POST /api/public/sales-agent/message
+ *
+ * Body: { message, email?, phone?, subject?, name? }
+ * Sends to whichever contact details are supplied — both when both are given.
+ * Always reports per-channel outcomes rather than a single pass/fail, so the
+ * caller can tell "the text failed but the email landed" from "nothing sent".
+ */
+export const sendAgentMessage = async (req, res) => {
+  try {
+    const { message, email, phone, subject, name } = req.body || {};
+
+    const text = typeof message === "string" ? message.trim() : "";
+    if (!text) {
+      return res.status(400).json({ message: "message is required" });
+    }
+    if (text.length > MAX_MESSAGE_CHARS) {
+      return res
+        .status(400)
+        .json({ message: `message is too long (${text.length} chars, max ${MAX_MESSAGE_CHARS})` });
+    }
+
+    const wantsEmail = !!email;
+    const wantsSms = !!phone;
+    if (!wantsEmail && !wantsSms) {
+      return res.status(400).json({ message: "Provide an email address, a phone number, or both" });
+    }
+    if (wantsEmail && !EMAIL_RE.test(String(email).trim())) {
+      return res.status(400).json({ message: "email is not a valid address" });
+    }
+    if (wantsSms && !isValidPhone(phone)) {
+      return res.status(400).json({ message: "phone must be 10-15 digits, country code included" });
+    }
+
+    const results = {};
+
+    if (wantsSms) {
+      const to = normalizePhone(phone);
+      // Every platform text carries the opt-out line, same as the agent's own.
+      const body = ComplianceService.addSmsOptOutSuffix(text);
+      const result = await sendSms({ to, body, smsConfig: "SYSTEM", tag: "botpress-message" });
+      const delivered = smsSent(result);
+      if (!delivered) {
+        console.error(
+          `[Agent Message] SMS to ${to} not delivered (${result.outcome}): ${result.error}`,
+        );
+      }
+      results.sms = {
+        to,
+        delivered,
+        outcome: result.outcome,
+        messageId: result.messageId || null,
+        characters: body.length,
+        error: delivered ? null : result.error || null,
+      };
+    }
+
+    if (wantsEmail) {
+      const to = String(email).trim();
+      const lines = name ? `Hi ${name},\n\n${text}` : text;
+      const result = await MailService.sendEmail({
+        to,
+        subject: (typeof subject === "string" && subject.trim()) || `A message from ${PLATFORM_SENDER_NAME}`,
+        html: Templates.getBrandedAgentEmail(lines, PLATFORM_SENDER_NAME),
+        fromName: PLATFORM_SENDER_NAME,
+        allowPlatformSender: true,
+      });
+      if (!result.success) {
+        console.error(
+          `[Agent Message] Email to ${to} not delivered (${result.outcome}): ${result.error}`,
+        );
+      }
+      results.email = {
+        to,
+        delivered: !!result.success,
+        outcome: result.outcome,
+        error: result.success ? null : result.error || null,
+      };
+    }
+
+    const attempted = Object.values(results);
+    const anyDelivered = attempted.some((r) => r.delivered);
+
+    // Nothing got through: say so with a 502 rather than a cheerful 200.
+    return res.status(anyDelivered ? 200 : 502).json({
+      ok: anyDelivered,
+      results,
+    });
+  } catch (error) {
+    console.error("[Agent Message] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};

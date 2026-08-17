@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { Shield, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { BrandLogo } from "@/components/BrandLogo";
 
 // Public, unauthenticated chrome for the legal pages (Terms, Privacy).
 export default function LegalLayout({ children }: { children: ReactNode }) {
@@ -10,9 +11,7 @@ export default function LegalLayout({ children }: { children: ReactNode }) {
       <header className="border-b border-border/60">
         <div className="max-w-3xl mx-auto px-6 h-16 flex items-center justify-between">
           <Link href="/login" className="flex items-center gap-2.5 group">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Shield className="h-4 w-4" />
-            </span>
+            <BrandLogo alt="AI4HB — AI For Home Builders" className="h-9 w-auto object-contain" />
             <span className="text-base font-bold tracking-tight">Aiforhomebuilder</span>
           </Link>
           <Link

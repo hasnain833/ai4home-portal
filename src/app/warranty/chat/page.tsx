@@ -35,7 +35,7 @@ export default function AIChatPage() {
 
   const companyName = user?.companyName || "Aiforhomebuilder";
   const botName = `${companyName} Assistant`;
-  const botLogoUrl = user?.companyLogo || (typeof window !== "undefined" ? window.location.origin + "/logo.png" : "");
+  const botLogoUrl = user?.companyLogo || (typeof window !== "undefined" ? window.location.origin + "/logo-light.svg" : "");
 
   useEffect(() => {
     if (isLoading || !user) return;
