@@ -166,10 +166,12 @@ async function openAiCompatibleToolCall({ cfg, companyId, endpoint, label, syste
   }
 }
 
-export async function toolCall({ companyId, system, messages, tool, maxTokens = 700 }) {
-  const cfg = await resolveAiConfig(companyId);
+export async function toolCall({ companyId, system, messages, tool, maxTokens = 700, forcePlatformKey = false }) {
+  const cfg = await resolveAiConfig(companyId, { forcePlatform: forcePlatformKey });
   if (!cfg.provider) {
-    console.warn(`[LLM] No AI provider for company=${companyId} (${cfg.reason}).`);
+    console.warn(
+      `[LLM] No AI provider for ${forcePlatformKey ? "the platform" : `company=${companyId}`} (${cfg.reason}).`,
+    );
     return null;
   }
   try {

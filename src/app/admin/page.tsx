@@ -68,7 +68,7 @@ export default function SuperAdminOverviewPage() {
                 the entire portal secure from one central place.
               </p>
             </div>
-            <div className="rounded-2xl bg-muted/50 border border-border p-4 min-w-[200px]">
+            <div className="rounded-2xl bg-muted/50 border border-border p-4 min-w-50">
               <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-bold mb-1">
                 Root Access Active
               </p>

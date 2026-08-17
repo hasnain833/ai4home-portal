@@ -140,7 +140,28 @@ async function resolveUncached(companyId) {
   return { provider: null, reason: "NO_KEY" };
 }
 
-export async function resolveAiConfig(companyId) {
+/**
+ * The platform's own key, ignoring whatever the tenant has configured. Used by
+ * internal tooling — the prompt lab — so testing never spends a tenant's key or
+ * depends on them having one.
+ */
+export async function resolvePlatformAiConfig() {
+  const keys = await getPlatformAiKeys();
+  for (const provider of PLATFORM_AI_PROVIDERS) {
+    if (keys[provider]) {
+      return {
+        provider,
+        apiKey: keys[provider],
+        model: DEFAULT_MODELS[provider],
+        source: "platform",
+      };
+    }
+  }
+  return { provider: null, reason: "PLATFORM_KEY_MISSING" };
+}
+
+export async function resolveAiConfig(companyId, { forcePlatform = false } = {}) {
+  if (forcePlatform) return resolvePlatformAiConfig();
   if (!companyId) return { provider: null, reason: "NO_COMPANY" };
 
   const hit = cache.get(companyId);
@@ -156,6 +177,11 @@ export async function resolveAiConfig(companyId) {
 
   cache.set(companyId, { value, expiresAt: Date.now() + CACHE_TTL_MS });
   return value;
+}
+
+export async function hasPlatformAi() {
+  const cfg = await resolvePlatformAiConfig();
+  return !!cfg.provider;
 }
 
 export async function hasAi(companyId) {

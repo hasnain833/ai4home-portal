@@ -26,9 +26,11 @@ import {
   CalendarRange,
   PanelLeftClose,
   PanelLeftOpen,
+  FlaskConical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { BrandLogo } from "@/components/BrandLogo";
 
 const adminNavItems = [
   { name: "Overview", href: "/admin", icon: LayoutDashboard },
@@ -39,7 +41,12 @@ const adminNavItems = [
   { name: "News Defaults", href: "/admin/news-defaults", icon: Newspaper },
   { name: "AI Keys", href: "/admin/ai-keys", icon: KeyRound },
   { name: "Support Access", href: "/admin/support", icon: LifeBuoy },
-  { name: "Appointments", href: "/admin/sales-agent-appointments", icon: CalendarRange },
+  {
+    name: "Appointments",
+    href: "/admin/sales-agent-appointments",
+    icon: CalendarRange,
+  },
+  { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical },
 ];
 
 export default function AdminLayout({
@@ -101,22 +108,22 @@ export default function AdminLayout({
         <div className="flex h-full flex-col">
           {/* Header */}
           <div className="flex h-16 items-center justify-between px-4 mt-2">
-            <div className="flex items-center gap-3">
-              <img
-                src="/logo.png"
-                alt="Aiforhomebuilder"
-                className="h-9 w-auto object-contain rounded-md"
+            <div className="flex min-w-0 items-center gap-3">
+              <BrandLogo
+                onDark
+                alt="AI4HB — AI For Home Builders"
+                className={`${sidebarExpanded ? "h-11" : "h-7"} w-auto shrink-0 object-contain`}
               />
-              {sidebarExpanded && (
-                <div className="flex flex-col leading-tight">
-                  <span className="text-lg font-bold tracking-tight">
-                    Aiforhomebuilder
-                  </span>
+              <div>
+                <p className="text-sm font-bold tracking-tight text-zinc-100">
+                  Aiforhomebuilder
+                </p>
+                {sidebarExpanded && (
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">
                     Super Admin
                   </span>
-                </div>
-              )}
+                )}
+              </div>
             </div>
             <Button
               variant="ghost"
@@ -144,13 +151,12 @@ export default function AdminLayout({
                   <motion.div
                     whileHover={{ x: 4 }}
                     transition={{ duration: 0.2 }}
-                    className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${isActive
+                    className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${
+                      isActive
                         ? "bg-white/10 text-white font-semibold"
                         : "text-white/80 hover:bg-white/10 hover:text-white border border-transparent"
-                      }`}>
-                    <item.icon
-                      className="h-5 w-5 shrink-0"
-                    />
+                    }`}>
+                    <item.icon className="h-5 w-5 shrink-0" />
                     {sidebarExpanded && <span>{item.name}</span>}
                   </motion.div>
                 </Link>
@@ -217,12 +223,10 @@ export default function AdminLayout({
             <Menu className="h-5 w-5" />
           </Button>
           <div className="flex items-center gap-2">
-            <img
-              src="/logo.png"
-              alt="Aiforhomebuilder"
-              className="h-7 w-auto object-contain rounded-md"
+            <BrandLogo
+              alt="AI4HB — AI For Home Builders"
+              className="h-10 w-auto shrink-0 object-contain"
             />
-            <span className="font-bold">Aiforhomebuilder</span>
           </div>
           <div className="w-9" /> {/* Spacer */}
         </header>
@@ -246,16 +250,13 @@ export default function AdminLayout({
                 className="fixed top-0 left-0 z-50 h-full w-72 bg-sidebar text-white shadow-2xl md:hidden">
                 <div className="flex h-full flex-col">
                   <div className="flex h-16 items-center justify-between px-4 mt-2">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src="/logo.png"
-                        alt="Aiforhomebuilder"
-                        className="h-9 w-auto object-contain rounded-md"
+                    <div className="flex min-w-0 items-center gap-3">
+                      <BrandLogo
+                        onDark
+                        alt="AI4HB — AI For Home Builders"
+                        className="h-11 w-auto shrink-0 object-contain"
                       />
-                      <div className="flex flex-col leading-tight">
-                        <span className="text-lg font-bold tracking-tight">
-                          Aiforhomebuilder
-                        </span>
+                      <div className="flex min-w-0 flex-col leading-tight">
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">
                           Super Admin
                         </span>
@@ -283,10 +284,11 @@ export default function AdminLayout({
                           href={item.href}
                           onClick={closeMobileSidebar}>
                           <div
-                            className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${isActive
+                            className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${
+                              isActive
                                 ? "bg-white/10 text-white font-semibold"
                                 : "text-white/80 hover:bg-white/10 hover:text-white border border-transparent"
-                              }`}>
+                            }`}>
                             <item.icon className="h-5 w-5 shrink-0" />
                             <span>{item.name}</span>
                           </div>
