@@ -138,11 +138,11 @@ export default function PromptLabPage() {
       setTableReady(lab.tableReady !== false);
       // Pick up where the last session left off, otherwise the shipped prompt.
       setDraft(
-        lab.active
+        lab.currentDraft
           ? {
-              systemTemplate: lab.active.systemTemplate,
-              toolDescription: lab.active.toolDescription,
-              kbEmptyText: lab.active.kbEmptyText,
+              systemTemplate: lab.currentDraft.systemTemplate,
+              toolDescription: lab.currentDraft.toolDescription,
+              kbEmptyText: lab.currentDraft.kbEmptyText,
             }
           : lab.defaults,
       );
@@ -326,8 +326,8 @@ export default function PromptLabPage() {
     toast.success(`Loaded ${v.label || "version"} into the editor.`);
   };
 
-  const activateVersion = async (v: PromptVersion) => {
-    const res = await fetch(`/api/admin/prompt-lab/versions/${v.id}/activate`, { method: "POST" });
+  const setCurrentVersion = async (v: PromptVersion) => {
+    const res = await fetch(`/api/admin/prompt-lab/versions/${v.id}/set-current`, { method: "POST" });
     if (!res.ok) {
       toast.error("Could not set that version as current.");
       return;
@@ -380,7 +380,7 @@ export default function PromptLabPage() {
   }
 
   return (
-    <div className="flex h-full min-h-[600px] flex-col gap-3">
+    <div className="flex h-full min-h-150 flex-col gap-3">
       {/* Heading */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
@@ -406,7 +406,7 @@ export default function PromptLabPage() {
 
       {/* Test context */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
-        <div className="min-w-[220px] flex-1">
+        <div className="min-w-55 flex-1">
           <Label className="text-[11px] font-semibold text-muted-foreground">Test as company</Label>
           <Select value={companyId} onValueChange={setCompanyId}>
             <SelectTrigger className="mt-0.5 h-9">
@@ -421,7 +421,7 @@ export default function PromptLabPage() {
             </SelectContent>
           </Select>
         </div>
-        <div className="w-[140px]">
+        <div className="w-35">
           <Label className="text-[11px] font-semibold text-muted-foreground">Lead name</Label>
           <Input
             className="mt-0.5 h-9"
@@ -555,7 +555,7 @@ export default function PromptLabPage() {
                 value={versionLabel}
                 onChange={(e) => setVersionLabel(e.target.value)}
                 placeholder="Name this version, e.g. softer objection handling"
-                className="h-9 min-w-[200px] flex-1"
+                className="h-9 min-w-50 flex-1"
               />
               <Button
                 size="sm"
@@ -716,7 +716,7 @@ export default function PromptLabPage() {
                     Load
                   </Button>
                   {!v.isActive && (
-                    <Button size="sm" variant="ghost" onClick={() => activateVersion(v)}>
+                    <Button size="sm" variant="ghost" onClick={() => setCurrentVersion(v)}>
                       Set current
                     </Button>
                   )}

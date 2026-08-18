@@ -1,5 +1,3 @@
-import prisma from "./prisma.js";
-
 export const PROMPT_PLACEHOLDERS = [
   {
     token: "companyName",
@@ -266,15 +264,13 @@ export function validatePromptDraft({ systemTemplate, toolDescription, kbEmptyTe
   return { errors, warnings };
 }
 
-/** The draft the lab is currently working against, or null when none is saved. */
-export async function getActivePromptVersion() {
-  try {
-    return await prisma.salesAgentPromptVersion.findFirst({
-      where: { isActive: true },
-      orderBy: { updatedAt: "desc" },
-    });
-  } catch {
-    // Table not migrated yet — the lab is simply empty until it is.
-    return null;
-  }
-}
+// Deliberately no getter for the "current" saved version here.
+//
+// SalesAgentPromptVersion rows are Prompt Lab drafts and nothing else. `isActive`
+// means "the draft the lab opens by default", NOT "the prompt the agent runs".
+// The live agent always uses the PROMPT_DEFAULTS above, which ship in this file —
+// a draft only reaches production when someone copies it into DEFAULT_SYSTEM_TEMPLATE
+// and it goes through code review and a deploy.
+//
+// Do not add a lookup that feeds a saved row into buildAgentPrompt(). It would put
+// every Save button press straight in front of real leads with no review.

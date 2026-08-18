@@ -1,6 +1,9 @@
 import prisma from "../lib/prisma.js";
 import { writeAuditLog } from "../lib/audit.js";
-import { buildAgentPrompt, runClaudeTurn } from "../inngest/functions/appointment.js";
+import {
+  buildDraftPromptForTesting,
+  runDraftTurnForTesting,
+} from "../inngest/functions/appointment.js";
 import { queryDetailed as kbQueryDetailed } from "../services/vector-store.service.js";
 import { KB_SCOPES } from "../lib/sales-ai.js";
 import { getAvailableSlots, getAvailabilitySetting } from "../services/scheduling-service.js";
@@ -49,7 +52,8 @@ export const getPromptLab = async (req, res) => {
       defaults: PROMPT_DEFAULTS,
       placeholders: PROMPT_PLACEHOLDERS,
       versions,
-      active: versions.find((v) => v.isActive) || null,
+      // The draft to reopen the editor with — not a prompt that is running anywhere.
+      currentDraft: versions.find((v) => v.isActive) || null,
       tableReady,
     });
   } catch (error) {
@@ -103,7 +107,11 @@ export const savePromptVersion = async (req, res) => {
   }
 };
 
-export const activatePromptVersion = async (req, res) => {
+/**
+ * Marks which saved draft the lab opens by default. `isActive` is a lab bookmark,
+ * not a deploy switch — no live agent reads this row.
+ */
+export const setCurrentPromptVersion = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;
     const { versionId } = req.params;
@@ -124,7 +132,7 @@ export const activatePromptVersion = async (req, res) => {
 
     await writeAuditLog({
       req,
-      action: "sales_agent_prompt.version_activated",
+      action: "sales_agent_prompt.version_set_current",
       targetType: "SalesAgentPromptVersion",
       targetId: version.id,
       metadata: { label: version.label },
@@ -232,16 +240,18 @@ export const previewPrompt = async (req, res) => {
     });
     if (ctx.error) return res.status(400).json({ message: ctx.error });
 
-    const { system, tool, slotList } = buildAgentPrompt({
-      lead: mockLead(ctx.company, req.body?.leadFirstName),
-      company: ctx.company,
-      channel: ctx.channel,
-      slots: ctx.slots,
-      timezone: ctx.timezone,
-      kbChunks: ctx.kbChunks,
-      retrievalMethod: ctx.retrievalMethod,
-      promptOverride: draft,
-    });
+    const { system, tool, slotList } = buildDraftPromptForTesting(
+      {
+        lead: mockLead(ctx.company, req.body?.leadFirstName),
+        company: ctx.company,
+        channel: ctx.channel,
+        slots: ctx.slots,
+        timezone: ctx.timezone,
+        kbChunks: ctx.kbChunks,
+        retrievalMethod: ctx.retrievalMethod,
+      },
+      draft,
+    );
 
     return res.json({
       system,
@@ -292,18 +302,19 @@ export const promptLabChat = async (req, res) => {
     }
 
     const startedAt = Date.now();
-    const response = await runClaudeTurn({
-      lead: mockLead(ctx.company, req.body?.leadFirstName),
-      company: ctx.company,
-      channel: ctx.channel,
-      transcript: messages,
-      slots: ctx.slots,
-      timezone: ctx.timezone,
-      kbChunks: ctx.kbChunks,
-      retrievalMethod: ctx.retrievalMethod,
-      promptOverride: draft,
-      forcePlatformKey: true,
-    });
+    const response = await runDraftTurnForTesting(
+      {
+        lead: mockLead(ctx.company, req.body?.leadFirstName),
+        company: ctx.company,
+        channel: ctx.channel,
+        transcript: messages,
+        slots: ctx.slots,
+        timezone: ctx.timezone,
+        kbChunks: ctx.kbChunks,
+        retrievalMethod: ctx.retrievalMethod,
+      },
+      draft,
+    );
 
     return res.json({
       action: response.action,

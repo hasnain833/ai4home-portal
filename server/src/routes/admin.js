@@ -28,7 +28,7 @@ import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.cont
 import {
   getPromptLab,
   savePromptVersion,
-  activatePromptVersion,
+  setCurrentPromptVersion,
   deletePromptVersion,
   previewPrompt,
   promptLabChat,
@@ -66,7 +66,9 @@ router.get("/sales-agent-appointments", requireAuth, getSalesAgentAppointments);
 // Sales agent prompt lab (super admin only — enforced inside each handler).
 router.get("/prompt-lab", requireAuth, getPromptLab);
 router.post("/prompt-lab/versions", requireAuth, savePromptVersion);
-router.post("/prompt-lab/versions/:versionId/activate", requireAuth, activatePromptVersion);
+// "set-current" only picks which draft the lab opens by default. It does not
+// publish anything — the live agent's prompt ships in sales-agent-prompt.js.
+router.post("/prompt-lab/versions/:versionId/set-current", requireAuth, setCurrentPromptVersion);
 router.delete("/prompt-lab/versions/:versionId", requireAuth, deletePromptVersion);
 router.post("/prompt-lab/preview", requireAuth, previewPrompt);
 router.post("/prompt-lab/chat", requireAuth, promptLabChat);
