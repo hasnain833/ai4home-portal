@@ -22,6 +22,7 @@ import {
   DEFAULT_SYSTEM_TEMPLATE,
   DEFAULT_TOOL_DESCRIPTION,
   DEFAULT_KB_EMPTY_TEXT,
+  PROMPT_DEFAULTS,
   renderTemplate,
 } from "../../lib/sales-agent-prompt.js";
 
@@ -161,7 +162,7 @@ export function formatKbContext(chunks, retrievalMethod = null, emptyText = DEFA
   return `Company Knowledge Base — reference material. Use this to actively answer the lead's questions about homes, communities, pricing, buying process, and financing. ALWAYS ground your answers in this text. If a question cannot be answered by this text, offer to connect them with a human sales consultant.${confidence}\n\n${body}`;
 }
 
-export function buildAgentPrompt({
+function renderAgentPrompt({
   lead,
   company,
   channel,
@@ -169,8 +170,7 @@ export function buildAgentPrompt({
   timezone,
   kbChunks,
   retrievalMethod = null,
-  promptOverride = null,
-}) {
+}, prompts) {
   const slotList = slots.map((s, i) => `${i + 1}. ${s.label}  [iso:${s.iso}]`).join("\n") || "(no slots currently available)";
   const channelGuidance =
     channel === "SMS"
@@ -187,9 +187,9 @@ export function buildAgentPrompt({
   const brandContext = buildBrandContext(company);
   const brandVoiceBlock = brandContext ? `\n## Brand voice\n${brandContext}\n` : "";
 
-  const systemTemplate = promptOverride?.systemTemplate || DEFAULT_SYSTEM_TEMPLATE;
-  const kbEmptyText = promptOverride?.kbEmptyText || DEFAULT_KB_EMPTY_TEXT;
-  const toolDescription = promptOverride?.toolDescription || DEFAULT_TOOL_DESCRIPTION;
+  const systemTemplate = prompts.systemTemplate;
+  const kbEmptyText = prompts.kbEmptyText;
+  const toolDescription = prompts.toolDescription;
 
   const kbContext = formatKbContext(kbChunks, retrievalMethod, kbEmptyText);
 
@@ -212,29 +212,20 @@ export function buildAgentPrompt({
   return { system, tool, slotList, kbContext };
 }
 
-export async function runClaudeTurn({
-  lead,
-  company,
-  channel,
-  transcript,
-  slots,
-  timezone,
-  kbChunks,
-  retrievalMethod = null,
-  promptOverride = null,
-  forcePlatformKey = false,
-}) {
-  const { system, tool } = buildAgentPrompt({
-    lead,
-    company,
-    channel,
-    slots,
-    timezone,
-    kbChunks,
-    retrievalMethod,
-    promptOverride,
-  });
 
+export function buildAgentPrompt(args) {
+  return renderAgentPrompt(args, PROMPT_DEFAULTS);
+}
+
+export function buildDraftPromptForTesting(args, draft) {
+  return renderAgentPrompt(args, {
+    systemTemplate: draft?.systemTemplate || DEFAULT_SYSTEM_TEMPLATE,
+    toolDescription: draft?.toolDescription || DEFAULT_TOOL_DESCRIPTION,
+    kbEmptyText: draft?.kbEmptyText || DEFAULT_KB_EMPTY_TEXT,
+  });
+}
+
+async function executeTurn({ company, transcript, system, tool, forcePlatformKey }) {
   const messages = toAnthropicMessages(transcript).map((m) =>
     typeof m.content === "string" ? { ...m, content: redactPII(m.content) } : m,
   );
@@ -245,6 +236,16 @@ export async function runClaudeTurn({
     return { action: "reply", message: "Happy to help — tell me a bit about what you're looking for and I'll point you in the right direction." };
   }
   return input;
+}
+
+export async function runClaudeTurn({ transcript, ...args }) {
+  const { system, tool } = buildAgentPrompt(args);
+  return executeTurn({ company: args.company, transcript, system, tool, forcePlatformKey: false });
+}
+
+export async function runDraftTurnForTesting({ transcript, ...args }, draft) {
+  const { system, tool } = buildDraftPromptForTesting(args, draft);
+  return executeTurn({ company: args.company, transcript, system, tool, forcePlatformKey: true });
 }
 
 

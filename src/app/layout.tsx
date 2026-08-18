@@ -8,6 +8,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Aiforhomebuilder",
   description: "AI-powered warranty management for homebuilders",
+  icons: {
+    icon: "/logo-light.svg",
+  },
 };
 
 export default function RootLayout({
