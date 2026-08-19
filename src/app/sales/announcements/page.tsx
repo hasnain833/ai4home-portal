@@ -673,7 +673,7 @@ export default function AnnouncementsPage() {
 
         {/* SW-ANN dead-letter queue dialog */}
         <Dialog open={failuresOpen} onOpenChange={setFailuresOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base">
                 <AlertTriangle className="h-4 w-4 text-red-500" />

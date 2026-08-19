@@ -345,7 +345,7 @@ export default function BlogDraftingPage() {
               <CardHeader className="pb-2">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto">
-                    <TabsList className="bg-slate-100/80 dark:bg-slate-900 grid grid-cols-5 h-9 p-1 rounded-lg">
+                    <TabsList className="bg-slate-100/80 dark:bg-slate-900 grid grid-cols-4 h-9 p-1 rounded-lg">
                       <TabsTrigger value="all" className="text-xs rounded-md">All</TabsTrigger>
                       <TabsTrigger value="draft" className="text-xs rounded-md">Drafts</TabsTrigger>
                       <TabsTrigger value="approved" className="text-xs rounded-md">Approved</TabsTrigger>

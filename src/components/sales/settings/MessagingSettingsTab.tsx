@@ -152,16 +152,18 @@ export default function MessagingSettingsTab() {
 
   // Webhook setup help dialogs.
   const [helpOpen, setHelpOpen] = useState<null | "email" | "sms">(null);
-  const [origin, setOrigin] = useState("https://your-portal-domain");
+  // The origin is known synchronously, so it seeds state rather than being
+  // written back in an effect. It is only read inside the webhook help dialog,
+  // which is closed on first render, so the client value cannot mismatch SSR.
+  const [origin] = useState(() => {
+    if (process.env.NEXT_PUBLIC_URL) return process.env.NEXT_PUBLIC_URL;
+    if (typeof window !== "undefined") return window.location.origin;
+    return "https://your-portal-domain";
+  });
   const [companyId, setCompanyId] = useState("");
 
   useEffect(() => {
     fetchSettings();
-    if (process.env.NEXT_PUBLIC_URL) {
-      setOrigin(process.env.NEXT_PUBLIC_URL);
-    } else if (typeof window !== "undefined") {
-      setOrigin(window.location.origin);
-    }
   }, []);
 
   const fetchSettings = async () => {

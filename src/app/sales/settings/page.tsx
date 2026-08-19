@@ -679,14 +679,18 @@ function SettingsPageContent() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <motion.div variants={fadeInUp}>
-              <TabsList className="bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl grid grid-cols-7 max-w-6xl h-10">
-                <TabsTrigger value="crm" className="text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
-                <TabsTrigger value="outreach" className="text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
-                <TabsTrigger value="messaging" className="text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
-                <TabsTrigger value="news" className="text-xs font-semibold rounded-lg">News Sources</TabsTrigger>
-                <TabsTrigger value="aiconfig" className="text-xs font-semibold rounded-lg">AI Config</TabsTrigger>
-                <TabsTrigger value="failed" className="text-xs font-semibold rounded-lg">Failed Sends</TabsTrigger>
-                <TabsTrigger value="privacy" className="text-xs font-semibold rounded-lg">Privacy</TabsTrigger>
+              {/* Labels run from "Privacy" to "Outreach & Compliance", and the
+                  TabsTrigger primitive sets whitespace-nowrap — so equal-width
+                  columns make the long ones overlap their neighbours. Size each
+                  tab to its own label and scroll the row when it doesn't fit. */}
+              <TabsList className="flex w-full max-w-6xl items-center justify-start gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 min-h-10 h-auto dark:bg-slate-900/60">
+                <TabsTrigger value="crm" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
+                <TabsTrigger value="outreach" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
+                <TabsTrigger value="messaging" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
+                <TabsTrigger value="news" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">News Sources</TabsTrigger>
+                <TabsTrigger value="aiconfig" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">AI Config</TabsTrigger>
+                <TabsTrigger value="failed" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Failed Sends</TabsTrigger>
+                <TabsTrigger value="privacy" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Privacy</TabsTrigger>
               </TabsList>
             </motion.div>
 

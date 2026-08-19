@@ -81,7 +81,15 @@ export default function PortalLayout({
   children: React.ReactNode;
   workspace?: "warranty" | "sales";
 }) {
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  // Read the stored width during the first render rather than correcting it in
+  // an effect afterwards — the effect version set state on mount, which cost an
+  // extra render pass and made the sidebar visibly jump from expanded to
+  // collapsed. Nothing renders until `mounted`, so there is no SSR mismatch.
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const stored = window.localStorage.getItem("sidebar-expanded");
+    return stored === null ? true : stored === "true";
+  });
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
@@ -90,10 +98,6 @@ export default function PortalLayout({
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
-    const stored = localStorage.getItem("sidebar-expanded");
-    if (stored !== null) {
-      setSidebarExpanded(stored === "true");
-    }
     const frame = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(frame);
   }, []);
@@ -347,14 +351,14 @@ export default function PortalLayout({
       >
         {/* Mobile header (visible only on < md) */}
         <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b bg-background px-4 shadow-sm md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setMobileSidebarOpen(true)}>
+          <Button variant="ghost" size="icon" className="shrink-0" aria-label="Open navigation menu" onClick={() => setMobileSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </Button>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <BrandLogo src={user?.companyLogo} className="h-8 w-auto shrink-0 object-contain rounded-sm" />
-            <span className="font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
+            <span className="truncate font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+          <Button variant="ghost" size="icon" className="shrink-0" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         </header >
@@ -379,18 +383,18 @@ export default function PortalLayout({
               >
                 <div className="flex h-full flex-col">
                   <div className="flex h-16 items-center justify-between px-4">
-                    <div className="flex items-center gap-3.5">
+                    <div className="flex min-w-0 items-center gap-3.5">
                       <BrandLogo src={user?.companyLogo} onDark className="h-9 w-auto shrink-0 object-contain rounded-md" />
-                      <span className="text-xl font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
+                      <span className="truncate text-xl font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={closeMobileSidebar} className="text-white hover:bg-white/10">
+                    <Button variant="ghost" size="icon" aria-label="Close navigation menu" onClick={closeMobileSidebar} className="shrink-0 text-white hover:bg-white/10">
                       <X className="h-5 w-5" />
                     </Button>
                   </div>
                   <Separator className="bg-white/10" />
 
-                  {/* Mobile Workspace Switcher — hidden until multi-workspace is enabled; restore by replacing `false` with the real condition */}
-                  {false && user && (user?.hasWarrantyAccess || user?.hasSalesAccess) && (
+                  {/* Mobile Workspace Switcher — mirrors the desktop one above. */}
+                  {user && (user?.hasWarrantyAccess || user?.hasSalesAccess) && (
                     <div className="px-3 py-2">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -408,13 +412,13 @@ export default function PortalLayout({
                           <DropdownMenuLabel className="text-xs">Switch Workspace</DropdownMenuLabel>
                           <DropdownMenuSeparator />
                           {user?.hasWarrantyAccess && (
-                            <DropdownMenuItem onClick={() => handleWorkspaceSwitch("warranty")} className="flex items-center justify-between text-xs cursor-pointer">
+                            <DropdownMenuItem onClick={() => { closeMobileSidebar(); handleWorkspaceSwitch("warranty"); }} className="flex items-center justify-between text-xs cursor-pointer">
                               <span>Warranty Care</span>
                               {workspace === "warranty" && <Check className="h-3.5 w-3.5" />}
                             </DropdownMenuItem>
                           )}
                           {user?.hasSalesAccess && (
-                            <DropdownMenuItem onClick={() => handleWorkspaceSwitch("sales")} className="flex items-center justify-between text-xs cursor-pointer">
+                            <DropdownMenuItem onClick={() => { closeMobileSidebar(); handleWorkspaceSwitch("sales"); }} className="flex items-center justify-between text-xs cursor-pointer">
                               <span>Sales Hub</span>
                               {workspace === "sales" && <Check className="h-3.5 w-3.5" />}
                             </DropdownMenuItem>
@@ -437,7 +441,29 @@ export default function PortalLayout({
                       </Link>
                     ))}
                   </nav>
-                  <div className="border-t border-white/10 p-4">
+                  <div className="space-y-3 border-t border-white/10 p-4">
+                    <div className="flex min-w-0 items-center gap-3 px-1">
+                      <Avatar className="h-8 w-8 shrink-0">
+                        <AvatarImage src={user?.avatar} />
+                        <AvatarFallback className="bg-secondary text-primary text-xs">
+                          {user
+                            ? getInitials(
+                                user.role === "admin"
+                                  ? user.companyName || user.name
+                                  : user.name,
+                              )
+                            : "U"}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1 text-left">
+                        <p className="truncate text-sm font-medium text-white">
+                          {user?.role === "admin"
+                            ? sidebarCompanyName || user?.name
+                            : user?.name}
+                        </p>
+                        <p className="text-xs capitalize text-white/60">{user?.role}</p>
+                      </div>
+                    </div>
                     <Button
                       variant="ghost"
                       className="w-full justify-start text-white/80 hover:bg-white/10"
@@ -445,6 +471,14 @@ export default function PortalLayout({
                     >
                       {theme === "dark" ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />}
                       {theme === "dark" ? "Light Mode" : "Dark Mode"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start text-white/80 hover:bg-white/10 hover:text-white"
+                      onClick={logout}
+                    >
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Logout
                     </Button>
                   </div>
                 </div>

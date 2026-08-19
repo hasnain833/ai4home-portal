@@ -78,8 +78,8 @@ export async function GET() {
       '  inset: 0;' +
       '  bottom: auto;' +
       '  right: auto;' +
-      '  width: 100vw;' +
-      '  height: 100vh;' +
+      '  width: 100%;' +
+      '  height: 100dvh;' +
       '}' +
       '#warranty-widget-bubble {' +
       '  width: 60px;' +
@@ -113,7 +113,7 @@ export async function GET() {
       '  right: 0;' +
       '  width: 380px;' +
       '  height: 600px;' +
-      '  max-height: calc(100vh - 120px);' +
+      '  max-height: calc(100dvh - 120px);' +
       '  max-width: calc(100vw - 40px);' +
       '  background-color: #ffffff;' +
       '  border-radius: 25px;' +
@@ -137,8 +137,8 @@ export async function GET() {
       '  inset: 0;' +
       '  bottom: auto;' +
       '  right: auto;' +
-      '  width: 100vw;' +
-      '  height: 100vh;' +
+      '  width: 100%;' +
+      '  height: 100dvh;' +
       '  max-width: none;' +
       '  max-height: none;' +
       '  border-radius: 0;' +
@@ -199,7 +199,7 @@ export async function GET() {
       '  }' +
       '  #warranty-widget-panel {' +
       '    width: calc(100vw - 30px);' +
-      '    height: calc(100vh - 100px);' +
+      '    height: calc(100dvh - 100px);' +
       '    bottom: 75px;' +
       '  }' +
       '}';

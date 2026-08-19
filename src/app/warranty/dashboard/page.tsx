@@ -500,7 +500,7 @@ export default function DashboardPage() {
             {/* KPI Cards Grid */}
             <motion.div
               variants={fadeInUp}
-              className="grid gap-4 grid-cols-1 xs:grid-cols-2 lg:grid-cols-4">
+              className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
               {loading || !kpis ? (
                 Array(4)
                   .fill(0)
