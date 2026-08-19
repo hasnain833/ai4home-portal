@@ -8,17 +8,20 @@ export default function UnsubscribePage() {
   const params = useParams();
   const leadId = Array.isArray(params.leadId) ? params.leadId[0] : params.leadId;
 
-  const [state, setState] = useState<"loading" | "success" | "error">("loading");
+  // A missing route param is knowable at render time, so it seeds the initial
+  // state instead of being corrected by an effect — that version rendered a
+  // spinner for one frame before flipping to the error.
+  const [state, setState] = useState<"loading" | "success" | "error">(
+    leadId ? "loading" : "error",
+  );
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
-  const [message, setMessage] = useState<string>("");
+  const [message, setMessage] = useState<string>(
+    leadId ? "" : "This unsubscribe link is invalid.",
+  );
 
   useEffect(() => {
-    if (!leadId) {
-      setState("error");
-      setMessage("This unsubscribe link is invalid.");
-      return;
-    }
+    if (!leadId) return;
     let cancelled = false;
     (async () => {
       try {

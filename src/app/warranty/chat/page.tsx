@@ -154,7 +154,9 @@ export default function AIChatPage() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout>
-        <div className="flex flex-col h-[calc(100vh-120px)] max-w-4xl mx-auto px-2 sm:px-4 w-full gap-4 pb-4">
+        {/* Offsets match PortalLayout's chrome: mobile is a 64px sticky header
+            plus p-4 top and bottom; from md there is no header, just p-6. */}
+        <div className="flex flex-col h-[calc(100dvh-96px)] md:h-[calc(100dvh-48px)] max-w-4xl mx-auto px-2 sm:px-4 w-full gap-4 pb-4">
           <div className="flex flex-row items-center justify-between gap-4 shrink-0">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">

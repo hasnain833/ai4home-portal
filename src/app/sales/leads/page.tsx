@@ -876,11 +876,11 @@ export default function LeadsPage() {
 
                   {/* Totals come from the server response — `leads` is one page. */}
                   {totalPages > 1 && (
-                    <div className="flex items-center justify-between px-6 py-4 border-t border-border/50 bg-slate-50/30 dark:bg-slate-900/10">
+                    <div className="flex flex-col gap-3 px-6 py-4 border-t border-border/50 bg-slate-50/30 dark:bg-slate-900/10 sm:flex-row sm:items-center sm:justify-between">
                       <div className="text-xs text-muted-foreground">
                         Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min((currentPage - 1) * ITEMS_PER_PAGE + leads.length, totalLeads)} of {totalLeads} prospects
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-2">
                         <span className="text-xs text-muted-foreground mr-1">
                           Page {currentPage} of {totalPages}
                         </span>
