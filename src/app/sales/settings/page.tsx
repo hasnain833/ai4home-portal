@@ -5,6 +5,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useSearchParams } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { SALES_PERMISSION } from "@/lib/sales-permissions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -638,7 +639,7 @@ function SettingsPageContent() {
   };
 
   return (
-    <ProtectedRoute allowedRoles={["admin", "staff"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff"]} requiredPermission={SALES_PERMISSION.settingsManage}>
       <PortalLayout workspace="sales">
         <motion.div
           variants={staggerContainer}
@@ -687,8 +688,7 @@ function SettingsPageContent() {
                 <TabsTrigger value="crm" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
                 <TabsTrigger value="outreach" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
                 <TabsTrigger value="messaging" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Email & SMS</TabsTrigger>
-                <TabsTrigger value="news" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">News Sources</TabsTrigger>
-                <TabsTrigger value="aiconfig" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">AI Config</TabsTrigger>
+                <TabsTrigger value="ainews" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">AI &amp; News Setup</TabsTrigger>
                 <TabsTrigger value="failed" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Failed Sends</TabsTrigger>
                 <TabsTrigger value="privacy" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Privacy</TabsTrigger>
               </TabsList>
@@ -697,11 +697,11 @@ function SettingsPageContent() {
             <TabsContent value="messaging" className="space-y-6 focus-visible:outline-none">
               <MessagingSettingsTab />
             </TabsContent>
-            <TabsContent value="news" className="space-y-6 focus-visible:outline-none">
-              <NewsSourcesTab />
-            </TabsContent>
-            <TabsContent value="aiconfig" className="space-y-6 focus-visible:outline-none">
+            <TabsContent value="ainews" className="space-y-6 focus-visible:outline-none">
+              {/* Provider first: the news scraper summarises with whichever
+                  provider is configured here, so it reads in dependency order. */}
               <AiConfigSafetyTab />
+              <NewsSourcesTab />
             </TabsContent>
             <TabsContent value="failed" className="space-y-6 focus-visible:outline-none">
               <DeadLetterTab />

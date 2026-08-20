@@ -96,6 +96,19 @@ export const Templates = {
     return wrapEmail(content, "New Tenant Registration");
   },
 
+  getPlatformKeyRequestEmail: (companyName, requesterName, requesterEmail, provider, adminUrl) => {
+    const content = `
+      <p style="margin-top: 0;">A workspace has asked for access to a platform AI key. Until it is granted, their AI drafting tools stay switched off.</p>
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 140px;">Workspace</td><td style="padding: 12px 0;">${companyName}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Requested by</td><td style="padding: 12px 0;">${requesterName} (${requesterEmail})</td></tr>
+        <tr><td style="padding: 12px 12px 12px 0; font-weight: 600;">Provider asked for</td><td style="padding: 12px 0;">${provider || "any"}</td></tr>
+      </table>
+      <p>Grant or decline the request from the AI Keys screen:</p>
+      ${emailButton(adminUrl, "Open AI Keys")}
+    `;
+    return wrapEmail(content, "Platform AI Key Requested");
+  },
   getForgotPasswordEmail: (actionLink) => {
     const content = `
       <p style="margin-top: 0;">Hi,</p>
@@ -277,6 +290,8 @@ export const SmsTemplates = {
   getAdminNewTenantSms: (companyName, companyEmail, companyPhone) =>
     `New tenant registered: ${companyName}. Email: ${companyEmail}. Phone: ${companyPhone || "not provided"}. Please schedule an onboarding appointment.`,
 
+  getPlatformKeyRequestSms: (companyName, requesterEmail) =>
+    `Platform AI key requested by ${companyName} (${requesterEmail}). Grant or decline it under Admin > AI Keys.`,
   getAppointmentReminderSms: (homeownerName, type, dateStr, companyName) =>
     `Hi ${homeownerName}, reminder: You have a ${type} appointment scheduled for ${dateStr} with ${companyName}. Reply STOP to opt out.`,
 

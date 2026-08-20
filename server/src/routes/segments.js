@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../middlewares/auth.js";
+import { requireAuth, requireRoles } from "../middlewares/auth.js";
 import {
   getSegments,
   createSegment,
@@ -9,9 +9,14 @@ import {
 
 const router = Router();
 
-router.get("/", requireAuth, getSegments);
-router.post("/", requireAuth, createSegment);
-router.delete("/:id", requireAuth, deleteSegment);
-router.get("/:id/evaluate", requireAuth, evaluateSegment);
+// Segments are tenant-wide audiences, and their evaluated counts reveal how
+// many leads the whole company holds. A homeowner only ever sees their own
+// leads, so segments are builder-only.
+const builderOnly = requireRoles(["ADMIN", "STAFF"]);
+
+router.get("/", requireAuth, builderOnly, getSegments);
+router.post("/", requireAuth, builderOnly, createSegment);
+router.delete("/:id", requireAuth, builderOnly, deleteSegment);
+router.get("/:id/evaluate", requireAuth, builderOnly, evaluateSegment);
 
 export default router;

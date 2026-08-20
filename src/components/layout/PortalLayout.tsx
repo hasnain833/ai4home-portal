@@ -29,6 +29,7 @@ import {
   Check,
   Layers,
   CalendarDays,
+  CalendarClock,
   Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,8 +46,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Circle } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { SALES_PERMISSION, hasSalesPermission, type SalesPermission } from "@/lib/sales-permissions";
 
-const warrantyNavItems = [
+type NavItem = {
+  name: string;
+  href: string;
+  icon: LucideIcon;
+  roles: string[];
+  permission?: SalesPermission;
+};
+
+const warrantyNavItems: NavItem[] = [
   { name: "Dashboard", href: "/warranty/dashboard", icon: LayoutDashboard, roles: ["admin", "staff", "homeowner"] },
   { name: "AI Assistant", href: "/warranty/chat", icon: Bot, roles: ["admin", "staff", "homeowner"] },
   { name: "Properties", href: "/warranty/properties", icon: Building2, roles: ["admin", "staff", "homeowner"] },
@@ -60,18 +71,18 @@ const warrantyNavItems = [
   { name: "Profile", href: "/warranty/profile", icon: User, roles: ["staff", "homeowner"] },
 ];
 
-const salesNavItems = [
-  { name: "Dashboard", href: "/sales/dashboard", icon: LayoutDashboard, roles: ["admin", "staff"] },
-  { name: "Leads", href: "/sales/leads", icon: Users, roles: ["admin", "staff"] },
-  { name: "Campaigns", href: "/sales/campaigns", icon: Layers, roles: ["admin", "staff"] },
-  { name: "Content Calendar", href: "/sales/calendar", icon: CalendarDays, roles: ["admin", "staff"] },
-  { name: "Appointments", href: "/sales/scheduling", icon: CalendarDays, roles: ["admin", "staff"] },
-  { name: "Announcements", href: "/sales/announcements", icon: Bot, roles: ["admin", "staff"] },
-  { name: "News Feed", href: "/sales/news", icon: Activity, roles: ["admin", "staff"] },
-  { name: "Blog Posts", href: "/sales/blog", icon: Pencil, roles: ["admin", "staff"] },
-  { name: "Knowledge Base", href: "/sales/knowledge-base", icon: Database, roles: ["admin", "staff"] },
-  { name: "Automations", href: "/sales/automations", icon: Plug, roles: ["admin"] },
-  { name: "Settings", href: "/sales/settings", icon: Settings, roles: ["admin", "staff"] },
+const salesNavItems: NavItem[] = [
+  { name: "Dashboard", href: "/sales/dashboard", icon: LayoutDashboard, roles: ["admin", "staff", "homeowner"] },
+  { name: "Leads", href: "/sales/leads", icon: Users, roles: ["admin", "staff", "homeowner"] },
+  { name: "Campaigns", href: "/sales/campaigns", icon: Layers, roles: ["admin", "staff"], permission: SALES_PERMISSION.campaignsManage },
+  { name: "Content Calendar", href: "/sales/calendar", icon: CalendarDays, roles: ["admin", "staff", "homeowner"] },
+  { name: "Appointments", href: "/sales/scheduling", icon: CalendarClock, roles: ["admin", "staff"] },
+  { name: "Announcements", href: "/sales/announcements", icon: Bot, roles: ["admin", "staff"], permission: SALES_PERMISSION.announcementsPublish },
+  { name: "News Feed", href: "/sales/news", icon: Activity, roles: ["admin", "staff", "homeowner"] },
+  { name: "Blog Posts", href: "/sales/blog", icon: Pencil, roles: ["admin", "staff"], permission: SALES_PERMISSION.blogManage },
+  { name: "Knowledge Base", href: "/sales/knowledge-base", icon: Database, roles: ["admin", "staff"], permission: SALES_PERMISSION.kbManage },
+  { name: "Automations", href: "/sales/automations", icon: Plug, roles: ["admin", "staff"], permission: SALES_PERMISSION.automationsManage },
+  { name: "Settings", href: "/sales/settings", icon: Settings, roles: ["admin", "staff"], permission: SALES_PERMISSION.settingsManage },
 ];
 
 export default function PortalLayout({
@@ -81,10 +92,6 @@ export default function PortalLayout({
   children: React.ReactNode;
   workspace?: "warranty" | "sales";
 }) {
-  // Read the stored width during the first render rather than correcting it in
-  // an effect afterwards — the effect version set state on mount, which cost an
-  // extra render pass and made the sidebar visibly jump from expanded to
-  // collapsed. Nothing renders until `mounted`, so there is no SSR mismatch.
   const [sidebarExpanded, setSidebarExpanded] = useState(() => {
     if (typeof window === "undefined") return true;
     const stored = window.localStorage.getItem("sidebar-expanded");
@@ -133,7 +140,11 @@ export default function PortalLayout({
     user.verificationStatus !== "VERIFIED";
 
   const navItems = workspace === "warranty" ? warrantyNavItems : salesNavItems;
-  const filteredNav = navItems.filter((item) => user && item.roles.includes(user.role));
+  const filteredNav = navItems.filter((item) => {
+    if (!user || !item.roles.includes(user.role)) return false;
+    // Items without a permission key are open to anyone holding the role.
+    return !item.permission || hasSalesPermission(user, item.permission);
+  });
   const getInitials = (name: string) =>
     name.split(" ").map((n) => n[0]).join("").toUpperCase();
   const companyName = user?.companyName || "Aiforhomebuilder";

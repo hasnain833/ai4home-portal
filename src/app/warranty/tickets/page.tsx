@@ -154,6 +154,13 @@ export default function TicketsPage() {
   // Role-based filtering
   const isHomeowner = user?.role === "homeowner";
 
+  // Declared above fetchTickets, which calls it: referencing it later would
+  // capture a binding that is not initialised at definition time.
+  const showToast = (type: "success" | "error", text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
   const fetchTickets = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
@@ -219,11 +226,6 @@ export default function TicketsPage() {
   useEffect(() => {
     setPage(1);
   }, [search, status, priority, year, dateRange]);
-
-  const showToast = (type: "success" | "error", text: string) => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3000);
-  };
 
   const handleResetFilters = () => {
     setSearch("");

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -162,11 +162,7 @@ export default function MessagingSettingsTab() {
   });
   const [companyId, setCompanyId] = useState("");
 
-  useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/sales/settings/messaging", {credentials: "include"});
       if (res.ok) {
@@ -216,7 +212,14 @@ export default function MessagingSettingsTab() {
     } finally {
       setLoading(false);
     }
-  };
+    // Only setState functions are used, and those are stable.
+  }, []);
+
+  // Declared before the effect that calls it, so the effect closes over the
+  // real function rather than an uninitialised binding.
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
 
   const handleSaveEmail = async () => {
     setSavingEmail(true);

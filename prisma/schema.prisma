@@ -109,6 +109,10 @@ model Company {
   appointmentMode         String                  @default("AI")
   agentMaxTurns           Int                     @default(4)
   aiPlatformGrant         String?
+  // Set when a tenant admin asks the platform administrator for a platform key.
+  // Cleared once a grant is issued, so the request state is never stale.
+  aiPlatformKeyRequestedAt DateTime?
+  aiPlatformKeyRequestedBy String?
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
 }
@@ -798,10 +802,6 @@ model SalesAgentAppointment {
   updatedAt     DateTime @updatedAt
 }
 
-// Prompt Lab drafts. These are test artifacts only — no runtime code reads this
-// table. The prompt the live sales agent runs is DEFAULT_SYSTEM_TEMPLATE in
-// server/src/lib/sales-agent-prompt.js, and a draft reaches production only by
-// being copied there and deployed.
 model SalesAgentPromptVersion {
   id              String   @id @default(cuid())
   label           String?
@@ -809,7 +809,7 @@ model SalesAgentPromptVersion {
   toolDescription String   @db.Text
   kbEmptyText     String   @db.Text
   notes           String?  @db.Text
-  isActive        Boolean  @default(false) // lab bookmark: which draft the editor opens with. NOT a deploy flag.
+  isActive        Boolean  @default(false)
   createdById     String?
   createdByName   String?
   createdAt       DateTime @default(now())

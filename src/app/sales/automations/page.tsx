@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { SALES_PERMISSION } from "@/lib/sales-permissions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -365,7 +366,7 @@ export default function AutomationsPage() {
   };
 
   return (
-    <ProtectedRoute allowedRoles={["admin"]}>
+    <ProtectedRoute allowedRoles={["admin"]} requiredPermission={SALES_PERMISSION.automationsManage}>
       <PortalLayout workspace="sales">
         <motion.div
           variants={staggerContainer}

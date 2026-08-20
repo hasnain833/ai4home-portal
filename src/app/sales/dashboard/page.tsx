@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
+import HomeownerDashboard from "@/components/sales/HomeownerDashboard";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -115,6 +116,8 @@ function formatRelative(iso: string | null): string {
 
 export default function SalesDashboardPage() {
   const { user } = useAuth();
+  // SRS 4.12: a homeowner has no CRM rights and no company-wide reporting.
+  const isHomeowner = user?.role === "homeowner";
   const [loading, setLoading] = useState(true);
   const [leads, setLeads] = useState<any[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignMetrics[]>([]);
@@ -122,6 +125,8 @@ export default function SalesDashboardPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [stats, setStats] = useState({
     totalLeads: 0,
+    newLeads: 0,
+    nurturingLeads: 0,
     activeCampaigns: 0,
     totalEnrolled: 0,
     appointmentRate: 0,
@@ -143,6 +148,8 @@ export default function SalesDashboardPage() {
         setStats((s) => ({
           ...s,
           totalLeads: total,
+          newLeads: data.leads?.new || 0,
+          nurturingLeads: data.leads?.nurturing || 0,
           activeCampaigns: data.campaigns?.activeCount || 0,
           totalEnrolled: data.campaigns?.totalEnrolled || 0,
           appointmentRate:
@@ -218,8 +225,27 @@ export default function SalesDashboardPage() {
     window.open(`/api/sales/dashboard/export?type=${type}`, "_blank");
   };
 
+  if (isHomeowner) {
+    return (
+      <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
+        <PortalLayout workspace="sales">
+          <HomeownerDashboard
+            loading={loading}
+            leadCounts={{
+              total: stats.totalLeads,
+              new: stats.newLeads,
+              nurturing: stats.nurturingLeads,
+            }}
+            recentLeads={leads}
+            calendarItems={calendarItems}
+          />
+        </PortalLayout>
+      </ProtectedRoute>
+    );
+  }
+
   return (
-    <ProtectedRoute allowedRoles={["admin", "staff"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout workspace="sales">
         <motion.div
           variants={staggerContainer}
@@ -240,10 +266,12 @@ export default function SalesDashboardPage() {
               </p>
             </div>
             <div className="flex items-center gap-2.5">
-              <span className="hidden sm:block text-[10px] text-muted-foreground">
-                Last sync: {formatRelative(lastSync)}
-              </span>
-              <Button
+              {!isHomeowner && (
+                <span className="hidden sm:block text-[10px] text-muted-foreground">
+                  Last sync: {formatRelative(lastSync)}
+                </span>
+              )}
+              {!isHomeowner && (<Button
                 variant="outline"
                 size="sm"
                 onClick={handleSync}
@@ -253,9 +281,9 @@ export default function SalesDashboardPage() {
                   className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
                 />
                 {syncing ? "Syncing CRM..." : "Sync Salesforce"}
-              </Button>
+              </Button>)}
               {/* SW-DSH-002: every reporting view is exportable, not just leads. */}
-              <DropdownMenu>
+              {!isHomeowner && (<DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="outline"
@@ -276,7 +304,7 @@ export default function SalesDashboardPage() {
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenu>)}
             </div>
           </motion.div>
 

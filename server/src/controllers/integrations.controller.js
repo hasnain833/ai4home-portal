@@ -5,25 +5,40 @@ import { generateTicketId } from "../lib/ticket-utils.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { encrypt, decryptSafe } from "../lib/crypto.js";
+import {
+  readWebhookSecretFromHeaders,
+  secretsMatch,
+} from "../middlewares/webhook-auth.js";
 
-function isAuthorizedBotpress(req) {
-  const secret =process.env.SESSION_SECRET || "";
-  if (!secret) {
+export function isAuthorizedBotpress(req) {
+  const dedicated = process.env.BOTPRESS_WEBHOOK_SECRET || "";
+  const legacy = process.env.SESSION_SECRET || "";
+
+  if (!dedicated && !legacy) {
     console.error(
-      "[Botpress] No SESSION_SECRET configured — rejecting webhook.",
+      "[Botpress] No BOTPRESS_WEBHOOK_SECRET configured — rejecting webhook.",
     );
     return false;
   }
 
-  const secretParam = req.query.secret;
-  const authHeader = req.headers.authorization;
-  const apiKeyHeader = req.headers["x-api-key"];
+  const secretParam = typeof req.query?.secret === "string" ? req.query.secret : "";
+  const provided = readWebhookSecretFromHeaders(req) || secretParam;
+  if (!provided) return false;
 
-  if (secretParam === secret) return true;
-  if (apiKeyHeader === secret) return true;
-  if (authHeader) {
-    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-    if (token === secret) return true;
+  if (dedicated && secretsMatch(provided, dedicated)) {
+    if (provided === secretParam) {
+      console.warn(
+        "[Botpress] Secret supplied as a query parameter — it is written to access logs. Move it to the x-webhook-secret header and rotate.",
+      );
+    }
+    return true;
+  }
+
+  if (legacy && secretsMatch(provided, legacy)) {
+    console.warn(
+      "[Botpress] Authenticated with SESSION_SECRET. Set BOTPRESS_WEBHOOK_SECRET to a distinct value and update the Botpress webhook configuration.",
+    );
+    return true;
   }
 
   return false;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DEFAULT_LEAD_STATUSES, statusColor } from "@/lib/lead-statuses";
 import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { SALES_PERMISSION, hasSalesPermission } from "@/lib/sales-permissions";
 import {
   Select,
   SelectContent,
@@ -92,9 +94,19 @@ const ITEMS_PER_PAGE = 25;
 
 export default function LeadsPage() {
   const { user } = useAuth();
+  // The Leads page itself is open to any staff member; importing is not.
+  const canImportCsv = hasSalesPermission(user, SALES_PERMISSION.csvUpload);
+  // Segments are tenant-wide audiences — their counts expose the whole company
+  // lead list, which a homeowner must not see.
+  const isHomeowner = user?.role === "homeowner";
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // The search box drives a request; debounce it so one is sent per pause,
+  // not per keystroke.
+  const debouncedSearch = useDebouncedValue(search, 300);
+  // Monotonic id of the most recently issued leads request.
+  const latestLeadsRequest = useRef(0);
   const [statusFilter, setStatusFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -111,6 +123,8 @@ export default function LeadsPage() {
   }, [statusFilter, tagFilter]);
 
   const fetchSegments = useCallback(async () => {
+    // Builder-only on the server; requesting them as a homeowner only yields a 403.
+    if (isHomeowner) return;
     try {
       // Shared with the campaigns and announcements pages via the query cache.
       const data = await fetchKey<Segment[]>(QUERY_KEYS.segments);
@@ -131,7 +145,7 @@ export default function LeadsPage() {
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [isHomeowner]);
 
   const saveSegment = async () => {
     if (!segmentName.trim() || activeSegmentFilters.length === 0) return;
@@ -210,12 +224,10 @@ export default function LeadsPage() {
   const [csvTemplates, setCsvTemplates] = useState<any[]>([]);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
-
   const [currentPage, setCurrentPage] = useState(1);
   const [totalLeads, setTotalLeads] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [serverTags, setServerTags] = useState<string[]>([]);
-
   const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -227,18 +239,22 @@ export default function LeadsPage() {
   };
 
   const fetchLeads = useCallback(async () => {
+    const requestId = ++latestLeadsRequest.current;
+    const isStale = () => requestId !== latestLeadsRequest.current;
+
     setLoading(true);
     try {
       const params = new URLSearchParams({
         status: statusFilter,
         tag: tagFilter,
-        search,
+        search: debouncedSearch,
         page: String(currentPage),
         pageSize: String(ITEMS_PER_PAGE),
       });
       const res = await fetch(`/api/sales/leads?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
+        if (isStale()) return;
         setLeads(data.leads || []);
         setTotalLeads(data.total || 0);
         setTotalPages(data.totalPages || 1);
@@ -248,12 +264,13 @@ export default function LeadsPage() {
         }
       }
     } catch (error) {
+      if (isStale()) return;
       console.error("[sales/leads]", error);
       showToast("Error loading leads");
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, statusFilter, tagFilter, currentPage]);
+  }, [debouncedSearch, statusFilter, tagFilter, currentPage]);
 
   const changeSearch = (value: string) => { setSearch(value); setCurrentPage(1); };
   const changeStatusFilter = (value: string) => { setStatusFilter(value); setCurrentPage(1); };
@@ -602,7 +619,7 @@ export default function LeadsPage() {
   }, [csvStep]);
 
   return (
-    <ProtectedRoute allowedRoles={["admin", "staff"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout workspace="sales">
         <div className="space-y-6 max-w-7xl mx-auto">
           {/* Header */}
@@ -619,9 +636,11 @@ export default function LeadsPage() {
               <Button onClick={() => setManualModalOpen(true)} className="bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90 gap-2 h-9">
                 <Plus className="h-4 w-4" /> Add Lead
               </Button>
-              <Button onClick={() => setCsvModalOpen(true)} className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-2 h-9 border-none">
-                <Upload className="h-4 w-4" /> Import CSV
-              </Button>
+              {canImportCsv && (
+                <Button onClick={() => setCsvModalOpen(true)} className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-2 h-9 border-none">
+                  <Upload className="h-4 w-4" /> Import CSV
+                </Button>
+              )}
               <Button variant="outline" onClick={fetchLeads} className="h-9">
                 <RefreshCw className="h-4 w-4" />
               </Button>
@@ -676,8 +695,8 @@ export default function LeadsPage() {
                 </div>
               </div>
 
-              {/* ─── Saved segments ─────────────────────────────────────────── */}
-              <div className="mt-4 pt-4 border-t border-border/60">
+              {/* ─── Saved segments (builder-only) ──────────────────────────── */}
+              {!isHomeowner && (<div className="mt-4 pt-4 border-t border-border/60">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-2">
                     <Filter className="h-3.5 w-3.5 text-[#b48c3c]" />
@@ -740,7 +759,7 @@ export default function LeadsPage() {
                     })}
                   </div>
                 )}
-              </div>
+              </div>)}
             </CardContent>
           </Card>
 
@@ -910,7 +929,7 @@ export default function LeadsPage() {
                 <div className="text-center py-20 text-muted-foreground">
                   <Users className="h-16 w-16 mx-auto opacity-20 text-[#b48c3c] mb-3" />
                   <p className="font-semibold text-sm">No prospects found in this company.</p>
-                  <p className="text-xs mt-1 text-slate-400">Click "Add Lead" or "Import CSV" to populate your workspace.</p>
+                  <p className="text-xs mt-1 text-slate-400">Click &quot;Add Lead&quot;{canImportCsv ? ' or "Import CSV"' : ""} to populate your workspace.</p>
                 </div>
               )}
             </CardContent>
