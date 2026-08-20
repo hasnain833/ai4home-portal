@@ -30,6 +30,7 @@ export const getHomeowners = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        hasSalesAccess: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
@@ -196,7 +197,7 @@ export const updateHomeowner = async (req, res) => {
     }
 
     const { id } = req.params;
-    const { name, email, password } = req.body;
+    const { name, email, password, hasSalesAccess } = req.body;
 
     const existingHomeowner = await prisma.user.findFirst({
       where: {
@@ -252,6 +253,30 @@ export const updateHomeowner = async (req, res) => {
     if (email) dbUpdateData.email = email;
     if (password) dbUpdateData.password = await bcrypt.hash(password, 10);
 
+    // Sales workspace access for a homeowner (SRS 4.12). Only a builder admin
+    // may grant it — staff can edit homeowner details but not widen access.
+    if (typeof hasSalesAccess === "boolean") {
+      if (session.role !== "ADMIN") {
+        return res
+          .status(403)
+          .json({ message: "Only a workspace admin can change Sales access." });
+      }
+      if (hasSalesAccess) {
+        // A tenant cannot grant access to a workspace it is not entitled to.
+        const company = await prisma.company.findUnique({
+          where: { id: session.companyId || "demo-company" },
+          select: { salesEnabled: true },
+        });
+        if (!company?.salesEnabled) {
+          return res.status(400).json({
+            message:
+              "The Sales workspace is not enabled for this company, so access cannot be granted.",
+          });
+        }
+      }
+      dbUpdateData.hasSalesAccess = hasSalesAccess;
+    }
+
     const updatedHomeowner = await prisma.user.update({
       where: { id },
       data: dbUpdateData,
@@ -260,6 +285,7 @@ export const updateHomeowner = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        hasSalesAccess: true,
         createdAt: true,
       },
     });

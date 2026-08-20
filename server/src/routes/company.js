@@ -6,7 +6,8 @@ import {
   updateCompany,
   getCompanyBranding,
   uploadCompanyLogo,
-  submitVerificationDocument
+  submitVerificationDocument,
+  requestPlatformKey
 } from "../controllers/company.controller.js";
 import { handleUploadErrors } from "../middlewares/upload.js";
 
@@ -20,6 +21,7 @@ const uploadFile = handleUploadErrors(upload.single("file"));
 
 router.get("/", requireAuth, getCompany);
 router.put("/", requireAuth, updateCompany);
+router.post("/request-platform-key", requireAuth, requestPlatformKey);
 
 router.get("/branding", getCompanyBranding);
 router.options("/branding", (req, res) => {

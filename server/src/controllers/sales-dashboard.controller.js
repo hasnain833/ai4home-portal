@@ -39,6 +39,14 @@ export const getDashboardStats = async (req, res) => {
     const companyId = req.user.companyId;
     const now = new Date();
 
+    // A homeowner sees only their own leads (SRS 4.12), so every lead figure on
+    // this dashboard is narrowed to the ones they own. Without this they would
+    // read the whole tenant lead count.
+    const isHomeowner = String(req.user.role || "").toUpperCase() === "HOMEOWNER";
+    const leadWhere = isHomeowner
+      ? { companyId, ownerId: req.user.id }
+      : { companyId };
+
     // Aggregate queries
     const [
       totalLeads,
@@ -53,15 +61,15 @@ export const getDashboardStats = async (req, res) => {
       upcomingCalendarItems,
       totalEnrolled,
     ] = await prisma.$transaction([
-      prisma.lead.count({ where: { companyId } }),
-      prisma.lead.count({ where: { companyId, status: "New" } }),
-      prisma.lead.count({ where: { companyId, status: LEAD_STATUS.NURTURING } }),
-      prisma.lead.count({ where: { companyId, status: LEAD_STATUS.APPOINTMENT_SET } }),
-      prisma.lead.count({ where: { companyId, status: LEAD_STATUS.CLOSED_WON } }),
+      prisma.lead.count({ where: leadWhere }),
+      prisma.lead.count({ where: { ...leadWhere, status: "New" } }),
+      prisma.lead.count({ where: { ...leadWhere, status: LEAD_STATUS.NURTURING } }),
+      prisma.lead.count({ where: { ...leadWhere, status: LEAD_STATUS.APPOINTMENT_SET } }),
+      prisma.lead.count({ where: { ...leadWhere, status: LEAD_STATUS.CLOSED_WON } }),
       prisma.campaign.count({ where: { companyId, status: "Active" } }),
       prisma.salesAppointment.findMany({
         where: {
-          lead: { companyId },
+          lead: leadWhere,
           time: { gte: now },
           status: "CONFIRMED",
         },
@@ -84,6 +92,8 @@ export const getDashboardStats = async (req, res) => {
       prisma.contentCalendar.findMany({
         where: {
           companyId,
+          // Homeowners see only their own calendar items.
+          ...(isHomeowner ? { ownerId: req.user.id } : {}),
           scheduledAt: { gte: now },
           status: { in: UPCOMING_CALENDAR_STATUSES },
         },

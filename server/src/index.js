@@ -9,6 +9,7 @@ import {
 } from "./middlewares/auth.js";
 import { auditMutations } from "./lib/audit.js";
 import { assertEncryptionKeyOnBoot } from "./lib/crypto.js";
+import { assertWebhookSecretOnBoot } from "./middlewares/webhook-auth.js";
 import authRouter from "./routes/auth.js";
 import leadsRouter from "./routes/leads.js";
 import complianceRouter from "./routes/compliance.js";
@@ -65,6 +66,20 @@ import {
 import { salesforceSyncCron } from "./inngest/functions/salesforce-cron.js";
 
 assertEncryptionKeyOnBoot();
+assertWebhookSecretOnBoot();
+
+if (process.env.NODE_ENV === "production") {
+  if (process.env.INNGEST_DEV) {
+    throw new Error(
+      "[Server] Refusing to start: INNGEST_DEV is set in production, which disables signature verification on /api/inngest.",
+    );
+  }
+  if (!process.env.INNGEST_SIGNING_KEY) {
+    throw new Error(
+      "[Server] Refusing to start: INNGEST_SIGNING_KEY is not set, so /api/inngest would accept unsigned invocations.",
+    );
+  }
+}
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -76,8 +91,6 @@ app.use(
   }),
 );
 
-// rawBody is kept so webhook signatures (Telnyx Ed25519) can be verified against
-// the exact bytes the provider signed.
 app.use(
   express.json({
     limit: "10mb",
@@ -140,11 +153,9 @@ app.use("/api/homeowners", ...warrantyGuard, homeownersRouter);
 app.use("/api/users", usersRouter);
 app.use(
   "/api/inngest",
-  (req, res, next) => {
-    next();
-  },
   serve({
     client: inngest,
+    signingKey: process.env.INNGEST_SIGNING_KEY,
     functions: [
       runNurtureCampaign,
       handleCampaignExit,

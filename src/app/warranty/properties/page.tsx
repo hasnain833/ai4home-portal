@@ -101,6 +101,8 @@ export default function PropertiesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Property | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Fixed reference point for warranty-year maths — see getWarrantyYear below.
+  const [now] = useState(() => Date.now());
 
   // Form state
   const [form, setForm] = useState(EMPTY_FORM);
@@ -261,7 +263,7 @@ export default function PropertiesPage() {
 
   const getWarrantyYear = (coeDate: string | null) => {
     if (!coeDate) return 1;
-    const diff = (Date.now() - new Date(coeDate).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+    const diff = (now - new Date(coeDate).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
     if (diff <= 1) return 1;
     if (diff <= 2) return 2;
     return 10;
@@ -400,7 +402,7 @@ export default function PropertiesPage() {
               <Card className="overflow-hidden">
                 <CardContent className="p-0 overflow-x-auto">
                   {filteredProperties.length > 0 ? (
-                    <Table className="min-w-[900px] md:min-w-full">
+                    <Table className="min-w-225 md:min-w-full">
                       <TableHeader>
                         <TableRow>
                           <TableHead>Property Address</TableHead>

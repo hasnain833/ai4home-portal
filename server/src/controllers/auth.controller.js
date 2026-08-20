@@ -8,6 +8,7 @@ import { resolveDownloadUrl } from "../lib/storage.js";
 import { sendSms, smsSent } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { Templates, SmsTemplates } from "../services/templates.js";
+import { effectiveSalesPermissions } from "../lib/permissions.js";
 
 const safeEqual = (a, b) => {
   const ab = Buffer.from(String(a ?? ""), "utf8");
@@ -39,6 +40,7 @@ export const getMe = async (req, res) => {
         name: req.user.name || "Super Admin",
         role: "admin",
         isSuperAdmin: true,
+        salesPermissions: effectiveSalesPermissions({ role: "ADMIN", isSuperAdmin: true }),
         hasWarrantyAccess: true,
         hasSalesAccess: true,
         verificationStatus: "VERIFIED",
@@ -83,8 +85,19 @@ export const getMe = async (req, res) => {
       ? "VERIFIED"
       : dbUser.company?.verificationStatus || "VERIFIED";
 
+    // The row carries the bcrypt hash; never let it reach the client.
+    const { password: _password, ...safeUser } = dbUser;
+
     return res.json({
-      ...dbUser,
+      ...safeUser,
+      // Resolved server-side so the client never has to work out what a role
+      // implies: an admin gets every permission, staff get exactly what was
+      // granted to them.
+      salesPermissions: effectiveSalesPermissions({
+        role: isSuperAdmin ? "ADMIN" : dbUser.role,
+        isSuperAdmin,
+        salesPermissions: dbUser.salesPermissions,
+      }),
       hasWarrantyAccess,
       hasSalesAccess,
       verificationStatus,

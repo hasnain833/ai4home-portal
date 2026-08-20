@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { SALES_PERMISSION } from "@/lib/sales-permissions";
 import { fetchKey, QUERY_KEYS } from "@/lib/use-query";
 import { useMessagingCapabilities, NOT_CONFIGURED_HINT } from "@/lib/use-messaging-capabilities";
 import { DEFAULT_LEAD_STATUSES, statusColor } from "@/lib/lead-statuses";
@@ -482,7 +483,7 @@ export default function CampaignsPage() {
   };
 
   return (
-    <ProtectedRoute allowedRoles={["admin", "staff"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff"]} requiredPermission={SALES_PERMISSION.campaignsManage}>
       <PortalLayout workspace="sales">
         <div className="space-y-6 max-w-7xl mx-auto">
           {/* Header */}

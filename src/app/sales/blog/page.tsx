@@ -5,6 +5,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { SALES_PERMISSION } from "@/lib/sales-permissions";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -311,7 +312,7 @@ export default function BlogDraftingPage() {
     user?.companyId && post.slug ? `/blog/${user.companyId}/${post.slug}` : "";
 
   return (
-    <ProtectedRoute allowedRoles={["admin", "staff"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff"]} requiredPermission={SALES_PERMISSION.blogManage}>
       <PortalLayout workspace="sales">
         <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-6 max-w-7xl mx-auto">
           <motion.div variants={fadeInUp} className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

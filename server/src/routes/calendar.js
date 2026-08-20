@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../middlewares/auth.js";
+import { requireAuth, requireRoles } from "../middlewares/auth.js";
 import {
   getCalendarEvents,
   createCalendarEvent,
@@ -10,10 +10,15 @@ import {
 
 const router = Router();
 
+// SRS 4.12: a homeowner may VIEW their own calendar items — reads are already
+// scoped by ownerScope() in the controller. Creating items, generating AI
+// suggestions and approving or rescheduling are builder actions.
+const builderOnly = requireRoles(["ADMIN", "STAFF"]);
+
 router.get("/", requireAuth, getCalendarEvents);
-router.post("/", requireAuth, createCalendarEvent);
-router.post("/suggestions", requireAuth, getCalendarSuggestions);
-router.patch("/:id/status", requireAuth, transitionCalendarEvent);
-router.patch("/:id", requireAuth, updateCalendarEvent);
+router.post("/", requireAuth, builderOnly, createCalendarEvent);
+router.post("/suggestions", requireAuth, builderOnly, getCalendarSuggestions);
+router.patch("/:id/status", requireAuth, builderOnly, transitionCalendarEvent);
+router.patch("/:id", requireAuth, builderOnly, updateCalendarEvent);
 
 export default router;

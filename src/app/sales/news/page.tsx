@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
+import { useAuth } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Bot, Newspaper, ExternalLink, Calendar, Loader2, RefreshCcw, Megaphone, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,10 @@ interface ScrapedNews {
 const PAGE_SIZE = 8;
 
 export default function SalesNewsPage() {
+  // SRS 4.12: a homeowner may view the news feed, not trigger scrapes or
+  // configure sources.
+  const { user } = useAuth();
+  const isHomeowner = user?.role === "homeowner";
   const router = useRouter();
   const [news, setNews] = useState<ScrapedNews[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -101,7 +106,7 @@ export default function SalesNewsPage() {
   const pagedNews = news.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
-    <ProtectedRoute allowedRoles={["admin", "staff"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout workspace="sales">
         <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full h-full pb-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -119,10 +124,12 @@ export default function SalesNewsPage() {
                 <RefreshCcw className="h-4 w-4" />
                 Refresh
               </Button>
-              <Button className="gap-2" onClick={fetchLatest} disabled={fetchingLatest}>
-                {fetchingLatest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Newspaper className="h-4 w-4" />}
-                Fetch latest
-              </Button>
+              {!isHomeowner && (
+                <Button className="gap-2" onClick={fetchLatest} disabled={fetchingLatest}>
+                  {fetchingLatest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Newspaper className="h-4 w-4" />}
+                  Fetch latest
+                </Button>
+              )}
             </div>
           </div>
 
@@ -167,7 +174,9 @@ export default function SalesNewsPage() {
                         </div>
 
                         <div className="mt-auto pt-2.5 flex items-center justify-between gap-2 border-t border-border/50">
-                          <Button
+                          {/* Campaigns are builder-only, so a homeowner reads the
+                              feed without being offered an action they cannot take. */}
+                          {!isHomeowner && (<Button
                             size="sm"
                             variant="outline"
                             className="h-7 text-[11px] gap-1.5 px-2.5"
@@ -180,7 +189,7 @@ export default function SalesNewsPage() {
                               <Megaphone className="h-3.5 w-3.5" />
                             )}
                             Create Campaign
-                          </Button>
+                          </Button>)}
                           <a
                             href={item.originalUrl}
                             target="_blank"

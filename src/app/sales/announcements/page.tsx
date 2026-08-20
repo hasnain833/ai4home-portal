@@ -6,6 +6,7 @@ import { useQuery, QUERY_KEYS } from "@/lib/use-query";
 import { useMessagingCapabilities } from "@/lib/use-messaging-capabilities";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { SALES_PERMISSION } from "@/lib/sales-permissions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -357,7 +358,7 @@ export default function AnnouncementsPage() {
 
 
   return (
-    <ProtectedRoute allowedRoles={["admin", "staff"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff"]} requiredPermission={SALES_PERMISSION.announcementsPublish}>
       <PortalLayout workspace="sales">
         <div className="space-y-6 max-w-7xl mx-auto">
           {/* Header */}

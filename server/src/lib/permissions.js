@@ -8,7 +8,11 @@ export const SALES_PERMISSIONS = {
   "campaigns.manage": {
     label: "Manage campaigns",
     description: "Create, edit, enroll leads into, and launch nurture sequences.",
-    homeowner: true,
+    // Deviation from SRS 4.12, which allows homeowners nurture sequences with
+    // "limited templates". No template restriction exists, so allowing it would
+    // grant full campaign control rather than the limited set. Homeowners are
+    // excluded until that restriction is built.
+    homeowner: false,
   },
   "announcements.publish": {
     label: "Publish announcements",
@@ -24,6 +28,12 @@ export const SALES_PERMISSIONS = {
   "automations.manage": {
     label: "Manage automations",
     description: "Create and activate automation rules.",
+    homeowner: false,
+  },
+  "settings.manage": {
+    label: "Manage workspace settings",
+    description:
+      "Edit email and SMS delivery, the AI provider and key, news sources, and privacy settings.",
     homeowner: false,
   },
   "kb.manage": {

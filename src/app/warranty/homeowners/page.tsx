@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Users,
   UserPlus,
@@ -43,6 +44,7 @@ interface Homeowner {
   name: string;
   email: string;
   role: string;
+  hasSalesAccess?: boolean;
   createdAt: string;
 }
 
@@ -140,6 +142,42 @@ export default function HomeownersManagementPage() {
       setTimeout(() => setSuccess(""), 4000);
     } catch {
       setError("Failed to remove homeowner.");
+    }
+  };
+
+  // Grants a homeowner the Sales workspace (SRS 4.12). Admin-only, and the
+  // server refuses if the company is not entitled to Sales.
+  const [savingAccessId, setSavingAccessId] = useState<string | null>(null);
+
+  const toggleSalesAccess = async (homeowner: Homeowner, next: boolean) => {
+    setSavingAccessId(homeowner.id);
+    // Optimistic: reverted below if the server refuses.
+    setHomeowners((prev) =>
+      prev.map((h) => (h.id === homeowner.id ? { ...h, hasSalesAccess: next } : h)),
+    );
+    try {
+      const res = await fetch(`/api/homeowners/${homeowner.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ hasSalesAccess: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setHomeowners((prev) =>
+          prev.map((h) => (h.id === homeowner.id ? { ...h, hasSalesAccess: !next } : h)),
+        );
+        setError(data.message || "Could not change Sales access.");
+        return;
+      }
+      setSuccess(`Sales access ${next ? "granted to" : "removed from"} ${homeowner.name}.`);
+    } catch {
+      setHomeowners((prev) =>
+        prev.map((h) => (h.id === homeowner.id ? { ...h, hasSalesAccess: !next } : h)),
+      );
+      setError("Could not change Sales access.");
+    } finally {
+      setSavingAccessId(null);
     }
   };
 
@@ -318,6 +356,19 @@ export default function HomeownersManagementPage() {
                       <Badge variant="secondary" className="bg-green-100 text-green-700">
                         Homeowner
                       </Badge>
+                      {user.role === "admin" && (
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                          <Checkbox
+                            checked={!!homeowner.hasSalesAccess}
+                            disabled={savingAccessId === homeowner.id}
+                            onCheckedChange={(checked) =>
+                              toggleSalesAccess(homeowner, checked === true)
+                            }
+                            aria-label={`Sales workspace access for ${homeowner.name}`}
+                          />
+                          Sales access
+                        </label>
+                      )}
                       <p className="text-xs text-muted-foreground hidden sm:block">
                         Added {new Date(homeowner.createdAt).toLocaleDateString()}
                       </p>

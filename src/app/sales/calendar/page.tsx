@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
+import { useAuth } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -77,6 +78,10 @@ const sameDay = (a: Date, b: Date) =>
   a.getDate() === b.getDate();
 
 export default function ContentCalendarPage() {
+  // SRS 4.12: a homeowner views their own calendar items. AI suggestion
+  // generation and approval are builder actions.
+  const { user } = useAuth();
+  const isHomeowner = user?.role === "homeowner";
   const [suggestions, setSuggestions] = useState<CalendarEvent[]>([]);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -405,7 +410,7 @@ export default function ContentCalendarPage() {
   );
 
   return (
-    <ProtectedRoute allowedRoles={["admin", "staff"]}>
+    <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout workspace="sales">
         <div className="space-y-6 max-w-7xl mx-auto relative">
           {/* Header */}
@@ -420,7 +425,7 @@ export default function ContentCalendarPage() {
             </div>
             <div className="flex gap-2 items-center">
               {/* Notification Bell Dropdown */}
-              <div className="relative">
+              <div className="relative" hidden={isHomeowner}>
                 <Button
                   onClick={() => setShowSuggestions(!showSuggestions)}
                   variant="outline"

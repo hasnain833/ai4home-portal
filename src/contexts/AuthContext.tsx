@@ -38,6 +38,9 @@ export interface User {
   lastSeen?: Date;
   hasWarrantyAccess: boolean;
   hasSalesAccess: boolean;
+  // Resolved by the server: admins hold every permission, staff hold only what
+  // was granted. Absent until /api/auth/me has answered.
+  salesPermissions?: string[];
   lastActiveWorkspace?: string;
   // Tenant onboarding gate: PENDING | SUBMITTED | VERIFIED
   verificationStatus?: string;
