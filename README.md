@@ -33,6 +33,7 @@ A multi-tenant SaaS portal for home-builder / warranty companies. It hosts **two
 
 ---
 
+
 ## Tech Stack
 
 Next.js 16 · React 19 · TypeScript 5 · Tailwind CSS 4 · Radix UI / shadcn · Express 5 · Prisma 7 · PostgreSQL (Supabase) · Supabase Auth · Inngest · Botpress (warranty bot) · Salesforce & Google Calendar integrations · Twilio (SMS) · Brevo/SMTP (email) · local `@xenova/transformers` embeddings + pgvector (Sales KB).
