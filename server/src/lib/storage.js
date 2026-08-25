@@ -2,6 +2,11 @@ import { createClient } from "@supabase/supabase-js";
 
 export const BUCKETS = {
   salesKb: "sales_knowledge_base",
+  // Named for the bucket the warranty KB has always used. Note that documents
+  // uploaded through controllers/knowledge-base.controller.js land there via a
+  // PUBLIC bucket and a public URL; uploads through this module are private and
+  // read back through signed URLs.
+  warrantyKb: "knowledge_base",
   verificationDocs: "verification_docs",
   companyLogos: "company_logos",
 };

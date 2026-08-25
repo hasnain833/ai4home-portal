@@ -2,7 +2,7 @@ import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import mammoth from "mammoth";
 import { createRequire } from "module";
-import { upsertChunks } from "../../services/vector-store.service.js";
+import { upsertChunks } from "../../services/warranty-vector.service.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { resolveDownloadUrl } from "../../lib/storage.js";
 
@@ -66,11 +66,11 @@ export async function extractText(url, name) {
   return buffer.toString("utf-8");
 }
 
-export async function runKbIngestion(documentId, companyId) {
-  const doc = await prisma.salesKB.findUnique({ where: { id: documentId } });
+export async function runWarrantyKbIngestion(documentId, companyId) {
+  const doc = await prisma.warrantyKB.findUnique({ where: { id: documentId } });
   if (!doc) return { status: "skipped", reason: "document-not-found" };
 
-  await prisma.salesKB.update({
+  await prisma.warrantyKB.update({
     where: { id: documentId },
     data: { status: "INDEXING", error: null },
   });
@@ -84,7 +84,7 @@ export async function runKbIngestion(documentId, companyId) {
     const chunks = chunkText(text);
 
     if (!chunks.length) {
-      await prisma.salesKB.update({
+      await prisma.warrantyKB.update({
         where: { id: documentId },
         data: { status: "FAILED", error: "No extractable text found in document." },
       });
@@ -95,16 +95,17 @@ export async function runKbIngestion(documentId, companyId) {
       name: doc.name,
       category: doc.category,
       scope: doc.scope,
+      communityId: doc.communityId,
     });
 
-    await prisma.salesKB.update({
+    await prisma.warrantyKB.update({
       where: { id: documentId },
       data: { status: "READY", chunkCount: count, error: null },
     });
 
     return { status: "ready", chunks: count };
   } catch (err) {
-    await prisma.salesKB.update({
+    await prisma.warrantyKB.update({
       where: { id: documentId },
       data: { status: "FAILED", error: String(err?.message || err).slice(0, 500) },
     });
@@ -112,13 +113,13 @@ export async function runKbIngestion(documentId, companyId) {
   }
 }
 
-export const ingestKbDocument = inngest.createFunction(
+export const ingestWarrantyKbDocument = inngest.createFunction(
   {
-    id: "sales-kb-ingest",
+    id: "warranty-kb-ingest",
     concurrency: [{ key: "event.data.companyId", limit: 2 }],
-    triggers: [{ event: "sales.kb.ingest" }],
+    triggers: [{ event: "warranty.kb.ingest" }],
     onFailure: async ({ event, error }) =>
-      deadLetterJob({ functionId: "sales-kb-ingest", event, error }),
+      deadLetterJob({ functionId: "warranty-kb-ingest", event, error }),
   },
-  async ({ event }) => runKbIngestion(event.data.documentId, event.data.companyId),
+  async ({ event }) => runWarrantyKbIngestion(event.data.documentId, event.data.companyId),
 );

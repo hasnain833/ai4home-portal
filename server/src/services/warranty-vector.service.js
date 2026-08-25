@@ -2,14 +2,6 @@ import prisma from "../lib/prisma.js";
 import { embedText, embedBatch, EMBEDDING_DIM } from "./embedding.service.js";
 
 const FTS_LANG = "english";
-
-/**
- * Retrieval sees two tiers at once: the PLATFORM knowledge every company shares,
- * plus that company's own documents. $2 is always the companyId.
- * A null companyId still matches the platform tier, which is what the Prompt Lab
- * wants when testing platform content on its own.
- */
-const SCOPE_FILTER_SQL = `(scope = 'PLATFORM' OR "companyId" = $2)`;
 const MAX_CHUNK_CHARS = 8000;
 
 export function isKbConfigured() {
@@ -29,24 +21,23 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
     embeddings = new Array(chunks.length).fill(null);
   }
 
-  await prisma.salesKBChunk.deleteMany({ where: { documentId } });
+  await prisma.warrantyKBChunk.deleteMany({ where: { documentId } });
 
   // scope is denormalised onto every chunk so retrieval filters without a join.
   const scope = meta.scope === "PLATFORM" ? "PLATFORM" : "COMPANY";
 
-  await prisma.salesKBChunk.createMany({
+  await prisma.warrantyKBChunk.createMany({
     data: chunks.map((content, i) => ({
       companyId: scope === "PLATFORM" ? null : companyId,
       scope,
+      communityId: meta.communityId || null,
       documentId,
       chunkIndex: i,
-      name: meta.name || "",
-      category: meta.category || "General",
       content: String(content).slice(0, MAX_CHUNK_CHARS),
     })),
   });
 
-  const inserted = await prisma.salesKBChunk.findMany({
+  const inserted = await prisma.warrantyKBChunk.findMany({
     where: { documentId },
     orderBy: { chunkIndex: "asc" },
     select: { id: true, chunkIndex: true },
@@ -57,7 +48,7 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
     if (emb) {
       const vecStr = `[${emb.join(",")}]`;
       await prisma.$executeRawUnsafe(
-        `UPDATE "SalesKBChunk" SET embedding = $1::vector WHERE id = $2`,
+        `UPDATE "WarrantyKBChunk" SET embedding = $1::vector WHERE id = $2`,
         vecStr,
         row.id,
       );
@@ -68,34 +59,39 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 }
 
 export async function deleteDocument(companyId, documentId) {
-  // Keyed on documentId alone: it already identifies exactly one document, and
-  // filtering on companyId would skip PLATFORM chunks, which have none.
-  // The caller is responsible for authorising the delete.
-  await prisma.salesKBChunk.deleteMany({ where: { documentId } });
+  // Keyed on documentId alone — filtering on companyId would skip PLATFORM
+  // chunks, which have none. The caller authorises the delete.
+  await prisma.warrantyKBChunk.deleteMany({ where: { documentId } });
 }
 
-export async function queryDetailed(companyId, text, k = 5, categories = null) {
+/**
+ * @param communityId  Restricts which community-specific documents are eligible.
+ *   Shared documents (communityId null) always apply. Passing null means only
+ *   shared documents are used — safer than letting another community's rules
+ *   answer a homeowner's question.
+ */
+export async function queryDetailed(companyId, text, k = 5, categories = null, communityId = null) {
   const q = (text || "").trim();
   if (!q) return { method: "empty", results: [] };
   const limit = Math.min(Number(k) || 5, 20);
 
-  const semanticResults = await semanticQuery(companyId, q, limit, categories);
+  const semanticResults = await semanticQuery(companyId, q, limit, categories, communityId);
   if (semanticResults && semanticResults.length > 0) {
     return { method: "semantic", results: semanticResults };
   }
 
   const method = semanticResults === null ? "fts (semantic unavailable)" : "fts (no semantic match)";
   console.log(`[Vector Store] Using ${method} for query.`);
-  const results = await ftsQuery(companyId, q, limit, categories);
+  const results = await ftsQuery(companyId, q, limit, categories, communityId);
   return { method, results };
 }
 
-export async function query(companyId, text, k = 5, categories = null, context = "unknown") {
-  const { method, results } = await queryDetailed(companyId, text, k, categories);
+export async function query(companyId, text, k = 5, categories = null, context = "unknown", communityId = null) {
+  const { method, results } = await queryDetailed(companyId, text, k, categories, communityId);
   if (method && method.startsWith("fts")) {
     console.warn(
       `[Vector Store] ${context}: retrieval degraded to ${method} for company ${companyId}. ` +
-      `Semantic search needs the pgvector setup SQL + POST /api/sales/kb/reindex.`,
+      `Semantic search needs the pgvector setup SQL + POST /api/warranty/kb/reindex.`,
     );
   }
   return results;
@@ -108,7 +104,7 @@ export async function getRetrievalStatus(companyId) {
   let detail = null;
 
   try {
-    totalChunks = await prisma.salesKBChunk.count({
+    totalChunks = await prisma.warrantyKBChunk.count({
       where: { OR: [{ scope: "PLATFORM" }, { companyId }] },
     });
   } catch (err) {
@@ -117,7 +113,7 @@ export async function getRetrievalStatus(companyId) {
 
   try {
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT COUNT(*)::int AS n FROM "SalesKBChunk"
+      `SELECT COUNT(*)::int AS n FROM "WarrantyKBChunk"
         WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NOT NULL`,
       companyId,
     );
@@ -146,7 +142,7 @@ export async function getRetrievalStatus(companyId) {
 }
 
 
-async function semanticQuery(companyId, text, limit, categories) {
+async function semanticQuery(companyId, text, limit, categories, communityId = null) {
   let queryEmbedding;
   try {
     queryEmbedding = await embedText(text);
@@ -159,33 +155,48 @@ async function semanticQuery(companyId, text, limit, categories) {
   const vecStr = `[${queryEmbedding.join(",")}]`;
   const hasCats = Array.isArray(categories) && categories.length > 0;
 
+  // Shared documents always apply; a community's own documents apply only to that
+  // community. The clause is built per-branch because the two queries number
+  // their parameters differently.
+  const catParams = hasCats ? 1 : 0;
+  const communityClause = communityId
+    ? `AND (c."communityId" IS NULL OR c."communityId" = $${4 + catParams})`
+    : `AND c."communityId" IS NULL`;
+  const communityArgs = communityId ? [communityId] : [];
+
   try {
     const rows = hasCats
       ? await prisma.$queryRawUnsafe(
-        `SELECT id, "documentId", name, category, content, scope,
-                  1 - (embedding <=> $1::vector) AS score
-           FROM "SalesKBChunk"
-           WHERE ${SCOPE_FILTER_SQL}
-             AND category = ANY($3::text[])
-             AND embedding IS NOT NULL
-           ORDER BY embedding <=> $1::vector
+        `SELECT c.id, c."documentId", doc.name, doc.category, c.content, c.scope,
+                  1 - (c.embedding <=> $1::vector) AS score
+           FROM "WarrantyKBChunk" c
+           JOIN "WarrantyKB" doc ON c."documentId" = doc.id
+           WHERE (c.scope = 'PLATFORM' OR c."companyId" = $2)
+             AND doc.category = ANY($3::text[])
+             ${communityClause}
+             AND c.embedding IS NOT NULL
+           ORDER BY c.embedding <=> $1::vector
            LIMIT $4`,
         vecStr,
         companyId,
         categories,
         limit,
+        ...communityArgs,
       )
       : await prisma.$queryRawUnsafe(
-        `SELECT id, "documentId", name, category, content, scope,
-                  1 - (embedding <=> $1::vector) AS score
-           FROM "SalesKBChunk"
-           WHERE ${SCOPE_FILTER_SQL}
-             AND embedding IS NOT NULL
-           ORDER BY embedding <=> $1::vector
+        `SELECT c.id, c."documentId", doc.name, doc.category, c.content, c.scope,
+                  1 - (c.embedding <=> $1::vector) AS score
+           FROM "WarrantyKBChunk" c
+           JOIN "WarrantyKB" doc ON c."documentId" = doc.id
+           WHERE (c.scope = 'PLATFORM' OR c."companyId" = $2)
+             ${communityClause}
+             AND c.embedding IS NOT NULL
+           ORDER BY c.embedding <=> $1::vector
            LIMIT $3`,
         vecStr,
         companyId,
         limit,
+        ...communityArgs,
       );
 
     return rows
@@ -205,25 +216,29 @@ async function semanticQuery(companyId, text, limit, categories) {
 }
 
 
-async function ftsQuery(companyId, text, limit, categories) {
+async function ftsQuery(companyId, text, limit, categories, communityId = null) {
   const hasCats = Array.isArray(categories) && categories.length > 0;
 
   const rows = hasCats
     ? await prisma.$queryRaw`
-        SELECT id, "documentId", name, category, content, scope,
-               ts_rank(to_tsvector(${FTS_LANG}::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
-        FROM "SalesKBChunk"
-        WHERE (scope = 'PLATFORM' OR "companyId" = ${companyId})
-          AND category = ANY(${categories})
-          AND to_tsvector(${FTS_LANG}::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
+        SELECT c.id, c."documentId", doc.name, doc.category, c.content, c.scope,
+               ts_rank(to_tsvector(${FTS_LANG}::regconfig, c.content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
+        FROM "WarrantyKBChunk" c
+        JOIN "WarrantyKB" doc ON c."documentId" = doc.id
+        WHERE (c.scope = 'PLATFORM' OR c."companyId" = ${companyId})
+          AND (c."communityId" IS NULL OR c."communityId" = ${communityId})
+          AND doc.category = ANY(${categories})
+          AND to_tsvector(${FTS_LANG}::regconfig, c.content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
         ORDER BY score DESC
         LIMIT ${limit}`
     : await prisma.$queryRaw`
-        SELECT id, "documentId", name, category, content, scope,
-               ts_rank(to_tsvector(${FTS_LANG}::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
-        FROM "SalesKBChunk"
-        WHERE (scope = 'PLATFORM' OR "companyId" = ${companyId})
-          AND to_tsvector(${FTS_LANG}::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
+        SELECT c.id, c."documentId", doc.name, doc.category, c.content, c.scope,
+               ts_rank(to_tsvector(${FTS_LANG}::regconfig, c.content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
+        FROM "WarrantyKBChunk" c
+        JOIN "WarrantyKB" doc ON c."documentId" = doc.id
+        WHERE (c.scope = 'PLATFORM' OR c."companyId" = ${companyId})
+          AND (c."communityId" IS NULL OR c."communityId" = ${communityId})
+          AND to_tsvector(${FTS_LANG}::regconfig, c.content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
         ORDER BY score DESC
         LIMIT ${limit}`;
 
@@ -239,7 +254,7 @@ async function ftsQuery(companyId, text, limit, categories) {
 
 export async function backfillEmbeddings(companyId, batchSize = 50) {
   const chunks = await prisma.$queryRawUnsafe(
-    `SELECT id, content FROM "SalesKBChunk"
+    `SELECT id, content FROM "WarrantyKBChunk"
       WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NULL
       ORDER BY "createdAt" ASC LIMIT $2`,
     companyId,
@@ -257,7 +272,7 @@ export async function backfillEmbeddings(companyId, batchSize = 50) {
     if (emb) {
       const vecStr = `[${emb.join(",")}]`;
       await prisma.$executeRawUnsafe(
-        `UPDATE "SalesKBChunk" SET embedding = $1::vector WHERE id = $2`,
+        `UPDATE "WarrantyKBChunk" SET embedding = $1::vector WHERE id = $2`,
         vecStr,
         chunks[i].id,
       );
@@ -266,7 +281,7 @@ export async function backfillEmbeddings(companyId, batchSize = 50) {
   }
 
   const remaining = await prisma.$queryRawUnsafe(
-    `SELECT COUNT(*)::int AS count FROM "SalesKBChunk"
+    `SELECT COUNT(*)::int AS count FROM "WarrantyKBChunk"
       WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NULL`,
     companyId,
   );

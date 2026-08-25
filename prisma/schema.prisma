@@ -46,6 +46,7 @@ model User {
   ownedLeads          Lead[]             @relation("LeadOwner")
   agentAppointments   SalesAppointment[] @relation("AgentAppointments")
   contentCalendars    ContentCalendar[]
+  warrantyConversations WarrantyConversation[]
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
@@ -113,6 +114,8 @@ model Company {
   // Cleared once a grant is issued, so the request state is never stale.
   aiPlatformKeyRequestedAt DateTime?
   aiPlatformKeyRequestedBy String?
+  warrantyKBs             WarrantyKB[]
+  warrantyConversations   WarrantyConversation[]
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
 }
@@ -188,7 +191,11 @@ model Property {
   homeowner    User      @relation(fields: [homeownerId], references: [id])
   companyId    String?
   company      Company?  @relation(fields: [companyId], references: [id])
+  /// Which community this home is in. Null when it has not been assigned to one.
+  communityId  String?
+  community    Community? @relation(fields: [communityId], references: [id], onDelete: SetNull)
   tickets      Ticket[]
+  warrantyConversations WarrantyConversation[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -227,14 +234,16 @@ model Ticket {
 }
 
 model Community {
-  id        String                  @id @default(cuid())
-  companyId String
-  company   Company                 @relation(fields: [companyId], references: [id])
-  name      String
-  color     String                  @default("#0F3B3D")
-  documents KnowledgeBaseDocument[]
-  createdAt DateTime                @default(now())
-  updatedAt DateTime                @updatedAt
+  id          String                  @id @default(cuid())
+  companyId   String
+  company     Company                 @relation(fields: [companyId], references: [id])
+  name        String
+  color       String                  @default("#0F3B3D")
+  documents   KnowledgeBaseDocument[]
+  warrantyKBs WarrantyKB[]
+  properties  Property[]
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
 
   @@index([companyId])
 }
@@ -253,6 +262,13 @@ model KnowledgeBaseDocument {
 
   @@index([companyId])
   @@index([communityId])
+}
+
+/// Which tier a knowledge-base document belongs to.
+/// PLATFORM rows are shared across every company; COMPANY rows belong to one.
+enum KBScope {
+  PLATFORM
+  COMPANY
 }
 
 enum LeadSource {
@@ -554,10 +570,16 @@ model ContentCalendar {
   @@index([status, scheduledAt])
 }
 
+/// Two tiers, distinguished by `scope`:
+///   PLATFORM — shared by every company. The base knowledge the agent works from.
+///              companyId is null; uploaded by super-admins from the Prompt Lab.
+///   COMPANY  — that one company's own policies, layered on top of the platform tier.
+/// Retrieval returns both, ranked together. See services/vector-store.service.js.
 model SalesKB {
   id         String         @id @default(cuid())
-  companyId  String
-  company    Company        @relation(fields: [companyId], references: [id])
+  scope      KBScope        @default(COMPANY)
+  companyId  String?
+  company    Company?       @relation(fields: [companyId], references: [id])
   name       String
   size       String
   url        String
@@ -572,11 +594,14 @@ model SalesKB {
   chunks     SalesKBChunk[]
 
   @@index([companyId, isDeleted])
+  @@index([scope, isDeleted])
 }
 
 model SalesKBChunk {
   id         String                      @id @default(cuid())
-  companyId  String
+  /// Denormalised from the parent document so retrieval filters without a join.
+  scope      KBScope                     @default(COMPANY)
+  companyId  String?
   documentId String
   document   SalesKB                     @relation(fields: [documentId], references: [id], onDelete: Cascade)
   chunkIndex Int
@@ -587,6 +612,7 @@ model SalesKBChunk {
   createdAt  DateTime                    @default(now())
 
   @@index([companyId])
+  @@index([scope])
   @@index([documentId])
 }
 
@@ -809,12 +835,86 @@ model SalesAgentPromptVersion {
   toolDescription String   @db.Text
   kbEmptyText     String   @db.Text
   notes           String?  @db.Text
+  // A Prompt Lab bookmark: the draft the lab reopens. Affects nothing else.
   isActive        Boolean  @default(false)
+  // The prompt real leads are talking to. Set only by the audited "Set Live"
+  // action, never by saving. At most one row may have this true.
+  isLive          Boolean  @default(false)
+  setLiveAt       DateTime?
+  setLiveById     String?
+  setLiveByName   String?
   createdById     String?
   createdByName   String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([isActive])
+  @@index([isLive])
   @@index([createdAt])
+}
+
+/// Same two-tier arrangement as SalesKB — see the comment on that model.
+model WarrantyKB {
+  id         String              @id @default(cuid())
+  scope      KBScope             @default(COMPANY)
+  companyId  String?
+  company    Company?            @relation(fields: [companyId], references: [id])
+  /// Null means shared across every community. Set means it applies only to that one.
+  communityId String?
+  community   Community?         @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  name       String
+  size       String
+  url        String
+  category   String              @default("General")
+  status     String              @default("PENDING")
+  error      String?             @db.Text
+  chunkCount Int                 @default(0)
+  version    Int                 @default(1)
+  isActive   Boolean             @default(true)
+  createdAt  DateTime            @default(now())
+  chunks     WarrantyKBChunk[]
+
+  @@index([companyId, isActive])
+  @@index([scope, isActive])
+  @@index([communityId])
+}
+
+model WarrantyKBChunk {
+  id         String                      @id @default(cuid())
+  /// Denormalised from the parent document so retrieval filters without a join.
+  scope      KBScope                     @default(COMPANY)
+  companyId  String?
+  /// Mirrors WarrantyKB.communityId. Null means every community.
+  communityId String?
+  documentId String
+  document   WarrantyKB                  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex Int
+  content    String                      @db.Text
+  embedding  Unsupported("vector(384)")?
+  createdAt  DateTime                    @default(now())
+
+  @@index([companyId])
+  @@index([scope])
+  @@index([communityId])
+  @@index([documentId])
+}
+
+model WarrantyConversation {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  homeownerId     String?
+  homeowner       User?    @relation(fields: [homeownerId], references: [id])
+  propertyId      String?
+  property        Property? @relation(fields: [propertyId], references: [id])
+  status          String   @default("ACTIVE") // ACTIVE, RESOLVED, ESCALATED
+  phase           String   @default("INTAKE") // INTAKE, IDENTIFY, DIAGNOSE, RESOLVE
+  issueState      Json?                       // Structured collected data
+  ticketId        String?
+  transcript      Json     @default("[]")
+  turnCount       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([companyId, status])
 }

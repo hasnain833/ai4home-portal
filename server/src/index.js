@@ -42,6 +42,7 @@ import usersRouter from "./routes/users.js";
 import deadLetterRouter from "./routes/dead-letter.js";
 import privacyRouter from "./routes/privacy.js";
 import salesAgentRouter from "./routes/sales-agent.js";
+import warrantyChatRouter from "./routes/warranty-chat.js";
 
 import { serve } from "inngest/express";
 import { inngest } from "./lib/inngest.js";
@@ -59,6 +60,7 @@ import { scheduleCalendarItem } from "./inngest/functions/calendar.js";
 import { scrapeNews } from "./inngest/functions/news-scraper.js";
 import { sendAnnouncement } from "./inngest/functions/announcement.js";
 import { ingestKbDocument } from "./inngest/functions/kb-ingest.js";
+import { ingestWarrantyKbDocument } from "./inngest/functions/warranty-kb-ingest.js";
 import {
   runAutomationRules,
   automationDateTriggers,
@@ -133,6 +135,7 @@ app.use("/api/sales/blog", ...salesGuard, blogRouter);
 app.use("/api/sales/privacy", ...salesGuard, privacyRouter);
 app.use("/api/public/blog", publicBlogRouter);
 app.use("/api/public/sales-agent", salesAgentRouter);
+app.use("/api/public/warranty/chat", warrantyChatRouter);
 
 const warrantyGuard = [
   requireAuth,
@@ -150,6 +153,7 @@ app.use("/api/integrations", integrationsRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/communities", ...warrantyGuard, communitiesRouter);
 app.use("/api/homeowners", ...warrantyGuard, homeownersRouter);
+app.use("/api/warranty/chat", ...warrantyGuard, warrantyChatRouter);
 app.use("/api/users", usersRouter);
 app.use(
   "/api/inngest",
@@ -167,6 +171,7 @@ app.use(
       scrapeNews,
       sendAnnouncement,
       ingestKbDocument,
+      ingestWarrantyKbDocument,
       runAutomationRules,
       automationDateTriggers,
       salesforceSyncCron,

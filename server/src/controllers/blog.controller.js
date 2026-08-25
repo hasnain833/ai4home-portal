@@ -2,6 +2,7 @@ import prisma from "../lib/prisma.js";
 import { chat, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
+import { renderTemplate, BLOG_WRITER_TEMPLATE } from "../prompts/index.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -212,27 +213,12 @@ export const generateBlogDraft = async (req, res) => {
       newsContext = news.map((n) => `- ${n.title}: ${n.summary} (${n.originalUrl})`).join("\n") || newsContext;
     }
 
-    const system = `You are a content marketing writer for ${company?.name || "a homebuilder"}. Write an original, engaging, SEO-aware blog post. Ground every factual claim in the provided Knowledge Base and Source News; never invent facts, prices, or statistics not present there.
-
-Brand voice:
-${brandVoiceContext(company)}
-
-Knowledge Base:
-${kbContext}
-
-Source News (cite these where you draw on them):
-${newsContext}
-
-Return ONLY a raw JSON object (no markdown fences) with this exact shape:
-{
-  "title": "string",
-  "excerpt": "string (1-2 sentence summary)",
-  "metaTitle": "string (<= 60 chars, SEO)",
-  "metaDescription": "string (<= 160 chars, SEO)",
-  "headings": ["H2 section headings, in order"],
-  "tags": ["3-6 lowercase tags"],
-  "content": "full post body in Markdown using ## headings"
-}`;
+    const system = renderTemplate(BLOG_WRITER_TEMPLATE, {
+      companyName: company?.name || "a homebuilder",
+      brandVoice: brandVoiceContext(company),
+      kbContext,
+      newsContext,
+    });
 
     const user = `Topic: ${topic}
 Tone: ${tone || company?.voiceProfile || "professional"}

@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
+import { inngest } from "../lib/inngest.js";
 
 const formatFileSize = (bytes) => {
   if (bytes === 0) return "0 Bytes";
@@ -16,14 +17,12 @@ export const getKnowledgeBaseDocs = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const docs = await prisma.knowledgeBaseDocument.findMany({
-      where: { companyId: session.companyId || "demo-company" },
-      include: {
-        community: {
-          select: { id: true, name: true, color: true }
-        }
-      },
+    const docs = await prisma.warrantyKB.findMany({
+      // scope pins this to the company tier — a null companyId would otherwise
+      // become `IS NULL` and match the shared PLATFORM documents.
+      where: { scope: "COMPANY", companyId: session.companyId || "demo-company", isActive: true },
       orderBy: { createdAt: "desc" },
+      include: { community: { select: { id: true, name: true, color: true } } },
     });
     return res.json(docs);
   } catch (error) {
@@ -40,7 +39,6 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
     }
 
     const file = req.file;
-    const communityId = req.body.communityId;
 
     if (!file) {
       return res.status(400).json({ message: "No file provided" });
@@ -95,20 +93,60 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
     const size = formatFileSize(file.size);
 
     // 5. Save to database
-    const doc = await prisma.knowledgeBaseDocument.create({
+    // "" or "shared" from the picker means the document applies to every community.
+    const rawCommunity = typeof req.body?.communityId === "string" ? req.body.communityId.trim() : "";
+    let communityId = rawCommunity && rawCommunity !== "shared" ? rawCommunity : null;
+
+    if (communityId) {
+      const community = await prisma.community.findFirst({
+        where: { id: communityId, companyId },
+        select: { id: true },
+      });
+      // A community from another company must not silently scope this document.
+      if (!community) {
+        return res.status(400).json({ message: "That community does not exist." });
+      }
+    }
+
+    const category =
+      typeof req.body?.category === "string" && req.body.category.trim()
+        ? req.body.category.trim()
+        : "General";
+
+    const doc = await prisma.warrantyKB.create({
       data: {
         name: originalName,
         size,
         url,
         companyId,
-        communityId: communityId || null,
+        scope: "COMPANY",
+        communityId,
+        category,
+        status: "PENDING",
       },
-      include: {
-        community: {
-          select: { id: true, name: true, color: true }
-        }
-      }
     });
+
+    // 6. Parse and embed. Inngest makes this durable and retried; if it is not
+    // configured the send throws, so fall back to running it in-process rather
+    // than leaving the document stuck at PENDING forever.
+    try {
+      await inngest.send({
+        name: "warranty.kb.ingest",
+        data: { documentId: doc.id, companyId },
+      });
+    } catch (e) {
+      console.warn("[Warranty KB] Inngest unavailable, ingesting in-process:", e?.message || e);
+      const { runWarrantyKbIngestion } = await import("../inngest/functions/warranty-kb-ingest.js");
+      runWarrantyKbIngestion(doc.id, companyId).catch(async (err) => {
+        console.error("[Warranty KB] Ingestion failed:", err?.message || err);
+        await prisma.warrantyKB
+          .update({
+            where: { id: doc.id },
+            data: { status: "FAILED", error: String(err?.message || err).slice(0, 500) },
+          })
+          .catch(() => {});
+      });
+    }
 
     return res.json(doc);
   } catch (error) {
@@ -129,16 +167,17 @@ export const deleteKnowledgeBaseDoc = async (req, res) => {
     if (!id) return res.status(400).json({ message: "ID required" });
 
     // Verify document belongs to company
-    const doc = await prisma.knowledgeBaseDocument.findFirst({
-      where: { id, companyId: session.companyId || "demo-company" }
+    const doc = await prisma.warrantyKB.findFirst({
+      where: { id, scope: "COMPANY", companyId: session.companyId || "demo-company" },
     });
 
     if (!doc) {
       return res.status(404).json({ message: "Document not found" });
     }
 
-    await prisma.knowledgeBaseDocument.delete({
+    await prisma.warrantyKB.update({
       where: { id },
+      data: { isActive: false }
     });
 
     return res.json({ success: true });
