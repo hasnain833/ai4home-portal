@@ -15,17 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v3.6/inject.js";
-
-type BotpressClient = {
-  config?: (payload: Record<string, unknown>) => void;
-  on?: (event: string, handler: () => void) => void;
-  updateUser?: (payload: Record<string, unknown>) => void;
-};
-
-type BotpressWindow = Window & {
-  botpress?: BotpressClient;
-};
+import WarrantyChat from "@/components/warranty/WarrantyChat";
 
 export default function AIChatPage() {
   const { user, isLoading } = useAuth();
@@ -35,7 +25,6 @@ export default function AIChatPage() {
 
   const companyName = user?.companyName || "Aiforhomebuilder";
   const botName = `${companyName} Assistant`;
-  const botLogoUrl = user?.companyLogo || (typeof window !== "undefined" ? window.location.origin + "/logo-light.svg" : "");
 
   useEffect(() => {
     if (isLoading || !user) return;
@@ -56,83 +45,7 @@ export default function AIChatPage() {
     fetchCompanyData();
   }, [user, isLoading]);
 
-  useEffect(() => {
-    if (isLoading || !user) return;
 
-    let cancelled = false;
-    const injectScript = document.createElement("script");
-    injectScript.src = INJECT_URL;
-    injectScript.async = true;
-
-    const params = new URLSearchParams({ botColor: themeColor, botName, companyName });
-    if (botLogoUrl) params.set("botLogo", botLogoUrl);
-    params.set("v", Date.now().toString());
-    const configScript = document.createElement("script");
-    configScript.src = `/bp-config?${params.toString()}`;
-    configScript.defer = true;
-
-    const startWebchat = () => {
-      if (cancelled) return;
-      const bp = (window as BotpressWindow).botpress;
-      if (!bp) {
-        // inject.js hasn't defined window.botpress yet — retry shortly.
-        setTimeout(startWebchat, 100);
-        return;
-      }
-
-      // Register listeners BEFORE the config script calls botpress.init(...).
-      try {
-        bp.on?.("webchat:initialized", () => {
-          if (user && bp.updateUser) {
-            try {
-              bp.updateUser({
-                data: {
-                  email: user.email || "",
-                  externalId: user.id || "",
-                  name: user.name || "",
-                  role: user.role || "",
-                  companyId: user.companyId || "",
-                  companyName,
-                },
-                tags: {
-                  email: user.email || "",
-                  userId: user.id || "",
-                  name: user.name || "",
-                  role: user.role || "",
-                  companyId: user.companyId || "",
-                  companyName,
-                },
-              });
-            } catch (err) {
-              console.error("Failed to update user in Botpress:", err);
-            }
-          }
-        });
-      } catch (err) {
-        console.error("Failed to register Botpress listener:", err);
-      }
-
-      document.body.appendChild(configScript);
-    };
-
-    injectScript.onload = startWebchat;
-    document.body.appendChild(injectScript);
-
-    return () => {
-      cancelled = true;
-      if (document.body.contains(injectScript)) document.body.removeChild(injectScript);
-      if (document.body.contains(configScript)) document.body.removeChild(configScript);
-      const bpElements = document.querySelectorAll(
-        "[class^='bp-'], iframe[src*='botpress'], .bp-webchat-container"
-      );
-      bpElements.forEach((el) => el.remove());
-      try {
-        delete (window as BotpressWindow).botpress;
-      } catch {
-        // Ignore — inject.js may define it as non-configurable.
-      }
-    };
-  }, [user, isLoading, themeColor, botName, botLogoUrl, companyName]);
 
   const portalUrl =
     process.env.NEXT_PUBLIC_URL ||
@@ -311,30 +224,13 @@ export default function AIChatPage() {
             )}
           </div>
 
-          <div className="flex-1 w-full overflow-hidden rounded-3xl border border-slate-800 shadow-2xl bg-[#020617] p-0 flex flex-col min-h-0">
-            <style jsx global>{`
-              #bp-embedded-webchat [class*="fab"],
-              #bp-embedded-webchat [class*="Fab"],
-              #bp-embedded-webchat [class*="launcher"],
-              #bp-embedded-webchat [class*="Launcher"],
-              #bp-embedded-webchat button[aria-label*="Open"],
-              #bp-embedded-webchat button[aria-label*="open"],
-              body > [class*="bpFab"],
-              body > [class*="bp-fab"],
-              body > button[aria-label*="Open"],
-              body > button[aria-label*="open"] {
-                display: none !important;
-              }
-
-              #bp-embedded-webchat,
-              #bp-embedded-webchat > * {
-                width: 100% !important;
-                height: 100% !important;
-              }
-            `}</style>
-            <div
-              id="bp-embedded-webchat"
-              className="w-full h-full bg-[#020617]"
+          <div className="flex-1 w-full overflow-hidden rounded-3xl shadow-2xl p-0 flex flex-col min-h-0">
+            <WarrantyChat
+              companyId={companyId}
+              themeColor={themeColor}
+              botName={botName}
+              logoUrl={user?.companyLogo}
+              homeownerId={user?.id}
             />
           </div>
         </div>

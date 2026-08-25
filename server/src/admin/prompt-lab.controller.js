@@ -12,7 +12,10 @@ import {
   PROMPT_DEFAULTS,
   PROMPT_PLACEHOLDERS,
   validatePromptDraft,
-} from "../lib/sales-agent-prompt.js";
+  listAgents,
+  AGENT_TYPES,
+} from "../prompts/index.js";
+import { getLivePrompts, invalidateLivePrompts } from "../prompts/live.js";
 
 function denyUnlessSuperAdmin(req, res) {
   if (!req.user?.isSuperAdmin) {
@@ -48,12 +51,24 @@ export const getPromptLab = async (req, res) => {
       tableReady = false;
     }
 
+    const liveRow = versions.find((v) => v.isLive) || null;
+    const live = await getLivePrompts(AGENT_TYPES.SALES);
+
     return res.json({
       defaults: PROMPT_DEFAULTS,
       placeholders: PROMPT_PLACEHOLDERS,
+      agents: listAgents(),
       versions,
       // The draft to reopen the editor with — not a prompt that is running anywhere.
       currentDraft: versions.find((v) => v.isActive) || null,
+      // What real leads are actually talking to right now.
+      live: {
+        source: live.meta.source,
+        versionId: liveRow?.id || null,
+        label: liveRow?.label || null,
+        setLiveAt: liveRow?.setLiveAt || null,
+        setLiveByName: liveRow?.setLiveByName || null,
+      },
       tableReady,
     });
   } catch (error) {
@@ -145,6 +160,118 @@ export const setCurrentPromptVersion = async (req, res) => {
   }
 };
 
+/**
+ * Puts a saved version in front of real leads.
+ *
+ * This is the ONLY path by which a Prompt Lab draft reaches production, and it is
+ * deliberately separate from saving. Guards, in order:
+ *   - super-admin only
+ *   - the version must still pass validatePromptDraft (a draft saved before a
+ *     validation rule was added must not slip through)
+ *   - warnings must be acknowledged explicitly via body.acknowledgeWarnings
+ *   - exactly one row may be live, swapped inside a transaction
+ *   - the cache in prompts/live.js is invalidated so the change is immediate
+ */
+export const setPromptVersionLive = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+    const { versionId } = req.params;
+
+    const target = await prisma.salesAgentPromptVersion.findUnique({ where: { id: versionId } });
+    if (!target) return res.status(404).json({ message: "Version not found" });
+
+    const { errors, warnings } = validatePromptDraft({
+      systemTemplate: target.systemTemplate,
+      toolDescription: target.toolDescription,
+      kbEmptyText: target.kbEmptyText,
+    });
+    if (errors.length) {
+      return res.status(400).json({
+        message: "This version can't go live until its errors are fixed.",
+        errors,
+        warnings,
+      });
+    }
+    if (warnings.length && !req.body?.acknowledgeWarnings) {
+      return res.status(409).json({
+        message: "This version goes live with warnings. Confirm to continue.",
+        needsAcknowledgement: true,
+        warnings,
+      });
+    }
+
+    const previous = await prisma.salesAgentPromptVersion.findFirst({ where: { isLive: true } });
+
+    const version = await prisma.$transaction(async (tx) => {
+      await tx.salesAgentPromptVersion.updateMany({
+        where: { isLive: true },
+        data: { isLive: false },
+      });
+      return tx.salesAgentPromptVersion.update({
+        where: { id: versionId },
+        data: {
+          isLive: true,
+          setLiveAt: new Date(),
+          setLiveById: req.user?.id || null,
+          setLiveByName: req.user?.name || req.user?.email || null,
+        },
+      });
+    });
+
+    invalidateLivePrompts(AGENT_TYPES.SALES);
+
+    await writeAuditLog({
+      req,
+      action: "sales_agent_prompt.set_live",
+      targetType: "SalesAgentPromptVersion",
+      targetId: version.id,
+      metadata: {
+        label: version.label,
+        warnings,
+        previousLiveId: previous?.id || null,
+        previousLiveLabel: previous?.label || null,
+      },
+    });
+
+    return res.json({ version, warnings, previousLiveId: previous?.id || null });
+  } catch (error) {
+    console.error("[Prompt Lab] Set live failed:", error);
+    return res.status(500).json({ message: "Failed to put this version live" });
+  }
+};
+
+/** Drops back to the prompts that ship in code. The always-available escape hatch. */
+export const revertToCodeDefaults = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+
+    const previous = await prisma.salesAgentPromptVersion.findFirst({ where: { isLive: true } });
+    if (!previous) {
+      return res.json({ message: "Already running the code defaults.", changed: false });
+    }
+
+    await prisma.salesAgentPromptVersion.updateMany({
+      where: { isLive: true },
+      data: { isLive: false },
+    });
+
+    invalidateLivePrompts(AGENT_TYPES.SALES);
+
+    await writeAuditLog({
+      req,
+      action: "sales_agent_prompt.reverted_to_defaults",
+      targetType: "SalesAgentPromptVersion",
+      targetId: previous.id,
+      metadata: { label: previous.label },
+    });
+
+    return res.json({ message: "Reverted to the code defaults.", changed: true });
+  } catch (error) {
+    console.error("[Prompt Lab] Revert failed:", error);
+    return res.status(500).json({ message: "Failed to revert" });
+  }
+};
+
 export const deletePromptVersion = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;
@@ -152,6 +279,15 @@ export const deletePromptVersion = async (req, res) => {
 
     const existing = await prisma.salesAgentPromptVersion.findUnique({ where: { id: versionId } });
     if (!existing) return res.status(404).json({ message: "Version not found" });
+
+    // Deleting the live version would silently drop the agent back to the code
+    // defaults with no record of the change. Make it a deliberate revert instead.
+    if (existing.isLive) {
+      return res.status(409).json({
+        message:
+          "This version is live. Set another version live, or revert to the code defaults, before deleting it.",
+      });
+    }
 
     await prisma.salesAgentPromptVersion.delete({ where: { id: versionId } });
 
@@ -171,10 +307,19 @@ export const deletePromptVersion = async (req, res) => {
 };
 
 
-async function resolveTestContext({ companyId, question }) {
-  const company = companyId
-    ? await prisma.company.findUnique({ where: { id: companyId } })
-    : await prisma.company.findFirst({ orderBy: { createdAt: "asc" } });
+/**
+ * The context a lab turn runs against.
+ *
+ * Knowledge-base retrieval is deliberately PLATFORM-only: the lab tests the shared
+ * documents a super-admin uploads here, not any one builder's private KB. Passing
+ * a null companyId is what restricts it — see the scope filter in
+ * services/vector-store.service.js.
+ *
+ * A company is still resolved, because the prompt needs a name to render and the
+ * booking rules need real slots and a timezone. It supplies those and nothing else.
+ */
+async function resolveTestContext({ question }) {
+  const company = await prisma.company.findFirst({ orderBy: { createdAt: "asc" } });
 
   if (!company) return { error: "No company exists to test against." };
 
@@ -182,7 +327,7 @@ async function resolveTestContext({ companyId, question }) {
   let retrievalMethod = null;
   if (question) {
     try {
-      const { method, results } = await kbQueryDetailed(company.id, question, 5, KB_SCOPES.scheduling);
+      const { method, results } = await kbQueryDetailed(null, question, 5, KB_SCOPES.scheduling);
       kbChunks = results || [];
       retrievalMethod = method || null;
     } catch (e) {
@@ -217,6 +362,25 @@ async function resolveTestContext({ companyId, question }) {
   };
 }
 
+/**
+ * The passages retrieval returned, trimmed for transport.
+ *
+ * The lab shows these so a prompt can be judged against what the agent was
+ * actually given — a weak answer caused by a KB gap looks identical to one caused
+ * by a bad prompt until you can see the retrieved text.
+ */
+function describeChunks(chunks = []) {
+  return chunks.map((c) => ({
+    documentId: c.documentId,
+    name: c.name || "",
+    category: c.category || "General",
+    scope: c.scope || "COMPANY",
+    score: Number(c.score) || 0,
+    excerpt: String(c.text || "").slice(0, 1200),
+    truncated: String(c.text || "").length > 1200,
+  }));
+}
+
 function mockLead(company, firstName) {
   return {
     id: "prompt-lab-lead",
@@ -234,10 +398,7 @@ export const previewPrompt = async (req, res) => {
     if (denyUnlessSuperAdmin(req, res)) return;
 
     const draft = normalizeDraft(req.body?.draft || req.body);
-    const ctx = await resolveTestContext({
-      companyId: req.body?.companyId,
-      question: req.body?.question || "",
-    });
+    const ctx = await resolveTestContext({ question: req.body?.question || "" });
     if (ctx.error) return res.status(400).json({ message: ctx.error });
 
     const { system, tool, slotList } = buildDraftPromptForTesting(
@@ -266,6 +427,7 @@ export const previewPrompt = async (req, res) => {
         kbChunkCount: ctx.kbChunks.length,
         retrievalMethod: ctx.retrievalMethod,
       },
+      retrieved: describeChunks(ctx.kbChunks),
       validation: validatePromptDraft(draft),
     });
   } catch (error) {
@@ -290,7 +452,6 @@ export const promptLabChat = async (req, res) => {
     }
 
     const ctx = await resolveTestContext({
-      companyId: req.body?.companyId,
       question: messages[messages.length - 1]?.content || "",
     });
     if (ctx.error) return res.status(400).json({ message: ctx.error });
@@ -333,6 +494,7 @@ export const promptLabChat = async (req, res) => {
         latencyMs: Date.now() - startedAt,
         characters: (response.message || "").length,
       },
+      retrieved: describeChunks(ctx.kbChunks),
     });
   } catch (error) {
     console.error("[Prompt Lab] Chat failed:", error);

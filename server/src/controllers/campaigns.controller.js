@@ -5,6 +5,15 @@ import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
+import {
+  renderTemplate,
+  NEWS_NURTURE_TEMPLATE,
+  CAMPAIGN_COPY_TEMPLATE,
+  SMS_FORMAT_RULES,
+  EMAIL_FORMAT_RULES,
+  DEFAULT_BRAND_VOICE,
+  DEFAULT_AUDIENCE,
+} from "../prompts/index.js";
 
 const CAMPAIGN_BATCH_SIZE = 500;
 
@@ -656,19 +665,9 @@ async function generateNewsCampaignCopy(news, company) {
       .filter(Boolean)
       .join("\n");
 
-    const systemPrompt = `You are an expert real-estate and home-builder marketing copywriter.
-Write a lead-nurture EMAIL and a nurture SMS based on a housing-market news item.
-
-Brand profile (reflect this voice):
-${brandLines || "Professional, warm, and helpful."}
-
-Rules:
-- Ground the copy in the news item. Be specific but do NOT fabricate statistics or quotes.
-- Do NOT repeat the raw headline verbatim more than once; paraphrase it naturally into the message.
-- Email: a compelling subject line (<= 80 chars) and a warm body (~90-160 words) that ties the news to the reader's home-buying/selling journey and ends with a soft call to action to book a chat using {bookingLink}.
-- SMS: <= 160 characters, friendly, referencing the news angle, and include {bookingLink}. End with "Reply STOP to opt out.".
-- You MAY use ONLY these merge tags: {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do not invent other placeholders.
-- Return ONLY valid minified JSON with exactly these keys: {"emailSubject":"...","emailBody":"...","smsBody":"..."}. No markdown, no commentary.`;
+    const systemPrompt = renderTemplate(NEWS_NURTURE_TEMPLATE, {
+      brandLines: brandLines || DEFAULT_BRAND_VOICE,
+    });
 
     const userPrompt = `News title: ${news.title}\nNews summary: ${news.summary}\nSource: ${news.source}`;
 
@@ -789,23 +788,15 @@ export const generateCampaignCopy = async (req, res) => {
       : "No knowledge-base context available.";
     const kbCitations = dedupeKbCitations(kbChunks);
 
-    const systemPrompt = `You are an expert sales copywriter specializing in home builder and warranty care lead nurturing.
-Your task is to write a single ${stepType === "SMS" ? "text message" : "email"} draft.
-
-Brand profile (reflect this voice and details):
-${brandLines || "Professional, warm, and helpful."}
-
-Company knowledge base (ground factual claims in this; never invent facts, prices, or policies not present here):
-${kbContext}
-
-Audience: ${audience || "Homebuyers or existing homeowners"}.
-Goal of this message: ${goal}.
-
-Additional Context: ${contextInfo || "None"}
-
-Rules:
-${stepType === "SMS" ? "- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}, {campaignName}. No other placeholders." : "- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {campaignName}, {bookingLink}. Do NOT invent other placeholders."}
-Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body":"..."}. For SMS, use an empty string for subject.`;
+    const systemPrompt = renderTemplate(CAMPAIGN_COPY_TEMPLATE, {
+      draftKind: stepType === "SMS" ? "text message" : "email",
+      brandLines: brandLines || DEFAULT_BRAND_VOICE,
+      kbContext,
+      audience: audience || DEFAULT_AUDIENCE,
+      goal,
+      contextInfo: contextInfo || "None",
+      formatRules: stepType === "SMS" ? SMS_FORMAT_RULES : EMAIL_FORMAT_RULES,
+    });
 
     const content = await chat({
       system: systemPrompt,

@@ -3,6 +3,7 @@ import prisma from "../lib/prisma.js";
 import { chat, hasLLM } from "../lib/llm.js";
 import { resolveNewsSources } from "../lib/news-sources.js";
 import { mapWithConcurrency } from "../lib/utils.js";
+import { NEWS_SUMMARY_PROMPT } from "../prompts/index.js";
 
 const parser = new Parser();
 const FEED_CONCURRENCY = 5;
@@ -68,8 +69,7 @@ export async function scrapeNewsForCompany(
       if (!(await hasLLM(company.id))) return null;
       return chat({
         companyId: company.id,
-        system:
-          "You are an expert real estate content marketer. You rewrite news snippets into engaging, 2-3 sentence summaries that are easy to read for homeowners and leads. Always maintain a professional, helpful tone.",
+        system: NEWS_SUMMARY_PROMPT,
         user: `Title: ${item.title}\nSnippet: ${item.contentSnippet || ""}\n\nPlease write a short, engaging summary of this news.`,
         maxTokens: 300,
       });
