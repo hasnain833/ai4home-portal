@@ -4,7 +4,7 @@
 
 A multi-tenant SaaS portal for home-builder / warranty companies. It hosts **two workspaces** behind one login, each independently entitled per tenant:
 
-- **Warranty workspace** — homeowner warranty support. The conversational AI (intake, diagnosis, escalation) lives in **Botpress**; the portal owns the ticket dashboard, ERP/CRM sync, knowledge-base management, company/widget branding, and KPI reporting.
+- **Warranty workspace** — homeowner warranty support. The conversational AI (intake, identification, coverage check, diagnosis, claim filing, escalation) runs **natively in this repo** on the Express service; the portal owns the ticket dashboard, ERP/CRM sync, knowledge-base management, company/widget branding, and KPI reporting.
 - **Sales workspace** — AI-assisted outbound sales. Runs on a **native Claude + Inngest** runtime: lead management, nurture campaigns, Salesforce sync, announcements, appointment scheduling, a blog-drafting agent, and a semantic knowledge base.
 
 ---
@@ -22,7 +22,7 @@ A multi-tenant SaaS portal for home-builder / warranty companies. It hosts **two
         ▼                                                                      ▼
    Supabase (auth)                                              Prisma 7 ──▶ PostgreSQL (Supabase)
                                                                 Inngest ──▶ background functions
-                                                                Botpress (warranty bot, embedded widget)
+                                                                Warranty agent (Express, embedded widget)
 ```
 
 - **Frontend** (`src/`): Next.js App Router. Talks to the backend exclusively over `/api/*`. In development, `next.config.ts` rewrites `/api/*` to the `BACKEND_URL` configured in `.env`. The frontend does **not** access the database directly — all data access goes through the Express API.
@@ -35,7 +35,7 @@ A multi-tenant SaaS portal for home-builder / warranty companies. It hosts **two
 
 ## Tech Stack
 
-Next.js 16 · React 19 · TypeScript 5 · Tailwind CSS 4 · Radix UI / shadcn · Express 5 · Prisma 7 · PostgreSQL (Supabase) · Supabase Auth · Inngest · Botpress (warranty bot) · Salesforce & Google Calendar integrations · Twilio (SMS) · Brevo/SMTP (email) · local `@xenova/transformers` embeddings + pgvector (Sales KB).
+Next.js 16 · React 19 · TypeScript 5 · Tailwind CSS 4 · Radix UI / shadcn · Express 5 · Prisma 7 · PostgreSQL (Supabase) · Supabase Auth · Inngest · Salesforce & Google Calendar integrations · Twilio (SMS) · Brevo/SMTP (email) · local `@xenova/transformers` embeddings + pgvector (Sales and Warranty KBs).
 
 ---
 
@@ -65,7 +65,7 @@ prisma/
 
 ## Setup
 
-**Prerequisites:** Node.js 20+, PostgreSQL database (Supabase recommended), Supabase Auth project. Optional integrations: Botpress, Anthropic API key, Salesforce app, Google OAuth, Twilio, Brevo, Inngest.
+**Prerequisites:** Node.js 20+, PostgreSQL database (Supabase recommended), Supabase Auth project. Optional integrations: Anthropic/OpenAI/Groq API key, Salesforce app, Google OAuth, Twilio, Brevo, Inngest.
 
 ```bash
 # 1. Install frontend deps (repo root)
@@ -114,8 +114,7 @@ The following represents the complete list of environment variables used across 
 | `NEXT_PUBLIC_URL` | Frontend & Backend | Public portal URL used for CORS, redirects, and link generation |
 | `NEXT_PUBLIC_SUPABASE_URL` | Frontend & Backend | Supabase instance URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend & Backend | Public anonymous access key |
-| `NEXT_PUBLIC_BOTPRESS_INJECT_URL` | Frontend | For homeowner support bot |
-| `NEXT_PUBLIC_BOTPRESS_CONFIG_URL` | Frontend | For homeowner support bot |
+| `WARRANTY_SESSION_IDLE_MINUTES` | Backend | Minutes before an idle warranty chat starts fresh (default 30) |
 | `PORT` | Backend | Express server port (5000) |
 | `NODE_ENV` | Backend | Environment mode (`development` / `production`) |
 | `VERCEL` | Backend | Detects serverless deployment |
@@ -190,4 +189,4 @@ environment fallback.
 
 ## Summary
 
-The AI4Home platform encapsulates conversational AI for both Warranty and Sales, operating within a modern Next.js/Express monolith backed by Supabase and Inngest. It provides builders with deep integrations into Salesforce and Botpress, allowing them to manage homeowners efficiently through automated AI pipelines.
+The AI4Home platform encapsulates conversational AI for both Warranty and Sales, operating within a modern Next.js/Express monolith backed by Supabase and Inngest. It provides builders with deep integrations into Salesforce and their ERP, allowing them to manage homeowners efficiently through automated AI pipelines.

@@ -33,8 +33,8 @@ function codeDefaults(agentType) {
 }
 
 async function loadLiveRow(agentType) {
-  // Only the sales agent has a versions table today. Warranty prompts still ship
-  // in code until the BotPress migration settles the orchestrator's shape.
+  // Only the sales agent has a versions table today. Warranty prompts ship in
+  // code; giving them Set Live needs its own versions table and migration.
   if (agentType !== AGENT_TYPES.SALES) return null;
 
   return prisma.salesAgentPromptVersion.findFirst({

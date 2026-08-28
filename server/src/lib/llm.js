@@ -1,4 +1,4 @@
-import { resolveAiConfig, recordAiUsage } from "./ai-config.js";
+import { resolveAiConfig, recordAiUsage, toFastTier } from "./ai-config.js";
 
 export { hasAi as hasLLM, aiUnavailableMessage } from "./ai-config.js";
 
@@ -96,7 +96,7 @@ export async function chat({ companyId, system, user, maxTokens = 700, json = fa
   }
 }
 
-async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens }) {
+async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature }) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -107,6 +107,7 @@ async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTo
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: maxTokens,
+      ...(temperature == null ? {} : { temperature }),
       system,
       tools: [tool],
       tool_choice: { type: "tool", name: tool.name },
@@ -124,11 +125,11 @@ async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTo
 }
 
 // OpenAI exposes Anthropic-style tools as "functions".
-async function openAiCompatibleToolCall({ cfg, companyId, endpoint, label, system, messages, tool, maxTokens }) {
+async function openAiCompatibleToolCall({ cfg, companyId, endpoint, label, system, messages, tool, maxTokens, temperature }) {
   const body = {
     model: cfg.model,
     max_tokens: maxTokens,
-    temperature: 0.3,
+    temperature: temperature == null ? 0.3 : temperature,
     messages: [{ role: "system", content: system }, ...messages],
     tools: [
       {
@@ -166,25 +167,35 @@ async function openAiCompatibleToolCall({ cfg, companyId, endpoint, label, syste
   }
 }
 
-export async function toolCall({ companyId, system, messages, tool, maxTokens = 700, forcePlatformKey = false }) {
-  const cfg = await resolveAiConfig(companyId, { forcePlatform: forcePlatformKey });
+export async function toolCall({
+  companyId,
+  system,
+  messages,
+  tool,
+  maxTokens = 700,
+  forcePlatformKey = false,
+  fast = false,
+  temperature,
+}) {
+  let cfg = await resolveAiConfig(companyId, { forcePlatform: forcePlatformKey });
   if (!cfg.provider) {
     console.warn(
       `[LLM] No AI provider for ${forcePlatformKey ? "the platform" : `company=${companyId}`} (${cfg.reason}).`,
     );
     return null;
   }
+  if (fast) cfg = toFastTier(cfg);
   try {
     switch (cfg.provider) {
       case "ANTHROPIC":
-        return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens });
+        return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature });
       case "OPENAI":
         return await openAiCompatibleToolCall({
-          cfg, companyId, endpoint: OPENAI_CHAT_URL, label: "OpenAI", system, messages, tool, maxTokens,
+          cfg, companyId, endpoint: OPENAI_CHAT_URL, label: "OpenAI", system, messages, tool, maxTokens, temperature,
         });
       case "GROQ":
         return await openAiCompatibleToolCall({
-          cfg, companyId, endpoint: GROQ_CHAT_URL, label: "Groq", system, messages, tool, maxTokens,
+          cfg, companyId, endpoint: GROQ_CHAT_URL, label: "Groq", system, messages, tool, maxTokens, temperature,
         });
       default:
         return null;

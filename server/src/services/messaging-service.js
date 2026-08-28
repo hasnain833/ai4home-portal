@@ -44,7 +44,7 @@ export class MessagingService {
   // resolving the homeowner, company, and per-company SMTP config from the DB
   // (falls back to the platform default transporter only if the tenant has no
   // Brevo integration saved). Safe to call from any status-change path
-  // (portal update or Botpress sync) — no-ops quietly if the homeowner has no email.
+  // (portal update or the warranty agent) — no-ops quietly if the homeowner has no email.
   static async notifyTicketStatusChange(ticketId, status) {
     try {
       const ticket = await prisma.ticket.findUnique({
