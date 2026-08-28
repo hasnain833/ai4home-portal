@@ -30,7 +30,7 @@ export const PROMPT_REGISTRY = {
 
   [AGENT_TYPES.WARRANTY]: {
     label: "Warranty Agent",
-    description: "Diagnoses homeowner issues and files warranty tickets. Migrating off BotPress.",
+    description: "Diagnoses homeowner issues and files warranty tickets.",
     kb: "warranty",
     editable: false,
     placeholders: WARRANTY_PLACEHOLDERS,

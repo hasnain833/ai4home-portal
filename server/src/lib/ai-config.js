@@ -11,6 +11,20 @@ export const DEFAULT_MODELS = {
   GROQ: "llama-3.3-70b-versatile",
 };
 
+
+export const FAST_MODELS = {
+  ANTHROPIC: "claude-haiku-4-5-20251001",
+  OPENAI: "gpt-4o-mini",
+  GROQ: "llama-3.1-8b-instant",
+};
+
+export function toFastTier(cfg) {
+  if (!cfg?.provider) return cfg;
+  const fast = FAST_MODELS[cfg.provider];
+  if (!fast || fast === cfg.model) return cfg;
+  return { ...cfg, model: fast, tier: "fast" };
+}
+
 export const AI_PROVIDER_CAPABILITIES = {
   ANTHROPIC: { chat: true, tools: true, jsonMode: false, embeddings: false },
   OPENAI: { chat: true, tools: true, jsonMode: true, embeddings: false },

@@ -7,8 +7,6 @@ import {
   saveCredentials,
   deleteCredentials,
   syncIntegration,
-  botpressTicket,
-  botpressSync
 } from "../controllers/integrations.controller.js";
 
 const router = express.Router();
@@ -25,9 +23,5 @@ router.delete("/credentials", requireAuth, deleteCredentials);
 
 // ERP sync
 router.post("/sync", requireAuth, syncIntegration);
-
-// Botpress endpoints
-router.post("/botpress/ticket", botpressTicket);
-router.post("/botpress/sync", botpressSync);
 
 export default router;
