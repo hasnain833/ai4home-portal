@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,12 +16,20 @@ import {
 import { Button } from "@/components/ui/button";
 
 import WarrantyChat from "@/components/warranty/WarrantyChat";
+import { type ConversationSummary } from "@/components/warranty/ConversationList";
 
 export default function AIChatPage() {
   const { user, isLoading } = useAuth();
   const [copied, setCopied] = useState(false);
   const [embedMode, setEmbedMode] = useState<"widget" | "fullscreen">("widget");
   const [themeColor, setThemeColor] = useState("#0F3B3D");
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  // undefined means "let the chat resume whatever this browser last used". Once
+  // the panel is touched it owns the selection, with null meaning a fresh thread.
+  const [activeConversationId, setActiveConversationId] = useState<string | null | undefined>(
+    undefined,
+  );
 
   const companyName = user?.companyName || "Aiforhomebuilder";
   const botName = `${companyName} Assistant`;
@@ -45,12 +53,40 @@ export default function AIChatPage() {
     fetchCompanyData();
   }, [user, isLoading]);
 
+  const loadConversations = useCallback(async () => {
+    try {
+      const res = await fetch("/api/warranty/chat/conversations", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setConversations(Array.isArray(data.conversations) ? data.conversations : []);
+    } catch (error) {
+      console.error("Failed to load conversation history:", error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isLoading || !user) return;
+    loadConversations();
+  }, [user, isLoading, loadConversations]);
+
+  const startNewConversation = () => setActiveConversationId(null);
+  const openConversation = (id: string) => setActiveConversationId(id);
+
 
 
   const portalUrl =
     process.env.NEXT_PUBLIC_URL ||
     (typeof window !== "undefined" ? window.location.origin : "");
-  const companyId = user?.companyId || "demo-company";
+  // Empty until auth resolves, never a placeholder id. This used to fall back to
+  // "demo-company", which no deployment actually has — nothing creates a Company
+  // with that id — so anything sent during the auth-loading window went to the
+  // agent as a real tenant and came back 404.
+  const companyId = user?.companyId || "";
   const widgetScriptCode = `<script src="${portalUrl}/widget.js?company=${companyId}&mode=widget"></script>`;
   const fullScreenScriptCode = `<script src="${portalUrl}/widget.js?company=${companyId}&mode=fullscreen"></script>`;
   const fullScreenUrl = `${portalUrl}/widget/${companyId}?mode=fullscreen`;
@@ -59,6 +95,12 @@ export default function AIChatPage() {
 
 
   const copyToClipboard = (value = embedScriptCode) => {
+    // ProtectedRoute renders its children while auth is still loading, so there
+    // is a window where companyId is empty. Handing out an embed snippet built
+    // from it would produce `?company=` — a widget that loads on the builder's
+    // site and refuses every message. Nothing leaves this page until the id is
+    // real.
+    if (!companyId) return;
     navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -69,7 +111,7 @@ export default function AIChatPage() {
       <PortalLayout>
         {/* Offsets match PortalLayout's chrome: mobile is a 64px sticky header
             plus p-4 top and bottom; from md there is no header, just p-6. */}
-        <div className="flex flex-col h-[calc(100dvh-96px)] md:h-[calc(100dvh-48px)] max-w-4xl mx-auto px-2 sm:px-4 w-full gap-4 pb-4">
+        <div className="flex flex-col h-[calc(100dvh-96px)] md:h-[calc(100dvh-48px)] max-w-6xl mx-auto px-2 sm:px-4 w-full gap-4 pb-4">
           <div className="flex flex-row items-center justify-between gap-4 shrink-0">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
@@ -80,10 +122,18 @@ export default function AIChatPage() {
               </h1>
             </div>
 
+            <div className="flex items-center gap-2">
             {(user?.role === "admin" || user?.role === "staff") && (
               <Dialog>
                 <DialogTrigger asChild>
-                  <Button className="gap-2 bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-medium" size="sm">
+                  <Button
+                    className="gap-2 bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-medium"
+                    size="sm"
+                    // Unavailable until the company is known, so the snippet on
+                    // the other side is never built from an empty id.
+                    disabled={!companyId}
+                    title={companyId ? undefined : "Loading your company details…"}
+                  >
                     <Code className="h-4 w-4" />
                     Embed Widget
                   </Button>
@@ -222,16 +272,33 @@ export default function AIChatPage() {
                 </DialogContent>
               </Dialog>
             )}
+            </div>
           </div>
 
-          <div className="flex-1 w-full overflow-hidden rounded-3xl shadow-2xl p-0 flex flex-col min-h-0">
-            <WarrantyChat
-              companyId={companyId}
-              themeColor={themeColor}
-              botName={botName}
-              logoUrl={user?.companyLogo}
-              homeownerId={user?.id}
-            />
+          {/* History lives inside the chat now, in a drawer opened from its own
+              header — so the conversation gets the full width, and the same
+              affordance works at every breakpoint instead of a desktop sidebar
+              plus a separate mobile dialog. */}
+          <div className="flex flex-1 min-h-0">
+            <div className="flex-1 min-w-0 overflow-hidden rounded-3xl shadow-2xl p-0 flex flex-col min-h-0">
+              <WarrantyChat
+                companyId={companyId}
+                themeColor={themeColor}
+                botName={botName}
+                logoUrl={user?.companyLogo}
+                homeownerId={user?.id}
+                enableHistory
+                activeConversationId={activeConversationId}
+                onConversationChange={(id) => {
+                  setActiveConversationId(id);
+                  loadConversations();
+                }}
+                conversations={conversations}
+                loadingHistory={loadingHistory}
+                onSelectConversation={openConversation}
+                onNewConversation={startNewConversation}
+              />
+            </div>
           </div>
         </div>
       </PortalLayout>

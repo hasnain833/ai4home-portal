@@ -47,7 +47,6 @@ import warrantyChatRouter, {
   publicWarrantyChatRouter,
 } from "./routes/warranty-chat.js";
 import warrantyWebhooksRouter from "./routes/warranty-webhooks.js";
-import warrantyDemoRouter from "./routes/warranty-demo.js";
 
 import { serve } from "inngest/express";
 import { inngest } from "./lib/inngest.js";
@@ -140,8 +139,7 @@ app.use("/api/sales/blog", ...salesGuard, blogRouter);
 app.use("/api/sales/privacy", ...salesGuard, privacyRouter);
 app.use("/api/public/blog", publicBlogRouter);
 app.use("/api/public/sales-agent", salesAgentRouter);
-// The widget is anonymous, so the only thing standing between it and the model
-// budget is this limiter. Sized for a real conversation, not a scripted one.
+
 const warrantyChatLimiter = createRateLimiter({
   windowMs: 60_000,
   max: 20,
@@ -150,7 +148,6 @@ const warrantyChatLimiter = createRateLimiter({
 app.use(
   "/api/public/warranty/chat",
   warrantyChatLimiter,
-  warrantyDemoRouter,
   publicWarrantyChatRouter,
 );
 

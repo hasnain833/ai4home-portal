@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Loader2 } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Bot, User, Loader2, History, Plus, X } from "lucide-react";
+import ConversationList, { type ConversationSummary } from "./ConversationList";
 
 interface Message {
   id: string;
@@ -17,10 +18,41 @@ interface WarrantyChatProps {
   tagline?: string;
   homeownerId?: string;
   isWidget?: boolean;
+  enableHistory?: boolean;
+  activeConversationId?: string | null;
+  onConversationChange?: (id: string | null) => void;
+  conversations?: ConversationSummary[];
+  loadingHistory?: boolean;
+  onSelectConversation?: (id: string) => void;
+  onNewConversation?: () => void;
 }
 
-// The company logo stands in for the bot avatar wherever one is shown, and
-// falls back to the generic icon when the company has not uploaded one.
+const GREETING: Message = {
+  id: "greeting",
+  role: "agent",
+  content: "Hello! I'm your Warranty Care Assistant. How can I help you with your home today?",
+};
+
+const STORAGE_PREFIX = "warranty-chat:conversation:";
+
+function readStoredConversationId(companyId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(STORAGE_PREFIX + companyId);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredConversationId(companyId: string, id: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (id) window.localStorage.setItem(STORAGE_PREFIX + companyId, id);
+    else window.localStorage.removeItem(STORAGE_PREFIX + companyId);
+  } catch {
+  }
+}
+
 function AgentAvatar({
   logoUrl,
   botName,
@@ -60,21 +92,33 @@ export default function WarrantyChat({
   tagline = "Tell me what's going on with your home, and I'll help you resolve it or submit a warranty request.",
   homeownerId,
   isWidget = false,
+  enableHistory = false,
+  activeConversationId,
+  onConversationChange,
+  conversations = [],
+  loadingHistory = false,
+  onSelectConversation,
+  onNewConversation,
 }: WarrantyChatProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "greeting",
-      role: "agent",
-      content: "Hello! I'm your Warranty Care Assistant. How can I help you with your home today?",
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([GREETING]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const isControlled = activeConversationId !== undefined;
+  const [internalConversationId, setInternalConversationId] = useState<string | null>(null);
+  const conversationId = isControlled ? activeConversationId : internalConversationId;
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const renderedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setHistoryOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [historyOpen]);
 
-  // Until the homeowner says something the splash stays vertically centered,
-  // the way the previous webchat presented an idle conversation.
   const hasUserMessages = messages.some((m) => m.role === "user");
 
   const scrollToBottom = () => {
@@ -85,9 +129,71 @@ export default function WarrantyChat({
     scrollToBottom();
   }, [messages, isLoading]);
 
+  const hydrate = useCallback(
+    async (id: string) => {
+      setIsRestoring(true);
+      try {
+        const res = await fetch(`/api/warranty/chat/conversations/${id}`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          writeStoredConversationId(companyId, null);
+          setInternalConversationId(null);
+          onConversationChange?.(null);
+          renderedIdRef.current = null;
+          setMessages([GREETING]);
+          return;
+        }
+        const data = await res.json();
+        const turns: { role?: string; content?: string }[] = Array.isArray(data.transcript)
+          ? data.transcript
+          : [];
+        renderedIdRef.current = id;
+        setMessages(
+          turns.length === 0
+            ? [GREETING]
+            : turns.map((turn, i) => ({
+                id: `${id}-${i}`,
+                role: turn.role === "agent" ? ("agent" as const) : ("user" as const),
+                content: String(turn.content || ""),
+              })),
+        );
+      } catch (error) {
+        console.error("Failed to restore conversation:", error);
+      } finally {
+        setIsRestoring(false);
+      }
+    },
+    [companyId, onConversationChange],
+  );
+
+  useEffect(() => {
+    if (isControlled || !enableHistory) return;
+    const stored = readStoredConversationId(companyId);
+    if (stored) setInternalConversationId(stored);
+  }, [isControlled, enableHistory, companyId]);
+
+  useEffect(() => {
+    if (!enableHistory) return;
+    if (!conversationId) {
+      if (renderedIdRef.current !== null) {
+        renderedIdRef.current = null;
+        setMessages([GREETING]);
+      }
+      return;
+    }
+    if (conversationId === renderedIdRef.current) return;
+    hydrate(conversationId);
+  }, [conversationId, enableHistory, hydrate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || isRestoring) return;
+    if (!companyId) {
+      console.error("[WarrantyChat] No companyId — refusing to send.");
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -119,8 +225,13 @@ export default function WarrantyChat({
 
       const data = await response.json();
 
-      if (data.conversationId && !conversationId) {
-        setConversationId(data.conversationId);
+      if (data.conversationId) {
+        renderedIdRef.current = data.conversationId;
+        if (data.conversationId !== conversationId) {
+          setInternalConversationId(data.conversationId);
+          writeStoredConversationId(companyId, data.conversationId);
+          onConversationChange?.(data.conversationId);
+        }
       }
 
       setMessages((prev) => [
@@ -147,27 +258,98 @@ export default function WarrantyChat({
   };
 
   return (
-    <div className={`flex flex-col w-full h-full bg-white dark:bg-[#020617] ${isWidget ? "" : "rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm"}`}>
+    <div className={`relative overflow-hidden flex flex-col w-full h-full bg-white dark:bg-[#020617] ${isWidget ? "" : "rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm"}`}>
       {/* Header */}
       <div
-        className="flex items-center px-4 py-3 border-b border-slate-100 dark:border-slate-800 shrink-0 text-white"
+        className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 dark:border-slate-800 shrink-0 text-white"
         style={{ backgroundColor: themeColor }}
       >
-        <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center mr-3 overflow-hidden shrink-0">
+        {enableHistory && (
+          <button
+            type="button"
+            onClick={() => setHistoryOpen((open) => !open)}
+            aria-label="Conversation history"
+            aria-expanded={historyOpen}
+            title="Conversation history"
+            className="w-8 h-8 -ml-1 rounded-full flex items-center justify-center shrink-0 text-white/90 hover:text-white hover:bg-white/15 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+          >
+            <History className="w-4.5 h-4.5" />
+          </button>
+        )}
+
+        <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center overflow-hidden shrink-0">
           {logoUrl ? (
             <img src={logoUrl} alt={botName} className="w-full h-full object-contain bg-white" />
           ) : (
             <Bot className="w-5 h-5 text-white" />
           )}
         </div>
-        <div>
-          <h2 className="font-semibold text-sm">{botName}</h2>
+        <div className="min-w-0">
+          <h2 className="font-semibold text-sm truncate">{botName}</h2>
           <p className="text-xs text-white/80">Online</p>
         </div>
+
+        {enableHistory && (
+          <button
+            type="button"
+            onClick={() => {
+              setHistoryOpen(false);
+              onNewConversation?.();
+            }}
+            aria-label="Start a new conversation"
+            title="New conversation"
+            className="ml-auto w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white/90 hover:text-white hover:bg-white/15 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+          >
+            <Plus className="w-4.5 h-4.5" />
+          </button>
+        )}
       </div>
 
-      {/* Messages — the column is bottom-anchored so a short conversation sits
-          just above the composer rather than hanging from the top. */}
+      {/* History drawer — inside the chat, over the messages. */}
+      {enableHistory && (
+        <>
+          <div
+            onClick={() => setHistoryOpen(false)}
+            aria-hidden="true"
+            className={`absolute inset-0 z-20 bg-slate-900/40 transition-opacity duration-200 ${
+              historyOpen ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
+          />
+          <aside
+            aria-hidden={!historyOpen}
+            inert={!historyOpen}
+            className={`absolute inset-y-0 left-0 z-30 flex w-72 max-w-[85%] flex-col border-r border-slate-200 bg-white shadow-2xl transition-transform duration-200 ease-out dark:border-slate-800 dark:bg-slate-950 ${
+              historyOpen ? "translate-x-0" : "-translate-x-full"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-3 dark:border-slate-800">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Conversations
+              </span>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                aria-label="Close conversation history"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              <ConversationList
+                conversations={conversations}
+                loading={loadingHistory}
+                activeId={activeConversationId}
+                onSelect={(id) => {
+                  onSelectConversation?.(id);
+                  setHistoryOpen(false);
+                }}
+              />
+            </div>
+          </aside>
+        </>
+      )}
+
       <div className="flex-1 overflow-y-auto min-h-0 bg-slate-50 dark:bg-[#020617]">
         <div className="flex flex-col justify-end min-h-full p-4 gap-4">
           {/* Branding splash */}
@@ -236,11 +418,11 @@ export default function WarrantyChat({
             placeholder="Type your message..."
             className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent dark:text-white"
             style={{ "--tw-ring-color": themeColor } as React.CSSProperties}
-            disabled={isLoading}
+            disabled={isLoading || isRestoring}
           />
           <button
             type="submit"
-            disabled={!input.trim() || isLoading}
+            disabled={!input.trim() || isLoading || isRestoring}
             className="w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             style={{ backgroundColor: themeColor }}
           >

@@ -11,8 +11,8 @@ import {
 const router = Router();
 
 function isDemoRequest(req) {
-  const { companyId, conversationId } = req.body || {};
-  return !companyId || isDemoConversationId(conversationId);
+  const { conversationId, demo } = req.body || {};
+  return demo === true || isDemoConversationId(conversationId);
 }
 
 router.post("/", async (req, res, next) => {

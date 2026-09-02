@@ -20,7 +20,7 @@ export async function GET() {
     }
   }
 
-  var companyId = 'demo-company';
+  var companyId = '';
   var mode = 'widget';
   var portalUrl = '${portalUrl}'; // Injected from server-side env
 
@@ -36,6 +36,21 @@ export async function GET() {
     } catch (e) {
       console.error('[Widget] Failed to parse script source URL:', e);
     }
+  }
+
+  // Refuse to load without a real company. This used to fall back to the string
+  // 'demo-company', which is not a company any deployment actually has — no seed
+  // creates it — so the widget rendered, accepted a homeowner's message, and got
+  // a 404 back on every send. Failing here, loudly and before anything paints,
+  // turns a chat box that silently swallows warranty claims into a one-line fix
+  // for whoever pasted the embed.
+  if (!companyId) {
+    console.error(
+      '[Widget] Missing company ID. Embed the script as ' +
+      '<script src="' + portalUrl + '/widget.js?company=YOUR_COMPANY_ID"></script>. ' +
+      'The warranty widget will not load without it.'
+    );
+    return;
   }
 
   // 2. Fetch company branding

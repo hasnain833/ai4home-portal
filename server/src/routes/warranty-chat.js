@@ -2,23 +2,6 @@ import { Router } from "express";
 import prisma from "../lib/prisma.js";
 import { processWarrantyTurn } from "../lib/warranty-orchestrator.js";
 
-/**
- * Two routers, because these endpoints do not share a trust level.
- *
- * The embedded widget is anonymous by nature — a homeowner on the builder's
- * website has no portal session — so sending a message has to be reachable
- * without auth. Reading a stored transcript does not: it returns another
- * person's conversation to anyone holding an ID, so it lives on the
- * authenticated portal mount only, scoped to the caller's own company.
- */
-
-/**
- * How long a conversation may sit idle before the next message starts a fresh
- * one. This is the Timeout flow's practical equivalent: web chat has no push
- * channel to nudge an absent homeowner, so instead of resuming a claim someone
- * abandoned hours ago mid-diagnosis, the stale thread is closed and the next
- * message opens a new one.
- */
 const IDLE_MINUTES = Number(process.env.WARRANTY_SESSION_IDLE_MINUTES || 30);
 
 function isStale(convo) {
@@ -26,29 +9,12 @@ function isStale(convo) {
   return Date.now() - new Date(convo.updatedAt).getTime() > IDLE_MINUTES * 60 * 1000;
 }
 
-/**
- * Who the caller is allowed to act as.
- *
- * The two mounts establish identity in different ways, and that difference is
- * the whole point of splitting them:
- *
- *   - The embedded widget has no session, by design. A homeowner on the
- *     builder's public site is anonymous, so identity is earned inside the
- *     conversation — the agent asks for the email and looks it up. That means a
- *     `homeownerId` in the request body is worthless here and is ignored: the
- *     widget must not be able to assert an identity it never proved.
- *
- *   - The portal has a session. A signed-in homeowner IS the homeowner, so their
- *     identity comes from the session rather than the payload, and staff may act
- *     on their own company's homeowners but no one else's.
- */
 function resolveActor(req) {
   const session = req.user;
   const sessionCompanyId = session?.companyId || null;
   const role = String(session?.role || "").toUpperCase();
 
   if (!sessionCompanyId) {
-    // Anonymous widget: the company is named by the embed, identity is not.
     return { companyId: req.body?.companyId || null, homeownerId: null, viaSession: false };
   }
 
@@ -63,7 +29,6 @@ function resolveActor(req) {
   };
 }
 
-/** Sends a message. Reachable by the anonymous widget; rate limited at the mount. */
 async function postMessage(req, res) {
   try {
     const { conversationId, message } = req.body;
@@ -84,7 +49,6 @@ async function postMessage(req, res) {
       return res.status(404).json({ error: "Company not found" });
     }
 
-    // A staff-supplied homeowner has to belong to the staff member's own company.
     if (homeownerId && actor.viaSession) {
       const owner = await prisma.user.findUnique({
         where: { id: homeownerId },
@@ -96,8 +60,6 @@ async function postMessage(req, res) {
     let convo = null;
     if (conversationId) {
       convo = await prisma.warrantyConversation.findUnique({ where: { id: conversationId } });
-      // A conversation ID from another tenant is not usable here — start fresh
-      // rather than letting one company's widget append to another's thread.
       if (convo && convo.companyId !== companyId) convo = null;
 
       if (convo && isStale(convo)) {
@@ -118,6 +80,11 @@ async function postMessage(req, res) {
           transcript: [],
         },
       });
+    } else if (homeownerId && actor.viaSession && !convo.homeownerId) {
+      convo = await prisma.warrantyConversation.update({
+        where: { id: convo.id },
+        data: { homeownerId },
+      });
     }
 
     const result = await processWarrantyTurn({ company, convo, newMsg: message });
@@ -133,18 +100,10 @@ async function postMessage(req, res) {
   }
 }
 
-/**
- * Clears a conversation so the homeowner can start over.
- *
- * The Botpress equivalent was simply a new session. Here the row is reused so a
- * widget that has already stored the ID keeps working, and any ticket already
- * filed is deliberately left alone — resetting the chat must not orphan or
- * retract a claim the warranty team can already see.
- */
 async function postReset(req, res) {
   try {
     const { conversationId } = req.body;
-    const { companyId } = resolveActor(req);
+    const { companyId, homeownerId: sessionHomeownerId } = resolveActor(req);
 
     if (!companyId || !conversationId) {
       return res.status(400).json({ error: "companyId and conversationId are required" });
@@ -163,7 +122,8 @@ async function postReset(req, res) {
         status: "ACTIVE",
         issueState: null,
         propertyId: null,
-        homeownerId: null,
+        homeownerId: sessionHomeownerId || null,
+        ticketId: null,
         turnCount: 0,
       },
     });
@@ -175,13 +135,64 @@ async function postReset(req, res) {
   }
 }
 
-/** Anonymous widget surface: send a message, start over. */
 export const publicWarrantyChatRouter = Router();
 publicWarrantyChatRouter.post("/", postMessage);
 publicWarrantyChatRouter.post("/reset", postReset);
 
-/** Authenticated portal surface: everything above, plus transcript reads. */
+function conversationPreview(transcript) {
+  const turns = Array.isArray(transcript) ? transcript : [];
+  const source = turns.find((t) => t.role === "user") || turns[turns.length - 1];
+  const text = String(source?.content || "").replace(/\s+/g, " ").trim();
+  return text.slice(0, 140) || null;
+}
+
 const router = Router();
+
+router.get("/conversations", async (req, res) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    const role = String(req.user?.role || "").toUpperCase();
+    const where = { companyId, turnCount: { gt: 0 } };
+
+    if (role === "HOMEOWNER") {
+      where.homeownerId = req.user.id;
+    } else if (req.query.homeownerId) {
+      where.homeownerId = String(req.query.homeownerId);
+    }
+
+    const rows = await prisma.warrantyConversation.findMany({
+      where,
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        phase: true,
+        status: true,
+        ticketId: true,
+        turnCount: true,
+        createdAt: true,
+        updatedAt: true,
+        homeownerId: true,
+        propertyId: true,
+        transcript: true,
+      },
+    });
+
+    return res.json({
+      conversations: rows.map(({ transcript, ...row }) => ({
+        ...row,
+        preview: conversationPreview(transcript),
+      })),
+    });
+  } catch (err) {
+    console.error("Error listing warranty conversations:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 router.get("/conversations/:id", async (req, res) => {
   try {
@@ -192,9 +203,10 @@ router.get("/conversations/:id", async (req, res) => {
     if (!convo) {
       return res.status(404).json({ error: "Conversation not found" });
     }
-
-    // Staff may only read their own company's conversations.
-    if (req.user?.companyId && convo.companyId !== req.user.companyId) {
+    if (!req.user?.companyId || convo.companyId !== req.user.companyId) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+    if (String(req.user.role || "").toUpperCase() === "HOMEOWNER" && convo.homeownerId !== req.user.id) {
       return res.status(404).json({ error: "Conversation not found" });
     }
 

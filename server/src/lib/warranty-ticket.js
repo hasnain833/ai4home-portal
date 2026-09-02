@@ -97,8 +97,13 @@ export async function createWarrantyTicket({
   }
 
   let selectedPropertyId = propertyId || null;
-  if (!selectedPropertyId && homeowner.properties?.length > 0) {
+  if (!selectedPropertyId && homeowner.properties?.length === 1) {
     selectedPropertyId = homeowner.properties[0].id;
+  }
+  if (!selectedPropertyId && (homeowner.properties?.length || 0) > 1) {
+    console.warn(
+      `[Warranty Ticket] Homeowner ${homeowner.id} has ${homeowner.properties.length} properties and none was selected — filing without one.`,
+    );
   }
 
   let property = null;
