@@ -15,7 +15,6 @@ import {
   renderTemplate,
 } from "../prompts/index.js";
 
-/** How many knowledge-base documents to remember for the ticket's references. */
 const MAX_TRACKED_KB_REFS = 12;
 
 const ORCHESTRATOR_TOOLS = {
@@ -45,7 +44,6 @@ function toAnthropicMessages(transcript) {
   return msgs;
 }
 
-/** The last few turns, as plain text, for the classifier to disambiguate a terse description. */
 function recentContext(transcript, turns = 6) {
   return (transcript || [])
     .slice(-turns)
@@ -53,15 +51,6 @@ function recentContext(transcript, turns = 6) {
     .join("\n");
 }
 
-/**
- * Resolves a homeowner's reply against a numbered property list.
- *
- * The Botpress flow presented properties as a numbered picker and converted the
- * choice deterministically. Asking the model to turn "2" back into an address it
- * can only see in its own earlier message is a needless round trip that fails
- * often, so the common answers are matched in code: a bare number, a number with
- * decoration ("#2", "option 2"), or any distinctive part of the address.
- */
 export function matchPropertyChoice(message, choices) {
   const list = Array.isArray(choices) ? choices : [];
   if (list.length === 0) return null;
@@ -79,16 +68,11 @@ export function matchPropertyChoice(message, choices) {
   const byAddress = list.filter((c) => {
     const address = String(c.address || "").toLowerCase();
     if (!address) return false;
-    // The reply containing the whole address is always meaningful. The reverse —
-    // the address containing the reply — only is when the reply is long enough to
-    // be a real fragment: "7" appears inside "1207 Marigold Way" and would
-    // otherwise silently pick a home the homeowner never named.
     if (lower.includes(address)) return true;
     return lower.length >= 4 && address.includes(lower);
   });
   if (byAddress.length === 1) return byAddress[0];
 
-  // Fall back to the street number, which is what people usually type.
   const streetNumber = lower.match(/\b(\d{1,6})\b/);
   if (streetNumber) {
     const hits = list.filter((c) => String(c.address || "").startsWith(streetNumber[1]));
@@ -98,7 +82,6 @@ export function matchPropertyChoice(message, choices) {
   return null;
 }
 
-/** Merges freshly retrieved passages into the running reference list, deduped by document. */
 function trackKbRefs(issueState, results) {
   const existing = Array.isArray(issueState.kbRefs) ? issueState.kbRefs : [];
   const seen = new Set(existing.map((r) => r.documentId));
@@ -118,7 +101,6 @@ function trackKbRefs(issueState, results) {
   issueState.kbRefs = merged.slice(-MAX_TRACKED_KB_REFS);
 }
 
-/** Retrieval for the phases that answer questions, scoped to the tenant and community. */
 async function retrieveContext({ companyId, question, communityId, issueState }) {
   const q = String(question || "").trim();
   if (!q) return KB_EMPTY_CONTEXT;
@@ -136,13 +118,6 @@ async function retrieveContext({ companyId, question, communityId, issueState })
   }
 }
 
-/**
- * Classifies and files the claim, and returns the line the homeowner is told.
- *
- * Both callers — the resolution step and the emergency path — go through here so
- * a ticket is always classified, always carries the transcript and the retrieved
- * references, and always reports the same way.
- */
 async function fileClaim({
   company,
   convo,
@@ -201,7 +176,6 @@ async function fileClaim({
   return { filed, classification, line, ticketId: ticket.id };
 }
 
-/** The message shown when the claim is ready but nobody has been identified yet. */
 const NEEDS_IDENTITY =
   "I have everything I need about the issue. Before I can log it, could you share the email address on your warranty file so I can attach it to the right property?";
 
@@ -216,15 +190,7 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
   let ticketId = convo.ticketId || null;
   let homeownerId = convo.homeownerId || null;
   let propertyId = convo.propertyId || null;
-
-  // Everything gathered so far. Read by the identify and resolve prompts, and
-  // drained into the ticket's extracted-info and knowledge-base references when
-  // the claim is filed.
   const issueState = { ...(convo.issueState || {}) };
-
-  // Which community's documents apply. Resolved from the identified property, so
-  // it is null until the homeowner has been identified — at which point only
-  // shared documents are eligible, never another community's rules.
   let communityId = null;
   let property = null;
   if (propertyId) {
@@ -232,7 +198,6 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
     communityId = property?.communityId || null;
   }
 
-  /** Records a resolved property: coverage, community scope, and conversation state. */
   const adoptProperty = async (chosen) => {
     property = chosen;
     propertyId = chosen.id;
@@ -271,9 +236,6 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
     return { reply: replyText, phase: nextPhase };
   };
 
-  // --- Deterministic property picker -------------------------------------
-  // A pending numbered list is resolved in code before the model is consulted,
-  // exactly as the Botpress "select property" node did.
   if (currentPhase === "IDENTIFY" && Array.isArray(issueState.propertyChoices)) {
     const choice = matchPropertyChoice(newMsg, issueState.propertyChoices);
     if (choice) {
@@ -286,9 +248,6 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
           coverageLine,
           "Could you tell me a bit more about the issue: where in the home it is, and when you first noticed it?",
         ].filter(Boolean).join(" ");
-
-        // The text above is ours, not the model's, so it does not need the
-        // compliance gate — that exists to review generated output.
         return finish(reply, "DIAGNOSE");
       }
     }
@@ -354,9 +313,6 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
         required: ["action"]
       }
     };
-
-    // A homeowner can still ask a question while wrapping up, so the resolution
-    // step answers from the same documents rather than from nothing.
     kbContext = await retrieveContext({
       companyId: company.id,
       question: newMsg,
@@ -372,13 +328,13 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
     coverageStatus: issueState.coverage?.status || COVERAGE.UNKNOWN,
   });
 
-  // 3. Execute LLM Turn
   const input = await toolCall({
     companyId: company.id,
     system,
     messages,
     tool,
-    maxTokens: 500,
+    maxTokens: 900,
+    temperature: 0.2,
   });
 
   if (!input) {
@@ -388,22 +344,19 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
   let replyText = input.message || "";
   let nextPhase = currentPhase;
 
-  // 4. Handle Tool Outcomes & State Transitions
   if (currentPhase === "INTAKE") {
     if (!issueState.issueSummary && newMsg.trim().length > 12) {
       issueState.issueSummary = newMsg.trim().slice(0, 600);
     }
     if (input.transition_phase === "IDENTIFY") {
       nextPhase = "IDENTIFY";
-    } else if (messages.length > 1) {
-      // Auto transition to identify if message length suggests they provided issue
+    } else if (input.transition_phase !== "STAY" && issueState.issueSummary) {
       nextPhase = "IDENTIFY";
     }
   } else if (currentPhase === "IDENTIFY") {
     if (input.action === "lookup_property" && !String(input.query || "").trim()) {
       replyText = input.message || "Could you share the email address on your warranty file so I can locate your property?";
     } else if (input.action === "lookup_property") {
-      // Look up by address or email
       const properties = await prisma.property.findMany({
         where: {
           companyId: company.id,
@@ -425,7 +378,6 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
         ].filter(Boolean).join(" ");
         nextPhase = "DIAGNOSE";
       } else if (properties.length > 1) {
-        // Remember the list so the reply "2" can be resolved in code next turn.
         issueState.propertyChoices = properties.map((p) => ({ id: p.id, address: p.address }));
         const propList = properties.map((p, i) => `${i + 1}. ${p.address}`).join("\n");
         replyText = `I found multiple properties associated with that info. Which one is experiencing the issue?\n${propList}`;
@@ -472,7 +424,12 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
       nextPhase = "RESOLVE";
     }
   } else if (currentPhase === "RESOLVE") {
-    if (input.action === "create_ticket") {
+    if (input.action === "create_ticket" && ticketId) {
+      const url = ticketUrlFor(ticketId);
+      replyText =
+        `Your issue is already logged as ticket ${ticketId} — the warranty team has it and will ` +
+        `reach out with next steps.${url ? ` You can follow its progress here: ${url}` : ""}`;
+    } else if (input.action === "create_ticket") {
       const description =
         String(input.issue_summary || "").trim() ||
         issueState.issueSummary ||
@@ -501,12 +458,18 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
   if (!replyText) {
     replyText = "I'm sorry, I didn't quite catch that. Could you please rephrase?";
   }
-
   const safetyCheck = await toolCall({
     companyId: company.id,
     system: COMPLIANCE_MONITOR_PROMPT,
     messages: [
-      { role: "user", content: renderTemplate(COMPLIANCE_REVIEW_TEMPLATE, { message: replyText }) }
+      {
+        role: "user",
+        content: renderTemplate(COMPLIANCE_REVIEW_TEMPLATE, {
+          homeownerMessage: newMsg,
+          recentContext: recentContext(transcript.slice(0, -1), 4) || "(start of conversation)",
+          message: replyText,
+        }),
+      },
     ],
     tool: {
       name: "safety_verdict",
@@ -515,21 +478,37 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
         type: "object",
         properties: {
           is_safe: { type: "boolean" },
-          is_emergency: { type: "boolean", description: "Does the situation indicate a life-safety emergency?" },
+          is_emergency: { type: "boolean", description: "Does the HOMEOWNER's message describe a live life-safety emergency?" },
           reason: { type: "string" },
-          corrected_message: { type: "string", description: "If unsafe or emergency, provide a safe alternative message." }
+          corrected_message: { type: "string", description: "Required when is_safe is false or is_emergency is true: the full replacement reply to send instead, in the agent's voice." }
         },
-        required: ["is_safe"]
+        required: ["is_safe", "is_emergency"]
       }
     },
-    maxTokens: 200,
+    maxTokens: 600,
     fast: true,
     temperature: 0,
   });
+  const gateTriggered = !!safetyCheck && (safetyCheck.is_safe === false || !!safetyCheck.is_emergency);
 
-  if (safetyCheck && (!safetyCheck.is_safe || safetyCheck.is_emergency) && safetyCheck.corrected_message) {
-    console.warn(`[Warranty Agent] Safety gate triggered: ${safetyCheck.reason}`);
-    replyText = safetyCheck.corrected_message;
+  if (gateTriggered) {
+    console.warn(
+      `[Warranty Agent] Safety gate triggered (unsafe=${safetyCheck.is_safe === false}, ` +
+      `emergency=${!!safetyCheck.is_emergency}): ${safetyCheck.reason || "no reason given"}`,
+    );
+
+    const replacement = String(safetyCheck.corrected_message || "").trim();
+    if (replacement) {
+      replyText = replacement;
+    } else if (safetyCheck.is_emergency) {
+      replyText =
+        "If anyone is in immediate danger, please call 911 now. " +
+        "I'm flagging this for our warranty team straight away.";
+    } else {
+      replyText =
+        "Thanks for letting me know — I want to make sure I get this right, so I'll pass the " +
+        "details to our warranty team and they'll follow up with you directly.";
+    }
 
     if (safetyCheck.is_emergency) {
       const reason = safetyCheck.reason || "Emergency detected by safety gate.";

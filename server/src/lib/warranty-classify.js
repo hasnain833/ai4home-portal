@@ -7,9 +7,12 @@ const EMERGENCY_PATTERNS = [
   /\bsmell(ing)?\s+gas\b/i,
   /\bcarbon\s*monoxide\b/i,
   /\bco\s*(detector|alarm)\s*(is\s*)?(going off|alarming|beeping)\b/i,
-  /\bfire\b/i,
-  /\bsmoke\s*(coming|filling|pouring)\b/i,
-  /\bsparks?\b|\bsparking\b|\barcing\b/i,
+  /\b(house|home|kitchen|garage|attic|electrical|grease)?\s*fire\s*(is\s*)?(started|starting|spreading|burning|broke out)\b/i,
+  /\b(there\s+is|there's|we\s+have|i\s+have)\s+a\s+fire\b/i,
+  /\bon\s+fire\b/i,
+  /\bcaught\s+fire\b/i,
+  /\bsmoke\s*(is\s*)?(coming|filling|pouring|billowing)\b/i,
+  /\b(sparks?|sparking|arcing)\b/i,
   /\bactive(ly)?\s*flood/i,
   /\bflooding\b/i,
   /\bburst\s*pipe\b/i,
@@ -22,15 +25,9 @@ const EMERGENCY_PATTERNS = [
 ];
 
 const ISSUE_TYPE_HINTS = [
-  // Ordered most specific first. A named appliance beats the generic trade word
-  // it happens to contain — "the dishwasher won't drain" is an appliance call,
-  // not a plumbing one, and "the dishwasher door" is not a Windows & Doors call.
-  // Word boundaries matter here: without them "ac" matches inside "crack" and
-  // "backup", which sent drywall cracks and sewage backups to HVAC. With them,
-  // any term that needs to match its own inflections has to say so — a bare
-  // \bshingle\b does not match "shingles", which is how people actually write.
   [/\b(dishwashers?|ovens?|ranges?|microwaves?|disposals?|refrigerators?|fridges?|washers?|dryers?|appliances?)\b/i, "Appliances"],
-  [/\b(hvac|furnaces?|heating|heaters?|a\/c|ac|air.?condition\w*|thermostats?|vents?|cooling|condensers?)\b/i, "HVAC"],
+  [/\b(water\s*heaters?|hot\s*water\s*(heaters?|tanks?)|tankless)\b/i, "Plumbing"],
+  [/\b(hvac|furnaces?|heating|heaters?|heat|a\/c|ac|air.?condition\w*|thermostats?|vents?|cooling|condensers?)\b/i, "HVAC"],
   [/\b(roofs?|roofing|shingles?|gutters?|attics?|soffits?)\b/i, "Roofing"],
   [/\b(leaks?|leaking|water|plumbing|plumber|drains?|draining|toilets?|faucets?|sinks?|pipes?|sewage|valves?)\b/i, "Plumbing"],
   [/\b(electrical|electric|outlets?|breakers?|wiring|switch|switches|panels?|receptacles?)\b/i, "Electrical"],
@@ -38,8 +35,6 @@ const ISSUE_TYPE_HINTS = [
   [/\b(floors?|flooring|tiles?|carpet|hardwood|grout\w*|baseboards?)\b/i, "Flooring"],
   [/\b(cabinets?|counters?|countertops?|trim|molding|millwork)\b/i, "Cabinets & Trim"],
   [/\b(foundations?|slabs?|settling|settlement|structural|structure)\b/i, "Structural"],
-  // Most generic, so it runs last: "crack", "wall" and "ceiling" appear in
-  // descriptions of almost every other trade's problems.
   [/\b(drywall|cracks?|cracking|paint\w*|ceilings?|walls?|nail pops?)\b/i, "Drywall & Paint"],
 ];
 
@@ -91,6 +86,13 @@ If a detail was never mentioned, return an empty string for it rather than guess
 export function matchesEmergencyPattern(text) {
   const s = String(text || "");
   return EMERGENCY_PATTERNS.some((re) => re.test(s));
+}
+
+export function homeownerLinesOnly(context) {
+  return String(context || "")
+    .split("\n")
+    .filter((line) => !/^\s*Assistant\s*:/i.test(line))
+    .join("\n");
 }
 
 export function guessIssueType(text) {
@@ -157,7 +159,8 @@ export async function classifyClaim({ companyId, description, context = "" }) {
     return fallback;
   }
 
-  const isEmergency = !!input.is_emergency || matchesEmergencyPattern(`${text} ${context}`);
+  const isEmergency =
+    !!input.is_emergency || matchesEmergencyPattern(`${text}\n${homeownerLinesOnly(context)}`);
 
   return {
     issueType: String(input.issue_type || "").trim().slice(0, 80) || fallback.issueType,

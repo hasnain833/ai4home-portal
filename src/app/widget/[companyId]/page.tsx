@@ -7,7 +7,7 @@ import WarrantyChat from "@/components/warranty/WarrantyChat";
 export default function WidgetPage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const companyId = (params?.companyId as string) || "demo-company";
+  const companyId = (params?.companyId as string) || "";
   const qColor = searchParams.get("botColor");
   const qName = searchParams.get("botName");
   const qLogo = searchParams.get("botLogo");

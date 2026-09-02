@@ -120,6 +120,11 @@ async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTo
   }
   const data = await response.json();
   recordAiUsage(companyId, cfg, data?.usage);
+  if (data?.stop_reason === "max_tokens") {
+    console.warn(
+      `[LLM] Anthropic tool call "${tool.name}" hit max_tokens (${maxTokens}); arguments are truncated.`,
+    );
+  }
   const block = data?.content?.find((b) => b.type === "tool_use" && b.name === tool.name);
   return block?.input || null;
 }
@@ -157,6 +162,11 @@ async function openAiCompatibleToolCall({ cfg, companyId, endpoint, label, syste
   }
   const data = await response.json();
   recordAiUsage(companyId, cfg, data?.usage);
+  if (data?.choices?.[0]?.finish_reason === "length") {
+    console.warn(
+      `[LLM] ${label} tool call "${tool.name}" hit max_tokens (${maxTokens}); arguments are truncated.`,
+    );
+  }
   const args = data?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
   if (!args) return null;
   try {
