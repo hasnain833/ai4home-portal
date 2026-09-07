@@ -33,7 +33,7 @@ export const SALES_PERMISSIONS = {
   "settings.manage": {
     label: "Manage workspace settings",
     description:
-      "Edit email and SMS delivery, the AI provider and key, news sources, and privacy settings.",
+      "Edit email and SMS delivery, news sources, and privacy settings.",
     homeowner: false,
   },
   "kb.manage": {

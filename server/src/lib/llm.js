@@ -2,14 +2,20 @@ import { resolveAiConfig, recordAiUsage, toFastTier } from "./ai-config.js";
 
 export { hasAi as hasLLM, aiUnavailableMessage } from "./ai-config.js";
 
+const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+
+function anthropicHeaders(cfg) {
+  return {
+    "x-api-key": cfg.apiKey,
+    "anthropic-version": "2023-06-01",
+    "content-type": "application/json",
+  };
+}
+
 async function callAnthropic({ cfg, companyId, system, user, maxTokens }) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
-    headers: {
-      "x-api-key": cfg.apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: anthropicHeaders(cfg),
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: maxTokens,
@@ -26,84 +32,24 @@ async function callAnthropic({ cfg, companyId, system, user, maxTokens }) {
   return data?.content?.[0]?.text || null;
 }
 
-// The OpenAI chat-completions contract.
-async function callOpenAiCompatible({ cfg, companyId, endpoint, label, system, user, maxTokens, json }) {
-  const attempt = async (useJsonMode) => {
-    const body = {
-      model: cfg.model,
-      max_tokens: maxTokens,
-      temperature: 0.3,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    };
-    if (useJsonMode) body.response_format = { type: "json_object" };
-
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) return { ok: false, err: await response.text() };
-    const data = await response.json();
-    recordAiUsage(companyId, cfg, data?.usage);
-    return { ok: true, text: data?.choices?.[0]?.message?.content || null };
-  };
-
-  let res = await attempt(json);
-  if (!res.ok && json) {
-    console.error(`[LLM] ${label} JSON mode failed, retrying plain:`, (res.err || "").slice(0, 160));
-    res = await attempt(false);
-  }
-  if (!res.ok) {
-    console.error(`[LLM] ${label} error:`, res.err);
-    return null;
-  }
-  return res.text;
-}
-
-const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
-const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
-
 export async function chat({ companyId, system, user, maxTokens = 700, json = false }) {
-  const cfg = await resolveAiConfig(companyId);
+  const cfg = resolveAiConfig();
   if (!cfg.provider) {
-    console.warn(`[LLM] No AI provider for company=${companyId} (${cfg.reason}).`);
+    console.warn(`[LLM] No AI provider available for company=${companyId} (${cfg.reason}).`);
     return null;
   }
   try {
-    switch (cfg.provider) {
-      case "ANTHROPIC":
-        return await callAnthropic({ cfg, companyId, system, user, maxTokens });
-      case "OPENAI":
-        return await callOpenAiCompatible({
-          cfg, companyId, endpoint: OPENAI_CHAT_URL, label: "OpenAI", system, user, maxTokens, json,
-        });
-      case "GROQ":
-        return await callOpenAiCompatible({
-          cfg, companyId, endpoint: GROQ_CHAT_URL, label: "Groq", system, user, maxTokens, json,
-        });
-      default:
-        return null;
-    }
+    return await callAnthropic({ cfg, companyId, system, user, maxTokens });
   } catch (err) {
-    console.error(`[LLM] ${cfg.provider} exception:`, err.message);
+    console.error("[LLM] Anthropic exception:", err.message);
     return null;
   }
 }
 
 async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature }) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
-    headers: {
-      "x-api-key": cfg.apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: anthropicHeaders(cfg),
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: maxTokens,
@@ -129,54 +75,6 @@ async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTo
   return block?.input || null;
 }
 
-// OpenAI exposes Anthropic-style tools as "functions".
-async function openAiCompatibleToolCall({ cfg, companyId, endpoint, label, system, messages, tool, maxTokens, temperature }) {
-  const body = {
-    model: cfg.model,
-    max_tokens: maxTokens,
-    temperature: temperature == null ? 0.3 : temperature,
-    messages: [{ role: "system", content: system }, ...messages],
-    tools: [
-      {
-        type: "function",
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.input_schema,
-        },
-      },
-    ],
-    tool_choice: { type: "function", function: { name: tool.name } },
-  };
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${cfg.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    console.error(`[LLM] ${label} tool error:`, await response.text());
-    return null;
-  }
-  const data = await response.json();
-  recordAiUsage(companyId, cfg, data?.usage);
-  if (data?.choices?.[0]?.finish_reason === "length") {
-    console.warn(
-      `[LLM] ${label} tool call "${tool.name}" hit max_tokens (${maxTokens}); arguments are truncated.`,
-    );
-  }
-  const args = data?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
-  if (!args) return null;
-  try {
-    return typeof args === "string" ? JSON.parse(args) : args;
-  } catch (e) {
-    console.error(`[LLM] ${label} tool args parse failed:`, e.message);
-    return null;
-  }
-}
-
 export async function toolCall({
   companyId,
   system,
@@ -187,31 +85,16 @@ export async function toolCall({
   fast = false,
   temperature,
 }) {
-  let cfg = await resolveAiConfig(companyId, { forcePlatform: forcePlatformKey });
+  let cfg = resolveAiConfig();
   if (!cfg.provider) {
-    console.warn(
-      `[LLM] No AI provider for ${forcePlatformKey ? "the platform" : `company=${companyId}`} (${cfg.reason}).`,
-    );
+    console.warn(`[LLM] No AI provider available for company=${companyId} (${cfg.reason}).`);
     return null;
   }
   if (fast) cfg = toFastTier(cfg);
   try {
-    switch (cfg.provider) {
-      case "ANTHROPIC":
-        return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature });
-      case "OPENAI":
-        return await openAiCompatibleToolCall({
-          cfg, companyId, endpoint: OPENAI_CHAT_URL, label: "OpenAI", system, messages, tool, maxTokens, temperature,
-        });
-      case "GROQ":
-        return await openAiCompatibleToolCall({
-          cfg, companyId, endpoint: GROQ_CHAT_URL, label: "Groq", system, messages, tool, maxTokens, temperature,
-        });
-      default:
-        return null;
-    }
+    return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature });
   } catch (err) {
-    console.error(`[LLM] ${cfg.provider} tool exception:`, err.message);
+    console.error("[LLM] Anthropic tool exception:", err.message);
     return null;
   }
 }

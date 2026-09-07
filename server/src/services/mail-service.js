@@ -1,11 +1,6 @@
 import nodemailer from "nodemailer";
 import { Templates } from "./templates.js";
 
-/**
- * Mail outcomes mirror the SMS ones: SENT means the SMTP server accepted every
- * recipient, FAILED is worth parking for retry, and NOT_CONFIGURED means there
- * were no credentials to send with.
- */
 export const MAIL_OUTCOME = {
   SENT: "sent",
   FAILED: "failed",
@@ -24,11 +19,6 @@ export class MailService {
 
   static platformTransporter = null;
 
-  /**
-   * The platform's own mailbox. Built on first use rather than at import so a
-   * deployment without platform SMTP credentials does not construct a
-   * transporter it can never authenticate with.
-   */
   static getPlatformTransporter() {
     if (!this.platformTransporter) {
       console.log(`[Mail Service] Initializing platform SMTP transporter: host=${this.SMTP_HOST}, port=${this.SMTP_PORT}`);
@@ -56,8 +46,13 @@ export class MailService {
 
   static transporters = new Map();
 
+
   static getOrCreateTransporter(smtpConfig) {
-    if (!smtpConfig) return this.getPlatformTransporter();
+    if (!smtpConfig) {
+      throw new Error(
+        "getOrCreateTransporter called without an SMTP config — tenant mail must not fall back to the platform sender.",
+      );
+    }
 
     const cacheKey = `${smtpConfig.host}:${smtpConfig.port}:${smtpConfig.user}`;
     if (!this.transporters.has(cacheKey)) {
@@ -80,13 +75,7 @@ export class MailService {
     return this.transporters.get(cacheKey);
   }
 
-  /**
-   * `allowPlatformSender` opts a call site into sending from the platform's own
-   * mailbox when the tenant has no SMTP config of its own. It is deliberately
-   * off by default: tenant-addressed mail must go out under the tenant's sender
-   * or not at all, so a workspace that never configured SMTP gets an honest
-   * "not configured" instead of mail silently sent from our account.
-   */
+
   static async sendEmail({ to, subject, html, fromName, fromEmail, smtpConfig, headers, allowPlatformSender = false }) {
     if (!smtpConfig && !allowPlatformSender) {
       console.warn(`[Mail Service] ⏭️ No SMTP config for this workspace — nothing sent to ${to}.`);
@@ -110,7 +99,9 @@ export class MailService {
     const senderEmail = smtpConfig?.senderEmail || fromEmail || this.SENDER_EMAIL;
     const fromString = `"${senderName}" <${senderEmail}>`;
 
-    const activeTransporter = this.getOrCreateTransporter(smtpConfig);
+    const activeTransporter = smtpConfig
+      ? this.getOrCreateTransporter(smtpConfig)
+      : this.getPlatformTransporter();
     const host = smtpConfig?.host || this.SMTP_HOST;
     const port = smtpConfig?.port || this.SMTP_PORT;
 

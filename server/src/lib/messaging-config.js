@@ -54,8 +54,7 @@ export async function getMessagingConfig(companyId) {
     };
   }
 
-  // Only one SMS provider is active per company (saving one deactivates the others).
-  const smsInt = integrations.find((i) => SMS_PROVIDERS.includes(i.platform));
+   const smsInt = integrations.find((i) => SMS_PROVIDERS.includes(i.platform));
   if (smsInt) {
     smsConfig = {
       provider: smsInt.platform,
@@ -69,11 +68,6 @@ export async function getMessagingConfig(companyId) {
   return { smtpConfig, smsConfig };
 }
 
-/**
- * Which channels this tenant can actually deliver on. Derived from the same
- * config the senders use, so the UI can never claim a channel works when a send
- * would be skipped. Contains no secrets — safe for any signed-in staff role.
- */
 export async function getMessagingCapabilities(companyId) {
   const { smtpConfig, smsConfig } = await getMessagingConfig(companyId);
 
@@ -92,16 +86,11 @@ export async function getMessagingCapabilities(companyId) {
   };
 }
 
-/** Does this channel string need SMS / email to be configured? */
 export function channelNeeds(channel) {
   const c = String(channel || "EMAIL").toUpperCase();
   return { email: c === "EMAIL" || c === "BOTH", sms: c === "SMS" || c === "BOTH" };
 }
 
-/**
- * Names the channels a send wants but cannot deliver on, ready to drop into a
- * message. Empty array means everything it needs is configured.
- */
 export async function missingChannelsFor(companyId, channel) {
   const needs = channelNeeds(channel);
   const caps = await getMessagingCapabilities(companyId);
@@ -109,4 +98,22 @@ export async function missingChannelsFor(companyId, channel) {
   if (needs.email && !caps.email.configured) missing.push("Email");
   if (needs.sms && !caps.sms.configured) missing.push("SMS");
   return missing;
+}
+
+export async function missingChannelsForSteps(companyId, steps) {
+  const types = new Set((steps || []).map((s) => String(s?.type || "").toUpperCase()));
+  if (!types.has("EMAIL") && !types.has("SMS")) return [];
+
+  const caps = await getMessagingCapabilities(companyId);
+  const missing = [];
+  if (types.has("EMAIL") && !caps.email.configured) missing.push("Email");
+  if (types.has("SMS") && !caps.sms.configured) missing.push("SMS");
+  return missing;
+}
+
+export function notConfiguredMessage(missing, operation) {
+  return (
+    `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not configured, so ` +
+    `${operation} cannot be delivered. Add your credentials in Settings > Email, SMS & News.`
+  );
 }
