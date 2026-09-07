@@ -144,7 +144,7 @@ export default function NewsSourcesTab() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <Card className="border border-border/80 shadow-xs max-w-3xl">
+      <Card className="border-slate-200/60 dark:border-slate-800/60 shadow-lg shadow-slate-200/20 dark:shadow-slate-900/20">
         <CardHeader className="border-b border-border/40 bg-slate-50/40 dark:bg-slate-950/20">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-amber-50 dark:bg-amber-950/20 rounded-xl text-[#b48c3c]">

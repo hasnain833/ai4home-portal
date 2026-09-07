@@ -344,7 +344,7 @@ export default function KnowledgeBasePage() {
               </h1>
               <p className="text-muted-foreground mt-1">
                 {isAdmin
-                  ? "View builder documents connected to the Botpress AI assistant"
+                  ? "View builder documents the warranty AI assistant answers from"
                   : "Manage communities and upload KB documents"}
               </p>
             </div>

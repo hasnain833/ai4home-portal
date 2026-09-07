@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -15,27 +15,24 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const INJECT_URL = process.env.NEXT_PUBLIC_BOTPRESS_INJECT_URL || "https://cdn.botpress.cloud/webchat/v3.6/inject.js";
-
-type BotpressClient = {
-  config?: (payload: Record<string, unknown>) => void;
-  on?: (event: string, handler: () => void) => void;
-  updateUser?: (payload: Record<string, unknown>) => void;
-};
-
-type BotpressWindow = Window & {
-  botpress?: BotpressClient;
-};
+import WarrantyChat from "@/components/warranty/WarrantyChat";
+import { type ConversationSummary } from "@/components/warranty/ConversationList";
 
 export default function AIChatPage() {
   const { user, isLoading } = useAuth();
   const [copied, setCopied] = useState(false);
   const [embedMode, setEmbedMode] = useState<"widget" | "fullscreen">("widget");
   const [themeColor, setThemeColor] = useState("#0F3B3D");
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  // undefined means "let the chat resume whatever this browser last used". Once
+  // the panel is touched it owns the selection, with null meaning a fresh thread.
+  const [activeConversationId, setActiveConversationId] = useState<string | null | undefined>(
+    undefined,
+  );
 
   const companyName = user?.companyName || "Aiforhomebuilder";
   const botName = `${companyName} Assistant`;
-  const botLogoUrl = user?.companyLogo || (typeof window !== "undefined" ? window.location.origin + "/logo-light.svg" : "");
 
   useEffect(() => {
     if (isLoading || !user) return;
@@ -56,88 +53,40 @@ export default function AIChatPage() {
     fetchCompanyData();
   }, [user, isLoading]);
 
+  const loadConversations = useCallback(async () => {
+    try {
+      const res = await fetch("/api/warranty/chat/conversations", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setConversations(Array.isArray(data.conversations) ? data.conversations : []);
+    } catch (error) {
+      console.error("Failed to load conversation history:", error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (isLoading || !user) return;
+    loadConversations();
+  }, [user, isLoading, loadConversations]);
 
-    let cancelled = false;
-    const injectScript = document.createElement("script");
-    injectScript.src = INJECT_URL;
-    injectScript.async = true;
+  const startNewConversation = () => setActiveConversationId(null);
+  const openConversation = (id: string) => setActiveConversationId(id);
 
-    const params = new URLSearchParams({ botColor: themeColor, botName, companyName });
-    if (botLogoUrl) params.set("botLogo", botLogoUrl);
-    params.set("v", Date.now().toString());
-    const configScript = document.createElement("script");
-    configScript.src = `/bp-config?${params.toString()}`;
-    configScript.defer = true;
 
-    const startWebchat = () => {
-      if (cancelled) return;
-      const bp = (window as BotpressWindow).botpress;
-      if (!bp) {
-        // inject.js hasn't defined window.botpress yet — retry shortly.
-        setTimeout(startWebchat, 100);
-        return;
-      }
-
-      // Register listeners BEFORE the config script calls botpress.init(...).
-      try {
-        bp.on?.("webchat:initialized", () => {
-          if (user && bp.updateUser) {
-            try {
-              bp.updateUser({
-                data: {
-                  email: user.email || "",
-                  externalId: user.id || "",
-                  name: user.name || "",
-                  role: user.role || "",
-                  companyId: user.companyId || "",
-                  companyName,
-                },
-                tags: {
-                  email: user.email || "",
-                  userId: user.id || "",
-                  name: user.name || "",
-                  role: user.role || "",
-                  companyId: user.companyId || "",
-                  companyName,
-                },
-              });
-            } catch (err) {
-              console.error("Failed to update user in Botpress:", err);
-            }
-          }
-        });
-      } catch (err) {
-        console.error("Failed to register Botpress listener:", err);
-      }
-
-      document.body.appendChild(configScript);
-    };
-
-    injectScript.onload = startWebchat;
-    document.body.appendChild(injectScript);
-
-    return () => {
-      cancelled = true;
-      if (document.body.contains(injectScript)) document.body.removeChild(injectScript);
-      if (document.body.contains(configScript)) document.body.removeChild(configScript);
-      const bpElements = document.querySelectorAll(
-        "[class^='bp-'], iframe[src*='botpress'], .bp-webchat-container"
-      );
-      bpElements.forEach((el) => el.remove());
-      try {
-        delete (window as BotpressWindow).botpress;
-      } catch {
-        // Ignore — inject.js may define it as non-configurable.
-      }
-    };
-  }, [user, isLoading, themeColor, botName, botLogoUrl, companyName]);
 
   const portalUrl =
     process.env.NEXT_PUBLIC_URL ||
     (typeof window !== "undefined" ? window.location.origin : "");
-  const companyId = user?.companyId || "demo-company";
+  // Empty until auth resolves, never a placeholder id. This used to fall back to
+  // "demo-company", which no deployment actually has — nothing creates a Company
+  // with that id — so anything sent during the auth-loading window went to the
+  // agent as a real tenant and came back 404.
+  const companyId = user?.companyId || "";
   const widgetScriptCode = `<script src="${portalUrl}/widget.js?company=${companyId}&mode=widget"></script>`;
   const fullScreenScriptCode = `<script src="${portalUrl}/widget.js?company=${companyId}&mode=fullscreen"></script>`;
   const fullScreenUrl = `${portalUrl}/widget/${companyId}?mode=fullscreen`;
@@ -146,6 +95,12 @@ export default function AIChatPage() {
 
 
   const copyToClipboard = (value = embedScriptCode) => {
+    // ProtectedRoute renders its children while auth is still loading, so there
+    // is a window where companyId is empty. Handing out an embed snippet built
+    // from it would produce `?company=` — a widget that loads on the builder's
+    // site and refuses every message. Nothing leaves this page until the id is
+    // real.
+    if (!companyId) return;
     navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -156,7 +111,7 @@ export default function AIChatPage() {
       <PortalLayout>
         {/* Offsets match PortalLayout's chrome: mobile is a 64px sticky header
             plus p-4 top and bottom; from md there is no header, just p-6. */}
-        <div className="flex flex-col h-[calc(100dvh-96px)] md:h-[calc(100dvh-48px)] max-w-4xl mx-auto px-2 sm:px-4 w-full gap-4 pb-4">
+        <div className="flex flex-col h-[calc(100dvh-96px)] md:h-[calc(100dvh-48px)] max-w-6xl mx-auto px-2 sm:px-4 w-full gap-4 pb-4">
           <div className="flex flex-row items-center justify-between gap-4 shrink-0">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
@@ -167,10 +122,18 @@ export default function AIChatPage() {
               </h1>
             </div>
 
+            <div className="flex items-center gap-2">
             {(user?.role === "admin" || user?.role === "staff") && (
               <Dialog>
                 <DialogTrigger asChild>
-                  <Button className="gap-2 bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-medium" size="sm">
+                  <Button
+                    className="gap-2 bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-medium"
+                    size="sm"
+                    // Unavailable until the company is known, so the snippet on
+                    // the other side is never built from an empty id.
+                    disabled={!companyId}
+                    title={companyId ? undefined : "Loading your company details…"}
+                  >
                     <Code className="h-4 w-4" />
                     Embed Widget
                   </Button>
@@ -309,33 +272,33 @@ export default function AIChatPage() {
                 </DialogContent>
               </Dialog>
             )}
+            </div>
           </div>
 
-          <div className="flex-1 w-full overflow-hidden rounded-3xl border border-slate-800 shadow-2xl bg-[#020617] p-0 flex flex-col min-h-0">
-            <style jsx global>{`
-              #bp-embedded-webchat [class*="fab"],
-              #bp-embedded-webchat [class*="Fab"],
-              #bp-embedded-webchat [class*="launcher"],
-              #bp-embedded-webchat [class*="Launcher"],
-              #bp-embedded-webchat button[aria-label*="Open"],
-              #bp-embedded-webchat button[aria-label*="open"],
-              body > [class*="bpFab"],
-              body > [class*="bp-fab"],
-              body > button[aria-label*="Open"],
-              body > button[aria-label*="open"] {
-                display: none !important;
-              }
-
-              #bp-embedded-webchat,
-              #bp-embedded-webchat > * {
-                width: 100% !important;
-                height: 100% !important;
-              }
-            `}</style>
-            <div
-              id="bp-embedded-webchat"
-              className="w-full h-full bg-[#020617]"
-            />
+          {/* History lives inside the chat now, in a drawer opened from its own
+              header — so the conversation gets the full width, and the same
+              affordance works at every breakpoint instead of a desktop sidebar
+              plus a separate mobile dialog. */}
+          <div className="flex flex-1 min-h-0">
+            <div className="flex-1 min-w-0 overflow-hidden rounded-3xl shadow-2xl p-0 flex flex-col min-h-0">
+              <WarrantyChat
+                companyId={companyId}
+                themeColor={themeColor}
+                botName={botName}
+                logoUrl={user?.companyLogo}
+                homeownerId={user?.id}
+                enableHistory
+                activeConversationId={activeConversationId}
+                onConversationChange={(id) => {
+                  setActiveConversationId(id);
+                  loadConversations();
+                }}
+                conversations={conversations}
+                loadingHistory={loadingHistory}
+                onSelectConversation={openConversation}
+                onNewConversation={startNewConversation}
+              />
+            </div>
           </div>
         </div>
       </PortalLayout>

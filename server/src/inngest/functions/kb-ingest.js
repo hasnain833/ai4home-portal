@@ -94,6 +94,7 @@ export async function runKbIngestion(documentId, companyId) {
     const count = await upsertChunks(companyId, documentId, chunks, {
       name: doc.name,
       category: doc.category,
+      scope: doc.scope,
     });
 
     await prisma.salesKB.update({

@@ -98,7 +98,6 @@ export default function CampaignsPage() {
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
   const [newStep, setNewStep] = useState<any>(buildDefaultEmailStep());
   const [generatingStepCopy, setGeneratingStepCopy] = useState(false);
-  const [aiReady, setAiReady] = useState(false);
 
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
   const [leadsForEnroll, setLeadsForEnroll] = useState<EnrollableLead[]>([]);
@@ -140,30 +139,6 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     fetchCampaigns();
-  }, []);
-
-  // The AI drafting button is useless without a configured provider, so find out
-  // up front rather than letting the request fail.
-  useEffect(() => {
-    const checkAi = async () => {
-      try {
-        const res = await fetch("/api/company", { credentials: "include" });
-        if (!res.ok) return;
-        const data = await res.json();
-        const ready =
-          data.aiProvider === "platform"
-            ? !!data.aiPlatformGrant
-            : data.aiProvider === "openai"
-              ? !!data.aiOpenAiKeyMasked
-              : data.aiProvider === "groq"
-                ? !!data.aiGroqKeyMasked
-                : !!data.aiAnthropicKeyMasked;
-        setAiReady(ready);
-      } catch {
-        /* leave AI disabled if we can't tell */
-      }
-    };
-    checkAi();
   }, []);
 
   useEffect(() => {
@@ -278,7 +253,10 @@ export default function CampaignsPage() {
         // exists — but they are told the step will not be delivered.
         for (const w of saved.warnings || []) toast.warning(w, { duration: 8000 });
       } else {
-        toast.error("Failed to save step.");
+        // Editing steps on a running campaign is refused when the new steps need
+        // a channel the workspace has not configured.
+        const data = await res.json().catch(() => ({}));
+        toast.error(data?.message || "Failed to save step.", { duration: 10000 });
       }
     } catch (error) {
       console.error("[sales/campaigns]", error);
@@ -374,7 +352,10 @@ export default function CampaignsPage() {
         setActiveSeq({ ...activeSeq, status: "Active" });
         toast.success("Campaign launched.");
       } else {
-        toast.error("Failed to launch campaign.");
+        // A launch refused for missing email/SMS credentials explains itself and
+        // names the fix, so show the server's message rather than a generic one.
+        const data = await res.json().catch(() => ({}));
+        toast.error(data?.message || "Failed to launch campaign.", { duration: 10000 });
       }
     } catch (e) {
       console.error("[sales/campaigns]", e);
@@ -472,7 +453,8 @@ export default function CampaignsPage() {
         const rd = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
         if (rd.ok) setActiveSeqDetail(await rd.json());
       } else {
-        toast.error("Failed to enroll leads.");
+        const data = await res.json().catch(() => ({}));
+        toast.error(data?.message || "Failed to enroll leads.", { duration: 10000 });
       }
     } catch (e) {
       console.error("[sales/campaigns]", e);
@@ -823,24 +805,14 @@ export default function CampaignsPage() {
                         size="icon"
                         className="h-8 w-8 border-[#b48c3c]/40 text-[#b48c3c] hover:bg-[#b48c3c]/10 hover:text-[#b48c3c]"
                         onClick={generateStepCopy}
-                        disabled={generatingStepCopy || !activeSeq || !aiReady}
-                        title={
-                          aiReady
-                            ? `Generate ${newStep.type === "SMS" ? "SMS" : "email"} copy with AI`
-                            : "Add an AI provider key in Settings > AI Config to use AI drafting"
-                        }
+                        disabled={generatingStepCopy || !activeSeq}
+                        title={`Generate ${newStep.type === "SMS" ? "SMS" : "email"} copy with AI`}
                       >
                         <Sparkles className={`h-4 w-4 ${generatingStepCopy ? "animate-pulse" : ""}`} />
                       </Button>
                     </div>
-                    {!aiReady && (
-                      <p className="text-[11px] text-amber-700 dark:text-amber-500 leading-relaxed">
-                        AI drafting is off &mdash; no provider key is set for this workspace. Add one in
-                        Settings &gt; AI Config, or ask your administrator to grant the platform key.
-                      </p>
-                    )}
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Merge tags: <code>{`{firstName}`}</code>, <code>{`{lastName}`}</code>, <code>{`{companyName}`}</code>, <code>{`{campaignName}`}</code>, <code>{`{city}`}</code>, <code>{`{bookingLink}`}</code>. Configure AI provider in Settings &gt; AI Config.
+                      Merge tags: <code>{`{firstName}`}</code>, <code>{`{lastName}`}</code>, <code>{`{companyName}`}</code>, <code>{`{campaignName}`}</code>, <code>{`{city}`}</code>, <code>{`{bookingLink}`}</code>.
                     </p>
                     <textarea
                       className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 min-h-25"

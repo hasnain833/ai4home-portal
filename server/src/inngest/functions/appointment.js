@@ -22,9 +22,10 @@ import {
   DEFAULT_SYSTEM_TEMPLATE,
   DEFAULT_TOOL_DESCRIPTION,
   DEFAULT_KB_EMPTY_TEXT,
-  PROMPT_DEFAULTS,
   renderTemplate,
-} from "../../lib/sales-agent-prompt.js";
+  AGENT_TYPES,
+} from "../../prompts/index.js";
+import { getLivePrompts } from "../../prompts/live.js";
 
 const RUNAWAY_TURN_BACKSTOP = 20;
 
@@ -213,8 +214,17 @@ function renderAgentPrompt({
 }
 
 
-export function buildAgentPrompt(args) {
-  return renderAgentPrompt(args, PROMPT_DEFAULTS);
+/**
+ * The prompt the LIVE agent runs.
+ *
+ * Resolves whichever Prompt Lab version was explicitly Set Live, falling back to
+ * the defaults shipped in prompts/sales-agent.js when nothing is live or the
+ * lookup fails. See prompts/live.js for that contract.
+ */
+export async function buildAgentPrompt(args) {
+  const live = await getLivePrompts(AGENT_TYPES.SALES);
+  const rendered = renderAgentPrompt(args, live);
+  return { ...rendered, promptSource: live.meta };
 }
 
 export function buildDraftPromptForTesting(args, draft) {
@@ -239,7 +249,7 @@ async function executeTurn({ company, transcript, system, tool, forcePlatformKey
 }
 
 export async function runClaudeTurn({ transcript, ...args }) {
-  const { system, tool } = buildAgentPrompt(args);
+  const { system, tool } = await buildAgentPrompt(args);
   return executeTurn({ company: args.company, transcript, system, tool, forcePlatformKey: false });
 }
 

@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { getMessagingCapabilities, notConfiguredMessage } from "../lib/messaging-config.js";
 
 const TRIGGER_DESCRIPTIONS = {
   LEAD_REPLIED: "Prospect responds to email or SMS",
@@ -55,6 +56,27 @@ function validateForActivation(rule) {
     }
   }
   return null;
+}
+
+/**
+ * A rule that sends must have somewhere to send from. Activating one the
+ * workspace cannot deliver on would fire on every matching lead and record a
+ * skip each time, which reads as "the automation is broken" rather than
+ * "you have not set up email yet".
+ */
+async function missingChannelsForRule(companyId, rule) {
+  const types = new Set(
+    (rule.actions || []).map((a) => String(a?.type || "").toUpperCase()),
+  );
+  const needsEmail = types.has("SEND_EMAIL") || types.has("NOTIFY_OWNER");
+  const needsSms = types.has("SEND_SMS");
+  if (!needsEmail && !needsSms) return [];
+
+  const caps = await getMessagingCapabilities(companyId);
+  const missing = [];
+  if (needsEmail && !caps.email.configured) missing.push("Email");
+  if (needsSms && !caps.sms.configured) missing.push("SMS");
+  return missing;
 }
 
 export const getAutomations = async (req, res) => {
@@ -115,6 +137,14 @@ export const updateAutomation = async (req, res) => {
     if (willBeActive) {
       const err = validateForActivation(input);
       if (err) return res.status(400).json({ message: err });
+
+      const missing = await missingChannelsForRule(req.user.companyId, input);
+      if (missing.length) {
+        return res.status(400).json({
+          message: notConfiguredMessage(missing, "this automation"),
+          missingChannels: missing,
+        });
+      }
     }
 
     const rule = await prisma.marketingRule.update({
@@ -149,6 +179,14 @@ export const toggleAutomation = async (req, res) => {
     if (nextActive) {
       const err = validateForActivation(rule);
       if (err) return res.status(400).json({ message: err });
+
+      const missing = await missingChannelsForRule(req.user.companyId, rule);
+      if (missing.length) {
+        return res.status(400).json({
+          message: notConfiguredMessage(missing, "this automation"),
+          missingChannels: missing,
+        });
+      }
     }
     const updated = await prisma.marketingRule.update({ where: { id }, data: { isActive: nextActive } });
     return res.json(toApi(updated));

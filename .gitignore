@@ -26,6 +26,7 @@ node_modules
 .DS_Store
 *.pem
 *.pdf
+*.docx
 
 # debug
 npm-debug.log*

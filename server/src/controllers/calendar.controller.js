@@ -4,6 +4,7 @@ import { getNextValidSendWindow } from "../lib/timezone.js";
 import { inngest } from "../lib/inngest.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, parseLlmJson } from "../lib/sales-ai.js";
+import { renderTemplate, CONTENT_CALENDAR_TEMPLATE } from "../prompts/index.js";
 
 const VALID_STATUSES = [
   "Suggested",
@@ -433,43 +434,17 @@ export const getCalendarSuggestions = async (req, res) => {
             .join("\n")
         : "No recent market news available.";
 
-    const systemPrompt = `You are a Content Assist Agent for a homebuilder company named "${company?.name || "Homebuilder"}".
-Your voice profile is: "${voiceProfile}".
-Your task is to generate exactly 3 content calendar suggestions for marketing (SMS, Email, Blog, or Announcement).
-Current date: ${new Date().toISOString()}
-
-Context:
-Tenant profile (markets, communities, brand — tailor topics to this footprint):
-${tenantProfileText}
-
-Company knowledge base (brand voice / product info — ground topic angles and copy in this; do not invent facts, prices, or policies not present here):
-${kbContextText}
-
-Seasonal context (favor timely, season-appropriate angles):
-${seasonalContextText}
-
-Existing upcoming/recent scheduled events:
-${existingEventsText || "No existing events."}
-
-Recent housing-market news (ground your topics in these current events where relevant):
-${recentNewsText}
-
-Recently Dismissed Topics (DO NOT suggest these):
-${dismissedText}
-
-Requirements:
-- Find schedule gaps and suggest dates (ISO 8601 strings) for the next 2-4 weeks.
-- Suggest topics grounded in the tenant profile above, current real estate/mortgage market trends from the news, and the seasonal context.
-- Return ONLY a raw JSON array matching this structure:
-[
-  {
-    "topic": "string",
-    "channel": "Email" | "SMS" | "Blog" | "Announcement",
-    "scheduledAt": "ISO date string",
-    "reason": "string (Why you suggested this, considering gaps/news)",
-    "outline": "string (Draft copy or outline)"
-  }
-]`;
+    const systemPrompt = renderTemplate(CONTENT_CALENDAR_TEMPLATE, {
+      companyName: company?.name || "Homebuilder",
+      voiceProfile,
+      currentDate: new Date().toISOString(),
+      tenantProfile: tenantProfileText,
+      kbContext: kbContextText,
+      seasonalContext: seasonalContextText,
+      existingEvents: existingEventsText || "No existing events.",
+      recentNews: recentNewsText,
+      dismissedTopics: dismissedText,
+    });
 
     const text = await chat({
       system: systemPrompt,

@@ -392,7 +392,7 @@ export default function TicketDetail() {
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px] gap-6 items-start">
             {/* Left Main Content */}
             <div className="space-y-6">
-              {/* Botpress Agent Reviewer (AI Draft) */}
+              {/* Warranty Agent Reviewer (AI Draft) */}
               {draftResponse && (
                 <Card className="border-cyan-500/30 bg-linear-to-br from-slate-900 to-slate-950 text-slate-100 shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
                   <div className="bg-linear-to-r from-cyan-600/20 to-blue-600/20 px-6 py-4 flex items-center justify-between border-b border-slate-800">
@@ -507,7 +507,7 @@ export default function TicketDetail() {
                 </CardContent>
               </Card>
 
-              {/* Botpress Conversation Summary */}
+              {/* Warranty Agent Conversation Summary */}
               {ticket.chatSummary && (
                 <Card className="border-amber-500/20 bg-linear-to-br from-slate-900 to-slate-950 text-slate-100 shadow-md overflow-hidden">
                   <div className="bg-linear-to-r from-amber-600/10 to-orange-600/10 px-6 py-4 flex items-center gap-3 border-b border-slate-800">

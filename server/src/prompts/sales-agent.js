@@ -1,3 +1,7 @@
+import { renderTemplate, usedTokens } from "./template.js";
+
+export { renderTemplate, usedTokens };
+
 export const PROMPT_PLACEHOLDERS = [
   {
     token: "companyName",
@@ -189,18 +193,6 @@ export const PROMPT_DEFAULTS = {
   kbEmptyText: DEFAULT_KB_EMPTY_TEXT,
 };
 
-export function renderTemplate(template, vars = {}) {
-  return String(template).replace(/\{\{\s*(\w+)\s*\}\}/g, (match, token) =>
-    Object.prototype.hasOwnProperty.call(vars, token) ? String(vars[token] ?? "") : match,
-  );
-}
-
-export function usedTokens(template) {
-  const found = new Set();
-  for (const m of String(template).matchAll(/\{\{\s*(\w+)\s*\}\}/g)) found.add(m[1]);
-  return [...found];
-}
-
 export function validatePromptDraft({ systemTemplate, toolDescription, kbEmptyText } = {}) {
   const errors = [];
   const warnings = [];
@@ -263,14 +255,3 @@ export function validatePromptDraft({ systemTemplate, toolDescription, kbEmptyTe
 
   return { errors, warnings };
 }
-
-// Deliberately no getter for the "current" saved version here.
-//
-// SalesAgentPromptVersion rows are Prompt Lab drafts and nothing else. `isActive`
-// means "the draft the lab opens by default", NOT "the prompt the agent runs".
-// The live agent always uses the PROMPT_DEFAULTS above, which ship in this file —
-// a draft only reaches production when someone copies it into DEFAULT_SYSTEM_TEMPLATE
-// and it goes through code review and a deploy.
-//
-// Do not add a lookup that feeds a saved row into buildAgentPrompt(). It would put
-// every Save button press straight in front of real leads with no review.

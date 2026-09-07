@@ -18,6 +18,14 @@ import {
   listSalesConfigVersions,
   rollbackSalesConfig,
 } from "../services/sales-config-version.service.js";
+import {
+  renderTemplate,
+  BLOG_SAMPLE_TEMPLATE,
+  COPY_SAMPLE_TEMPLATE,
+  SMS_LENGTH_RULE,
+  EMAIL_LENGTH_RULE,
+  DEFAULT_AUDIENCE,
+} from "../prompts/index.js";
 
 function formatFileSize(bytes) {
   if (!bytes) return "0 Bytes";
@@ -30,7 +38,9 @@ function formatFileSize(bytes) {
 export const getSalesKB = async (req, res) => {
   try {
     const documents = await prisma.salesKB.findMany({
-      where: { companyId: req.user.companyId, isDeleted: false },
+      // scope pins this to the company tier: a null companyId would otherwise
+      // become `IS NULL` and match PLATFORM rows.
+      where: { scope: "COMPANY", companyId: req.user.companyId, isDeleted: false },
       orderBy: { createdAt: "desc" },
     });
     return res.json(
@@ -88,6 +98,7 @@ export const addSalesKBDocument = async (req, res) => {
 
     const document = await prisma.salesKB.create({
       data: {
+        scope: "COMPANY",
         companyId: req.user.companyId,
         name,
         size,
@@ -132,6 +143,9 @@ export const uploadSalesKBDocument = async (req, res) => {
 
     const document = await prisma.salesKB.create({
       data: {
+        // This screen only ever writes the company tier. The platform tier is
+        // managed by super-admins in the Prompt Lab.
+        scope: "COMPANY",
         companyId,
         name: originalName,
         size: formatFileSize(file.size),
@@ -170,7 +184,7 @@ export const uploadSalesKBDocument = async (req, res) => {
 export const getSalesKBDownloadUrl = async (req, res) => {
   try {
     const document = await prisma.salesKB.findFirst({
-      where: { id: req.params.id, companyId: req.user.companyId, isDeleted: false },
+      where: { id: req.params.id, scope: "COMPANY", companyId: req.user.companyId, isDeleted: false },
     });
     if (!document) return res.status(404).json({ message: "Document not found" });
     if (!document.url) return res.status(404).json({ message: "This document has no stored file." });
@@ -201,7 +215,7 @@ export const deleteSalesKBDocument = async (req, res) => {
     const { id } = req.params;
 
     const document = await prisma.salesKB.findFirst({
-      where: { id, companyId: req.user.companyId, isDeleted: false },
+      where: { id, scope: "COMPANY", companyId: req.user.companyId, isDeleted: false },
     });
 
     if (!document) {
@@ -410,25 +424,20 @@ export const previewAiOutput = async (req, res) => {
     const kbCitations = dedupeKbCitations(kbChunks);
 
     if (feature === "blog") {
-      system = `You are a content marketing writer for ${company?.name || "a homebuilder"}. Write a short SAMPLE section reflecting this brand voice. Ground factual claims in the Knowledge Base; never invent facts.
-
-Brand voice:
-${brandLines}
-
-Knowledge Base:
-${kbContext}`;
+      system = renderTemplate(BLOG_SAMPLE_TEMPLATE, {
+        companyName: company?.name || "a homebuilder",
+        brandLines,
+        kbContext,
+      });
     } else {
       const stepType = sample.stepType === "SMS" ? "SMS" : "email";
-      system = `You are an expert sales copywriter for a home builder. Write a single ${stepType} draft reflecting this brand voice. Ground factual claims in the Knowledge Base; never invent facts, prices, or policies.
-
-Brand profile:
-${brandLines}
-
-Company knowledge base:
-${kbContext}
-
-Audience: ${sample.audience || "Homebuyers or existing homeowners"}.
-${stepType === "SMS" ? "Keep it under 160 characters." : "Provide a Subject Line and Email Body."}`;
+      system = renderTemplate(COPY_SAMPLE_TEMPLATE, {
+        stepType,
+        brandLines,
+        kbContext,
+        audience: sample.audience || DEFAULT_AUDIENCE,
+        lengthRule: stepType === "SMS" ? SMS_LENGTH_RULE : EMAIL_LENGTH_RULE,
+      });
     }
 
     const draft = await chat({ companyId, system, user, maxTokens: 700 });

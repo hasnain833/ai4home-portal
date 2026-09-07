@@ -2,6 +2,14 @@ import prisma from "../lib/prisma.js";
 import { embedText, embedBatch, EMBEDDING_DIM } from "./embedding.service.js";
 
 const FTS_LANG = "english";
+
+/**
+ * Retrieval sees two tiers at once: the PLATFORM knowledge every company shares,
+ * plus that company's own documents. $2 is always the companyId.
+ * A null companyId still matches the platform tier, which is what the Prompt Lab
+ * wants when testing platform content on its own.
+ */
+const SCOPE_FILTER_SQL = `(scope = 'PLATFORM' OR "companyId" = $2)`;
 const MAX_CHUNK_CHARS = 8000;
 
 export function isKbConfigured() {
@@ -23,9 +31,13 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 
+  // scope is denormalised onto every chunk so retrieval filters without a join.
+  const scope = meta.scope === "PLATFORM" ? "PLATFORM" : "COMPANY";
+
   await prisma.salesKBChunk.createMany({
     data: chunks.map((content, i) => ({
-      companyId,
+      companyId: scope === "PLATFORM" ? null : companyId,
+      scope,
       documentId,
       chunkIndex: i,
       name: meta.name || "",
@@ -56,7 +68,10 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 }
 
 export async function deleteDocument(companyId, documentId) {
-  await prisma.salesKBChunk.deleteMany({ where: { documentId, companyId } });
+  // Keyed on documentId alone: it already identifies exactly one document, and
+  // filtering on companyId would skip PLATFORM chunks, which have none.
+  // The caller is responsible for authorising the delete.
+  await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 }
 
 export async function queryDetailed(companyId, text, k = 5, categories = null) {
@@ -93,14 +108,17 @@ export async function getRetrievalStatus(companyId) {
   let detail = null;
 
   try {
-    totalChunks = await prisma.salesKBChunk.count({ where: { companyId } });
+    totalChunks = await prisma.salesKBChunk.count({
+      where: { OR: [{ scope: "PLATFORM" }, { companyId }] },
+    });
   } catch (err) {
     detail = `Could not count chunks: ${err.message}`;
   }
 
   try {
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT COUNT(*)::int AS n FROM "SalesKBChunk" WHERE "companyId" = $1 AND embedding IS NOT NULL`,
+      `SELECT COUNT(*)::int AS n FROM "SalesKBChunk"
+        WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NOT NULL`,
       companyId,
     );
     embeddedChunks = rows?.[0]?.n ?? 0;
@@ -144,10 +162,10 @@ async function semanticQuery(companyId, text, limit, categories) {
   try {
     const rows = hasCats
       ? await prisma.$queryRawUnsafe(
-        `SELECT id, "documentId", name, category, content,
+        `SELECT id, "documentId", name, category, content, scope,
                   1 - (embedding <=> $1::vector) AS score
            FROM "SalesKBChunk"
-           WHERE "companyId" = $2
+           WHERE ${SCOPE_FILTER_SQL}
              AND category = ANY($3::text[])
              AND embedding IS NOT NULL
            ORDER BY embedding <=> $1::vector
@@ -158,10 +176,10 @@ async function semanticQuery(companyId, text, limit, categories) {
         limit,
       )
       : await prisma.$queryRawUnsafe(
-        `SELECT id, "documentId", name, category, content,
+        `SELECT id, "documentId", name, category, content, scope,
                   1 - (embedding <=> $1::vector) AS score
            FROM "SalesKBChunk"
-           WHERE "companyId" = $2
+           WHERE ${SCOPE_FILTER_SQL}
              AND embedding IS NOT NULL
            ORDER BY embedding <=> $1::vector
            LIMIT $3`,
@@ -176,6 +194,7 @@ async function semanticQuery(companyId, text, limit, categories) {
         documentId: r.documentId,
         name: r.name || "",
         category: r.category || "General",
+        scope: r.scope || "COMPANY",
         text: r.content || "",
         score: Number(r.score) || 0,
       }));
@@ -191,19 +210,19 @@ async function ftsQuery(companyId, text, limit, categories) {
 
   const rows = hasCats
     ? await prisma.$queryRaw`
-        SELECT id, "documentId", name, category, content,
+        SELECT id, "documentId", name, category, content, scope,
                ts_rank(to_tsvector(${FTS_LANG}::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
         FROM "SalesKBChunk"
-        WHERE "companyId" = ${companyId}
+        WHERE (scope = 'PLATFORM' OR "companyId" = ${companyId})
           AND category = ANY(${categories})
           AND to_tsvector(${FTS_LANG}::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
         ORDER BY score DESC
         LIMIT ${limit}`
     : await prisma.$queryRaw`
-        SELECT id, "documentId", name, category, content,
+        SELECT id, "documentId", name, category, content, scope,
                ts_rank(to_tsvector(${FTS_LANG}::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
         FROM "SalesKBChunk"
-        WHERE "companyId" = ${companyId}
+        WHERE (scope = 'PLATFORM' OR "companyId" = ${companyId})
           AND to_tsvector(${FTS_LANG}::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
         ORDER BY score DESC
         LIMIT ${limit}`;
@@ -212,6 +231,7 @@ async function ftsQuery(companyId, text, limit, categories) {
     documentId: r.documentId,
     name: r.name || "",
     category: r.category || "General",
+    scope: r.scope || "COMPANY",
     text: r.content || "",
     score: Number(r.score) || 0,
   }));
@@ -219,7 +239,9 @@ async function ftsQuery(companyId, text, limit, categories) {
 
 export async function backfillEmbeddings(companyId, batchSize = 50) {
   const chunks = await prisma.$queryRawUnsafe(
-    `SELECT id, content FROM "SalesKBChunk" WHERE "companyId" = $1 AND embedding IS NULL ORDER BY "createdAt" ASC LIMIT $2`,
+    `SELECT id, content FROM "SalesKBChunk"
+      WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NULL
+      ORDER BY "createdAt" ASC LIMIT $2`,
     companyId,
     batchSize,
   );
@@ -244,7 +266,8 @@ export async function backfillEmbeddings(companyId, batchSize = 50) {
   }
 
   const remaining = await prisma.$queryRawUnsafe(
-    `SELECT COUNT(*)::int AS count FROM "SalesKBChunk" WHERE "companyId" = $1 AND embedding IS NULL`,
+    `SELECT COUNT(*)::int AS count FROM "SalesKBChunk"
+      WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NULL`,
     companyId,
   );
 

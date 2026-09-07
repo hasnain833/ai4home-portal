@@ -5,6 +5,16 @@ import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
+import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
+import {
+  renderTemplate,
+  NEWS_NURTURE_TEMPLATE,
+  CAMPAIGN_COPY_TEMPLATE,
+  SMS_FORMAT_RULES,
+  EMAIL_FORMAT_RULES,
+  DEFAULT_BRAND_VOICE,
+  DEFAULT_AUDIENCE,
+} from "../prompts/index.js";
 
 const CAMPAIGN_BATCH_SIZE = 500;
 
@@ -115,6 +125,12 @@ export const getCampaignDetail = async (req, res) => {
         SUPPRESSED: enrollments.filter(
           (e) => e.status === "EXITED" && e.exitedReason === "SUPPRESSED",
         ).length,
+        // Enrollments stopped because the workspace lost its email/SMS
+        // credentials mid-sequence. Broken out so this reads as a setup problem
+        // the tenant can fix, not as leads that opted out.
+        NOT_CONFIGURED: enrollments.filter(
+          (e) => e.status === "EXITED" && e.exitedReason === "NOT_CONFIGURED",
+        ).length,
       },
     };
 
@@ -174,10 +190,21 @@ export const updateCampaign = async (req, res) => {
 
     const campaign = await prisma.campaign.findFirst({
       where: { id, companyId: req.user.companyId },
+      include: { steps: { select: { type: true } } },
     });
 
     if (!campaign) {
       return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    if (campaign.status !== "Active" && status === "Active") {
+      const missing = await missingChannelsForSteps(req.user.companyId, campaign.steps);
+      if (missing.length) {
+        return res.status(400).json({
+          message: notConfiguredMessage(missing, "this campaign"),
+          missingChannels: missing,
+        });
+      }
     }
 
     const updated = await prisma.campaign.update({
@@ -318,6 +345,17 @@ export const updateCampaignSteps = async (req, res) => {
       });
     }
 
+   
+    if (campaign.status === "Active") {
+      const missing = await missingChannelsForSteps(req.user.companyId, steps);
+      if (missing.length) {
+        return res.status(400).json({
+          message: notConfiguredMessage(missing, "these steps"),
+          missingChannels: missing,
+        });
+      }
+    }
+
     await prisma.$transaction([
       prisma.campaign.update({
         where: { id },
@@ -400,6 +438,19 @@ export const enrollCampaign = async (req, res) => {
 
     if (!campaign) {
       return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    // Same gate as launching: enrolling into a campaign this workspace cannot
+    // deliver on would consume the leads without sending anything.
+    const missingEnrollChannels = await missingChannelsForSteps(
+      req.user.companyId,
+      campaign.steps,
+    );
+    if (missingEnrollChannels.length) {
+      return res.status(400).json({
+        message: notConfiguredMessage(missingEnrollChannels, "this campaign"),
+        missingChannels: missingEnrollChannels,
+      });
     }
 
     const uniqueLeadIds = Array.from(new Set(leadIds));
@@ -656,19 +707,9 @@ async function generateNewsCampaignCopy(news, company) {
       .filter(Boolean)
       .join("\n");
 
-    const systemPrompt = `You are an expert real-estate and home-builder marketing copywriter.
-Write a lead-nurture EMAIL and a nurture SMS based on a housing-market news item.
-
-Brand profile (reflect this voice):
-${brandLines || "Professional, warm, and helpful."}
-
-Rules:
-- Ground the copy in the news item. Be specific but do NOT fabricate statistics or quotes.
-- Do NOT repeat the raw headline verbatim more than once; paraphrase it naturally into the message.
-- Email: a compelling subject line (<= 80 chars) and a warm body (~90-160 words) that ties the news to the reader's home-buying/selling journey and ends with a soft call to action to book a chat using {bookingLink}.
-- SMS: <= 160 characters, friendly, referencing the news angle, and include {bookingLink}. End with "Reply STOP to opt out.".
-- You MAY use ONLY these merge tags: {firstName}, {lastName}, {city}, {companyName}, {bookingLink}. Do not invent other placeholders.
-- Return ONLY valid minified JSON with exactly these keys: {"emailSubject":"...","emailBody":"...","smsBody":"..."}. No markdown, no commentary.`;
+    const systemPrompt = renderTemplate(NEWS_NURTURE_TEMPLATE, {
+      brandLines: brandLines || DEFAULT_BRAND_VOICE,
+    });
 
     const userPrompt = `News title: ${news.title}\nNews summary: ${news.summary}\nSource: ${news.source}`;
 
@@ -789,23 +830,15 @@ export const generateCampaignCopy = async (req, res) => {
       : "No knowledge-base context available.";
     const kbCitations = dedupeKbCitations(kbChunks);
 
-    const systemPrompt = `You are an expert sales copywriter specializing in home builder and warranty care lead nurturing.
-Your task is to write a single ${stepType === "SMS" ? "text message" : "email"} draft.
-
-Brand profile (reflect this voice and details):
-${brandLines || "Professional, warm, and helpful."}
-
-Company knowledge base (ground factual claims in this; never invent facts, prices, or policies not present here):
-${kbContext}
-
-Audience: ${audience || "Homebuyers or existing homeowners"}.
-Goal of this message: ${goal}.
-
-Additional Context: ${contextInfo || "None"}
-
-Rules:
-${stepType === "SMS" ? "- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}, {campaignName}. No other placeholders." : "- Provide a concise Subject Line.\n- Provide the Email Body.\n- You may use merge tags {firstName}, {lastName}, {city}, {companyName}, {campaignName}, {bookingLink}. Do NOT invent other placeholders."}
-Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body":"..."}. For SMS, use an empty string for subject.`;
+    const systemPrompt = renderTemplate(CAMPAIGN_COPY_TEMPLATE, {
+      draftKind: stepType === "SMS" ? "text message" : "email",
+      brandLines: brandLines || DEFAULT_BRAND_VOICE,
+      kbContext,
+      audience: audience || DEFAULT_AUDIENCE,
+      goal,
+      contextInfo: contextInfo || "None",
+      formatRules: stepType === "SMS" ? SMS_FORMAT_RULES : EMAIL_FORMAT_RULES,
+    });
 
     const content = await chat({
       system: systemPrompt,
@@ -818,7 +851,7 @@ Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body"
     if (!content) {
       return res.status(502).json({
         message:
-          "The AI provider returned nothing. This is usually a rejected API key, an expired plan, or a rate limit — check the key in Settings > AI Config, then try again.",
+          "AI drafting did not return anything this time. Please try again in a moment — if it keeps happening, contact support.",
       });
     }
 
@@ -836,7 +869,7 @@ Return ONLY valid minified JSON with exactly these keys: {"subject":"...","body"
   } catch (error) {
     console.error("[Generate Copy] Error:", error);
     return res.status(500).json({
-      message: `Could not generate the copy: ${error.message}. Your draft has not been changed — check Settings > AI Config, and the server logs if this keeps happening.`,
+      message: `Could not generate the copy: ${error.message}. Your draft has not been changed — please try again, and contact support if this keeps happening.`,
     });
   }
 };

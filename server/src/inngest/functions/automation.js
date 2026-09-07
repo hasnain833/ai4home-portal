@@ -3,7 +3,7 @@ import prisma from "../../lib/prisma.js";
 import { MailService, MAIL_OUTCOME } from "../../services/mail-service.js";
 import { MessagingService } from "../../services/messaging-service.js";
 import { SMS_OUTCOME, smsSent } from "../../services/sms.service.js";
-import { getMessagingConfig } from "../../lib/messaging-config.js";
+import { getMessagingConfig, missingChannelsForSteps } from "../../lib/messaging-config.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
 import { Templates } from "../../services/templates.js";
@@ -89,8 +89,17 @@ export async function executeAction(action, lead, ctx = {}) {
       if (!campaignId) return { type, error: "missing campaignId" };
       const campaign = await prisma.campaign.findFirst({
         where: { id: campaignId, companyId: lead.companyId },
+        include: { steps: { select: { type: true } } },
       });
       if (!campaign) return { type, error: "campaign not found" };
+
+      // This path enrolls straight into the database, so it has to repeat the
+      // check the enroll endpoint makes — otherwise a rule quietly enrols leads
+      // into a campaign the workspace cannot send on.
+      const missing = await missingChannelsForSteps(lead.companyId, campaign.steps);
+      if (missing.length) {
+        return { type, skipped: `${missing.join(" and ").toLowerCase()} not configured` };
+      }
 
       const existing = await prisma.campaignEnrollment.findUnique({
         where: { leadId_campaignId: { leadId: lead.id, campaignId } },
