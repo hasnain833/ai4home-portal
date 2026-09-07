@@ -5,6 +5,7 @@ import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
+import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
 import {
   renderTemplate,
   NEWS_NURTURE_TEMPLATE,
@@ -124,6 +125,12 @@ export const getCampaignDetail = async (req, res) => {
         SUPPRESSED: enrollments.filter(
           (e) => e.status === "EXITED" && e.exitedReason === "SUPPRESSED",
         ).length,
+        // Enrollments stopped because the workspace lost its email/SMS
+        // credentials mid-sequence. Broken out so this reads as a setup problem
+        // the tenant can fix, not as leads that opted out.
+        NOT_CONFIGURED: enrollments.filter(
+          (e) => e.status === "EXITED" && e.exitedReason === "NOT_CONFIGURED",
+        ).length,
       },
     };
 
@@ -183,10 +190,21 @@ export const updateCampaign = async (req, res) => {
 
     const campaign = await prisma.campaign.findFirst({
       where: { id, companyId: req.user.companyId },
+      include: { steps: { select: { type: true } } },
     });
 
     if (!campaign) {
       return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    if (campaign.status !== "Active" && status === "Active") {
+      const missing = await missingChannelsForSteps(req.user.companyId, campaign.steps);
+      if (missing.length) {
+        return res.status(400).json({
+          message: notConfiguredMessage(missing, "this campaign"),
+          missingChannels: missing,
+        });
+      }
     }
 
     const updated = await prisma.campaign.update({
@@ -327,6 +345,17 @@ export const updateCampaignSteps = async (req, res) => {
       });
     }
 
+   
+    if (campaign.status === "Active") {
+      const missing = await missingChannelsForSteps(req.user.companyId, steps);
+      if (missing.length) {
+        return res.status(400).json({
+          message: notConfiguredMessage(missing, "these steps"),
+          missingChannels: missing,
+        });
+      }
+    }
+
     await prisma.$transaction([
       prisma.campaign.update({
         where: { id },
@@ -409,6 +438,19 @@ export const enrollCampaign = async (req, res) => {
 
     if (!campaign) {
       return res.status(404).json({ message: "Campaign not found" });
+    }
+
+    // Same gate as launching: enrolling into a campaign this workspace cannot
+    // deliver on would consume the leads without sending anything.
+    const missingEnrollChannels = await missingChannelsForSteps(
+      req.user.companyId,
+      campaign.steps,
+    );
+    if (missingEnrollChannels.length) {
+      return res.status(400).json({
+        message: notConfiguredMessage(missingEnrollChannels, "this campaign"),
+        missingChannels: missingEnrollChannels,
+      });
     }
 
     const uniqueLeadIds = Array.from(new Set(leadIds));
@@ -809,7 +851,7 @@ export const generateCampaignCopy = async (req, res) => {
     if (!content) {
       return res.status(502).json({
         message:
-          "The AI provider returned nothing. This is usually a rejected API key, an expired plan, or a rate limit — check the key in Settings > AI Config, then try again.",
+          "AI drafting did not return anything this time. Please try again in a moment — if it keeps happening, contact support.",
       });
     }
 
@@ -827,7 +869,7 @@ export const generateCampaignCopy = async (req, res) => {
   } catch (error) {
     console.error("[Generate Copy] Error:", error);
     return res.status(500).json({
-      message: `Could not generate the copy: ${error.message}. Your draft has not been changed — check Settings > AI Config, and the server logs if this keeps happening.`,
+      message: `Could not generate the copy: ${error.message}. Your draft has not been changed — please try again, and contact support if this keeps happening.`,
     });
   }
 };

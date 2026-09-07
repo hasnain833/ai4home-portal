@@ -340,13 +340,30 @@ export const runNurtureCampaign = inngest.createFunction(
         return { channel: currentStep.type, attempted: false };
       });
 
+      // A workspace that has lost its credentials cannot deliver anything, and
+      // advancing would consume the rest of the sequence sending nothing that
+      // could ever be re-sent. Exit the enrollment instead, leaving the step
+      // pointer where it stopped so the record shows how far it got.
+      if (sendResult.attempted && sendResult.outcome === "not_configured") {
+        const exited = await step.run(`exit-not-configured-${currentStep.position}`, async () => {
+          await prisma.campaignEnrollment.update({
+            where: { id: enrollment.id },
+            data: { status: "EXITED", exitedReason: "NOT_CONFIGURED" },
+          });
+          console.warn(
+            `[Nurture] Step ${currentStep.position}: ${sendResult.channel} not configured — enrollment ${enrollment.id} exited.`,
+          );
+          return { status: "exited", reason: "NOT_CONFIGURED" };
+        });
+        return exited;
+      }
+
       await step.run(`record-step-${currentStep.position}`, async () => {
         if (sendResult.attempted && sendResult.success) {
           console.log(`[Nurture] Step ${currentStep.position}: ${sendResult.channel} sent successfully.`);
         } else if (sendResult.attempted) {
-          const verb = sendResult.outcome === "not_configured" ? "skipped" : "failed";
           console.warn(
-            `[Nurture] Step ${currentStep.position}: ${sendResult.channel} ${verb} (${sendResult.outcome}) — ${sendResult.error}`,
+            `[Nurture] Step ${currentStep.position}: ${sendResult.channel} failed (${sendResult.outcome}) — ${sendResult.error}`,
           );
         } else {
           console.log(`[Nurture] Step ${currentStep.position}: no ${currentStep.type} contact channel on lead; nothing sent.`);

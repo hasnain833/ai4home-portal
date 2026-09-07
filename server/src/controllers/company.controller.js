@@ -1,12 +1,9 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
-import { encrypt, decryptSafe } from "../lib/crypto.js";
 import { normalizeNewsSources } from "../lib/news-sources.js";
 import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
 import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
-import { Templates, SmsTemplates } from "../services/templates.js";
-import { sendSms, smsSent } from "../services/sms.service.js";
-import { TENANT_AI_PROVIDERS, invalidateAiConfigCache } from "../lib/ai-config.js";
+import { Templates } from "../services/templates.js";
 import { hasSalesPermission } from "../lib/permissions.js";
 
 export const getCompany = async (req, res) => {
@@ -19,31 +16,8 @@ export const getCompany = async (req, res) => {
     const company = await prisma.company.findUnique({
       where: { id: session.companyId || "demo-company" }
     });
-    const aiIntegrations = await prisma.integration.findMany({
-      where: {
-        companyId: session.companyId || "demo-company",
-        platform: { in: TENANT_AI_PROVIDERS },
-      },
-      select: { platform: true, apiKey: true, isActive: true },
-    });
-    const mask = (value) => {
-      const plain = decryptSafe(value || "");
-      return plain ? `••••${plain.slice(-4)}` : "";
-    };
-    const keyOf = (platform) =>
-      aiIntegrations.find((i) => i.platform === platform)?.apiKey;
-    const activeProvider =
-      aiIntegrations.find((i) => i.isActive)?.platform?.toLowerCase() ||
-      "platform";
 
-    return res.json({
-      ...(company || {}),
-      aiProvider: activeProvider,
-      aiPlatformGrant: company?.aiPlatformGrant || null,
-      aiAnthropicKeyMasked: mask(keyOf("ANTHROPIC")),
-      aiOpenAiKeyMasked: mask(keyOf("OPENAI")),
-      aiGroqKeyMasked: mask(keyOf("GROQ")),
-    });
+    return res.json({ ...(company || {}) });
   } catch (error) {
     console.error("Error fetching company details:", error);
     return res.status(500).json({ message: "Error fetching company" });
@@ -96,14 +70,9 @@ export const updateCompany = async (req, res) => {
     const sent = (fields) => fields.filter((f) => req.body[f] !== undefined);
     const refusedSettings = canManageSettings ? [] : sent(SETTINGS_FIELDS);
     const refusedCompliance = isAdmin ? [] : sent(COMPLIANCE_FIELDS);
-    const aiFieldsSent = ["aiProvider", "aiAnthropicKey", "aiOpenAiKey", "aiGroqKey"].filter(
-      (f) => req.body[f] !== undefined,
-    );
-    const refusedAi = canManageSettings ? [] : aiFieldsSent;
-
     // Named explicitly so a caller can tell which field was refused rather than
     // guessing why the whole request failed.
-    const refused = [...refusedSettings, ...refusedCompliance, ...refusedAi];
+    const refused = [...refusedSettings, ...refusedCompliance];
     if (refused.length) {
       return res.status(403).json({
         message: `You do not have permission to change: ${refused.join(", ")}.`,
@@ -139,17 +108,6 @@ export const updateCompany = async (req, res) => {
       data.newsSources = normalizeNewsSources(data.newsSources);
     }
 
-    const aiProvider = ["platform", ...TENANT_AI_PROVIDERS.map((p) => p.toLowerCase())].includes(
-      req.body.aiProvider,
-    )
-      ? req.body.aiProvider
-      : undefined;
-    const aiKeys = {
-      ANTHROPIC: typeof req.body.aiAnthropicKey === "string" ? req.body.aiAnthropicKey.trim() : undefined,
-      OPENAI: typeof req.body.aiOpenAiKey === "string" ? req.body.aiOpenAiKey.trim() : undefined,
-      GROQ: typeof req.body.aiGroqKey === "string" ? req.body.aiGroqKey.trim() : undefined,
-    };
-
     const clampHour = (v, fallback) => {
       const n = Number(v);
       return Number.isFinite(n) ? Math.min(24, Math.max(0, Math.round(n))) : fallback;
@@ -166,18 +124,6 @@ export const updateCompany = async (req, res) => {
       where: { id: companyId },
       data,
     });
-
-    if (aiProvider !== undefined || Object.values(aiKeys).some(Boolean)) {
-      for (const platform of TENANT_AI_PROVIDERS) {
-        await saveAiIntegration(
-          companyId,
-          platform,
-          aiProvider === platform.toLowerCase(),
-          aiKeys[platform],
-        );
-      }
-      invalidateAiConfigCache(companyId);
-    }
 
     if (
       data.campaignExitConditions !== undefined ||
@@ -209,30 +155,6 @@ export const updateCompany = async (req, res) => {
     return res.status(500).json({ message: "Error updating company" });
   }
 };
-
-async function saveAiIntegration(companyId, platform, isActive, apiKey) {
-  const existing = await prisma.integration.findFirst({
-    where: { companyId, platform },
-    select: { id: true },
-  });
-  const data = {
-    isActive,
-    environment: "production",
-    ...(apiKey && !apiKey.includes("••••") ? { apiKey: encrypt(apiKey) } : {}),
-  };
-  if (existing) {
-    await prisma.integration.update({ where: { id: existing.id }, data });
-  } else if (isActive || apiKey) {
-    await prisma.integration.create({
-      data: {
-        companyId,
-        platform,
-        ...data,
-      },
-    });
-  }
-}
-
 export const getCompanyBranding = async (req, res) => {
   try {
     const id = req.query.id;
@@ -376,107 +298,3 @@ export const uploadCompanyLogo = async (req, res) => {
   }
 };
 
-/**
- * A tenant admin asking the platform administrator to grant this workspace a
- * platform AI key. The grant itself is issued from Admin -> AI Keys; this only
- * raises the request and notifies the administrator by email and SMS.
- */
-export const requestPlatformKey = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session) return res.status(401).json({ message: "Unauthorized" });
-    if (session.role !== "ADMIN" && session.role !== "admin") {
-      return res.status(403).json({ message: "Only a workspace admin can request a platform key." });
-    }
-
-    const company = await prisma.company.findUnique({
-      where: { id: session.companyId || "demo-company" },
-    });
-    if (!company) return res.status(404).json({ message: "Company not found" });
-
-    if (company.aiPlatformGrant) {
-      return res
-        .status(400)
-        .json({ message: "Your workspace already has a platform key. No request is needed." });
-    }
-
-    // One request per day: the administrator is notified by SMS, so a button
-    // that can be pressed repeatedly is a way to spam them.
-    const lastRequest = company.aiPlatformKeyRequestedAt;
-    if (lastRequest && Date.now() - new Date(lastRequest).getTime() < 24 * 60 * 60 * 1000) {
-      return res.status(429).json({
-        message: "A request was already sent in the last 24 hours. Your administrator has it.",
-        requestedAt: lastRequest,
-      });
-    }
-
-    const provider = typeof req.body?.provider === "string" ? req.body.provider : null;
-    const requesterName = session.name || session.email || "A workspace admin";
-    const requesterEmail = session.email || "unknown";
-
-    await prisma.company.update({
-      where: { id: company.id },
-      data: {
-        aiPlatformKeyRequestedAt: new Date(),
-        aiPlatformKeyRequestedBy: requesterEmail,
-      },
-    });
-
-    // Notification failures must not lose the request: it is already recorded,
-    // and the administrator can still see it in the admin screen.
-    const adminNotifyEmail = process.env.ADMIN_NOTIFY_EMAIL;
-    const adminNotifyPhone = process.env.ADMIN_NOTIFY_PHONE;
-    const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/ai-keys`;
-    const delivery = { email: false, sms: false };
-
-    try {
-      if (adminNotifyEmail) {
-        await MailService.sendEmail({
-          to: adminNotifyEmail,
-          subject: `Platform AI key requested: ${company.name}`,
-          html: Templates.getPlatformKeyRequestEmail(
-            company.name,
-            requesterName,
-            requesterEmail,
-            provider,
-            adminUrl,
-          ),
-          allowPlatformSender: true,
-        });
-        delivery.email = true;
-      } else {
-        console.warn("[Platform Key] ADMIN_NOTIFY_EMAIL missing - skipping admin email.");
-      }
-    } catch (mailError) {
-      console.error("[Platform Key] Failed to email the administrator:", mailError);
-    }
-
-    try {
-      if (adminNotifyPhone) {
-        const sms = await sendSms({
-          to: adminNotifyPhone,
-          tag: "platform-key-request",
-          body: SmsTemplates.getPlatformKeyRequestSms(company.name, requesterEmail),
-          smsConfig: "SYSTEM",
-        });
-        delivery.sms = smsSent(sms);
-        if (!delivery.sms) {
-          console.warn(`[Platform Key] Admin SMS not delivered (${sms.outcome}): ${sms.error}`);
-        }
-      } else {
-        console.warn("[Platform Key] ADMIN_NOTIFY_PHONE missing - skipping admin SMS.");
-      }
-    } catch (smsError) {
-      console.error("[Platform Key] Failed to text the administrator:", smsError);
-    }
-
-    return res.json({
-      message: "Request sent. Your administrator will be in touch once it is reviewed.",
-      requestedAt: new Date().toISOString(),
-      delivery,
-    });
-  } catch (error) {
-    console.error("[Platform Key] Request failed:", error);
-    return res.status(500).json({ message: "Could not send the request. Please try again." });
-  }
-};

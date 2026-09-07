@@ -3,6 +3,7 @@ import { calculateWarrantyYear } from "../lib/utils.js";
 import { generateTicketId } from "../lib/ticket-utils.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { getMessagingConfig } from "../lib/messaging-config.js";
+import { MAIL_OUTCOME } from "../services/mail-service.js";
 import { syncTicketToERP } from "../services/erp-service.js";
 
 export const getTickets = async (req, res) => {
@@ -222,6 +223,8 @@ export const updateTicket = async (req, res) => {
       data: updatedData,
     });
 
+    let notice = null;
+
     // If status changed, sync to ERP (escalation/resolution — SRS §4.2.7) and email the homeowner
     if (status && status !== oldTicket.status) {
       try {
@@ -248,6 +251,14 @@ export const updateTicket = async (req, res) => {
 
           if (mailResult.blocked) {
             console.warn(`[Ticket API] Status email suppressed for ${oldTicket.homeowner.email}: ${mailResult.reason}`);
+          } else if (mailResult.outcome === MAIL_OUTCOME.NOT_CONFIGURED) {
+            // The ticket update itself stands — only the homeowner notice did
+            // not go out. Surfaced on the response so staff know to follow up
+            // rather than assuming the homeowner was told.
+            notice =
+              "Ticket updated, but the homeowner was not emailed: email is not configured for this workspace. " +
+              "Add your SMTP credentials in Settings > Email, SMS & News.";
+            console.warn(`[Ticket API] Status email not sent to ${oldTicket.homeowner.email} — email not configured.`);
           } else if (!mailResult.success) {
             console.error("[Ticket API] Mail failed to send but ticket updated:", mailResult.error);
           }
@@ -257,7 +268,7 @@ export const updateTicket = async (req, res) => {
       }
     }
 
-    return res.json(ticket);
+    return res.json(notice ? { ...ticket, notice } : ticket);
   } catch (error) {
     console.error("[Ticket API] Error updating ticket:", error);
     return res.status(500).json({ message: "Error updating ticket" });
