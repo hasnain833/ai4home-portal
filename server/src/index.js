@@ -40,6 +40,8 @@ import adminRouter from "./routes/admin.js";
 import communitiesRouter from "./routes/communities.js";
 import homeownersRouter from "./routes/homeowners.js";
 import usersRouter from "./routes/users.js";
+import notificationsRouter from "./routes/notifications.js";
+import ticketAppointmentsRouter from "./routes/ticket-appointments.js";
 import deadLetterRouter from "./routes/dead-letter.js";
 import privacyRouter from "./routes/privacy.js";
 import salesAgentRouter from "./routes/sales-agent.js";
@@ -70,6 +72,9 @@ import {
   automationDateTriggers,
 } from "./inngest/functions/automation.js";
 import { salesforceSyncCron } from "./inngest/functions/salesforce-cron.js";
+import { ticketReminders } from "./inngest/functions/ticket-reminders.js";
+import { warrantyConversationRetention } from "./inngest/functions/warranty-conversation-retention.js";
+import { ticketAppointmentReminders } from "./inngest/functions/appointment-reminders.js";
 
 assertEncryptionKeyOnBoot();
 assertWebhookSecretOnBoot();
@@ -170,6 +175,8 @@ app.use("/api/homeowners", ...warrantyGuard, homeownersRouter);
 app.use("/api/warranty/chat", ...warrantyGuard, warrantyChatRouter);
 app.use("/api/webhooks/warranty", warrantyWebhooksRouter);
 app.use("/api/users", usersRouter);
+app.use("/api/notifications", ...warrantyGuard, notificationsRouter);
+app.use("/api/ticket-appointments", ...warrantyGuard, ticketAppointmentsRouter);
 app.use(
   "/api/inngest",
   serve({
@@ -190,6 +197,9 @@ app.use(
       runAutomationRules,
       automationDateTriggers,
       salesforceSyncCron,
+      ticketReminders,
+      ticketAppointmentReminders,
+      warrantyConversationRetention,
     ],
   }),
 );

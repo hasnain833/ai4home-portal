@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { useAuth } from "@/contexts/AuthContext";
+import { TicketAppointments } from "@/components/warranty/TicketAppointments";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +34,14 @@ import { toast } from "sonner";
 
 type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "ESCALATED";
 type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+
+/** One knowledge-base document the agent drew on, as buildKbReferences stores it. */
+type KbReference = {
+  documentId?: string;
+  name?: string;
+  category?: string | null;
+  scope?: string | null;
+};
 
 type TicketDetailData = {
   id: string;
@@ -198,6 +208,7 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
 
 export default function TicketDetail() {
   const { id } = useParams();
+  const { user } = useAuth();
   const [ticket, setTicket] = useState<TicketDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -507,6 +518,12 @@ export default function TicketDetail() {
                 </CardContent>
               </Card>
 
+              {/* Repair visits between the trade and the homeowner */}
+              <TicketAppointments
+                ticketId={String(id)}
+                canSchedule={user?.role === "admin" || user?.role === "staff"}
+              />
+
               {/* Warranty Agent Conversation Summary */}
               {ticket.chatSummary && (
                 <Card className="border-amber-500/20 bg-linear-to-br from-slate-900 to-slate-950 text-slate-100 shadow-md overflow-hidden">
@@ -529,11 +546,15 @@ export default function TicketDetail() {
 
               {/* Referenced KB Documents */}
               {ticket.kbReferences && (() => {
-                let parsedRefs: string[] = [];
+                // buildKbReferences writes objects, not strings. A bare string is
+                // still accepted in case an older ticket stored only the name.
+                let parsedRefs: KbReference[] = [];
                 try {
                   const parsed = JSON.parse(ticket.kbReferences);
                   if (Array.isArray(parsed)) {
-                    parsedRefs = parsed;
+                    parsedRefs = parsed
+                      .map((r) => (typeof r === "string" ? { name: r } : r))
+                      .filter((r): r is KbReference => !!r && typeof r === "object");
                   }
                 } catch (e) {
                   console.warn("Failed to parse ticket.kbReferences JSON:", e);
@@ -554,14 +575,25 @@ export default function TicketDetail() {
                     </div>
                     <CardContent className="p-6">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {parsedRefs.map((ref, idx) => (
-                          <div key={idx} className="flex items-center gap-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800/40 hover:border-teal-500/30 transition duration-200">
-                            <div className="p-1.5 bg-teal-500/10 rounded-lg text-teal-400">
-                              <FileText className="h-4 w-4" />
+                        {parsedRefs.map((ref, idx) => {
+                          const label = ref.name || ref.documentId || "Untitled document";
+                          const meta = [
+                            ref.category,
+                            ref.scope === "PLATFORM" ? "Platform" : ref.scope === "COMPANY" ? "Company" : null,
+                          ].filter(Boolean).join(" · ");
+
+                          return (
+                            <div key={ref.documentId || idx} className="flex items-center gap-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800/40 hover:border-teal-500/30 transition duration-200">
+                              <div className="p-1.5 bg-teal-500/10 rounded-lg text-teal-400 shrink-0">
+                                <FileText className="h-4 w-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <span className="block text-sm font-medium text-slate-200 truncate" title={label}>{label}</span>
+                                {meta && <span className="text-[10px] text-slate-400">{meta}</span>}
+                              </div>
                             </div>
-                            <span className="text-sm font-medium text-slate-200 truncate" title={ref}>{ref}</span>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </CardContent>
                   </Card>

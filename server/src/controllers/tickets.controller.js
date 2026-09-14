@@ -1,10 +1,10 @@
 import prisma from "../lib/prisma.js";
 import { calculateWarrantyYear } from "../lib/utils.js";
-import { generateTicketId } from "../lib/ticket-utils.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { getMessagingConfig } from "../lib/messaging-config.js";
 import { MAIL_OUTCOME } from "../services/mail-service.js";
 import { syncTicketToERP } from "../services/erp-service.js";
+import { notifyTicketCreated } from "../services/notification-service.js";
 
 export const getTickets = async (req, res) => {
   try {
@@ -92,11 +92,9 @@ export const createTicket = async (req, res) => {
 
     const warrantyYear = calculateWarrantyYear(property.coeDate);
 
-    const ticketId = await generateTicketId();
-
     const ticket = await prisma.ticket.create({
       data: {
-        id: ticketId,
+        // id omitted — Supabase/Prisma auto-assigns a cuid
         issueType,
         ticketType,
         propertyId,
@@ -117,7 +115,16 @@ export const createTicket = async (req, res) => {
       console.error(`[Ticket API] ERP sync on creation failed for #${ticket.id}:`, erpError.message);
     }
 
-    return res.json(ticket);
+    // Notify the homeowner and every company admin. The in-portal notification
+    // always lands; email only goes out if this workspace has SMTP credentials.
+    const notifyResult = await notifyTicketCreated(ticket.id);
+    const notice =
+      notifyResult.emailConfigured === false
+        ? "Ticket created and visible in the portal, but no email was sent: email is not " +
+          "configured for this workspace. Add your SMTP credentials in Settings > Email, SMS & News."
+        : null;
+
+    return res.json(notice ? { ...ticket, notice } : ticket);
   } catch (error) {
     console.error("Failed to create ticket:", error);
     return res.status(500).json({ message: "Failed to create ticket" });
@@ -200,7 +207,13 @@ export const updateTicket = async (req, res) => {
     }
 
     const updatedData = {};
-    if (status) updatedData.status = status;
+    if (status) {
+      updatedData.status = status;
+      // Reminders measure how long a ticket has sat OPEN, so any status change
+      // restarts the clock — including a re-open.
+      updatedData.reminderCount = 0;
+      updatedData.lastReminderAt = null;
+    }
     if (priority) updatedData.priority = priority;
 
     if (action === "approve") {

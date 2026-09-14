@@ -17,6 +17,16 @@ import {
 
 const MAX_TRACKED_KB_REFS = 12;
 
+/**
+ * Passages retrieved per turn.
+ *
+ * A diagnostic matrix is indexed one question per chunk, so this is a count of
+ * questions, not of pages: the largest problem code in the matrix runs to six,
+ * and retrieving three would hand the agent half a decision tree. The headroom
+ * above six leaves room for policy prose to come back alongside.
+ */
+const KB_PASSAGES = 8;
+
 const ORCHESTRATOR_TOOLS = {
   RESPOND: {
     name: "respond",
@@ -58,13 +68,23 @@ export function matchPropertyChoice(message, choices) {
   const raw = String(message || "").trim();
   if (!raw) return null;
 
+  const lower = raw.toLowerCase();
+
+  // An exact address settles it before the ordinal rule gets a chance.
+  //
+  // Choices are offered as buttons that send the address verbatim, so "3 Elm
+  // Street" arrives as a whole answer — but it also starts with a digit, and the
+  // ordinal rule below would read it as "the third one" and quietly pick a
+  // different home. Exactness beats position.
+  const exact = list.find((c) => String(c.address || "").trim().toLowerCase() === lower);
+  if (exact) return exact;
+
   const numeric = raw.match(/^\s*(?:#|option\s*|number\s*|no\.?\s*)?(\d{1,2})\b/i);
   if (numeric) {
     const index = Number(numeric[1]) - 1;
     if (index >= 0 && index < list.length) return list[index];
   }
 
-  const lower = raw.toLowerCase();
   const byAddress = list.filter((c) => {
     const address = String(c.address || "").toLowerCase();
     if (!address) return false;
@@ -101,20 +121,30 @@ function trackKbRefs(issueState, results) {
   issueState.kbRefs = merged.slice(-MAX_TRACKED_KB_REFS);
 }
 
+/**
+ * Returns both the rendered context block and the raw passages behind it.
+ *
+ * Production only needs the block, but the Prompt Lab shows the passages: a weak
+ * answer caused by a KB gap is indistinguishable from one caused by a bad prompt
+ * until you can see what the agent was actually handed.
+ */
 async function retrieveContext({ companyId, question, communityId, issueState }) {
   const q = String(question || "").trim();
-  if (!q) return KB_EMPTY_CONTEXT;
+  if (!q) return { context: KB_EMPTY_CONTEXT, results: [] };
 
   try {
-    const { results } = await kbQueryDetailed(companyId, q, 3, null, communityId);
+    const { results } = await kbQueryDetailed(companyId, q, KB_PASSAGES, null, communityId);
     if (results && results.length > 0) {
       trackKbRefs(issueState, results);
-      return results.map((r, i) => `[${i + 1}] ${r.name}: ${r.text}`).join("\n\n");
+      return {
+        context: results.map((r, i) => `[${i + 1}] ${r.name}: ${r.text}`).join("\n\n"),
+        results,
+      };
     }
-    return KB_EMPTY_CONTEXT;
+    return { context: KB_EMPTY_CONTEXT, results: [] };
   } catch (e) {
     console.error("KB retrieval failed:", e);
-    return KB_EMPTY_CONTEXT;
+    return { context: KB_EMPTY_CONTEXT, results: [] };
   }
 }
 
@@ -158,12 +188,11 @@ async function fileClaim({
 
   if (!filed) return { filed: null, classification };
 
-  const { ticket, ticketUrl } = filed;
-  const link = ticketUrl ? ` You can follow its progress here: ${ticketUrl}` : "";
+  const { ticket } = filed;
 
   const line = ticket.isEmergency
-    ? `I've logged this as an emergency ticket (${ticket.id}) and flagged it for our warranty team right away.${link}`
-    : `Thank you — I've logged ticket ${ticket.id} for your issue. Our warranty team will be in touch with next steps.${link}`;
+    ? `Your issue has been recorded and flagged as urgent. Our warranty team will contact you as soon as possible.`
+    : `Your issue has been recorded. Our warranty team will review it and contact you with next steps shortly.`;
 
   await prisma.warrantyConversation.update({
     where: { id: convo.id },
@@ -182,7 +211,7 @@ const NEEDS_IDENTITY =
 const EMERGENCY_NO_IDENTITY =
   "If anyone is in immediate danger, call 911 now. I have flagged this conversation as an emergency for our warranty team — please reply with your email address so I can file the ticket against your property.";
 
-export async function processWarrantyTurn({ company, convo, newMsg }) {
+export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode = false, draftPrompts = null }) {
   const transcript = [...(convo.transcript || []), { role: "user", content: newMsg, at: new Date().toISOString() }];
   const messages = toAnthropicMessages(transcript);
 
@@ -193,6 +222,27 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
   const issueState = { ...(convo.issueState || {}) };
   let communityId = null;
   let property = null;
+
+  /** Passages retrieved on this turn. Reported to the Prompt Lab; unused in production. */
+  let kbHits = [];
+
+  /**
+   * Choices the homeowner can pick from this turn, rendered as buttons.
+   *
+   * Carried beside the reply rather than numbered into it: a list the client can
+   * render is also a list it can turn into one tap, and picking from it produces
+   * an exact answer instead of "the second one" for the next turn to interpret.
+   */
+  let turnOptions = [];
+
+  // The sandbox grounds on the PLATFORM tier alone.
+  //
+  // It runs against whichever company happens to be first in the table, and
+  // retrieval unions PLATFORM with that company's own documents. Left as-is, a
+  // super-admin tuning the shared defaults would be reading answers shaped by one
+  // arbitrary tenant's private files. A null companyId matches no COMPANY row, so
+  // only the platform documents come back.
+  const kbCompanyId = sandboxMode ? null : company.id;
   if (propertyId) {
     property = await prisma.property.findUnique({ where: { id: propertyId } }).catch(() => null);
     communityId = property?.communityId || null;
@@ -213,10 +263,12 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
     issueState.propertyAddress = chosen.address || null;
     delete issueState.propertyChoices;
 
-    await prisma.warrantyConversation.update({
-      where: { id: convo.id },
-      data: { propertyId, homeownerId, issueState },
-    });
+    if (!sandboxMode) {
+      await prisma.warrantyConversation.update({
+        where: { id: convo.id },
+        data: { propertyId, homeownerId, issueState },
+      });
+    }
 
     return coverage;
   };
@@ -224,16 +276,18 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
   /** Persists the turn and returns the reply. Used by the deterministic branches. */
   const finish = async (replyText, nextPhase) => {
     const finalTranscript = [...transcript, { role: "agent", content: replyText, at: new Date().toISOString() }];
-    await prisma.warrantyConversation.update({
-      where: { id: convo.id },
-      data: {
-        transcript: finalTranscript,
-        phase: nextPhase,
-        issueState,
-        turnCount: { increment: 1 },
-      },
-    });
-    return { reply: replyText, phase: nextPhase };
+    if (!sandboxMode) {
+      await prisma.warrantyConversation.update({
+        where: { id: convo.id },
+        data: {
+          transcript: finalTranscript,
+          phase: nextPhase,
+          issueState,
+          turnCount: { increment: 1 },
+        },
+      });
+    }
+    return { reply: replyText, phase: nextPhase, kbHits, options: turnOptions };
   };
 
   if (currentPhase === "IDENTIFY" && Array.isArray(issueState.propertyChoices)) {
@@ -257,11 +311,19 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
   let tool = ORCHESTRATOR_TOOLS.RESPOND;
   let kbContext = "";
 
+  // Phase prompts: use draftPrompts from the lab if provided, else the shipped defaults.
+  const phasePrompts = {
+    INTAKE:   (draftPrompts?.INTAKE   ?? INTAKE_SYSTEM_PROMPT),
+    IDENTIFY: (draftPrompts?.IDENTIFY ?? IDENTIFY_SYSTEM_PROMPT),
+    DIAGNOSE: (draftPrompts?.DIAGNOSE ?? DIAGNOSTIC_SYSTEM_PROMPT),
+    RESOLVE:  (draftPrompts?.RESOLVE  ?? RESOLUTION_SYSTEM_PROMPT),
+  };
+
   // 2. Select Agent based on Phase
   if (currentPhase === "INTAKE") {
-    systemPromptTemplate = INTAKE_SYSTEM_PROMPT;
+    systemPromptTemplate = phasePrompts.INTAKE;
   } else if (currentPhase === "IDENTIFY") {
-    systemPromptTemplate = IDENTIFY_SYSTEM_PROMPT;
+    systemPromptTemplate = phasePrompts.IDENTIFY;
     tool = {
       name: "identify_tools",
       description: "Respond or lookup property.",
@@ -276,7 +338,7 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
       }
     };
   } else if (currentPhase === "DIAGNOSE") {
-    systemPromptTemplate = DIAGNOSTIC_SYSTEM_PROMPT;
+    systemPromptTemplate = phasePrompts.DIAGNOSE;
     tool = {
       name: "diagnose_tools",
       description: "Respond or escalate emergency.",
@@ -292,14 +354,14 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
       }
     };
 
-    kbContext = await retrieveContext({
-      companyId: company.id,
+    ({ context: kbContext, results: kbHits } = await retrieveContext({
+      companyId: kbCompanyId,
       question: newMsg,
       communityId,
       issueState,
-    });
+    }));
   } else if (currentPhase === "RESOLVE") {
-    systemPromptTemplate = RESOLUTION_SYSTEM_PROMPT;
+    systemPromptTemplate = phasePrompts.RESOLVE;
     tool = {
       name: "resolve_tools",
       description: "Respond or create ticket.",
@@ -313,12 +375,12 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
         required: ["action"]
       }
     };
-    kbContext = await retrieveContext({
-      companyId: company.id,
+    ({ context: kbContext, results: kbHits } = await retrieveContext({
+      companyId: kbCompanyId,
       question: newMsg,
       communityId,
       issueState,
-    });
+    }));
   }
 
   const system = renderTemplate(systemPromptTemplate, {
@@ -338,7 +400,11 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
   });
 
   if (!input) {
-    return { reply: "I'm having trouble connecting to my system. Please try again in a moment." };
+    return {
+      reply: "I'm having trouble connecting to my system. Please try again in a moment.",
+      kbHits,
+      options: turnOptions,
+    };
   }
 
   let replyText = input.message || "";
@@ -379,8 +445,13 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
         nextPhase = "DIAGNOSE";
       } else if (properties.length > 1) {
         issueState.propertyChoices = properties.map((p) => ({ id: p.id, address: p.address }));
-        const propList = properties.map((p, i) => `${i + 1}. ${p.address}`).join("\n");
-        replyText = `I found multiple properties associated with that info. Which one is experiencing the issue?\n${propList}`;
+
+        // The addresses go out as options, not as a numbered list in the prose.
+        // matchPropertyChoice already resolves a full address, so a tap comes back
+        // as an exact answer. They stay on issueState either way, so the prompt can
+        // still see them if the homeowner types something unmatched instead.
+        turnOptions = properties.map((p) => p.address);
+        replyText = "I found multiple properties associated with that info. Which one is experiencing the issue?";
       } else {
         replyText = `I couldn't find a property matching "${input.query}". Could you double-check the email address on your warranty file?`;
       }
@@ -414,10 +485,12 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
         } else {
           replyText = `${input.message}\n\n${EMERGENCY_NO_IDENTITY}`;
           nextPhase = "IDENTIFY";
-          await prisma.warrantyConversation.update({
-            where: { id: convo.id },
-            data: { status: "ESCALATED" },
-          });
+          if (!sandboxMode) {
+            await prisma.warrantyConversation.update({
+              where: { id: convo.id },
+              data: { status: "ESCALATED" },
+            });
+          }
         }
       }
     } else if (input.transition_phase === "RESOLVE") {
@@ -425,32 +498,35 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
     }
   } else if (currentPhase === "RESOLVE") {
     if (input.action === "create_ticket" && ticketId) {
-      const url = ticketUrlFor(ticketId);
       replyText =
-        `Your issue is already logged as ticket ${ticketId} — the warranty team has it and will ` +
-        `reach out with next steps.${url ? ` You can follow its progress here: ${url}` : ""}`;
+        `Your issue has already been recorded. Our warranty team will be in touch with you shortly.`;
     } else if (input.action === "create_ticket") {
-      const description =
-        String(input.issue_summary || "").trim() ||
-        issueState.issueSummary ||
-        newMsg.trim();
-
-      const result = await fileClaim({
-        company,
-        convo,
-        transcript,
-        issueState,
-        homeownerId,
-        propertyId,
-        description,
-      });
-
-      if (result.filed) {
-        ticketId = result.ticketId;
-        replyText = result.line;
+      if (sandboxMode) {
+        // In sandbox mode, don't file a real ticket — just confirm the flow.
+        replyText = input.message || "[Sandbox] Your issue has been recorded. Our warranty team will contact you with next steps.";
       } else {
-        replyText = NEEDS_IDENTITY;
-        nextPhase = "IDENTIFY";
+        const description =
+          String(input.issue_summary || "").trim() ||
+          issueState.issueSummary ||
+          newMsg.trim();
+
+        const result = await fileClaim({
+          company,
+          convo,
+          transcript,
+          issueState,
+          homeownerId,
+          propertyId,
+          description,
+        });
+
+        if (result.filed) {
+          ticketId = result.ticketId;
+          replyText = result.line;
+        } else {
+          replyText = NEEDS_IDENTITY;
+          nextPhase = "IDENTIFY";
+        }
       }
     }
   }
@@ -515,7 +591,7 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
 
       if (ticketId) {
         await escalateWarrantyTicket(ticketId, { reason });
-        replyText += `\n\nI've escalated your ticket (${ticketId}) to our emergency queue.`;
+        replyText += `\n\nYour issue has been flagged as urgent and our warranty team will contact you as soon as possible.`;
         nextPhase = "RESOLVE";
       } else {
         const result = await fileClaim({
@@ -536,10 +612,12 @@ export async function processWarrantyTurn({ company, convo, newMsg }) {
         } else {
           replyText += `\n\n${EMERGENCY_NO_IDENTITY}`;
           nextPhase = "IDENTIFY";
-          await prisma.warrantyConversation.update({
-            where: { id: convo.id },
-            data: { status: "ESCALATED" },
-          });
+          if (!sandboxMode) {
+            await prisma.warrantyConversation.update({
+              where: { id: convo.id },
+              data: { status: "ESCALATED" },
+            });
+          }
         }
       }
     }

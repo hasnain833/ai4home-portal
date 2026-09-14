@@ -42,6 +42,7 @@ import {
   BookOpen,
   Globe,
   Building2,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -116,6 +117,37 @@ type ChatMessage = {
 
 const EMPTY_DRAFT: Draft = { systemTemplate: "", toolDescription: "", kbEmptyText: "" };
 
+const WARRANTY_PHASE_KEYS = ["INTAKE", "IDENTIFY", "DIAGNOSE", "RESOLVE"] as const;
+type WarrantyPhaseKey = (typeof WARRANTY_PHASE_KEYS)[number];
+type WarrantyDraft = Record<WarrantyPhaseKey, string>;
+const EMPTY_WARRANTY_DRAFT: WarrantyDraft = { INTAKE: "", IDENTIFY: "", DIAGNOSE: "", RESOLVE: "" };
+
+type WarrantyChatMessage = {
+  id: string;
+  role: "user" | "agent";
+  content: string;
+  phase?: string;
+  latencyMs?: number;
+  retrieved?: RetrievedChunk[];
+  options?: string[];
+};
+
+type AgentTab = "sales" | "warranty";
+
+const PHASE_LABELS: Record<WarrantyPhaseKey, string> = {
+  INTAKE: "Intake",
+  IDENTIFY: "Identify",
+  DIAGNOSE: "Diagnose",
+  RESOLVE: "Resolve",
+};
+
+const PHASE_DESCRIPTIONS: Record<WarrantyPhaseKey, string> = {
+  INTAKE: "Greets the homeowner and asks them to describe the issue.",
+  IDENTIFY: "Looks up the homeowner's account and property by email.",
+  DIAGNOSE: "Analyses the issue against the Warranty KB and gathers details.",
+  RESOLVE: "Confirms the issue and files a warranty ticket.",
+};
+
 export default function PromptLabPage() {
   const { user } = useAuth();
   const confirm = useConfirm();
@@ -149,6 +181,30 @@ export default function PromptLabPage() {
   const [previewMeta, setPreviewMeta] = useState<Record<string, unknown> | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  // ── Agent switcher ───────────────────────────────────────────────────────
+  const [agentTab, setAgentTab] = useState<AgentTab>("sales");
+
+  // ── Warranty state ───────────────────────────────────────────────────────
+  const [wLoading, setWLoading] = useState(false);
+  const [wDefaults, setWDefaults] = useState<WarrantyDraft>(EMPTY_WARRANTY_DRAFT);
+  const [wDraft, setWDraft] = useState<WarrantyDraft>(EMPTY_WARRANTY_DRAFT);
+  const [wPhaseTab, setWPhaseTab] = useState<WarrantyPhaseKey>("INTAKE");
+  const [wTab, setWTab] = useState<"prompt" | "kb">("prompt");
+  const [wVersions, setWVersions] = useState<PromptVersion[]>([]);
+  const [wTableReady, setWTableReady] = useState(true);
+  const [wLive, setWLive] = useState<LiveState | null>(null);
+  const [wVersionLabel, setWVersionLabel] = useState("");
+  const [wSaving, setWSaving] = useState(false);
+  const [wSettingLive, setWSettingLive] = useState(false);
+  const [wHistoryOpen, setWHistoryOpen] = useState(false);
+  const [wErrors, setWErrors] = useState<string[]>([]);
+  const [wWarnings, setWWarnings] = useState<string[]>([]);
+  const [wMessages, setWMessages] = useState<WarrantyChatMessage[]>([]);
+  const [wInput, setWInput] = useState("");
+  const [wSending, setWSending] = useState(false);
+  const [wChatPhase, setWChatPhase] = useState("INTAKE");
+  const wChatEndRef = useRef<HTMLDivElement>(null);
+
   const systemRef = useRef<HTMLTextAreaElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -166,7 +222,6 @@ export default function PromptLabPage() {
       setVersions(lab.versions || []);
       setLive(lab.live || null);
       setTableReady(lab.tableReady !== false);
-      // Pick up where the last session left off, otherwise the shipped prompt.
       setDraft(
         lab.currentDraft
           ? {
@@ -181,13 +236,38 @@ export default function PromptLabPage() {
     }
   }, []);
 
+  const loadWarranty = useCallback(async () => {
+    setWLoading(true);
+    try {
+      const res = await fetch("/api/admin/warranty-prompt-lab");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(data.message || "Could not load the warranty prompt lab."); return; }
+      setWDefaults(data.defaults || EMPTY_WARRANTY_DRAFT);
+      setWVersions(data.versions || []);
+      setWLive(data.live || null);
+      setWTableReady(data.tableReady !== false);
+      setWDraft(data.currentDraft ? {
+        INTAKE: data.currentDraft.INTAKE,
+        IDENTIFY: data.currentDraft.IDENTIFY,
+        DIAGNOSE: data.currentDraft.DIAGNOSE,
+        RESOLVE: data.currentDraft.RESOLVE,
+      } : data.defaults || EMPTY_WARRANTY_DRAFT);
+    } finally {
+      setWLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (user?.isSuperAdmin) load();
-  }, [user, load]);
+    if (user?.isSuperAdmin) { load(); loadWarranty(); }
+  }, [user, load, loadWarranty]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, sending]);
+
+  useEffect(() => {
+    wChatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [wMessages, wSending]);
 
   const isDefault = useMemo(
     () =>
@@ -458,6 +538,137 @@ export default function PromptLabPage() {
     );
   };
 
+  // ── Warranty action handlers ──────────────────────────────────────────────────
+
+  const sendWarrantyMessage = async (e: React.FormEvent | null, override?: string) => {
+    e?.preventDefault();
+    const text = (override ?? wInput).trim();
+    if (!text || wSending) return;
+
+    const userMsg: WarrantyChatMessage = { id: `wu-${Date.now()}`, role: "user", content: text };
+    const transcript = [...wMessages, userMsg];
+    setWMessages(transcript);
+    setWInput("");
+    setWSending(true);
+
+    try {
+      const res = await fetch("/api/admin/warranty-prompt-lab/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draft: wDraft,
+          phase: wChatPhase,
+          messages: transcript.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.message || "The warranty agent could not reply.");
+        setWMessages((prev) => prev.slice(0, -1));
+        setWInput(text);
+        return;
+      }
+      if (data.phase) setWChatPhase(data.phase);
+      setWMessages((prev) => [
+        ...prev,
+        { id: `wa-${Date.now()}`, role: "agent", content: data.reply || "",
+          phase: data.phase, latencyMs: data.latencyMs,
+          retrieved: Array.isArray(data.retrieved) ? data.retrieved : [],
+          options: Array.isArray(data.options) ? data.options : [] },
+      ]);
+    } catch {
+      toast.error("Could not reach the warranty agent.");
+      setWMessages((prev) => prev.slice(0, -1));
+      setWInput(text);
+    } finally {
+      setWSending(false);
+    }
+  };
+
+  const saveWarrantyVersion = async () => {
+    setWSaving(true);
+    try {
+      const res = await fetch("/api/admin/warranty-prompt-lab/versions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...wDraft, label: wVersionLabel }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setWErrors(data.errors || [data.message || "Could not save."]);
+        setWWarnings(data.warnings || []);
+        toast.error(data.message || "Could not save this version.");
+        return;
+      }
+      setWErrors([]);
+      setWWarnings(data.warnings || []);
+      setWVersionLabel("");
+      toast.success("Version saved.");
+      await loadWarranty();
+    } finally {
+      setWSaving(false);
+    }
+  };
+
+  const loadWarrantyVersion = (v: PromptVersion) => {
+    const pv = v as unknown as Record<string, string>;
+    setWDraft({ INTAKE: pv.INTAKE || "", IDENTIFY: pv.IDENTIFY || "",
+      DIAGNOSE: pv.DIAGNOSE || "", RESOLVE: pv.RESOLVE || "" });
+    setWErrors([]); setWWarnings([]);
+    setWHistoryOpen(false);
+    toast.success(`Loaded ${v.label || "version"} into the editor.`);
+  };
+
+  const setWarrantyVersionLive = async (v: PromptVersion, acknowledgeWarnings = false) => {
+    setWSettingLive(true);
+    try {
+      const res = await fetch(`/api/admin/warranty-prompt-lab/versions/${v.id}/set-live`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ acknowledgeWarnings }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.needsAcknowledgement) {
+        const ok = await confirm({
+          title: "Put this version live with warnings?",
+          description: (<div className="space-y-1.5"><p>This prompt goes live with warnings:</p>
+            <ul className="list-disc pl-4 space-y-0.5">{((data.warnings || []) as string[]).map((w) => <li key={w}>{w}</li>)}</ul>
+            <p>Real homeowners will see it immediately.</p></div>),
+          confirmText: "Set live anyway", destructive: true,
+        });
+        if (ok) await setWarrantyVersionLive(v, true);
+        return;
+      }
+      if (!res.ok) { toast.error(data.message || "Could not put that version live."); return; }
+      toast.success(`"${v.label || "Version"}" is now live.`);
+      setWHistoryOpen(false);
+      await loadWarranty();
+    } finally { setWSettingLive(false); }
+  };
+
+  const revertWarrantyToDefaults = async () => {
+    const ok = await confirm({
+      title: "Revert warranty agent to code defaults?",
+      description: "The live agent stops using the saved version and goes back to the prompts that ship in code. New conversations change immediately.",
+      confirmText: "Revert",
+    });
+    if (!ok) return;
+    setWSettingLive(true);
+    try {
+      const res = await fetch("/api/admin/warranty-prompt-lab/revert-to-defaults", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(data.message || "Could not revert."); return; }
+      toast.success(data.message || "Reverted to code defaults.");
+      await loadWarranty();
+    } finally { setWSettingLive(false); }
+  };
+
+  const deleteWarrantyVersion = async (v: PromptVersion) => {
+    const res = await fetch(`/api/admin/warranty-prompt-lab/versions/${v.id}`, { method: "DELETE" });
+    if (!res.ok) { toast.error("Could not delete that version."); return; }
+    toast.success("Version deleted.");
+    await loadWarranty();
+  };
+
   if (!user?.isSuperAdmin) {
     return (
       <div className="p-8 text-sm text-muted-foreground">
@@ -466,7 +677,7 @@ export default function PromptLabPage() {
     );
   }
 
-  if (loading) {
+  if (loading && wLoading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-[#b48c3c]" />
@@ -476,30 +687,62 @@ export default function PromptLabPage() {
 
   return (
     <div className="flex h-full min-h-150 flex-col gap-3">
-      {/* Heading */}
+      {/* Heading + Agent Switcher */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
           <FlaskConical className="h-5 w-5 text-[#b48c3c]" />
           Prompt Lab
         </h1>
+        {/* Agent switcher tabs */}
+        <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+          <button type="button" onClick={() => setAgentTab("sales")}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+              agentTab === "sales" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            <FlaskConical className="h-3.5 w-3.5" /> Sales Agent
+          </button>
+          <button type="button" onClick={() => setAgentTab("warranty")}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+              agentTab === "warranty" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            <ShieldCheck className="h-3.5 w-3.5" /> Warranty Agent
+          </button>
+        </div>
         <div className="flex items-center gap-2">
-          {isDefault ? (
-            <Badge variant="secondary">Matches shipped prompt</Badge>
+          {agentTab === "sales" ? (
+            <>
+              {isDefault ? (
+                <Badge variant="secondary">Matches shipped prompt</Badge>
+              ) : (
+                <Badge className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]">Edited</Badge>
+              )}
+              <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setHistoryOpen(true)}>
+                <History className="h-4 w-4" /> History
+                {versions.length > 0 && <span className="text-muted-foreground">({versions.length})</span>}
+              </Button>
+            </>
           ) : (
-            <Badge className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]">Edited</Badge>
+            <>
+              <Badge variant="secondary">
+                {wLive?.source === "live-version" ? "Custom prompt live" : "Matches shipped prompt"}
+              </Badge>
+              <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setWHistoryOpen(true)}>
+                <History className="h-4 w-4" /> History
+                {wVersions.length > 0 && <span className="text-muted-foreground">({wVersions.length})</span>}
+              </Button>
+            </>
           )}
-          <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setHistoryOpen(true)}>
-            <History className="h-4 w-4" /> History
-            {versions.length > 0 && <span className="text-muted-foreground">({versions.length})</span>}
-          </Button>
         </div>
         <p className="w-full text-xs text-muted-foreground">
-          Edit the prompt, add knowledge-base documents, and talk to the agent. Saving keeps a draft
-          for testing; only <strong>Set live</strong> puts a prompt in front of real leads.
+          {agentTab === "sales"
+            ? <>Edit the prompt, add knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> puts a prompt in front of real leads.</>
+            : <>Edit the four phase prompts the warranty agent uses, add platform knowledge-base documents, and test both in sandbox mode. No tickets or emails are sent during testing.</>}
         </p>
       </div>
 
-      {/* What the running agent is actually using. */}
+      {agentTab === "sales" && (
+        <>
+          {/* What the running agent is actually using. */}
       <div
         className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-xs ${
           live?.source === "live-version"
@@ -872,6 +1115,260 @@ export default function PromptLabPage() {
           </CardContent>
         </Card>
       </div>
+      </>
+      )}
+
+      {agentTab === "warranty" && (
+        <>
+          {/* Warranty Agent Live Banner */}
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-xs ${
+              wLive?.source === "live-version"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                : "border-border bg-muted/40 text-muted-foreground"
+            }`}>
+            <span className="flex items-center gap-1.5 font-semibold"><Radio className="h-3.5 w-3.5" />Live agent</span>
+            {wLive?.source === "live-version" ? (
+              <span>running <strong>{wLive.label || "an unlabelled version"}</strong>
+                {wLive.setLiveByName && ` — set live by ${wLive.setLiveByName}`}
+                {wLive.setLiveAt && ` on ${new Date(wLive.setLiveAt).toLocaleDateString()}`}
+              </span>
+            ) : (<span>running the prompts that ship in code. No lab version has been set live.</span>)}
+            <div className="ml-auto flex items-center gap-1.5">
+              {wLive?.source === "live-version" && (
+                <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" disabled={wSettingLive} onClick={revertWarrantyToDefaults}>
+                  <Undo2 className="h-3.5 w-3.5" /> Revert to code
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setWHistoryOpen(true)}>
+                Choose a version to set live
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 mt-3">
+            {/* Warranty Prompt Editor */}
+            <Card className="flex min-h-0 flex-col overflow-hidden">
+              <CardHeader className="shrink-0 flex-col justify-between space-y-3 py-3">
+                {/*
+                  Two switchers, nested. The four phases only mean something while
+                  editing a prompt, so they sit under Prompt rather than competing
+                  with the Knowledge base tab for the same row.
+                */}
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+                    <button type="button" onClick={() => setWTab("prompt")}
+                      className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                        wTab === "prompt" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                      }`}>
+                      <FlaskConical className="h-3.5 w-3.5" /> Prompt
+                    </button>
+                    <button type="button" onClick={() => setWTab("kb")}
+                      className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                        wTab === "kb" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                      }`}>
+                      <BookOpen className="h-3.5 w-3.5" /> Knowledge base
+                    </button>
+                  </div>
+                  {wTab === "prompt" && (
+                    <div className="flex items-center gap-1.5">
+                      <Button variant="ghost" size="sm" className="gap-1.5"
+                        onClick={() => { setWDraft(wDefaults); setWErrors([]); setWWarnings([]); toast.success("Reset to the default shipped prompts."); }}>
+                        <RotateCcw className="h-3.5 w-3.5" /> Reset all
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                {wTab === "prompt" && (
+                  <>
+                    <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5 w-fit">
+                      {WARRANTY_PHASE_KEYS.map(key => (
+                        <button key={key} type="button" onClick={() => setWPhaseTab(key)}
+                          className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                            wPhaseTab === key ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                          }`}>
+                          {PHASE_LABELS[key]}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      <strong>{PHASE_LABELS[wPhaseTab]} phase:</strong> {PHASE_DESCRIPTIONS[wPhaseTab]}
+                    </p>
+                  </>
+                )}
+              </CardHeader>
+              <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pb-3">
+                {wTab === "kb" ? (
+                  <KnowledgeBasePanel agent="warranty" />
+                ) : (
+                  <>
+                <Textarea
+                  value={wDraft[wPhaseTab]}
+                  onChange={(e) => setWDraft(d => ({ ...d, [wPhaseTab]: e.target.value }))}
+                  className="min-h-0 flex-1 resize-none font-mono text-[11px] leading-relaxed"
+                  placeholder="System prompt instructions..."
+                />
+
+                {wErrors.length > 0 && (
+                  <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    <ul className="list-inside list-disc">
+                      {wErrors.map((e, i) => (<li key={i}>{e}</li>))}
+                    </ul>
+                  </div>
+                )}
+                {wWarnings.length > 0 && (
+                  <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                    <ul className="list-inside list-disc">
+                      {wWarnings.map((w, i) => (<li key={i}>{w}</li>))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex items-center gap-2 max-w-50">
+                    <Input placeholder="Version name (e.g. Beta v2)" value={wVersionLabel} onChange={(e) => setWVersionLabel(e.target.value)}
+                      className="h-8 text-xs bg-muted/50" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" className="h-8 gap-1.5 bg-[#b48c3c] hover:bg-[#b48c3c]/90 text-white" disabled={wSaving} onClick={saveWarrantyVersion}>
+                      {wSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                      Save version
+                    </Button>
+                  </div>
+                </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Warranty Test Chat Sandbox */}
+            <Card className="flex min-h-0 flex-col overflow-hidden bg-muted/20">
+              <CardHeader className="shrink-0 flex-row items-center justify-between space-y-0 py-3 pb-2 border-b">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold">Test Sandbox</span>
+                  <Badge variant="outline" className="bg-background text-[10px] tracking-wider uppercase font-medium">Phase: {wChatPhase}</Badge>
+                </div>
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                  onClick={() => { setWMessages([]); setWChatPhase("INTAKE"); }}>
+                  <RotateCcw className="h-3.5 w-3.5" /> Clear chat
+                </Button>
+              </CardHeader>
+              <CardContent className="flex min-h-0 flex-1 flex-col gap-0 p-0">
+                <div className="flex-1 overflow-y-auto p-4 pb-12 space-y-4">
+                  {wMessages.length === 0 && (
+                    <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
+                      <ShieldCheck className="mb-2 h-8 w-8 opacity-20" />
+                      <p>Start chatting to test the 4-phase warranty flow.</p>
+                      <p className="text-[11px] mt-1 opacity-70">No real tickets are filed in this sandbox.</p>
+                    </div>
+                  )}
+                  {wMessages.map((msg) => (
+                    <div key={msg.id} className={`flex w-full ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                      <div className={`relative max-w-[85%] rounded-lg px-3 py-2 text-sm shadow-sm ${
+                          msg.role === "user"
+                            ? "bg-[#b48c3c] text-white"
+                            : "bg-background border text-foreground"
+                        }`}>
+                        <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                        {msg.role === "agent" && msg.latencyMs && (
+                          <div className="mt-1 flex items-center justify-between gap-4 text-[10px] text-muted-foreground">
+                            <span>{msg.latencyMs}ms</span>
+                            {msg.retrieved && (
+                              <span>
+                                {msg.retrieved.length} KB passage{msg.retrieved.length === 1 ? "" : "s"}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/*
+                          Only the DIAGNOSE and RESOLVE phases retrieve, so an empty
+                          list here is expected during intake and identification.
+                        */}
+                        {/* Choices the agent offered. Clickable here too, so the
+                            property-selection path can actually be walked in the lab. */}
+                        {msg.role === "agent" && msg.options && msg.options.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {msg.options.map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                disabled={wSending}
+                                onClick={() => sendWarrantyMessage(null, opt)}
+                                className="rounded-full border border-border bg-background px-2.5 py-1 text-[11px] transition-colors hover:bg-accent disabled:opacity-50"
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {msg.role === "agent" && msg.retrieved && msg.retrieved.length > 0 && (
+                          <details className="group mt-1.5">
+                            <summary className="flex cursor-pointer list-none items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                              <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" />
+                              Knowledge base context ({msg.retrieved.length})
+                            </summary>
+                            <ul className="mt-1 space-y-1.5">
+                              {msg.retrieved.map((r, i) => (
+                                <li
+                                  key={`${r.documentId}-${i}`}
+                                  className="rounded border border-border/60 bg-background/60 px-2 py-1.5"
+                                >
+                                  <div className="mb-0.5 flex flex-wrap items-center gap-1">
+                                    {r.scope === "PLATFORM" ? (
+                                      <Globe className="h-2.5 w-2.5 text-muted-foreground" />
+                                    ) : (
+                                      <Building2 className="h-2.5 w-2.5 text-muted-foreground" />
+                                    )}
+                                    <span className="truncate text-[10px] font-medium">
+                                      {r.name || "Untitled"}
+                                    </span>
+                                    <span className="text-[9px] text-muted-foreground">{r.category}</span>
+                                    <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                                      {r.score.toFixed(3)}
+                                    </span>
+                                  </div>
+                                  <p className="line-clamp-3 text-[10px] leading-relaxed text-muted-foreground">
+                                    {r.excerpt}
+                                    {r.truncated && "…"}
+                                  </p>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {wSending && (
+                    <div className="flex w-full justify-start">
+                      <div className="flex items-center gap-1.5 rounded-lg border bg-background px-4 py-2.5 shadow-sm text-muted-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <span className="text-[11px] font-medium tracking-wide">THINKING</span>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={wChatEndRef} />
+                </div>
+
+                <form onSubmit={sendWarrantyMessage} className="shrink-0 flex items-end gap-2 border-t bg-background p-3">
+                  <Textarea value={wInput} onChange={(e) => setWInput(e.target.value)} onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendWarrantyMessage(e); }
+                    }}
+                    className="min-h-11 max-h-32 resize-none text-sm leading-relaxed"
+                    placeholder="Describe a warranty issue..."
+                    disabled={wSending}
+                  />
+                  <Button type="submit" disabled={!wInput.trim() || wSending} className="gap-2 shrink-0 bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90">
+                    {wSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Send
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
 
       {/* Version history */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
@@ -943,6 +1440,59 @@ export default function PromptLabPage() {
                     onClick={() => deleteVersion(v)}
                     title="Delete version"
                   >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Warranty Version history */}
+      <Dialog open={wHistoryOpen} onOpenChange={setWHistoryOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Warranty Agent Versions</DialogTitle>
+            <DialogDescription>
+              Load a version back into the editor, or set it live for homeowners.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto">
+            {wVersions.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Nothing saved yet. Edit the phase prompts, name the version, and hit Save.
+              </p>
+            )}
+            {wVersions.map((v) => (
+              <div key={v.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-semibold">{v.label || "Untitled version"}</span>
+                    {v.isActive && <Badge variant="secondary">Current draft</Badge>}
+                    {v.isLive && (
+                      <Badge className="gap-1 bg-emerald-600 text-white hover:bg-emerald-600">
+                        <Radio className="h-3 w-3" /> Live
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {new Date(v.createdAt).toLocaleString()}
+                    {v.createdByName ? ` · ${v.createdByName}` : ""}
+                    {v.isLive && v.setLiveByName ? ` · live by ${v.setLiveByName}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button size="sm" variant="outline" onClick={() => loadWarrantyVersion(v)}>Load</Button>
+                  {!v.isLive && (
+                    <Button size="sm" className="gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
+                      disabled={wSettingLive} onClick={() => setWarrantyVersionLive(v)}>
+                      {wSettingLive ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Radio className="h-3.5 w-3.5" />}
+                      Set live
+                    </Button>
+                  )}
+                  <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => deleteWarrantyVersion(v)} title="Delete version">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>

@@ -102,39 +102,59 @@ export default function AdminLayout({
         initial={false}
         animate={{ width: sidebarWidth }}
         transition={{ duration: 0.2, ease: "easeInOut" }}
-        className="fixed inset-y-0 left-0 z-50 hidden md:block bg-sidebar text-white shadow-xl">
+        className="fixed inset-y-0 left-0 z-50 hidden md:block overflow-hidden bg-sidebar text-white shadow-xl">
         <div className="flex h-full flex-col">
-          {/* Header */}
-          <div className="flex h-16 items-center justify-between px-4 mt-2">
+          {/*
+            Header. The rail is 80px when collapsed, which fits the logo (a 280x216
+            mark, so ~57px tall at h-11) but not the logo beside the wordmark and the
+            toggle. So the collapsed state drops the wordmark and stacks the toggle
+            underneath, rather than shrinking the logo to buy room.
+          */}
+          <div
+            className={`flex h-16 items-center mt-2 ${
+              sidebarExpanded ? "justify-between px-4" : "justify-center px-2"
+            }`}>
             <div className="flex min-w-0 items-center gap-3">
               <BrandLogo
                 onDark
                 alt="AI4HB — AI For Home Builders"
-                className={`${sidebarExpanded ? "h-11" : "h-7"} w-auto shrink-0 object-contain`}
+                className="h-11 w-auto shrink-0 object-contain"
               />
-              <div>
-                <p className="text-sm font-bold tracking-tight text-zinc-100">
-                  Aiforhomebuilder
-                </p>
-                {sidebarExpanded && (
+              {sidebarExpanded && (
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold tracking-tight text-zinc-100">
+                    Aiforhomebuilder
+                  </p>
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-[#b48c3c]">
                     Super Admin
                   </span>
-                )}
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleSidebar}
-              className="text-white hover:bg-white/10">
-              {sidebarExpanded ? (
-                <PanelLeftClose size={16} />
-              ) : (
-                <PanelLeftOpen size={16} />
+                </div>
               )}
-            </Button>
+            </div>
+            {sidebarExpanded && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSidebar}
+                className="shrink-0 text-white hover:bg-white/10"
+                title="Collapse sidebar">
+                <PanelLeftClose size={16} />
+              </Button>
+            )}
           </div>
+
+          {!sidebarExpanded && (
+            <div className="flex justify-center pt-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSidebar}
+                className="text-white hover:bg-white/10"
+                title="Expand sidebar">
+                <PanelLeftOpen size={16} />
+              </Button>
+            </div>
+          )}
 
           <div className="px-4 py-2">
             <Separator className="bg-white/10" />
@@ -149,13 +169,16 @@ export default function AdminLayout({
                   <motion.div
                     whileHover={{ x: 4 }}
                     transition={{ duration: 0.2 }}
-                    className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${
+                    title={sidebarExpanded ? undefined : item.name}
+                    className={`flex items-center rounded-md py-2 text-sm font-medium transition-all ${
+                      sidebarExpanded ? "space-x-3 px-3" : "justify-center px-0"
+                    } ${
                       isActive
                         ? "bg-white/10 text-white font-semibold"
                         : "text-white/80 hover:bg-white/10 hover:text-white border border-transparent"
                     }`}>
                     <item.icon className="h-5 w-5 shrink-0" />
-                    {sidebarExpanded && <span>{item.name}</span>}
+                    {sidebarExpanded && <span className="truncate">{item.name}</span>}
                   </motion.div>
                 </Link>
               );
@@ -168,17 +191,23 @@ export default function AdminLayout({
               variant="ghost"
               size="sm"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="w-full justify-start text-white/80 hover:bg-white/10 hover:text-white">
+              title={theme === "dark" ? "Light Mode" : "Dark Mode"}
+              className={`w-full text-white/80 hover:bg-white/10 hover:text-white ${
+                sidebarExpanded ? "justify-start" : "justify-center px-0"
+              }`}>
               {theme === "dark" ? (
-                <Sun className="h-4 w-4 mr-3" />
+                <Sun className={`h-4 w-4 ${sidebarExpanded ? "mr-3" : ""}`} />
               ) : (
-                <Moon className="h-4 w-4 mr-3" />
+                <Moon className={`h-4 w-4 ${sidebarExpanded ? "mr-3" : ""}`} />
               )}
               {sidebarExpanded &&
                 (theme === "dark" ? "Light Mode" : "Dark Mode")}
             </Button>
 
-            <div className="w-full flex items-center justify-between gap-3 rounded-xl bg-white/5 border border-white/5 px-3 py-2.5 text-sm transition-all">
+            <div
+              className={`w-full flex items-center rounded-xl bg-white/5 border border-white/5 py-2.5 text-sm transition-all ${
+                sidebarExpanded ? "justify-between gap-3 px-3" : "justify-center px-0"
+              }`}>
               <div className="flex items-center gap-3 overflow-hidden">
                 <div className="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center shrink-0 border border-white/10">
                   <span className="text-xs font-bold text-zinc-300">SA</span>

@@ -1,9 +1,9 @@
 import prisma from "./prisma.js";
 import { calculateWarrantyYear } from "./utils.js";
-import { generateTicketId } from "./ticket-utils.js";
 import { normalizePriority } from "./warranty-classify.js";
 import { syncTicketToERP } from "../services/erp-service.js";
 import { MessagingService } from "../services/messaging-service.js";
+import { notifyTicketCreated } from "../services/notification-service.js";
 
 const MAX_SUMMARY_TURNS = 14;
 const MAX_SUMMARY_CHARS = 4000;
@@ -118,11 +118,9 @@ export async function createWarrantyTicket({
   const priority = normalizePriority(classification?.priority, { isEmergency });
   const issueType = String(classification?.issueType || "General Warranty").slice(0, 80);
 
-  const ticketId = await generateTicketId();
-
   const ticket = await prisma.ticket.create({
     data: {
-      id: ticketId,
+      // id is omitted — Supabase/Prisma auto-assigns a cuid
       issueType,
       ticketType,
       description: String(description || classification?.summary || "").slice(0, 5000) || null,
@@ -145,6 +143,9 @@ export async function createWarrantyTicket({
   } catch (err) {
     console.error(`[Warranty Ticket] ERP sync failed for #${ticket.id}:`, err.message);
   }
+
+  // Agent-filed tickets notify exactly like portal-filed ones.
+  await notifyTicketCreated(ticket.id);
 
   console.log(
     `[Warranty Ticket] #${ticket.id} filed for ${homeowner.email} ` +

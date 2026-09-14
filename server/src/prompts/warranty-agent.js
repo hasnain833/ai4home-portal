@@ -131,8 +131,32 @@ export const WARRANTY_PLACEHOLDERS = [
 ];
 
 export const WARRANTY_PHASE_PROMPTS = {
-  INTAKE: INTAKE_SYSTEM_PROMPT,
+  INTAKE:   INTAKE_SYSTEM_PROMPT,
   IDENTIFY: IDENTIFY_SYSTEM_PROMPT,
   DIAGNOSE: DIAGNOSTIC_SYSTEM_PROMPT,
-  RESOLVE: RESOLUTION_SYSTEM_PROMPT,
+  RESOLVE:  RESOLUTION_SYSTEM_PROMPT,
 };
+
+const WARRANTY_PHASE_KEYS = ["INTAKE", "IDENTIFY", "DIAGNOSE", "RESOLVE"];
+
+/**
+ * Validates a warranty prompt draft (four phase keys).
+ * Returns { errors: string[], warnings: string[] }.
+ */
+export function validateWarrantyDraft(draft = {}) {
+  const errors = [];
+  const warnings = [];
+
+  for (const key of WARRANTY_PHASE_KEYS) {
+    const val = typeof draft[key] === "string" ? draft[key].trim() : "";
+    if (!val) {
+      errors.push(`The ${key} phase prompt is required and cannot be empty.`);
+    } else {
+      if (!val.includes("{{companyName}}")) {
+        warnings.push(`${key} phase: {{companyName}} placeholder is missing — the agent won't know which builder it represents.`);
+      }
+    }
+  }
+
+  return { errors, warnings };
+}

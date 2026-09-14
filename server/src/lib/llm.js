@@ -53,7 +53,6 @@ async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTo
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: maxTokens,
-      ...(temperature == null ? {} : { temperature }),
       system,
       tools: [tool],
       tool_choice: { type: "tool", name: tool.name },

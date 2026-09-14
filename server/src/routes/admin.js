@@ -39,6 +39,16 @@ import {
   reindexKbDocument,
   probeKb,
 } from "../admin/prompt-lab-kb.controller.js";
+import {
+  getWarrantyPromptLab,
+  saveWarrantyPromptVersion,
+  setCurrentWarrantyVersion,
+  deleteWarrantyVersion,
+  previewWarrantyPrompt,
+  warrantyPromptLabChat,
+  setWarrantyVersionLive,
+  revertWarrantyToDefaults,
+} from "../admin/warranty-prompt-lab.controller.js";
 import multer from "multer";
 import { handleUploadErrors } from "../middlewares/upload.js";
 
@@ -108,5 +118,15 @@ router.post(
   reindexKbDocument,
 );
 router.delete("/prompt-lab/kb/:documentId", requireAuth, deleteKbDocument);
+
+// Warranty Prompt Lab
+router.get("/warranty-prompt-lab", requireAuth, getWarrantyPromptLab);
+router.post("/warranty-prompt-lab/versions", requireAuth, saveWarrantyPromptVersion);
+router.post("/warranty-prompt-lab/versions/:versionId/set-current", requireAuth, setCurrentWarrantyVersion);
+router.post("/warranty-prompt-lab/versions/:versionId/set-live", requireAuth, setWarrantyVersionLive);
+router.post("/warranty-prompt-lab/revert-to-defaults", requireAuth, revertWarrantyToDefaults);
+router.delete("/warranty-prompt-lab/versions/:versionId", requireAuth, deleteWarrantyVersion);
+router.post("/warranty-prompt-lab/preview", requireAuth, previewWarrantyPrompt);
+router.post("/warranty-prompt-lab/chat", requireAuth, warrantyPromptLabChat);
 
 export default router;

@@ -19,6 +19,7 @@ export {
   KB_EMPTY_CONTEXT,
   WARRANTY_PLACEHOLDERS,
   WARRANTY_PHASE_PROMPTS,
+  validateWarrantyDraft,
 } from "./warranty-agent.js";
 
 export * from "./content.js";

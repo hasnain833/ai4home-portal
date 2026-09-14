@@ -33,14 +33,19 @@ function codeDefaults(agentType) {
 }
 
 async function loadLiveRow(agentType) {
-  // Only the sales agent has a versions table today. Warranty prompts ship in
-  // code; giving them Set Live needs its own versions table and migration.
-  if (agentType !== AGENT_TYPES.SALES) return null;
-
-  return prisma.salesAgentPromptVersion.findFirst({
-    where: { isLive: true },
-    orderBy: { setLiveAt: "desc" },
-  });
+  if (agentType === AGENT_TYPES.SALES) {
+    return prisma.salesAgentPromptVersion.findFirst({
+      where: { isLive: true },
+      orderBy: { setLiveAt: "desc" },
+    });
+  }
+  if (agentType === AGENT_TYPES.WARRANTY) {
+    return prisma.warrantyAgentPromptVersion.findFirst({
+      where: { isLive: true },
+      orderBy: { setLiveAt: "desc" },
+    });
+  }
+  return null;
 }
 
 /**

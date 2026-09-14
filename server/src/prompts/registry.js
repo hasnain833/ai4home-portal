@@ -6,6 +6,7 @@ import {
 import {
   WARRANTY_PHASE_PROMPTS,
   WARRANTY_PLACEHOLDERS,
+  validateWarrantyDraft,
 } from "./warranty-agent.js";
 
 export const AGENT_TYPES = {
@@ -32,14 +33,14 @@ export const PROMPT_REGISTRY = {
     label: "Warranty Agent",
     description: "Diagnoses homeowner issues and files warranty tickets.",
     kb: "warranty",
-    editable: false,
+    editable: true,
     placeholders: WARRANTY_PLACEHOLDERS,
-    validate: null,
+    validate: validateWarrantyDraft,
     prompts: {
-      INTAKE: { label: "Intake phase", default: WARRANTY_PHASE_PROMPTS.INTAKE },
+      INTAKE:   { label: "Intake phase",   default: WARRANTY_PHASE_PROMPTS.INTAKE },
       IDENTIFY: { label: "Identify phase", default: WARRANTY_PHASE_PROMPTS.IDENTIFY },
       DIAGNOSE: { label: "Diagnose phase", default: WARRANTY_PHASE_PROMPTS.DIAGNOSE },
-      RESOLVE: { label: "Resolve phase", default: WARRANTY_PHASE_PROMPTS.RESOLVE },
+      RESOLVE:  { label: "Resolve phase",  default: WARRANTY_PHASE_PROMPTS.RESOLVE },
     },
   },
 };

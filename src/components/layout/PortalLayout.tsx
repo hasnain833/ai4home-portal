@@ -35,6 +35,7 @@ import {
 import { Button } from "@/components/ui/button";
 import VerificationGate from "@/components/layout/VerificationGate";
 import { BrandLogo } from "@/components/BrandLogo";
+import { NotificationBell } from "@/components/warranty/NotificationBell";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -272,8 +273,14 @@ export default function PortalLayout({
             })}
           </nav>
 
-          {/* Bottom section: theme toggle + profile */}
+          {/* Bottom section: notifications + theme toggle + profile */}
           <div className="border-t border-white/10 p-4 space-y-3">
+            {user && user.role === "admin" && (
+              <NotificationBell
+                expanded={sidebarExpanded}
+                className="text-white/80 hover:bg-white/10 hover:text-white"
+              />
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -369,9 +376,12 @@ export default function PortalLayout({
             <BrandLogo src={user?.companyLogo} className="h-8 w-auto shrink-0 object-contain rounded-sm" />
             <span className="truncate font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
           </div>
-          <Button variant="ghost" size="icon" className="shrink-0" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            {user && user.role === "admin" && <NotificationBell />}
+            <Button variant="ghost" size="icon" className="shrink-0" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+          </div>
         </header >
 
         {/* Mobile Drawer Sidebar */}

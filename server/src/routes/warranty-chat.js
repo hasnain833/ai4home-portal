@@ -1,6 +1,7 @@
 import { Router } from "express";
 import prisma from "../lib/prisma.js";
 import { processWarrantyTurn } from "../lib/warranty-orchestrator.js";
+import { getWarrantySuggestions } from "../services/warranty-suggestions.service.js";
 
 const IDLE_MINUTES = Number(process.env.WARRANTY_SESSION_IDLE_MINUTES || 30);
 
@@ -93,6 +94,9 @@ async function postMessage(req, res) {
       conversationId: convo.id,
       reply: result.reply,
       phase: result.phase,
+      // Choices for this turn, for the client to render as buttons. Empty on
+      // turns that ask an open question.
+      options: Array.isArray(result.options) ? result.options : [],
     });
   } catch (err) {
     console.error("Error in warranty chat:", err);
@@ -100,129 +104,25 @@ async function postMessage(req, res) {
   }
 }
 
-async function postReset(req, res) {
+
+
+async function getSuggestions(req, res) {
   try {
-    const { conversationId } = req.body;
-    const { companyId, homeownerId: sessionHomeownerId } = resolveActor(req);
-
-    if (!companyId || !conversationId) {
-      return res.status(400).json({ error: "companyId and conversationId are required" });
-    }
-
-    const convo = await prisma.warrantyConversation.findUnique({ where: { id: conversationId } });
-    if (!convo || convo.companyId !== companyId) {
-      return res.status(404).json({ error: "Conversation not found" });
-    }
-
-    await prisma.warrantyConversation.update({
-      where: { id: convo.id },
-      data: {
-        transcript: [],
-        phase: "INTAKE",
-        status: "ACTIVE",
-        issueState: null,
-        propertyId: null,
-        homeownerId: sessionHomeownerId || null,
-        ticketId: null,
-        turnCount: 0,
-      },
-    });
-
-    return res.json({ conversationId: convo.id, phase: "INTAKE", reset: true });
-  } catch (err) {
-    console.error("Error resetting warranty chat:", err);
-    res.status(500).json({ error: "Internal server error" });
+    const companyId = req.user?.companyId || req.query?.companyId || null;
+    return res.json({ suggestions: await getWarrantySuggestions(companyId) });
+  } catch (error) {
+    console.error("[Warranty chat] Suggestions failed:", error);
+    return res.json({ suggestions: [] });
   }
 }
 
 export const publicWarrantyChatRouter = Router();
+publicWarrantyChatRouter.get("/suggestions", getSuggestions);
 publicWarrantyChatRouter.post("/", postMessage);
-publicWarrantyChatRouter.post("/reset", postReset);
-
-function conversationPreview(transcript) {
-  const turns = Array.isArray(transcript) ? transcript : [];
-  const source = turns.find((t) => t.role === "user") || turns[turns.length - 1];
-  const text = String(source?.content || "").replace(/\s+/g, " ").trim();
-  return text.slice(0, 140) || null;
-}
 
 const router = Router();
 
-router.get("/conversations", async (req, res) => {
-  try {
-    const companyId = req.user?.companyId;
-    if (!companyId) {
-      return res.status(401).json({ error: "Not authenticated" });
-    }
-
-    const role = String(req.user?.role || "").toUpperCase();
-    const where = { companyId, turnCount: { gt: 0 } };
-
-    if (role === "HOMEOWNER") {
-      where.homeownerId = req.user.id;
-    } else if (req.query.homeownerId) {
-      where.homeownerId = String(req.query.homeownerId);
-    }
-
-    const rows = await prisma.warrantyConversation.findMany({
-      where,
-      orderBy: { updatedAt: "desc" },
-      take: 50,
-      select: {
-        id: true,
-        phase: true,
-        status: true,
-        ticketId: true,
-        turnCount: true,
-        createdAt: true,
-        updatedAt: true,
-        homeownerId: true,
-        propertyId: true,
-        transcript: true,
-      },
-    });
-
-    return res.json({
-      conversations: rows.map(({ transcript, ...row }) => ({
-        ...row,
-        preview: conversationPreview(transcript),
-      })),
-    });
-  } catch (err) {
-    console.error("Error listing warranty conversations:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.get("/conversations/:id", async (req, res) => {
-  try {
-    const convo = await prisma.warrantyConversation.findUnique({
-      where: { id: req.params.id },
-    });
-
-    if (!convo) {
-      return res.status(404).json({ error: "Conversation not found" });
-    }
-    if (!req.user?.companyId || convo.companyId !== req.user.companyId) {
-      return res.status(404).json({ error: "Conversation not found" });
-    }
-    if (String(req.user.role || "").toUpperCase() === "HOMEOWNER" && convo.homeownerId !== req.user.id) {
-      return res.status(404).json({ error: "Conversation not found" });
-    }
-
-    return res.json({
-      transcript: convo.transcript,
-      phase: convo.phase,
-      status: convo.status,
-      ticketId: convo.ticketId,
-    });
-  } catch (err) {
-    console.error("Error fetching conversation:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
+router.get("/suggestions", getSuggestions);
 router.post("/", postMessage);
-router.post("/reset", postReset);
 
 export default router;

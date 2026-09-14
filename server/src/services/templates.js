@@ -72,6 +72,122 @@ export const Templates = {
   },
 
 
+  /// Sent to the homeowner the moment their ticket is filed, from either the
+  /// portal form or the warranty agent.
+  getTicketCreatedHomeownerEmail: (homeownerName, ticketId, issueType, portalUrl, companyName) => {
+    const content = `
+      <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
+      <p>We've received your warranty request and opened ticket <strong>#${ticketId}</strong>.</p>
+      ${emailHighlightBox(issueType)}
+      <p>Our team will review it and be in touch. You can follow the progress of your claim in the portal at any time.</p>
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket in Portal")}
+    `;
+    return wrapEmail(content, "Warranty Ticket Received", companyName, COLORS.accent);
+  },
+
+  /// Sent to company admins when a ticket is filed. Leads with priority so an
+  /// emergency is obvious in the inbox preview.
+  getTicketCreatedAdminEmail: (ticketId, issueType, priority, isEmergency, homeownerName, propertyAddress, portalUrl, companyName) => {
+    const urgencyNote = isEmergency
+      ? `<p style="color: #b91c1c; font-weight: 600; margin-top: 0;">This ticket was flagged as an emergency and needs immediate attention.</p>`
+      : "";
+    const content = `
+      ${urgencyNote}
+      <p${isEmergency ? "" : ' style="margin-top: 0;"'}>A new warranty ticket has been filed and is waiting for review.</p>
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Ticket</td><td style="padding: 12px 0;">#${ticketId}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Issue</td><td style="padding: 12px 0;">${issueType}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Priority</td><td style="padding: 12px 0;">${priority}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Homeowner</td><td style="padding: 12px 0;">${homeownerName}</td></tr>
+        <tr><td style="padding: 12px 12px 12px 0; font-weight: 600;">Property</td><td style="padding: 12px 0;">${propertyAddress || "Not specified"}</td></tr>
+      </table>
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "Open Ticket")}
+    `;
+    return wrapEmail(content, "New Warranty Ticket", companyName, COLORS.primary);
+  },
+
+  /// Stale-ticket nag. `ageLabel` is pre-formatted by the caller so the copy
+  /// reads naturally for both the 4h emergency cycle and the 48h standard one.
+  getTicketReminderEmail: (ticketId, issueType, priority, isEmergency, homeownerName, ageLabel, portalUrl, companyName) => {
+    const lead = isEmergency
+      ? `This <strong>emergency</strong> ticket has been open for ${ageLabel} and has not been actioned yet.`
+      : `This ticket has been open for ${ageLabel} and has not been actioned yet.`;
+    const content = `
+      <p style="margin-top: 0;">${lead}</p>
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Ticket</td><td style="padding: 12px 0;">#${ticketId}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Issue</td><td style="padding: 12px 0;">${issueType}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Priority</td><td style="padding: 12px 0;">${priority}</td></tr>
+        <tr><td style="padding: 12px 12px 12px 0; font-weight: 600;">Homeowner</td><td style="padding: 12px 0;">${homeownerName}</td></tr>
+      </table>
+      <p>Moving it out of <strong>Open</strong> stops these reminders.</p>
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "Review Ticket")}
+    `;
+    return wrapEmail(content, "Ticket Awaiting Action", companyName, isEmergency ? "#b91c1c" : COLORS.primary);
+  },
+
+  /// Appointment confirmation. `role` is "homeowner" or "trade" — the two sides
+  /// need the same facts framed differently.
+  getTicketAppointmentEmail: (role, { ticketId, issueType, whenLabel, address, tradeName, homeownerName, notes }, portalUrl, companyName) => {
+    const forHomeowner = role === "homeowner";
+    const lead = forHomeowner
+      ? `Your repair visit for ticket <strong>#${ticketId}</strong> has been scheduled.`
+      : `A repair visit has been scheduled for ticket <strong>#${ticketId}</strong>.`;
+    const rows = [
+      ["When", whenLabel],
+      ["Issue", issueType],
+      ["Property", address || "Not specified"],
+      forHomeowner ? ["Attending", tradeName || companyName] : ["Homeowner", homeownerName],
+    ];
+    const content = `
+      <p style="margin-top: 0;">${lead}</p>
+      ${emailHighlightBox(whenLabel)}
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
+        ${rows.map(([k, v]) => `<tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">${k}</td><td style="padding: 12px 0;">${v}</td></tr>`).join("")}
+      </table>
+      ${notes ? `<p style="font-size: 14px; color: ${COLORS.textMuted};"><strong>Notes:</strong> ${notes}</p>` : ""}
+      <p>We'll send a reminder before the visit.</p>
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket")}
+    `;
+    return wrapEmail(content, "Appointment Scheduled", companyName, COLORS.primary);
+  },
+
+  /// 24-hour and 1-hour appointment reminders, for either side.
+  getTicketAppointmentReminderEmail: (role, { ticketId, issueType, whenLabel, address, tradeName, homeownerName }, windowLabel, portalUrl, companyName) => {
+    const forHomeowner = role === "homeowner";
+    const lead = forHomeowner
+      ? `A reminder that your repair visit is ${windowLabel}.`
+      : `A reminder that you have a repair visit ${windowLabel}.`;
+    const rows = [
+      ["When", whenLabel],
+      ["Ticket", `#${ticketId}`],
+      ["Issue", issueType],
+      ["Property", address || "Not specified"],
+      forHomeowner ? ["Attending", tradeName || companyName] : ["Homeowner", homeownerName],
+    ];
+    const content = `
+      <p style="margin-top: 0;">${lead}</p>
+      ${emailHighlightBox(whenLabel)}
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
+        ${rows.map(([k, v]) => `<tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">${k}</td><td style="padding: 12px 0;">${v}</td></tr>`).join("")}
+      </table>
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket")}
+    `;
+    return wrapEmail(content, "Appointment Reminder", companyName, COLORS.accent);
+  },
+
+  /// Sent to both sides when a scheduled visit is called off.
+  getTicketAppointmentCancelledEmail: (role, { ticketId, issueType, whenLabel }, portalUrl, companyName) => {
+    const who = role === "homeowner" ? "Your" : "The";
+    const content = `
+      <p style="margin-top: 0;">${who} repair visit for ticket <strong>#${ticketId}</strong> (${issueType}) has been cancelled.</p>
+      ${emailHighlightBox(`Cancelled — ${whenLabel}`)}
+      <p>If this was not expected, please get in touch and we'll rebook.</p>
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket")}
+    `;
+    return wrapEmail(content, "Appointment Cancelled", companyName, COLORS.primary);
+  },
+
   getSignupVerificationEmail: (companyName, actionLink) => {
     const content = `
       <p style="margin-top: 0;">Hi ${companyName},</p>
