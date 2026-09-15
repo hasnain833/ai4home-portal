@@ -145,10 +145,13 @@ async function dispatch(appointment, kind, { windowLabel = null } = {}) {
     });
 
   let emailed = 0;
+  let attempted = 0;
 
-  // Side 1 — the homeowner.
+  let homeownerDelivered = null;
   if (appointment.homeowner?.email) {
+    attempted++;
     const r = await send(appointment.homeowner.email, "homeowner");
+    homeownerDelivered = Boolean(r.success);
     if (r.success) emailed++;
     else
       console.warn(
@@ -156,11 +159,11 @@ async function dispatch(appointment, kind, { windowLabel = null } = {}) {
       );
   }
 
-  // Side 2 — the trade: company admins, plus the named crew if there is one.
   const tradeRecipients = new Set(admins.map((a) => a.email).filter(Boolean));
   if (appointment.tradeEmail) tradeRecipients.add(appointment.tradeEmail);
 
   for (const to of tradeRecipients) {
+    attempted++;
     const r = await send(to, "trade");
     if (r.success) emailed++;
     else
@@ -169,7 +172,15 @@ async function dispatch(appointment, kind, { windowLabel = null } = {}) {
       );
   }
 
-  return { ok: true, notified: admins.length, emailed, emailConfigured: true };
+  const ok = attempted === 0 || emailed > 0;
+  return {
+    ok,
+    notified: admins.length,
+    emailed,
+    attempted,
+    homeownerDelivered,
+    emailConfigured: true,
+  };
 }
 
 export async function notifyAppointmentScheduled(appointmentId) {

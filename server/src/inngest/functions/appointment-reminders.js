@@ -39,6 +39,7 @@ export const ticketAppointmentReminders = inngest.createFunction(
       });
 
       let sent = 0;
+      let failed = 0;
 
       for (const appointment of candidates) {
         const window = dueWindow(appointment, now);
@@ -46,9 +47,18 @@ export const ticketAppointmentReminders = inngest.createFunction(
 
         const result = await notifyAppointmentReminder(appointment, windowLabelFor(window));
         if (!result.ok) {
-          // Leave the flag alone so the next run retries.
-          console.error(`[Appointment Reminders] ${appointment.id} failed: ${result.error}`);
+          console.error(
+            `[Appointment Reminders] ${appointment.id} not delivered to anyone` +
+              `${result.error ? `: ${result.error}` : ""} — will retry.`,
+          );
+          failed++;
           continue;
+        }
+        if (result.homeownerDelivered === false) {
+          console.error(
+            `[Appointment Reminders] ${appointment.id}: reminder did NOT reach the homeowner ` +
+              `(trade notified). Visit ${windowLabelFor(window)}.`,
+          );
         }
 
         await prisma.ticketAppointment.update({
@@ -58,8 +68,10 @@ export const ticketAppointmentReminders = inngest.createFunction(
         sent++;
       }
 
-      console.log(`[Appointment Reminders] checked ${candidates.length}, sent ${sent}.`);
-      return { checked: candidates.length, sent };
+      console.log(
+        `[Appointment Reminders] checked ${candidates.length}, sent ${sent}, undelivered ${failed}.`,
+      );
+      return { checked: candidates.length, sent, failed };
     });
   },
 );

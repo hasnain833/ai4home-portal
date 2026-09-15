@@ -8,6 +8,7 @@ const STANDARD_INTERVAL_HOURS = 48;
 const EMERGENCY_INTERVAL_HOURS = 4;
 const MAX_REMINDERS = 3;
 const BATCH_SIZE = 200;
+const CHASEABLE_STATUSES = ["OPEN", "ESCALATED"];
 
 const isUrgent = (ticket) => ticket.isEmergency || ticket.priority === "URGENT";
 
@@ -23,7 +24,7 @@ export function formatAge(ms) {
 }
 
 export function reminderIsDue(ticket, now = Date.now()) {
-  if (ticket.status !== "OPEN") return false;
+  if (!CHASEABLE_STATUSES.includes(ticket.status)) return false;
   if ((ticket.reminderCount ?? 0) >= MAX_REMINDERS) return false;
   const since = (ticket.lastReminderAt || ticket.createdAt).getTime();
   return now - since >= intervalHoursFor(ticket) * HOUR;
@@ -35,11 +36,34 @@ export const ticketReminders = inngest.createFunction(
     const now = Date.now();
 
     return step.run("send-due-ticket-reminders", async () => {
+
+      const urgentCutoff = new Date(now - EMERGENCY_INTERVAL_HOURS * HOUR);
+      const standardCutoff = new Date(now - STANDARD_INTERVAL_HOURS * HOUR);
+      const dueSince = (cutoff) => ({
+        OR: [
+          { lastReminderAt: { lte: cutoff } },
+          { lastReminderAt: null, createdAt: { lte: cutoff } },
+        ],
+      });
+
       const candidates = await prisma.ticket.findMany({
         where: {
-          status: "OPEN",
+          status: { in: CHASEABLE_STATUSES },
           reminderCount: { lt: MAX_REMINDERS },
-          createdAt: { lte: new Date(now - EMERGENCY_INTERVAL_HOURS * HOUR) },
+          OR: [
+            {
+              AND: [
+                { OR: [{ isEmergency: true }, { priority: "URGENT" }] },
+                dueSince(urgentCutoff),
+              ],
+            },
+            {
+              AND: [
+                { isEmergency: false, priority: { not: "URGENT" } },
+                dueSince(standardCutoff),
+              ],
+            },
+          ],
         },
         include: { homeowner: { include: { company: true } } },
         orderBy: { createdAt: "asc" },
@@ -57,10 +81,15 @@ export const ticketReminders = inngest.createFunction(
 
         const ageLabel = formatAge(now - ticket.createdAt.getTime());
         const result = await notifyTicketReminder(ticket, ageLabel);
+
         if (!result.ok) {
-          // Leave the counter alone so the next run retries this ticket.
           console.error(`[Ticket Reminders] #${ticket.id} failed: ${result.error}`);
           continue;
+        }
+        if (result.emailConfigured && result.emailed === 0 && result.attempted > 0) {
+          console.warn(
+            `[Ticket Reminders] #${ticket.id}: in-portal only — all ${result.attempted} reminder email(s) failed.`,
+          );
         }
 
         await prisma.ticket.update({

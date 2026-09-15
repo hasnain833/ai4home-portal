@@ -127,6 +127,14 @@ async function retrieveContext({ companyId, question, communityId, issueState, i
   }
 }
 
+function unescapeModelText(text) {
+  const s = String(text ?? "");
+  if (!/\\[nrt"'\\]/.test(s)) return s;
+  return s.replace(/\\([nrt"'\\])/g, (_, ch) =>
+    ch === "n" ? "\n" : ch === "r" ? "\r" : ch === "t" ? "\t" : ch,
+  );
+}
+
 function claimLine(isEmergency) {
   return isEmergency
     ? `Your issue has been recorded and flagged as urgent. Our warranty team will contact you as soon as possible.`
@@ -161,14 +169,6 @@ async function fileClaim({
   issueState.isEmergency = classification.isEmergency;
   issueState.classifiedAt = new Date().toISOString();
 
-  // The lab must not write. Classification still runs — judging how an issue is
-  // categorised and prioritised is most of what a tester is here for — but it
-  // stops short of creating a ticket, emailing the homeowner, or updating the
-  // conversation row, which does not exist for the sandbox's synthetic id.
-  //
-  // The homeowner gate is mirrored rather than skipped: "share the email on your
-  // file first" is a real branch, and a sandbox that always files would never
-  // show it.
   if (sandboxMode) {
     const homeowner = homeownerId
       ? await prisma.user.findUnique({ where: { id: homeownerId }, select: { id: true } })
@@ -179,8 +179,7 @@ async function fileClaim({
       filed: { sandbox: true },
       classification,
       line: claimLine(classification.isEmergency),
-      // Deliberately null: nothing was created, so there is no ticket for a
-      // later turn to escalate.
+
       ticketId: null,
     };
   }
@@ -266,7 +265,10 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   };
 
 
-  const finish = async (replyText, nextPhase) => {
+  const finish = async (rawReplyText, nextPhase) => {
+    // Normalised here, the single point every branch returns through, so the
+    // stored transcript and the reply on the wire always agree.
+    const replyText = unescapeModelText(rawReplyText);
     const finalTranscript = [...transcript, { role: "agent", content: replyText, at: new Date().toISOString() }];
     if (!sandboxMode) {
       await prisma.warrantyConversation.update({

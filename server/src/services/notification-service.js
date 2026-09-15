@@ -162,6 +162,7 @@ export async function notifyTicketReminder(ticket, ageLabel) {
     }
 
     let emailed = 0;
+    let attempted = 0;
     for (const admin of admins) {
       if (!admin.email) continue;
       const result = await MessagingService.sendEmail({
@@ -183,9 +184,14 @@ export async function notifyTicketReminder(ticket, ageLabel) {
         smtpConfig,
       });
       if (result.success) emailed++;
+      else
+        console.warn(
+          `[Ticket Notify] #${ticket.id}: reminder email to ${admin.email} not delivered — ${result.error || result.reason}`,
+        );
+      attempted++;
     }
 
-    return { ok: true, notified: admins.length, emailed, emailConfigured: true };
+    return { ok: true, notified: admins.length, emailed, attempted, emailConfigured: true };
   } catch (err) {
     console.error(`[Ticket Notify] notifyTicketReminder failed for #${ticket?.id}:`, err.message);
     return { ok: false, error: err.message };
