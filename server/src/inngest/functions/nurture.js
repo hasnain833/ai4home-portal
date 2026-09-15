@@ -12,16 +12,11 @@ import { getOrCreateLeadBookingToken } from "../../lib/public-tokens.js";
 import { LEAD_STATUS } from "../../lib/lead-statuses.js";
 import { Templates } from "../../services/templates.js";
 
-/**
- * The next step to run given a resume point. `currentStepPosition` is the position
- * of the step to run NEXT, so completing step N records N+1 and a restarted run
- * resumes after N instead of re-sending it.
- */
 export function nextStepFrom(steps, currentPosition) {
   return (steps || []).find((s) => s.position >= currentPosition) || null;
 }
 
-/** What to record once the step at this position is done. */
+
 export function resumePointAfter(step) {
   return step.position + 1;
 }
@@ -40,9 +35,6 @@ const calculateDelayTime = (value, unit) => {
   return d;
 };
 
-// Only the fields the run actually uses. Step results are persisted by the job
-// engine and replayed on every wake, so we keep the payload small and free of
-// anything sensitive — credentials are fetched inside the send step instead.
 const ENROLLMENT_SELECT = {
   id: true,
   status: true,
@@ -88,10 +80,6 @@ const ENROLLMENT_SELECT = {
 export const runNurtureCampaign = inngest.createFunction(
   {
     id: "run-nurture-campaign-v4",
-    // Deliberately NOT idempotent on enrollmentId. Idempotency permanently blocks
-    // a second run, so any failure froze the enrollment forever with no way back.
-    // A concurrency key of 1 gives the same protection against overlapping runs
-    // while still letting a later run recover a stalled enrollment.
     concurrency: [
       { key: "event.data.campaignId", limit: 2 },
       { key: "event.data.enrollmentId", limit: 1 },
@@ -103,10 +91,6 @@ export const runNurtureCampaign = inngest.createFunction(
   async ({ event, step }) => {
     const { leadId, campaignId, enrollmentId } = event.data;
     console.log(`[Nurture] === START === event received for lead=${leadId}, campaign=${campaignId}, enrollment=${enrollmentId}`);
-
-    // Inside a step: the job engine re-executes the function body from the top on
-    // every wake, so an un-stepped read here meant one database hiccup three days
-    // into a campaign killed the whole run. Stepped, it is retried and memoized.
     const e = await step.run("load-enrollment", async () =>
       prisma.campaignEnrollment.findUnique({
         where: { id: enrollmentId },
@@ -126,9 +110,6 @@ export const runNurtureCampaign = inngest.createFunction(
     const migrate = (campaign.versionPolicy || "FINISH_OLD") === "MIGRATE";
     let workingSteps = campaign.steps;
     console.log(`[Nurture] Processing ${workingSteps.length} steps (versionPolicy=${campaign.versionPolicy || "FINISH_OLD"}). currentStepPosition=${enrollment.currentStepPosition}`);
-
-    // currentStepPosition is the step to run NEXT — the resume point — so a run
-    // that restarts picks up after the last completed step instead of repeating it.
     let currentPosition = enrollment.currentStepPosition || 1;
 
     while (true) {
@@ -159,9 +140,6 @@ export const runNurtureCampaign = inngest.createFunction(
             t = getNextValidSendWindow(t, tz, currentStep.sendWindowDays, currentStep.sendWindowStart, currentStep.sendWindowEnd);
           }
 
-          // Record the delay as done and park nextRunAt at the wake time. The
-          // stalled-enrollment sweep only picks up rows whose nextRunAt has passed,
-          // so an enrollment legitimately sleeping here is never resumed early.
           await prisma.campaignEnrollment.update({
             where: { id: enrollment.id },
             data: { currentStepPosition: nextPosition, nextRunAt: t },
@@ -340,10 +318,6 @@ export const runNurtureCampaign = inngest.createFunction(
         return { channel: currentStep.type, attempted: false };
       });
 
-      // A workspace that has lost its credentials cannot deliver anything, and
-      // advancing would consume the rest of the sequence sending nothing that
-      // could ever be re-sent. Exit the enrollment instead, leaving the step
-      // pointer where it stopped so the record shows how far it got.
       if (sendResult.attempted && sendResult.outcome === "not_configured") {
         const exited = await step.run(`exit-not-configured-${currentStep.position}`, async () => {
           await prisma.campaignEnrollment.update({
@@ -399,11 +373,6 @@ export const runNurtureCampaign = inngest.createFunction(
   }
 );
 
-// An enrollment is "stalled" when it is still ACTIVE, is not deliberately asleep
-// in a DELAY, and has not moved for a while — i.e. its run died. Re-emitting the
-// start event is safe: the enrollmentId concurrency key stops it from overlapping
-// a run that is somehow still alive, and currentStepPosition resumes it after the
-// last completed step rather than repeating one.
 const STALE_AFTER_MS = 30 * 60 * 1000;
 const RESUME_BATCH = 200;
 
@@ -411,15 +380,11 @@ export const resumeStalledEnrollments = inngest.createFunction(
   { id: "resume-stalled-enrollments", triggers: [{ cron: "*/15 * * * *" }] },
   async ({ step }) => {
     const stalled = await step.run("find-stalled-enrollments", async () => {
-      // Both the wake time and the last write must be well in the past. Using
-      // "nextRunAt < now" would race a healthy run that is waking from its delay
-      // right now and has not yet written its next step.
       const cutoff = new Date(Date.now() - STALE_AFTER_MS);
       const rows = await prisma.campaignEnrollment.findMany({
         where: {
           status: "ACTIVE",
           updatedAt: { lt: cutoff },
-          // Either it never reached a delay, or its delay ended long ago.
           OR: [{ nextRunAt: null }, { nextRunAt: { lt: cutoff } }],
           campaign: { status: "Active" },
         },

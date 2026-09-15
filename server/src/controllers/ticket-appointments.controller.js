@@ -4,21 +4,13 @@ import {
   notifyAppointmentCancelled,
 } from "../services/ticket-appointment-service.js";
 
-/**
- * Repair visits booked against a warranty ticket.
- *
- * Booking is a company-side action: staff and admins schedule, homeowners read.
- * Every query is scoped by the caller's company so one tenant can never reach
- * another tenant's tickets.
- */
-
 const BOOKING_ROLES = ["ADMIN", "STAFF"];
 
 const NOT_CONFIGURED_NOTICE =
   "Saved, and visible in the portal, but no email was sent: email is not configured " +
   "for this workspace. Add your SMTP credentials in Settings > Email, SMS & News.";
 
-/** Load a ticket the caller is allowed to act on, or null. */
+
 async function accessibleTicket(session, ticketId) {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
@@ -113,10 +105,6 @@ export const createAppointment = async (req, res) => {
   }
 };
 
-/**
- * Reschedule, cancel or complete. A reschedule clears the reminder flags so the
- * new time gets its own 24h and 1h notices.
- */
 export const updateAppointment = async (req, res) => {
   try {
     const session = req.user;

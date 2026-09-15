@@ -2,16 +2,6 @@ import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { notifyTicketReminder } from "../../services/notification-service.js";
 
-/**
- * Stale-ticket reminders (FR: ticket reminders for homebuilders).
- *
- * A ticket that is still OPEN has not been actioned by anyone. We nag the
- * company admins on a fixed cycle until they move it out of OPEN, capped so a
- * forgotten ticket cannot mail somebody forever.
- *
- * Emergencies run on a much shorter cycle — an urgent leak sitting unread for
- * two days is the exact failure this is here to prevent.
- */
 
 const HOUR = 60 * 60 * 1000;
 const STANDARD_INTERVAL_HOURS = 48;
@@ -24,7 +14,6 @@ const isUrgent = (ticket) => ticket.isEmergency || ticket.priority === "URGENT";
 export const intervalHoursFor = (ticket) =>
   isUrgent(ticket) ? EMERGENCY_INTERVAL_HOURS : STANDARD_INTERVAL_HOURS;
 
-/** "3 hours" / "2 days" — used in the subject line, so it has to read naturally. */
 export function formatAge(ms) {
   const hours = Math.floor(ms / HOUR);
   if (hours < 1) return "less than an hour";
@@ -33,10 +22,6 @@ export function formatAge(ms) {
   return `${days} day${days === 1 ? "" : "s"}`;
 }
 
-/**
- * Whether this ticket is due for its next nag. The clock runs from the last
- * reminder, or from creation if none has been sent yet.
- */
 export function reminderIsDue(ticket, now = Date.now()) {
   if (ticket.status !== "OPEN") return false;
   if ((ticket.reminderCount ?? 0) >= MAX_REMINDERS) return false;
@@ -50,8 +35,6 @@ export const ticketReminders = inngest.createFunction(
     const now = Date.now();
 
     return step.run("send-due-ticket-reminders", async () => {
-      // Cheap pre-filter: nothing can be due before the shortest interval has
-      // elapsed, so the database never hands us the whole open backlog.
       const candidates = await prisma.ticket.findMany({
         where: {
           status: "OPEN",

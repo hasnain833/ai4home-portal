@@ -32,7 +32,7 @@ model User {
   email                 String                 @unique
   password              String
   name                  String?
-  avatar                String? // Personal avatar for staff members
+  avatar                String? 
   role                  Role                   @default(HOMEOWNER)
   companyId             String?
   company               Company?               @relation(fields: [companyId], references: [id])
@@ -191,7 +191,6 @@ model Property {
   homeowner             User                   @relation(fields: [homeownerId], references: [id])
   companyId             String?
   company               Company?               @relation(fields: [companyId], references: [id])
-  /// Which community this home is in. Null when it has not been assigned to one.
   communityId           String?
   community             Community?             @relation(fields: [communityId], references: [id], onDelete: SetNull)
   tickets               Ticket[]
@@ -231,8 +230,6 @@ model Ticket {
   @@index([propertyId])
   @@index([companyId, status])
   @@index([status])
-  /// Stale-ticket reminder tracking. reminderCount caps the nag; lastReminderAt
-  /// spaces them out. Both are reset once the ticket leaves OPEN.
   reminderCount  Int            @default(0)
   lastReminderAt DateTime?
   notifications  Notification[]
@@ -270,8 +267,6 @@ model KnowledgeBaseDocument {
   @@index([communityId])
 }
 
-/// Which tier a knowledge-base document belongs to.
-/// PLATFORM rows are shared across every company; COMPANY rows belong to one.
 enum KBScope {
   PLATFORM
   COMPANY
@@ -576,11 +571,6 @@ model ContentCalendar {
   @@index([status, scheduledAt])
 }
 
-/// Two tiers, distinguished by `scope`:
-///   PLATFORM — shared by every company. The base knowledge the agent works from.
-///              companyId is null; uploaded by super-admins from the Prompt Lab.
-///   COMPANY  — that one company's own policies, layered on top of the platform tier.
-/// Retrieval returns both, ranked together. See services/vector-store.service.js.
 model SalesKB {
   id         String         @id @default(cuid())
   scope      KBScope        @default(COMPANY)
@@ -605,7 +595,6 @@ model SalesKB {
 
 model SalesKBChunk {
   id         String                      @id @default(cuid())
-  /// Denormalised from the parent document so retrieval filters without a join.
   scope      KBScope                     @default(COMPANY)
   companyId  String?
   documentId String
@@ -645,7 +634,6 @@ model MarketingRule {
   @@index([companyId, triggerEvent, isActive])
 }
 
-// SW-AMK-005: audit log — one row per rule evaluation.
 model MarketingRuleRun {
   id           String        @id @default(cuid())
   ruleId       String
@@ -678,8 +666,6 @@ model Announcement {
   scheduledAt   DateTime?
   sentAt        DateTime?
   audienceCount Int       @default(0)
-  // Outcome of the last send, so the UI can show what actually happened rather
-  // than assuming everyone in the audience received it.
   sentCount     Int       @default(0)
   failedCount   Int       @default(0)
   skippedCount  Int       @default(0)
@@ -841,10 +827,7 @@ model SalesAgentPromptVersion {
   toolDescription String    @db.Text
   kbEmptyText     String    @db.Text
   notes           String?   @db.Text
-  // A Prompt Lab bookmark: the draft the lab reopens. Affects nothing else.
   isActive        Boolean   @default(false)
-  // The prompt real leads are talking to. Set only by the audited "Set Live"
-  // action, never by saving. At most one row may have this true.
   isLive          Boolean   @default(false)
   setLiveAt       DateTime?
   setLiveById     String?
@@ -898,12 +881,17 @@ model WarrantyKB {
   chunkCount  Int               @default(0)
   version     Int               @default(1)
   isActive    Boolean           @default(true)
+  /// Uploaded from the Prompt Lab to test community-scoped retrieval.
+  /// Production retrieval excludes these; only the lab opts in. Defaults to
+  /// false so anything created anywhere else is a real document.
+  isSandbox   Boolean           @default(false)
   createdAt   DateTime          @default(now())
   chunks      WarrantyKBChunk[]
 
   @@index([companyId, isActive])
   @@index([scope, isActive])
   @@index([communityId])
+  @@index([isSandbox])
 }
 
 model WarrantyKBChunk {
@@ -932,9 +920,9 @@ model WarrantyConversation {
   homeowner   User?     @relation(fields: [homeownerId], references: [id])
   propertyId  String?
   property    Property? @relation(fields: [propertyId], references: [id])
-  status      String    @default("ACTIVE") // ACTIVE, RESOLVED, ESCALATED
-  phase       String    @default("INTAKE") // INTAKE, IDENTIFY, DIAGNOSE, RESOLVE
-  issueState  Json? // Structured collected data
+  status      String    @default("ACTIVE") 
+  phase       String    @default("INTAKE") 
+  issueState  Json? 
   ticketId    String?
   transcript  Json      @default("[]")
   turnCount   Int       @default(0)

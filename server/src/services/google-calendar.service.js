@@ -46,10 +46,7 @@ export async function exchangeCodeAndStore(companyId, code) {
   }
 
   const data = {
-    // OAuth tokens are encrypted at rest (AES-256-GCM). decryptSafe() on read
-    // keeps any legacy plaintext rows working and they migrate on next write.
     accessToken: encrypt(tokens.access_token || ""),
-    // keep prior refresh token if Google omits it (undefined = Prisma no-op)
     refreshToken: tokens.refresh_token ? encrypt(tokens.refresh_token) : undefined,
     tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
     scope: tokens.scope || SCOPES.join(" "),
@@ -175,7 +172,6 @@ export async function createEventWithMeet(companyId, { summary, description, sta
   }
 }
 
-/** Move an existing event to a new time. Returns updated { eventId, meetLink } or null. */
 export async function updateEventTime(companyId, eventId, { start, end, timezone }) {
   const authed = await getAuthedClient(companyId);
   if (!authed || !eventId) return null;

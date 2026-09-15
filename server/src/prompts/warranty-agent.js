@@ -139,10 +139,7 @@ export const WARRANTY_PHASE_PROMPTS = {
 
 const WARRANTY_PHASE_KEYS = ["INTAKE", "IDENTIFY", "DIAGNOSE", "RESOLVE"];
 
-/**
- * Validates a warranty prompt draft (four phase keys).
- * Returns { errors: string[], warnings: string[] }.
- */
+
 export function validateWarrantyDraft(draft = {}) {
   const errors = [];
   const warnings = [];

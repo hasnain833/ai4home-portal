@@ -38,6 +38,7 @@ import {
   deleteKbDocument,
   reindexKbDocument,
   probeKb,
+  getKbDocumentUrl,
 } from "../admin/prompt-lab-kb.controller.js";
 import {
   getWarrantyPromptLab,
@@ -112,6 +113,7 @@ router.post(
   uploadKbDocument,
 );
 router.post("/prompt-lab/kb/probe", requireAuth, probeKb);
+router.get("/prompt-lab/kb/:documentId/url", requireAuth, getKbDocumentUrl);
 router.post(
   "/prompt-lab/kb/:documentId/reindex",
   requireAuth,

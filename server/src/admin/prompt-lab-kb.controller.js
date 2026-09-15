@@ -1,16 +1,6 @@
-/**
- * Knowledge Base management from inside the Prompt Lab.
- *
- * This screen manages the PLATFORM tier only — the shared knowledge every
- * company's agent retrieves. A single builder's own documents are uploaded on
- * that company's own KB screen, which enforces its own permissions.
- *
- * Super-admin only: platform KB content reaches every tenant, so it is not
- * something a company admin can write.
- */
 import prisma from "../lib/prisma.js";
 import { writeAuditLog } from "../lib/audit.js";
-import { BUCKETS, uploadObject } from "../lib/storage.js";
+import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
 import {
   assertUploadSafe,
   buildStorageKey,
@@ -28,7 +18,7 @@ import {
   deleteDocument as warrantyDeleteChunks,
   getRetrievalStatus as warrantyRetrievalStatus,
 } from "../services/warranty-vector.service.js";
-import { KB_CATEGORIES, KB_SCOPES } from "../lib/sales-ai.js";
+import { KB_SCOPES } from "../lib/sales-ai.js";
 
 function denyUnlessSuperAdmin(req, res) {
   if (!req.user?.isSuperAdmin) {
@@ -46,8 +36,8 @@ const KB_BACKENDS = {
     query: salesQuery,
     deleteChunks: salesDeleteChunks,
     retrievalStatus: salesRetrievalStatus,
-    categories: Object.values(KB_CATEGORIES),
     defaultScopeCategories: KB_SCOPES.scheduling,
+    supportsCommunities: false,
     targetType: "SalesKB",
     softDelete: true,
   },
@@ -58,8 +48,8 @@ const KB_BACKENDS = {
     query: warrantyQuery,
     deleteChunks: warrantyDeleteChunks,
     retrievalStatus: warrantyRetrievalStatus,
-    categories: ["General", "diagnostic", "policy", "faq"],
     defaultScopeCategories: null,
+    supportsCommunities: true,
     targetType: "WarrantyKB",
     softDelete: false,
   },
@@ -75,6 +65,26 @@ function backendFor(req, res) {
     return null;
   }
   return { key, ...backend };
+}
+
+async function resolveLabCompany() {
+  return prisma.company.findFirst({
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true },
+  });
+}
+
+async function resolveTestCommunity(rawId, company) {
+  const id = typeof rawId === "string" ? rawId.trim() : "";
+  if (!id || id === "platform") return { communityId: null };
+  if (!company) return { error: "No company exists to test communities against." };
+
+  const community = await prisma.community.findFirst({
+    where: { id, companyId: company.id },
+    select: { id: true, name: true },
+  });
+  if (!community) return { error: "That community does not exist." };
+  return { communityId: community.id, community };
 }
 
 function formatFileSize(bytes) {
@@ -111,11 +121,49 @@ export const listKbDocuments = async (req, res) => {
       .retrievalStatus(null)
       .catch((e) => ({ status: "UNAVAILABLE", detail: e.message }));
 
+    let testCompany = null;
+    let communities = [];
+    let communityDocuments = [];
+
+    if (backend.supportsCommunities) {
+      testCompany = await resolveLabCompany();
+      if (testCompany) {
+        communities = await prisma.community.findMany({
+          where: { companyId: testCompany.id },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true, color: true },
+        });
+
+        const picked = await resolveTestCommunity(req.query?.communityId, testCompany);
+        if (picked.error) return res.status(400).json({ message: picked.error });
+
+        if (picked.communityId) {
+          // Both the tenant's real documents and the lab's own test uploads.
+          // `isSandbox` travels to the client so the two can be told apart and
+          // only the test ones get destructive controls.
+          const rows = await backend.model().findMany({
+            where: {
+              scope: "COMPANY",
+              companyId: testCompany.id,
+              communityId: picked.communityId,
+              isActive: true,
+            },
+            orderBy: { createdAt: "desc" },
+            take: 200,
+          });
+          communityDocuments = rows.map(toSafeDoc);
+        }
+      }
+    }
+
     return res.json({
       agent: backend.key,
-      categories: backend.categories,
+      supportsCommunities: Boolean(backend.supportsCommunities),
+      testCompany,
+      communities,
       documents: documents.map(toSafeDoc),
-      counts: { platform: documents.length },
+      communityDocuments,
+      counts: { platform: documents.length, community: communityDocuments.length },
       retrieval,
     });
   } catch (error) {
@@ -135,15 +183,33 @@ export const uploadKbDocument = async (req, res) => {
     const file = req.file;
     if (!file) return res.status(400).json({ message: "No file provided" });
 
-    const scope = "PLATFORM";
-    const companyId = null;
+    // Uploading against a community produces a SANDBOX document: it is a
+    // COMPANY-scoped row, because a community belongs to a tenant and retrieval
+    // cannot reach it otherwise, but `isSandbox` keeps it out of every
+    // production query. Without a community it is an ordinary platform
+    // document, exactly as before.
+    let scope = "PLATFORM";
+    let companyId = null;
+    let communityId = null;
+    let isSandbox = false;
+
+    if (backend.supportsCommunities) {
+      const company = await resolveLabCompany();
+      const picked = await resolveTestCommunity(req.body?.communityId, company);
+      if (picked.error) return res.status(400).json({ message: picked.error });
+
+      if (picked.communityId) {
+        scope = "COMPANY";
+        companyId = company.id;
+        communityId = picked.communityId;
+        isSandbox = true;
+      }
+    }
 
     const scan = await assertUploadSafe(file, "kbDocument");
     const originalName = file.originalname || "document";
-    const category =
-      typeof req.body?.category === "string" && req.body.category.trim()
-        ? req.body.category.trim()
-        : "General";
+
+    const category = "General";
 
     const key = buildStorageKey(
       companyId || "platform",
@@ -167,6 +233,7 @@ export const uploadKbDocument = async (req, res) => {
         url: ref,
         category,
         status: "PENDING",
+        ...(backend.supportsCommunities ? { communityId, isSandbox } : {}),
       },
     });
 
@@ -180,20 +247,12 @@ export const uploadKbDocument = async (req, res) => {
         name: originalName,
         bytes: file.size,
         scope,
+        communityId,
+        isSandbox,
         agent: backend.key,
         scanned: scan.scanned,
       },
     });
-
-    // Ingestion runs after the response, and deliberately so.
-    //
-    // Embedding dominates the cost: a book-length PDF is a thousand-plus chunks
-    // and minutes of work, far past any proxy's patience. Holding the request
-    // makes the browser report a failure while the server is still succeeding.
-    //
-    // So respond now and let the client poll the document's status. The one thing
-    // that must not happen is a silent stall, so a thrown error is recorded on the
-    // row as FAILED rather than only reaching the log.
     backend.ingest(document.id, companyId).catch(async (e) => {
       console.error(
         `[Prompt Lab KB] Ingestion failed for ${document.id}:`,
@@ -223,6 +282,16 @@ export const uploadKbDocument = async (req, res) => {
   }
 };
 
+/**
+ * The lab may only mutate what it owns: the platform tier, and the sandbox
+ * documents it created for testing. A tenant's real community document is
+ * listed here for context and must survive being looked at — enforced on the
+ * server, because hiding the button is not a permission.
+ */
+function mayMutate(doc) {
+  return doc.scope === "PLATFORM" || doc.isSandbox === true;
+}
+
 export const deleteKbDocument = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;
@@ -232,6 +301,11 @@ export const deleteKbDocument = async (req, res) => {
 
     const doc = await backend.model().findUnique({ where: { id: documentId } });
     if (!doc) return res.status(404).json({ message: "Document not found" });
+    if (!mayMutate(doc)) {
+      return res.status(403).json({
+        message: "That document belongs to a builder. Delete it from their knowledge base, not here.",
+      });
+    }
 
     await backend.deleteChunks(doc.companyId, documentId);
     await backend.model().delete({ where: { id: documentId } });
@@ -261,6 +335,11 @@ export const reindexKbDocument = async (req, res) => {
 
     const doc = await backend.model().findUnique({ where: { id: documentId } });
     if (!doc) return res.status(404).json({ message: "Document not found" });
+    if (!mayMutate(doc)) {
+      return res.status(403).json({
+        message: "That document belongs to a builder. Reindex it from their knowledge base, not here.",
+      });
+    }
 
     await backend.model().update({
       where: { id: documentId },
@@ -284,6 +363,55 @@ export const reindexKbDocument = async (req, res) => {
 };
 
 
+export const getKbDocumentUrl = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+    const backend = backendFor(req, res);
+    if (!backend) return;
+    const { documentId } = req.params;
+
+    const where = { id: documentId };
+    if (backend.softDelete) where.isDeleted = false;
+
+    if (backend.supportsCommunities) {
+      const company = await resolveLabCompany();
+      where.OR = [
+        { scope: "PLATFORM" },
+        company ? { scope: "COMPANY", companyId: company.id } : { scope: "PLATFORM" },
+      ];
+    } else {
+      where.scope = "PLATFORM";
+    }
+
+    const doc = await backend.model().findFirst({ where });
+    if (!doc) return res.status(404).json({ message: "Document not found" });
+    if (!doc.url) {
+      return res.status(404).json({ message: "This document has no stored file." });
+    }
+
+    const url = await resolveDownloadUrl(doc.url);
+    if (!url) {
+      return res
+        .status(500)
+        .json({ message: "Could not generate a link for this document." });
+    }
+
+    await writeAuditLog({
+      req,
+      action: "prompt_lab.kb_document_opened",
+      companyId: doc.companyId,
+      targetType: backend.targetType,
+      targetId: documentId,
+      metadata: { name: doc.name, scope: doc.scope, agent: backend.key },
+    });
+
+    return res.json({ url, name: doc.name });
+  } catch (error) {
+    console.error("[Prompt Lab KB] Download URL failed:", error);
+    return res.status(500).json({ message: "Failed to open this document" });
+  }
+};
+
 export const probeKb = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;
@@ -298,9 +426,20 @@ export const probeKb = async (req, res) => {
         .json({ message: "Enter a question to test retrieval with." });
     }
 
-    // Platform tier only, so the probe tests exactly the documents listed above.
-    // Production retrieval also layers in that company's own documents.
-    const companyId = null;
+    let companyId = null;
+    let communityId = null;
+
+    if (backend.supportsCommunities) {
+      const company = await resolveLabCompany();
+      const picked = await resolveTestCommunity(req.body?.communityId, company);
+      if (picked.error) return res.status(400).json({ message: picked.error });
+
+      if (picked.communityId) {
+        companyId = company.id;
+        communityId = picked.communityId;
+      }
+    }
+
     const limit = Math.min(Math.max(Number(req.body?.limit) || 8, 1), 20);
     const categories =
       Array.isArray(req.body?.categories) && req.body.categories.length
@@ -313,11 +452,15 @@ export const probeKb = async (req, res) => {
       question,
       limit,
       categories,
+      communityId,
+      // The lab is the one caller allowed to see sandbox documents.
+      true,
     );
 
     return res.json({
       question,
       method,
+      communityId,
       latencyMs: Date.now() - startedAt,
       results: (results || []).map((r) => ({
         documentId: r.documentId,

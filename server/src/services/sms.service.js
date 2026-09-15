@@ -1,11 +1,8 @@
 const TWILIO_API_BASE = "https://api.twilio.com/2010-04-01";
 const TELNYX_API_BASE = "https://api.telnyx.com/v2";
 
-// SMS providers must support inbound messages — the portal depends on replies for
-// reply-detection and on STOP keywords for opt-out compliance.
 export const SMS_PROVIDERS = ["TWILIO_SMS", "TELNYX_SMS"];
 
-// Platforms that were once selectable; stale rows are purged when SMS settings are saved.
 export const RETIRED_SMS_PROVIDERS = ["BREVO_SMS"];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -15,8 +12,6 @@ const statusCallbackUrl = () =>
     ? `${process.env.NEXT_PUBLIC_URL.replace(/\/$/, "")}/api/sales/compliance/inbound/sms-status`
     : null;
 
-// The platform-level fallback used by callers that pass smsConfig: "SYSTEM".
-// Picks the provider named by SMS_PROVIDER, else the first one fully configured.
 function resolveSystemConfig() {
   const candidates = {
     TWILIO_SMS: {
@@ -43,17 +38,11 @@ function resolveSystemConfig() {
   return null;
 }
 
-// Exported so the capabilities endpoint reports exactly what the sender would do
-// — "SMS is configured" in the UI must mean the same thing as it does here.
 export function isComplete(cfg) {
   if (!cfg?.apiKey || !cfg?.from) return false;
-  // Only Twilio needs a second credential to authenticate outbound sends.
   if (cfg.provider === "TWILIO_SMS" && !cfg.apiSecret) return false;
   return true;
 }
-
-// Accepts the shape produced by getMessagingConfig()/the settings controller, and
-// still understands the legacy Twilio-only keys (accountSid/authToken).
 function resolveConfig(smsConfig) {
   if (smsConfig === "SYSTEM") return resolveSystemConfig();
   if (!smsConfig) return null;
@@ -70,13 +59,6 @@ function resolveConfig(smsConfig) {
   return isComplete(cfg) ? cfg : null;
 }
 
-/**
- * Every send reports exactly one of these. SENT means the provider accepted the
- * message; FAILED means it rejected it or the request never got through, and is
- * worth parking for retry; NOT_CONFIGURED means the tenant has no usable
- * credentials, so there is nothing to retry and the caller should skip with a
- * reason. Nothing here ever pretends a message went out.
- */
 export const SMS_OUTCOME = {
   SENT: "sent",
   FAILED: "failed",
@@ -85,7 +67,6 @@ export const SMS_OUTCOME = {
 
 export const smsSent = (result) => result?.outcome === SMS_OUTCOME.SENT;
 
-/** Only genuine failures are worth a dead-letter row — missing config is not. */
 export const smsShouldPark = (result) => result?.outcome === SMS_OUTCOME.FAILED;
 
 const withTag = (url, tag) => {

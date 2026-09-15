@@ -4,26 +4,10 @@ import { getMessagingConfig } from "../lib/messaging-config.js";
 import { Templates } from "./templates.js";
 import { companyAdmins, writeNotifications, emailIsConfigured } from "./notification-service.js";
 
-/**
- * Notifications for repair visits booked against a warranty ticket.
- *
- * Two sides are notified, as the spec requires:
- *   Homeowner — by email.
- *   Trade     — the tenant company doing the repair. Its admins get an in-portal
- *               notification plus email; when the builder has named a specific
- *               crew or subcontractor on the appointment, that address is
- *               emailed too.
- *
- * Email obeys the same guard as everything else: it only goes out if the
- * workspace has SMTP credentials configured. The in-portal notification always
- * lands, so a workspace with no email still sees its bookings.
- */
-
 const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
 
 const DEFAULT_TZ = "America/New_York";
 
-/** Company timezone, taken from the shared availability settings when present. */
 export async function companyTimezone(companyId) {
   if (!companyId) return DEFAULT_TZ;
   const setting = await prisma.availabilitySetting
@@ -32,7 +16,6 @@ export async function companyTimezone(companyId) {
   return setting?.timezone || DEFAULT_TZ;
 }
 
-/** "Tue, 12 Mar 2026 at 2:30 PM EDT" — one label used across every message. */
 export function formatWhen(date, timeZone = DEFAULT_TZ) {
   try {
     return new Intl.DateTimeFormat("en-US", {
@@ -50,7 +33,6 @@ export function formatWhen(date, timeZone = DEFAULT_TZ) {
   }
 }
 
-/** Shared shape handed to every appointment template. */
 function detailsFor(appointment, whenLabel) {
   return {
     ticketId: appointment.ticketId,
@@ -63,7 +45,6 @@ function detailsFor(appointment, whenLabel) {
   };
 }
 
-/** Load an appointment with everything the templates need. */
 export function appointmentWithContext(id) {
   return prisma.ticketAppointment.findUnique({
     where: { id },
@@ -75,12 +56,6 @@ export function appointmentWithContext(id) {
   });
 }
 
-/**
- * Fan a single appointment message out to both sides.
- *
- * `kind` picks the copy: "scheduled", "reminder" or "cancelled". For reminders,
- * `windowLabel` reads like "tomorrow" or "in about an hour".
- */
 async function dispatch(appointment, kind, { windowLabel = null } = {}) {
   const companyId = appointment.companyId;
   const company = appointment.company || null;
@@ -219,7 +194,6 @@ export async function notifyAppointmentCancelled(appointmentId) {
   }
 }
 
-/** Called by the reminder cron, which owns the schedule and the sent flags. */
 export async function notifyAppointmentReminder(appointment, windowLabel) {
   try {
     return await dispatch(appointment, "reminder", { windowLabel });

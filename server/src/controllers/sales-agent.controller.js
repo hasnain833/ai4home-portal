@@ -21,9 +21,6 @@ export const bookAppointment = async (req, res) => {
       },
     });
 
-    // Notify User - SMS. This booking belongs to AI4Homebuilders itself, not to a
-    // tenant workspace, so it sends on the platform credentials — the same
-    // "SYSTEM" marker the admin notification below already uses.
     const customerSms = await sendSms({
       to: phone,
       body: `Hi ${name}, your appointment with AI4Homebuilders is confirmed for ${preferredTime}. We look forward to speaking with you!`,
@@ -137,15 +134,6 @@ export const simulateInbound = async (req, res) => {
 };
 
 
-/* ------------------------------------------------------------------ *
- * Botpress outbound messaging.
- *
- * Botpress decides what to say and who to say it to; delivery is ours.
- * Everything here sends on the platform's own credentials — Telnyx/Twilio for
- * SMS, Brevo for email — never a tenant's integration, because these messages
- * come from AI4Homebuilders rather than from any one workspace.
- * ------------------------------------------------------------------ */
-
 const MAX_MESSAGE_CHARS = 1600;
 const EMAIL_RE = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/;
 const PLATFORM_SENDER_NAME = "AI4Homebuilders";
@@ -158,14 +146,7 @@ function isValidPhone(value) {
   return /^\+?\d{10,15}$/.test(normalizePhone(value));
 }
 
-/**
- * POST /api/public/sales-agent/message
- *
- * Body: { message, email?, phone?, subject?, name? }
- * Sends to whichever contact details are supplied — both when both are given.
- * Always reports per-channel outcomes rather than a single pass/fail, so the
- * caller can tell "the text failed but the email landed" from "nothing sent".
- */
+
 export const sendAgentMessage = async (req, res) => {
   try {
     const { message, email, phone, subject, name } = req.body || {};

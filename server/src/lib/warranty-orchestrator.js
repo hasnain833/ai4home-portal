@@ -17,14 +17,6 @@ import {
 
 const MAX_TRACKED_KB_REFS = 12;
 
-/**
- * Passages retrieved per turn.
- *
- * A diagnostic matrix is indexed one question per chunk, so this is a count of
- * questions, not of pages: the largest problem code in the matrix runs to six,
- * and retrieving three would hand the agent half a decision tree. The headroom
- * above six leaves room for policy prose to come back alongside.
- */
 const KB_PASSAGES = 8;
 
 const ORCHESTRATOR_TOOLS = {
@@ -70,12 +62,6 @@ export function matchPropertyChoice(message, choices) {
 
   const lower = raw.toLowerCase();
 
-  // An exact address settles it before the ordinal rule gets a chance.
-  //
-  // Choices are offered as buttons that send the address verbatim, so "3 Elm
-  // Street" arrives as a whole answer — but it also starts with a digit, and the
-  // ordinal rule below would read it as "the third one" and quietly pick a
-  // different home. Exactness beats position.
   const exact = list.find((c) => String(c.address || "").trim().toLowerCase() === lower);
   if (exact) return exact;
 
@@ -121,19 +107,12 @@ function trackKbRefs(issueState, results) {
   issueState.kbRefs = merged.slice(-MAX_TRACKED_KB_REFS);
 }
 
-/**
- * Returns both the rendered context block and the raw passages behind it.
- *
- * Production only needs the block, but the Prompt Lab shows the passages: a weak
- * answer caused by a KB gap is indistinguishable from one caused by a bad prompt
- * until you can see what the agent was actually handed.
- */
-async function retrieveContext({ companyId, question, communityId, issueState }) {
+async function retrieveContext({ companyId, question, communityId, issueState, includeSandbox = false }) {
   const q = String(question || "").trim();
   if (!q) return { context: KB_EMPTY_CONTEXT, results: [] };
 
   try {
-    const { results } = await kbQueryDetailed(companyId, q, KB_PASSAGES, null, communityId);
+    const { results } = await kbQueryDetailed(companyId, q, KB_PASSAGES, null, communityId, includeSandbox);
     if (results && results.length > 0) {
       trackKbRefs(issueState, results);
       return {
@@ -148,6 +127,12 @@ async function retrieveContext({ companyId, question, communityId, issueState })
   }
 }
 
+function claimLine(isEmergency) {
+  return isEmergency
+    ? `Your issue has been recorded and flagged as urgent. Our warranty team will contact you as soon as possible.`
+    : `Your issue has been recorded. Our warranty team will review it and contact you with next steps shortly.`;
+}
+
 async function fileClaim({
   company,
   convo,
@@ -157,6 +142,7 @@ async function fileClaim({
   propertyId,
   description,
   forceEmergency = false,
+  sandboxMode = false,
 }) {
   const classification = await classifyClaim({
     companyId: company.id,
@@ -175,6 +161,30 @@ async function fileClaim({
   issueState.isEmergency = classification.isEmergency;
   issueState.classifiedAt = new Date().toISOString();
 
+  // The lab must not write. Classification still runs — judging how an issue is
+  // categorised and prioritised is most of what a tester is here for — but it
+  // stops short of creating a ticket, emailing the homeowner, or updating the
+  // conversation row, which does not exist for the sandbox's synthetic id.
+  //
+  // The homeowner gate is mirrored rather than skipped: "share the email on your
+  // file first" is a real branch, and a sandbox that always files would never
+  // show it.
+  if (sandboxMode) {
+    const homeowner = homeownerId
+      ? await prisma.user.findUnique({ where: { id: homeownerId }, select: { id: true } })
+      : null;
+    if (!homeowner) return { filed: null, classification };
+
+    return {
+      filed: { sandbox: true },
+      classification,
+      line: claimLine(classification.isEmergency),
+      // Deliberately null: nothing was created, so there is no ticket for a
+      // later turn to escalate.
+      ticketId: null,
+    };
+  }
+
   const filed = await createWarrantyTicket({
     companyId: company.id,
     homeownerId,
@@ -190,10 +200,6 @@ async function fileClaim({
 
   const { ticket } = filed;
 
-  const line = ticket.isEmergency
-    ? `Your issue has been recorded and flagged as urgent. Our warranty team will contact you as soon as possible.`
-    : `Your issue has been recorded. Our warranty team will review it and contact you with next steps shortly.`;
-
   await prisma.warrantyConversation.update({
     where: { id: convo.id },
     data: {
@@ -202,7 +208,7 @@ async function fileClaim({
     },
   });
 
-  return { filed, classification, line, ticketId: ticket.id };
+  return { filed, classification, line: claimLine(ticket.isEmergency), ticketId: ticket.id };
 }
 
 const NEEDS_IDENTITY =
@@ -211,7 +217,7 @@ const NEEDS_IDENTITY =
 const EMERGENCY_NO_IDENTITY =
   "If anyone is in immediate danger, call 911 now. I have flagged this conversation as an emergency for our warranty team — please reply with your email address so I can file the ticket against your property.";
 
-export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode = false, draftPrompts = null }) {
+export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode = false, draftPrompts = null, sandboxCommunityId = null }) {
   const transcript = [...(convo.transcript || []), { role: "user", content: newMsg, at: new Date().toISOString() }];
   const messages = toAnthropicMessages(transcript);
 
@@ -222,27 +228,13 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   const issueState = { ...(convo.issueState || {}) };
   let communityId = null;
   let property = null;
-
-  /** Passages retrieved on this turn. Reported to the Prompt Lab; unused in production. */
   let kbHits = [];
-
-  /**
-   * Choices the homeowner can pick from this turn, rendered as buttons.
-   *
-   * Carried beside the reply rather than numbered into it: a list the client can
-   * render is also a list it can turn into one tap, and picking from it produces
-   * an exact answer instead of "the second one" for the next turn to interpret.
-   */
   let turnOptions = [];
 
-  // The sandbox grounds on the PLATFORM tier alone.
-  //
-  // It runs against whichever company happens to be first in the table, and
-  // retrieval unions PLATFORM with that company's own documents. Left as-is, a
-  // super-admin tuning the shared defaults would be reading answers shaped by one
-  // arbitrary tenant's private files. A null companyId matches no COMPANY row, so
-  // only the platform documents come back.
-  const kbCompanyId = sandboxMode ? null : company.id;
+  const kbCompanyId = sandboxMode ? (sandboxCommunityId ? company.id : null) : company.id;
+  if (sandboxMode && sandboxCommunityId) {
+    communityId = sandboxCommunityId;
+  }
   if (propertyId) {
     property = await prisma.property.findUnique({ where: { id: propertyId } }).catch(() => null);
     communityId = property?.communityId || null;
@@ -273,7 +265,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     return coverage;
   };
 
-  /** Persists the turn and returns the reply. Used by the deterministic branches. */
+
   const finish = async (replyText, nextPhase) => {
     const finalTranscript = [...transcript, { role: "agent", content: replyText, at: new Date().toISOString() }];
     if (!sandboxMode) {
@@ -355,6 +347,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     };
 
     ({ context: kbContext, results: kbHits } = await retrieveContext({
+      includeSandbox: sandboxMode,
       companyId: kbCompanyId,
       question: newMsg,
       communityId,
@@ -376,6 +369,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       }
     };
     ({ context: kbContext, results: kbHits } = await retrieveContext({
+      includeSandbox: sandboxMode,
       companyId: kbCompanyId,
       question: newMsg,
       communityId,
@@ -445,11 +439,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
         nextPhase = "DIAGNOSE";
       } else if (properties.length > 1) {
         issueState.propertyChoices = properties.map((p) => ({ id: p.id, address: p.address }));
-
-        // The addresses go out as options, not as a numbered list in the prose.
-        // matchPropertyChoice already resolves a full address, so a tap comes back
-        // as an exact answer. They stay on issueState either way, so the prompt can
-        // still see them if the homeowner types something unmatched instead.
         turnOptions = properties.map((p) => p.address);
         replyText = "I found multiple properties associated with that info. Which one is experiencing the issue?";
       } else {
@@ -462,7 +451,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     if (input.action === "escalate_emergency") {
       const reason = input.emergency_reason || "Emergency reported during diagnosis.";
 
-      if (ticketId) {
+      if (ticketId && !sandboxMode) {
         await escalateWarrantyTicket(ticketId, { reason });
         replyText = `${input.message}\n\nI've escalated your existing ticket (${ticketId}) to our emergency queue.`;
         nextPhase = "RESOLVE";
@@ -474,6 +463,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
           issueState,
           homeownerId,
           propertyId,
+          sandboxMode,
           description: reason,
           forceEmergency: true,
         });
@@ -517,6 +507,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
           issueState,
           homeownerId,
           propertyId,
+          sandboxMode,
           description,
         });
 
@@ -589,7 +580,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     if (safetyCheck.is_emergency) {
       const reason = safetyCheck.reason || "Emergency detected by safety gate.";
 
-      if (ticketId) {
+      if (ticketId && !sandboxMode) {
         await escalateWarrantyTicket(ticketId, { reason });
         replyText += `\n\nYour issue has been flagged as urgent and our warranty team will contact you as soon as possible.`;
         nextPhase = "RESOLVE";
@@ -601,6 +592,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
           issueState,
           homeownerId,
           propertyId,
+          sandboxMode,
           description: reason,
           forceEmergency: true,
         });

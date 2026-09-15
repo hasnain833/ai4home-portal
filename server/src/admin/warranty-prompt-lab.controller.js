@@ -21,17 +21,8 @@ function denyUnlessSuperAdmin(req, res) {
 
 const MAX_TRANSCRIPT_TURNS = 40;
 const PHASE_KEYS = ["INTAKE", "IDENTIFY", "DIAGNOSE", "RESOLVE"];
-
-/** Longest passage excerpt sent to the lab. Enough to judge relevance, short enough to ship. */
 const MAX_EXCERPT = 1200;
 
-/**
- * The passages retrieval handed the agent, trimmed for transport.
- *
- * Shown in the lab so a prompt can be judged against what the agent actually
- * had: an answer weakened by a KB gap looks identical to one weakened by a bad
- * prompt until you can read the retrieved text.
- */
 function describeChunks(chunks = []) {
   return (Array.isArray(chunks) ? chunks : []).map((c) => ({
     documentId: c.documentId,
@@ -258,11 +249,19 @@ export const warrantyPromptLabChat = async (req, res) => {
       return res.status(503).json({ message: "No platform AI key is set. Add one under Admin -> AI Keys." });
     }
 
-    // A company is still needed for the agent's own name and for the AI key, but
-    // sandboxMode pins retrieval to the PLATFORM tier, so this company's private
-    // documents do not colour the answers. See processWarrantyTurn.
     const company = await prisma.company.findFirst({ orderBy: { createdAt: "asc" } });
     if (!company) return res.status(400).json({ message: "No company exists to test against." });
+    const rawCommunity =
+      typeof req.body?.communityId === "string" ? req.body.communityId.trim() : "";
+    let sandboxCommunityId = null;
+    if (rawCommunity && rawCommunity !== "platform") {
+      const community = await prisma.community.findFirst({
+        where: { id: rawCommunity, companyId: company.id },
+        select: { id: true },
+      });
+      if (!community) return res.status(400).json({ message: "That community does not exist." });
+      sandboxCommunityId = community.id;
+    }
 
     const phase = String(req.body?.phase || "INTAKE").toUpperCase();
     const convo = {
@@ -284,16 +283,15 @@ export const warrantyPromptLabChat = async (req, res) => {
 
     const result = await processWarrantyTurn({
       company, convo, newMsg: lastMsg, sandboxMode: true, draftPrompts: draft,
+      sandboxCommunityId,
     });
 
     return res.json({
       reply: result.reply,
       phase: result.phase,
       latencyMs: Date.now() - startedAt,
+      communityId: sandboxCommunityId,
       retrieved: describeChunks(result.kbHits),
-      // Choices now travel beside the reply rather than numbered into it, so the
-      // lab has to render them too — otherwise a property question looks like a
-      // question with its answers missing.
       options: Array.isArray(result.options) ? result.options : [],
     });
   } catch (error) {

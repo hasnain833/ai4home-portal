@@ -125,10 +125,6 @@ export default function AnnouncementsPage() {
     }
   }, []);
 
-  // NFR-P-001: both requests start together, and the segment list comes from
-  // the shared cache — the leads and campaigns pages read the same key. Derived
-  // straight from the cache rather than mirrored into state, so there is no
-  // extra render pass when it arrives.
   const { data: cachedSegments } = useQuery<Segment[]>(QUERY_KEYS.segments);
   const segments: Segment[] = Array.isArray(cachedSegments) ? cachedSegments : [];
 
@@ -165,10 +161,7 @@ export default function AnnouncementsPage() {
     }
   };
 
-  /**
-   * Saving and sending are deliberately separate. "save" creates/updates a Draft
-   * and never contacts a lead; "send"/"schedule" is the only path that dispatches.
-   */
+ 
   const submitAnnouncement = async (mode: "save" | "send") => {
     if (submitting) return;
 

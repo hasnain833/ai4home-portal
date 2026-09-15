@@ -5,8 +5,6 @@ import { Templates } from "../services/templates.js";
 
 const ALERT_ACTION = "FAILURE_ALERT";
 
-// Alert after 3 consecutive sync failures, then stay quiet about the same
-// company for a day so a persistent outage doesn't become an inbox flood.
 const threshold = () => 3;
 const cooldownHours = () => 24;
 
@@ -95,8 +93,6 @@ export async function maybeAlertOnSyncFailure(companyId, { action = "sync" } = {
         lastErrors,
       }),
       smtpConfig,
-      // An integration-broken alert has to reach the admin even when the reason
-      // the workspace is misconfigured is that it never set up SMTP either.
       allowPlatformSender: true,
     });
 

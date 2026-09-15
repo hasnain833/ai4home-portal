@@ -3,12 +3,6 @@ import { embedText, embedBatch, EMBEDDING_DIM } from "./embedding.service.js";
 
 const FTS_LANG = "english";
 
-/**
- * Retrieval sees two tiers at once: the PLATFORM knowledge every company shares,
- * plus that company's own documents. $2 is always the companyId.
- * A null companyId still matches the platform tier, which is what the Prompt Lab
- * wants when testing platform content on its own.
- */
 const SCOPE_FILTER_SQL = `(scope = 'PLATFORM' OR "companyId" = $2)`;
 const MAX_CHUNK_CHARS = 8000;
 
@@ -68,9 +62,6 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 }
 
 export async function deleteDocument(companyId, documentId) {
-  // Keyed on documentId alone: it already identifies exactly one document, and
-  // filtering on companyId would skip PLATFORM chunks, which have none.
-  // The caller is responsible for authorising the delete.
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 }
 

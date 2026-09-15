@@ -5,7 +5,8 @@
  *
  * Manages the PLATFORM tier: the shared documents every company's agent
  * retrieves. A single builder's own documents live on that company's own KB
- * screen, not here.
+ * screen, not here — except the community under test, which is listed read-only
+ * so community-scoped retrieval can be seen working.
  *
  * The probe box runs retrieval with no model call, which is the fast loop for
  * tuning KB content: ask the question, see which passages come back and at what
@@ -15,8 +16,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -33,6 +34,9 @@ import {
   FileText,
   Globe,
   AlertCircle,
+  ExternalLink,
+  Home,
+  FlaskConical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -47,6 +51,9 @@ export type KbDocument = {
   chunkCount: number;
   error: string | null;
   companyId: string | null;
+  hasFile: boolean;
+  /** Uploaded from this lab for testing; never retrieved by the live agent. */
+  isSandbox?: boolean;
   createdAt: string;
 };
 
@@ -59,6 +66,12 @@ export type KbProbeResult = {
   text: string;
 };
 
+export type KbCommunity = {
+  id: string;
+  name: string;
+  color: string;
+};
+
 type RetrievalStatus = {
   status: string;
   totalChunks?: number;
@@ -69,18 +82,21 @@ type RetrievalStatus = {
 
 type Props = {
   agent: string;
+  /**
+   * Community being tested against, or "platform" for the shared default.
+   *
+   * Owned by the page rather than this panel because the test conversation
+   * grounds on the same choice — a community picked here that the chat ignored
+   * would be worse than no picker at all.
+   */
+  communityId?: string;
+  onCommunityChange?: (id: string, name: string | null) => void;
 };
 
-/** Documents sit in PENDING/INDEXING until ingestion finishes, so the list polls. */
+const PLATFORM = "platform";
+
 const POLL_MS = 4000;
 const BUSY_STATUSES = new Set(["PENDING", "INDEXING"]);
-
-/**
- * Ingestion runs in the server process, so restarting the server mid-document
- * strands it in INDEXING with nothing to move it along. There is no heartbeat to
- * detect that, so past this age we stop implying it is still working and point at
- * Reindex instead.
- */
 const STALE_AFTER_MS = 15 * 60 * 1000;
 
 function looksStalled(doc: KbDocument) {
@@ -96,15 +112,21 @@ function statusTone(status: string) {
   return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300";
 }
 
-export default function KnowledgeBasePanel({ agent }: Props) {
+export default function KnowledgeBasePanel({
+  agent,
+  communityId = PLATFORM,
+  onCommunityChange,
+}: Props) {
   const confirm = useConfirm();
   const [documents, setDocuments] = useState<KbDocument[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
+  const [communityDocs, setCommunityDocs] = useState<KbDocument[]>([]);
+  const [communities, setCommunities] = useState<KbCommunity[]>([]);
+  const [supportsCommunities, setSupportsCommunities] = useState(false);
+  const [testCompany, setTestCompany] = useState<{ id: string; name: string } | null>(null);
   const [retrieval, setRetrieval] = useState<RetrievalStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [uploading, setUploading] = useState(false);
-  const [uploadCategory, setUploadCategory] = useState("General");
   const [uploadQueue, setUploadQueue] = useState<{ done: number; total: number; current: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -116,18 +138,24 @@ export default function KnowledgeBasePanel({ agent }: Props) {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/admin/prompt-lab/kb?agent=${encodeURIComponent(agent)}`);
+      const res = await fetch(
+        `/api/admin/prompt-lab/kb?agent=${encodeURIComponent(agent)}` +
+          `&communityId=${encodeURIComponent(communityId)}`,
+      );
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed to load");
       const data = await res.json();
       setDocuments(Array.isArray(data.documents) ? data.documents : []);
-      setCategories(Array.isArray(data.categories) ? data.categories : []);
+      setCommunityDocs(Array.isArray(data.communityDocuments) ? data.communityDocuments : []);
+      setCommunities(Array.isArray(data.communities) ? data.communities : []);
+      setSupportsCommunities(Boolean(data.supportsCommunities));
+      setTestCompany(data.testCompany || null);
       setRetrieval(data.retrieval || null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load documents");
     } finally {
       setLoading(false);
     }
-  }, [agent]);
+  }, [agent, communityId]);
 
   useEffect(() => {
     setLoading(true);
@@ -141,28 +169,19 @@ export default function KnowledgeBasePanel({ agent }: Props) {
     return () => clearInterval(t);
   }, [documents, load]);
 
-  /** Uploads one file. Returns whether it was accepted, so a batch can report totals. */
   const uploadOne = async (file: File) => {
     const body = new FormData();
     body.append("file", file);
     body.append("agent", agent);
-    body.append("category", uploadCategory);
-
-    // The server stores the file, responds, and indexes afterwards, because
-    // embedding a long document takes minutes. The list below polls for status.
+    // Uploading while a community is selected files the document against that
+    // community as a sandbox document, rather than into the platform tier.
+    body.append("communityId", communityId);
     const res = await fetch("/api/admin/prompt-lab/kb/upload", { method: "POST", body });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.message || "Upload failed");
     return data;
   };
 
-  /**
-   * Uploads a whole selection.
-   *
-   * Sequential rather than parallel: each upload kicks off a CPU-bound embedding
-   * job on the server, and firing ten at once would contend for the same cores
-   * and make every one of them slower.
-   */
   const uploadMany = async (files: File[]) => {
     if (!files.length) return;
     setUploading(true);
@@ -225,6 +244,28 @@ export default function KnowledgeBasePanel({ agent }: Props) {
     }
   };
 
+  const openDocument = async (doc: KbDocument) => {
+    const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    try {
+      const res = await fetch(
+        `/api/admin/prompt-lab/kb/${doc.id}/url?agent=${encodeURIComponent(agent)}`,
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) {
+        throw new Error(data.message || "Could not open that document.");
+      }
+      // A blocked popup leaves nothing to navigate; fall back to this tab.
+      if (tab) tab.location.replace(data.url);
+      else window.location.assign(data.url);
+    } catch (e) {
+      tab?.close();
+      toast.error(e instanceof Error ? e.message : "Could not open that document.");
+    }
+  };
+
+  const communityName = communities.find((c) => c.id === communityId)?.name || null;
+
   const probe = async (e: React.FormEvent) => {
     e.preventDefault();
     const question = probeText.trim();
@@ -234,7 +275,7 @@ export default function KnowledgeBasePanel({ agent }: Props) {
       const res = await fetch("/api/admin/prompt-lab/kb/probe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent, question }),
+        body: JSON.stringify({ agent, question, communityId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Retrieval test failed");
@@ -249,43 +290,67 @@ export default function KnowledgeBasePanel({ agent }: Props) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {/* Community under test */}
+      {supportsCommunities && (
+        <div className="shrink-0 rounded-lg border border-border bg-muted/30 p-3">
+          <Label className="text-[11px] font-semibold text-muted-foreground">
+            Test as a homeowner in
+          </Label>
+          <Select
+            value={communityId}
+            onValueChange={(v) =>
+              onCommunityChange?.(v, communities.find((c) => c.id === v)?.name || null)
+            }
+            disabled={!onCommunityChange}
+          >
+            <SelectTrigger className="mt-0.5 h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={PLATFORM}>Platform (no community)</SelectItem>
+              {communities.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            {communityId === PLATFORM ? (
+              <>
+                <Globe className="mt-px h-3 w-3 shrink-0" />
+                Platform documents are the default — every tenant&apos;s agent retrieves these, and
+                nothing else is in play.
+              </>
+            ) : (
+              <>
+                <Home className="mt-px h-3 w-3 shrink-0" />
+                Retrieval returns the platform documents <strong>plus</strong>
+                {testCompany ? ` ${testCompany.name}'s` : " this tenant's"} documents filed under
+                this community — exactly what a homeowner there would be answered from.
+              </>
+            )}
+          </p>
+          {communities.length === 0 && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {testCompany
+                ? `${testCompany.name} has no communities yet.`
+                : "No company exists to test communities against."}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Upload */}
       <div className="shrink-0 rounded-lg border border-border bg-muted/30 p-3">
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="min-w-32 flex-1">
-            <Label className="text-[11px] font-semibold text-muted-foreground">Category</Label>
-            <Select value={uploadCategory} onValueChange={setUploadCategory}>
-              <SelectTrigger className="mt-0.5 h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(categories.length ? categories : ["General"]).map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            className="hidden"
-            accept=".pdf,.docx,.txt,.csv"
-            onChange={(e) => uploadMany(Array.from(e.target.files || []))}
-          />
-          <Button
-            className="h-9 gap-1.5"
-            disabled={uploading}
-            onClick={() => fileRef.current?.click()}
-          >
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            {uploadQueue
-              ? `Uploading ${uploadQueue.done + 1} of ${uploadQueue.total}…`
-              : "Upload documents"}
-          </Button>
-        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          className="hidden"
+          accept=".pdf,.docx,.txt,.csv"
+          onChange={(e) => uploadMany(Array.from(e.target.files || []))}
+        />
         <div
           onDragOver={(e) => {
             e.preventDefault();
@@ -298,28 +363,48 @@ export default function KnowledgeBasePanel({ agent }: Props) {
             if (!uploading) uploadMany(Array.from(e.dataTransfer.files || []));
           }}
           onClick={() => !uploading && fileRef.current?.click()}
-          className={`mt-2 cursor-pointer rounded-md border border-dashed px-3 py-4 text-center transition-colors ${
+          className={`cursor-pointer rounded-md border border-dashed px-3 py-5 text-center transition-colors ${
             dragging ? "border-[#b48c3c] bg-[#b48c3c]/10" : "border-border hover:bg-accent/40"
           } ${uploading ? "pointer-events-none opacity-60" : ""}`}
         >
           {uploadQueue ? (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Uploading <strong>{uploadQueue.current}</strong> ({uploadQueue.done + 1} of{" "}
               {uploadQueue.total})
             </p>
           ) : (
             <p className="text-[11px] text-muted-foreground">
-              Drag &amp; drop files here, or click to browse — several at once is fine.
-              <br />
-              PDF, DOCX, TXT, or CSV, up to 25MB each.
+              <span className="flex items-center justify-center gap-1.5 text-xs font-medium text-foreground">
+                <Upload className="h-3.5 w-3.5" />
+                Drag &amp; drop files here, or click to browse
+              </span>
+              <span className="mt-1 block">
+                Several at once is fine. PDF, DOCX, TXT, or CSV, up to 25MB each.
+              </span>
+              {supportsCommunities && communityId !== PLATFORM && (
+                <span className="mt-1.5 flex items-center justify-center gap-1.5 font-medium text-[#b48c3c]">
+                  <FlaskConical className="h-3 w-3" />
+                  Uploads go to {communityName || "this community"} as test documents
+                </span>
+              )}
             </p>
           )}
         </div>
-        <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
-          <Globe className="mt-px h-3 w-3 shrink-0" />
-          Documents added here are retrieved by every company&apos;s agent, and stay until you
-          delete them.
-        </p>
+        {supportsCommunities && communityId !== PLATFORM ? (
+          <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            <FlaskConical className="mt-px h-3 w-3 shrink-0" />
+            Test documents. They are retrieved here and in the Test Sandbox so you can check
+            community-scoped answers, and <strong>never by the live agent</strong> — no real
+            homeowner will ever be answered from them.
+          </p>
+        ) : (
+          <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            <Globe className="mt-px h-3 w-3 shrink-0" />
+            Documents added here are retrieved by every company&apos;s agent, and stay until you
+            delete them.
+          </p>
+        )}
       </div>
 
       {/* Retrieval health */}
@@ -341,7 +426,7 @@ export default function KnowledgeBasePanel({ agent }: Props) {
         <Input
           value={probeText}
           onChange={(e) => setProbeText(e.target.value)}
-          placeholder="Test retrieval — e.g. &quot;my AC isn't cooling&quot;"
+          placeholder="Test retrieval — e.g. &quot;my AC isn&apos;t cooling&quot;"
           className="h-9"
         />
         <Button type="submit" variant="outline" size="sm" className="h-9 gap-1.5" disabled={probing}>
@@ -383,7 +468,11 @@ export default function KnowledgeBasePanel({ agent }: Props) {
                   <li key={`${r.documentId}-${i}`} className="px-3 py-2">
                     <div className="mb-1 flex flex-wrap items-center gap-1.5">
                       <span className="truncate text-[11px] font-medium">{r.name || "Untitled"}</span>
-                      <span className="text-[10px] text-muted-foreground">{r.category}</span>
+                      {supportsCommunities && (
+                        <Badge variant="secondary" className="text-[9px] font-normal">
+                          {r.scope === "PLATFORM" ? "Platform" : "Community"}
+                        </Badge>
+                      )}
                       <span className="ml-auto font-mono text-[10px] text-muted-foreground">
                         {r.score.toFixed(3)}
                       </span>
@@ -404,14 +493,40 @@ export default function KnowledgeBasePanel({ agent }: Props) {
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <DocGroup
-            title="Platform knowledge base"
-            subtitle="Every company's agent retrieves these"
-            icon={<Globe className="h-3.5 w-3.5" />}
-            docs={documents}
-            onDelete={remove}
-            onReindex={reindex}
-          />
+          <>
+            <DocGroup
+              title="Platform knowledge base"
+              subtitle="Every company's agent retrieves these"
+              icon={<Globe className="h-3.5 w-3.5" />}
+              docs={documents}
+              onOpen={openDocument}
+              onDelete={remove}
+              onReindex={reindex}
+            />
+            {/*
+              The tenant's own documents for the community under test. Read-only
+              on purpose: the lab owns the platform tier, and a super-admin
+              deleting a builder's document from a testing screen would be a
+              surprise nobody asked for. They are listed because a probe that
+              returns nothing is otherwise ambiguous — empty community, or bad
+              question?
+            */}
+            {supportsCommunities && communityId !== PLATFORM && (
+              <DocGroup
+                title={`${communityName || "Community"} documents`}
+                subtitle={`Test uploads, plus ${testCompany?.name || "the tenant"}'s own (read-only)`}
+                icon={<Home className="h-3.5 w-3.5" />}
+                docs={communityDocs}
+                onOpen={openDocument}
+                // Only the lab's own test documents can be changed from here;
+                // DocGroup hides the controls per row on the same rule the
+                // server enforces.
+                onDelete={remove}
+                onReindex={reindex}
+                mutableOnly="sandbox"
+              />
+            )}
+          </>
         )}
       </div>
     </div>
@@ -423,15 +538,21 @@ function DocGroup({
   subtitle,
   icon,
   docs,
+  onOpen,
   onDelete,
   onReindex,
+  mutableOnly,
 }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
   docs: KbDocument[];
-  onDelete: (d: KbDocument) => void;
-  onReindex: (d: KbDocument) => void;
+  onOpen: (d: KbDocument) => void;
+  /** Omitted for groups the lab shows but does not own. */
+  onDelete?: (d: KbDocument) => void;
+  onReindex?: (d: KbDocument) => void;
+  /** "sandbox" limits the controls to the lab's own test documents. */
+  mutableOnly?: "sandbox";
 }) {
   return (
     <div>
@@ -449,16 +570,31 @@ function DocGroup({
         </p>
       ) : (
         <ul className="space-y-1">
-          {docs.map((d) => (
+          {docs.map((d) => {
+            const mutable = mutableOnly === "sandbox" ? Boolean(d.isSandbox) : true;
+            return (
             <li
               key={d.id}
-              className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5"
+              className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 ${
+                d.isSandbox ? "border-[#b48c3c]/40 bg-[#b48c3c]/5" : "border-border"
+              }`}
             >
               <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium">{d.name}</p>
+                {d.hasFile ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpen(d)}
+                    title={`Open ${d.name}`}
+                    className="block max-w-full truncate text-left text-xs font-medium hover:underline"
+                  >
+                    {d.name}
+                  </button>
+                ) : (
+                  <p className="truncate text-xs font-medium">{d.name}</p>
+                )}
                 <p className="text-[10px] text-muted-foreground">
-                  {d.size} · {d.category}
+                  {d.size}
                   {d.status === "READY" && ` · ${d.chunkCount} chunks`}
                   {BUSY_STATUSES.has(d.status) &&
                     !looksStalled(d) &&
@@ -468,30 +604,56 @@ function DocGroup({
                   {d.error && ` · ${d.error}`}
                 </p>
               </div>
+              {d.isSandbox && (
+                <Badge
+                  variant="outline"
+                  className="gap-1 border-[#b48c3c]/50 text-[9px] font-medium text-[#b48c3c]"
+                  title="Test document — the live agent never retrieves this"
+                >
+                  <FlaskConical className="h-2.5 w-2.5" />
+                  TEST
+                </Badge>
+              )}
               <Badge className={`text-[10px] font-normal ${statusTone(d.status)}`}>
                 {d.status === "INDEXING" && <Loader2 className="mr-1 h-2.5 w-2.5 animate-spin" />}
                 {d.status}
               </Badge>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                title="Reindex"
-                onClick={() => onReindex(d)}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-destructive hover:text-destructive"
-                title="Delete"
-                onClick={() => onDelete(d)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              {d.hasFile && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  title="Open document"
+                  onClick={() => onOpen(d)}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {onReindex && mutable && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  title="Reindex"
+                  onClick={() => onReindex(d)}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {onDelete && mutable && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-destructive hover:text-destructive"
+                  title="Delete"
+                  onClick={() => onDelete(d)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>

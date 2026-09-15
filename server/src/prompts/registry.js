@@ -60,7 +60,6 @@ export function listAgents() {
   }));
 }
 
-/** The shipped defaults for an agent, as a { promptKey: template } map. */
 export function defaultsFor(agentType) {
   const spec = getAgentSpec(agentType);
   if (!spec) return null;

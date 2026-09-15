@@ -66,11 +66,7 @@ export const getMessagingSettings = async (req, res) => {
   }
 };
 
-/**
- * What this tenant can actually deliver on. No secrets, so unlike the settings
- * endpoint above this is readable by any signed-in staff member — the campaign
- * and announcement builders use it to gate their channel pickers.
- */
+
 export const getCapabilities = async (req, res) => {
   try {
     const session = req.user;

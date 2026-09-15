@@ -43,7 +43,7 @@ function brandedEmail(companyName, bodyText) {
   return Templates.getBrandedAgentEmail(bodyText, companyName);
 }
 
-/** Subject line an emailed agent reply goes out under. */
+
 export function replySubject({ usedKb, companyName, slotCount }) {
   const name = companyName || "us";
   if (usedKb) return `Re: your question for ${name}`;
@@ -214,13 +214,7 @@ function renderAgentPrompt({
 }
 
 
-/**
- * The prompt the LIVE agent runs.
- *
- * Resolves whichever Prompt Lab version was explicitly Set Live, falling back to
- * the defaults shipped in prompts/sales-agent.js when nothing is live or the
- * lookup fails. See prompts/live.js for that contract.
- */
+
 export async function buildAgentPrompt(args) {
   const live = await getLivePrompts(AGENT_TYPES.SALES);
   const rendered = renderAgentPrompt(args, live);

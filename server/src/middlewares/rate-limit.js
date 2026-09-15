@@ -15,7 +15,6 @@ export function createRateLimiter({
   label = "Rate limit",
   keyFn = clientKey,
 } = {}) {
-  /** @type {Map<string, {count:number, resetAt:number}>} */
   const buckets = new Map();
 
   function sweep(now) {

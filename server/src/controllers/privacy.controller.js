@@ -1,26 +1,5 @@
 import prisma from "../lib/prisma.js";
 import { writeAuditLog } from "../lib/audit.js";
-
-/**
- * NFR-S-005 — GDPR / CCPA data subject rights.
- *
- * Two rights are implemented, for both kinds of data subject the portal holds:
- * marketing contacts (Lead) and homeowners (User with role HOMEOWNER).
- *
- *   Access / portability  → a machine-readable export of everything held.
- *   Erasure               → anonymise (default) or hard delete.
- *
- * Erasure deliberately does NOT remove two things:
- *   - the suppression-list entry, because continuing to honour an opt-out
- *     requires remembering the contact. It is kept as a one-way hash instead of
- *     the raw address, so the record proves suppression without storing the PII.
- *   - the audit trail of the erasure itself, which is the evidence that the
- *     request was carried out.
- *
- * Every action here is audit-logged (NFR-S-004), which is what makes a DSAR
- * defensible after the fact.
- */
-
 import { createHash } from "crypto";
 
 const MAX_RESULTS = 25;
@@ -33,9 +12,6 @@ function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-// A suppression entry must outlive erasure, but must not keep the raw contact.
-// Hashing lets a later send still test "is this address suppressed?" without
-// the list itself being a store of erased people's contact details.
 function hashContact(value) {
   return `erased:${createHash("sha256").update(String(value)).digest("hex").slice(0, 32)}`;
 }
@@ -45,8 +21,7 @@ function requireCompanyAdmin(req, res) {
     res.status(403).json({ message: "No company associated" });
     return false;
   }
-  // A DSAR is an account-level legal action, so it is admin-only regardless of
-  // the granular sales permissions.
+ 
   if (req.user.role !== "ADMIN" && !req.user.isSuperAdmin) {
     res.status(403).json({
       message: "Only a company admin can process data subject requests.",
@@ -56,10 +31,7 @@ function requireCompanyAdmin(req, res) {
   return true;
 }
 
-/**
- * GET /api/sales/privacy/subjects?query=...
- * Find the people a request could refer to, by email, phone or name.
- */
+
 export const searchDataSubjects = async (req, res) => {
   try {
     if (!requireCompanyAdmin(req, res)) return;
@@ -292,10 +264,7 @@ async function buildHomeownerExport(companyId, userId) {
   };
 }
 
-/**
- * GET /api/sales/privacy/subjects/:type/:id/export
- * Subject access request: everything held about this person, as JSON.
- */
+
 export const exportDataSubject = async (req, res) => {
   try {
     if (!requireCompanyAdmin(req, res)) return;
@@ -370,16 +339,10 @@ async function eraseLead(companyId, leadId, mode) {
   }
 
   if (mode === "delete") {
-    // Appointments, enrolments and scheduling conversations all cascade from
-    // Lead, so this removes the whole footprint.
     await prisma.lead.delete({ where: { id: leadId } });
     return { mode: "delete", removed: ["lead", "appointments", "enrollments", "conversations"] };
   }
 
-  // Anonymise: keep the row so campaign and conversion counts stay accurate,
-  // but strip everything that identifies a person. Free-text history is deleted
-  // outright rather than scrubbed — message bodies and transcripts cannot be
-  // reliably de-identified in place.
   await prisma.schedulingConversation.deleteMany({ where: { leadId } });
   await prisma.salesAppointment.updateMany({
     where: { leadId },
@@ -419,9 +382,6 @@ async function eraseHomeowner(companyId, userId, mode) {
   if (!user) return null;
 
   if (mode === "delete") {
-    // Tickets and properties reference the user without a cascade, so a hard
-    // delete would fail on the foreign key. Warranty claim history also has an
-    // independent retention basis, so it is detached rather than destroyed.
     const [tickets, properties] = await Promise.all([
       prisma.ticket.count({ where: { homeownerId: userId } }),
       prisma.property.count({ where: { homeownerId: userId } }),
@@ -439,8 +399,6 @@ async function eraseHomeowner(companyId, userId, mode) {
     return { mode: "delete", removed: ["user"] };
   }
 
-  // Anonymise. The email column is unique and non-null, so it is replaced with
-  // a non-routable placeholder rather than cleared.
   await prisma.user.update({
     where: { id: userId },
     data: {
@@ -466,10 +424,7 @@ async function eraseHomeowner(companyId, userId, mode) {
   return { mode: "anonymize", cleared: ["identity", "ticketNarratives"] };
 }
 
-/**
- * POST /api/sales/privacy/subjects/:type/:id/erase
- * Body: { mode: "anonymize" | "delete", confirm: true }
- */
+
 export const eraseDataSubject = async (req, res) => {
   try {
     if (!requireCompanyAdmin(req, res)) return;
@@ -522,8 +477,6 @@ export const eraseDataSubject = async (req, res) => {
       metadata: {
         subjectType: type,
         mode: result.mode,
-        // Identify the subject by hash, so the proof-of-erasure record does not
-        // itself re-store the contact details that were just erased.
         subjectRef: hashContact(before?.email || before?.phone || id),
       },
     });
@@ -543,11 +496,6 @@ export const eraseDataSubject = async (req, res) => {
   }
 };
 
-/**
- * GET /api/sales/privacy/log
- * The company's own record of DSARs handled — evidence of compliance, and the
- * thing an auditor asks for first.
- */
 export const getPrivacyLog = async (req, res) => {
   try {
     if (!requireCompanyAdmin(req, res)) return;

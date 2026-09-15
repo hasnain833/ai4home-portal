@@ -1,7 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { decryptSafe } from "../lib/crypto.js";
 
-/** Fetch credentials from DB for a given company + platform (decrypted at rest). */
+
 export async function getERPConfig(companyId, platform) {
   const record = await prisma.integration.findFirst({
     where: { companyId, platform, isActive: true },
@@ -13,8 +13,6 @@ export async function getERPConfig(companyId, platform) {
     environment: record.environment,
   };
 }
-
-// ─── Platform clients ─────────────────────────────────────────────────────────
 
 class BuiltopiaClient {
   constructor(config) {
@@ -173,10 +171,6 @@ export async function testERPConnection(companyId, platform) {
   }
 }
 
-// NFR 6.5: failed ERP writes are retried up to 3× with exponential backoff before
-// the ticket is marked FAILED and an alert row is written. Idempotent — the remote
-// side keys on the ticket id (externalId/externalRef/warrantyRef) so retries and
-// re-syncs upsert rather than duplicate.
 const MAX_ERP_ATTEMPTS = 3;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -211,8 +205,6 @@ async function syncWithRetry(client, ticket, platform) {
   return { success: false, error: lastError };
 }
 
-// Best-effort audit/alert row so persistent ERP failures surface in the KPI
-// dashboard (NFR 6.5). Reuses the existing generic SyncLog model — no migration.
 async function logErpSync({ companyId, ticketId, platform, status, message }) {
   try {
     await prisma.syncLog.create({
@@ -262,7 +254,6 @@ export async function syncTicketToERP(ticketId, { reason = "manual" } = {}) {
       return true;
     }
 
-    // This platform failed all attempts — record it and try the next one.
     await logErpSync({
       companyId,
       ticketId,
@@ -272,8 +263,6 @@ export async function syncTicketToERP(ticketId, { reason = "manual" } = {}) {
     });
   }
 
-  // Every configured platform failed after retries → mark the ticket so the
-  // failure is visible in the dashboard and can be retried.
   if (anyConfigured) {
     await prisma.ticket.update({
       where: { id: ticketId },

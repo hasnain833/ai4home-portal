@@ -58,12 +58,7 @@ function validateForActivation(rule) {
   return null;
 }
 
-/**
- * A rule that sends must have somewhere to send from. Activating one the
- * workspace cannot deliver on would fire on every matching lead and record a
- * skip each time, which reads as "the automation is broken" rather than
- * "you have not set up email yet".
- */
+
 async function missingChannelsForRule(companyId, rule) {
   const types = new Set(
     (rule.actions || []).map((a) => String(a?.type || "").toUpperCase()),

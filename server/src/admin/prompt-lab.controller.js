@@ -122,10 +122,7 @@ export const savePromptVersion = async (req, res) => {
   }
 };
 
-/**
- * Marks which saved draft the lab opens by default. `isActive` is a lab bookmark,
- * not a deploy switch — no live agent reads this row.
- */
+
 export const setCurrentPromptVersion = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;
@@ -160,18 +157,7 @@ export const setCurrentPromptVersion = async (req, res) => {
   }
 };
 
-/**
- * Puts a saved version in front of real leads.
- *
- * This is the ONLY path by which a Prompt Lab draft reaches production, and it is
- * deliberately separate from saving. Guards, in order:
- *   - super-admin only
- *   - the version must still pass validatePromptDraft (a draft saved before a
- *     validation rule was added must not slip through)
- *   - warnings must be acknowledged explicitly via body.acknowledgeWarnings
- *   - exactly one row may be live, swapped inside a transaction
- *   - the cache in prompts/live.js is invalidated so the change is immediate
- */
+
 export const setPromptVersionLive = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;
@@ -240,7 +226,6 @@ export const setPromptVersionLive = async (req, res) => {
   }
 };
 
-/** Drops back to the prompts that ship in code. The always-available escape hatch. */
 export const revertToCodeDefaults = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;
@@ -307,17 +292,7 @@ export const deletePromptVersion = async (req, res) => {
 };
 
 
-/**
- * The context a lab turn runs against.
- *
- * Knowledge-base retrieval is deliberately PLATFORM-only: the lab tests the shared
- * documents a super-admin uploads here, not any one builder's private KB. Passing
- * a null companyId is what restricts it — see the scope filter in
- * services/vector-store.service.js.
- *
- * A company is still resolved, because the prompt needs a name to render and the
- * booking rules need real slots and a timezone. It supplies those and nothing else.
- */
+
 async function resolveTestContext({ question }) {
   const company = await prisma.company.findFirst({ orderBy: { createdAt: "asc" } });
 
@@ -362,13 +337,7 @@ async function resolveTestContext({ question }) {
   };
 }
 
-/**
- * The passages retrieval returned, trimmed for transport.
- *
- * The lab shows these so a prompt can be judged against what the agent was
- * actually given — a weak answer caused by a KB gap looks identical to one caused
- * by a bad prompt until you can see the retrieved text.
- */
+
 function describeChunks(chunks = []) {
   return chunks.map((c) => ({
     documentId: c.documentId,
@@ -392,7 +361,6 @@ function mockLead(company, firstName) {
   };
 }
 
-/** Renders the prompt exactly as the agent would see it — no model call. */
 export const previewPrompt = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;

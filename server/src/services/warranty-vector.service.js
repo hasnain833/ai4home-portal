@@ -23,7 +23,6 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 
   await prisma.warrantyKBChunk.deleteMany({ where: { documentId } });
 
-  // scope is denormalised onto every chunk so retrieval filters without a join.
   const scope = meta.scope === "PLATFORM" ? "PLATFORM" : "COMPANY";
 
   await prisma.warrantyKBChunk.createMany({
@@ -59,35 +58,36 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 }
 
 export async function deleteDocument(companyId, documentId) {
-  // Keyed on documentId alone — filtering on companyId would skip PLATFORM
-  // chunks, which have none. The caller authorises the delete.
   await prisma.warrantyKBChunk.deleteMany({ where: { documentId } });
 }
 
 /**
- * @param communityId  Restricts which community-specific documents are eligible.
- *   Shared documents (communityId null) always apply. Passing null means only
- *   shared documents are used — safer than letting another community's rules
- *   answer a homeowner's question.
+ * `includeSandbox` defaults to false, and that default is the safety property.
+ *
+ * Documents uploaded from the Prompt Lab to test community retrieval are marked
+ * `isSandbox` and must never reach a homeowner. Because the gate is opt-in, any
+ * caller that forgets about it — including one written later by someone who has
+ * never heard of sandbox documents — fails closed and hides them. Only the lab
+ * passes true.
  */
-export async function queryDetailed(companyId, text, k = 5, categories = null, communityId = null) {
+export async function queryDetailed(companyId, text, k = 5, categories = null, communityId = null, includeSandbox = false) {
   const q = (text || "").trim();
   if (!q) return { method: "empty", results: [] };
   const limit = Math.min(Number(k) || 5, 20);
 
-  const semanticResults = await semanticQuery(companyId, q, limit, categories, communityId);
+  const semanticResults = await semanticQuery(companyId, q, limit, categories, communityId, includeSandbox);
   if (semanticResults && semanticResults.length > 0) {
     return { method: "semantic", results: semanticResults };
   }
 
   const method = semanticResults === null ? "fts (semantic unavailable)" : "fts (no semantic match)";
   console.log(`[Vector Store] Using ${method} for query.`);
-  const results = await ftsQuery(companyId, q, limit, categories, communityId);
+  const results = await ftsQuery(companyId, q, limit, categories, communityId, includeSandbox);
   return { method, results };
 }
 
-export async function query(companyId, text, k = 5, categories = null, context = "unknown", communityId = null) {
-  const { method, results } = await queryDetailed(companyId, text, k, categories, communityId);
+export async function query(companyId, text, k = 5, categories = null, context = "unknown", communityId = null, includeSandbox = false) {
+  const { method, results } = await queryDetailed(companyId, text, k, categories, communityId, includeSandbox);
   if (method && method.startsWith("fts")) {
     console.warn(
       `[Vector Store] ${context}: retrieval degraded to ${method} for company ${companyId}. ` +
@@ -142,7 +142,7 @@ export async function getRetrievalStatus(companyId) {
 }
 
 
-async function semanticQuery(companyId, text, limit, categories, communityId = null) {
+async function semanticQuery(companyId, text, limit, categories, communityId = null, includeSandbox = false) {
   let queryEmbedding;
   try {
     queryEmbedding = await embedText(text);
@@ -155,14 +155,15 @@ async function semanticQuery(companyId, text, limit, categories, communityId = n
   const vecStr = `[${queryEmbedding.join(",")}]`;
   const hasCats = Array.isArray(categories) && categories.length > 0;
 
-  // Shared documents always apply; a community's own documents apply only to that
-  // community. The clause is built per-branch because the two queries number
-  // their parameters differently.
   const catParams = hasCats ? 1 : 0;
   const communityClause = communityId
     ? `AND (c."communityId" IS NULL OR c."communityId" = $${4 + catParams})`
     : `AND c."communityId" IS NULL`;
   const communityArgs = communityId ? [communityId] : [];
+
+  // A literal, not a bound parameter, so adding it does not renumber $1..$4
+  // above. Empty when the lab opts in.
+  const sandboxClause = includeSandbox ? "" : `AND doc."isSandbox" = false`;
 
   try {
     const rows = hasCats
@@ -174,6 +175,7 @@ async function semanticQuery(companyId, text, limit, categories, communityId = n
            WHERE (c.scope = 'PLATFORM' OR c."companyId" = $2)
              AND doc.category = ANY($3::text[])
              ${communityClause}
+             ${sandboxClause}
              AND c.embedding IS NOT NULL
            ORDER BY c.embedding <=> $1::vector
            LIMIT $4`,
@@ -190,6 +192,7 @@ async function semanticQuery(companyId, text, limit, categories, communityId = n
            JOIN "WarrantyKB" doc ON c."documentId" = doc.id
            WHERE (c.scope = 'PLATFORM' OR c."companyId" = $2)
              ${communityClause}
+             ${sandboxClause}
              AND c.embedding IS NOT NULL
            ORDER BY c.embedding <=> $1::vector
            LIMIT $3`,
@@ -216,7 +219,7 @@ async function semanticQuery(companyId, text, limit, categories, communityId = n
 }
 
 
-async function ftsQuery(companyId, text, limit, categories, communityId = null) {
+async function ftsQuery(companyId, text, limit, categories, communityId = null, includeSandbox = false) {
   const hasCats = Array.isArray(categories) && categories.length > 0;
 
   const rows = hasCats
@@ -227,6 +230,7 @@ async function ftsQuery(companyId, text, limit, categories, communityId = null) 
         JOIN "WarrantyKB" doc ON c."documentId" = doc.id
         WHERE (c.scope = 'PLATFORM' OR c."companyId" = ${companyId})
           AND (c."communityId" IS NULL OR c."communityId" = ${communityId})
+          AND (${includeSandbox}::boolean OR doc."isSandbox" = false)
           AND doc.category = ANY(${categories})
           AND to_tsvector(${FTS_LANG}::regconfig, c.content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
         ORDER BY score DESC
@@ -238,6 +242,7 @@ async function ftsQuery(companyId, text, limit, categories, communityId = null) 
         JOIN "WarrantyKB" doc ON c."documentId" = doc.id
         WHERE (c.scope = 'PLATFORM' OR c."companyId" = ${companyId})
           AND (c."communityId" IS NULL OR c."communityId" = ${communityId})
+          AND (${includeSandbox}::boolean OR doc."isSandbox" = false)
           AND to_tsvector(${FTS_LANG}::regconfig, c.content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
         ORDER BY score DESC
         LIMIT ${limit}`;

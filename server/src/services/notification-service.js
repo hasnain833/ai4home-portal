@@ -3,27 +3,12 @@ import { MessagingService } from "./messaging-service.js";
 import { getMessagingConfig } from "../lib/messaging-config.js";
 import { Templates } from "./templates.js";
 
-/**
- * Ticket notifications run on two channels with deliberately different
- * guarantees:
- *
- *   In-portal  — always written. This is the reliable channel, so a workspace
- *                with no email credentials still sees every ticket land.
- *   Email      — best effort. It requires the tenant to have configured SMTP
- *                under Sales settings; without that we send nothing and mark
- *                the in-portal notification as standing in for the email.
- *
- * Nothing here throws. Ticket creation must never fail because a notification
- * could not be delivered.
- */
 
 const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
 
-/** True when the workspace has a usable tenant SMTP config. */
 export const emailIsConfigured = (smtpConfig) =>
   !!(smtpConfig?.host && smtpConfig?.user && smtpConfig?.pass);
 
-/** Company-side recipients: every admin in the company. Tickets have no assignee. */
 export async function companyAdmins(companyId) {
   if (!companyId) return [];
   return prisma.user.findMany({
@@ -38,10 +23,6 @@ export async function writeNotifications(rows) {
   return rows;
 }
 
-/**
- * Fired when a ticket is created, from the portal form or the warranty agent.
- * Notifies the homeowner (email) and every company admin (in-portal + email).
- */
 export async function notifyTicketCreated(ticketId) {
   try {
     const ticket = await prisma.ticket.findUnique({
@@ -62,12 +43,9 @@ export async function notifyTicketCreated(ticketId) {
 
     const admins = await companyAdmins(companyId);
 
-    // Resolve the workspace's mail credentials first, so each notification can
-    // record on creation whether it is standing in for an email.
     const { smtpConfig } = await getMessagingConfig(companyId);
     const emailReady = emailIsConfigured(smtpConfig);
 
-    // Channel 1 — in-portal. Always written, whether or not email can be sent.
     if (companyId && admins.length) {
       await writeNotifications(
         admins.map((a) => ({
@@ -154,10 +132,6 @@ export async function notifyTicketCreated(ticketId) {
   }
 }
 
-/**
- * One stale-ticket nag. Called by the reminder cron, which owns the schedule
- * and the counter — this function only delivers.
- */
 export async function notifyTicketReminder(ticket, ageLabel) {
   try {
     const companyId = ticket.companyId || ticket.homeowner?.companyId || null;

@@ -435,12 +435,7 @@ export default function PromptLabPage() {
     await load();
   };
 
-  /**
-   * Puts a saved version in front of real leads.
-   *
-   * The server refuses versions that fail validation outright, and returns 409
-   * when there are warnings — that is the confirm step, not an error.
-   */
+  
   const setVersionLive = async (v: PromptVersion, acknowledgeWarnings = false) => {
     setSettingLive(true);
     try {
@@ -540,6 +535,9 @@ export default function PromptLabPage() {
 
   // ── Warranty action handlers ──────────────────────────────────────────────────
 
+  const [wCommunityId, setWCommunityId] = useState("platform");
+  const [wCommunityName, setWCommunityName] = useState<string | null>(null);
+
   const sendWarrantyMessage = async (e: React.FormEvent | null, override?: string) => {
     e?.preventDefault();
     const text = (override ?? wInput).trim();
@@ -558,6 +556,7 @@ export default function PromptLabPage() {
         body: JSON.stringify({
           draft: wDraft,
           phase: wChatPhase,
+          communityId: wCommunityId,
           messages: transcript.map((m) => ({ role: m.role, content: m.content })),
         }),
       });
@@ -1198,7 +1197,14 @@ export default function PromptLabPage() {
               </CardHeader>
               <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pb-3">
                 {wTab === "kb" ? (
-                  <KnowledgeBasePanel agent="warranty" />
+                  <KnowledgeBasePanel
+                    agent="warranty"
+                    communityId={wCommunityId}
+                    onCommunityChange={(id, name) => {
+                      setWCommunityId(id);
+                      setWCommunityName(name);
+                    }}
+                  />
                 ) : (
                   <>
                 <Textarea
@@ -1243,9 +1249,26 @@ export default function PromptLabPage() {
             {/* Warranty Test Chat Sandbox */}
             <Card className="flex min-h-0 flex-col overflow-hidden bg-muted/20">
               <CardHeader className="shrink-0 flex-row items-center justify-between space-y-0 py-3 pb-2 border-b">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold">Test Sandbox</span>
                   <Badge variant="outline" className="bg-background text-[10px] tracking-wider uppercase font-medium">Phase: {wChatPhase}</Badge>
+                  {/*
+                    The community is chosen on the Knowledge base tab, which may
+                    not be the tab you are looking at. Shown here because a chat
+                    grounding on a community you cannot see is a trap.
+                  */}
+                  <Badge variant="outline" className="bg-background text-[10px] font-medium gap-1">
+                    {wCommunityId === "platform" ? (
+                      <>
+                        <Globe className="h-2.5 w-2.5" /> Platform
+                      </>
+                    ) : (
+                      <>
+                        <Building2 className="h-2.5 w-2.5" />
+                        {wCommunityName || "Community"}
+                      </>
+                    )}
+                  </Badge>
                 </div>
                 <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
                   onClick={() => { setWMessages([]); setWChatPhase("INTAKE"); }}>
