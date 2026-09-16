@@ -6,6 +6,11 @@ import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
 import { Templates } from "../services/templates.js";
 import { hasSalesPermission } from "../lib/permissions.js";
 
+// Bump together with the PDF in public/legal/ and the constants in
+// VerificationGate.tsx, so a stored agreementVersion always names the
+// wording that was actually signed.
+const AGREEMENT_VERSION = "1.0";
+
 export const getCompany = async (req, res) => {
   try {
     const session = req.user;
@@ -32,9 +37,6 @@ export const updateCompany = async (req, res) => {
     }
 
     const companyId = session.companyId || "demo-company";
-
-    // Company profile: any staff member may edit it. The warranty workspace
-    // edits these same fields, so they must not require a sales permission.
     const PROFILE_FIELDS = [
       "name",
       "logo",
@@ -45,7 +47,6 @@ export const updateCompany = async (req, res) => {
       "botColor",
     ];
 
-    // Sales configuration: requires the settings permission.
     const SETTINGS_FIELDS = [
       "defaultLeadOwner",
       "voiceProfile",
@@ -54,8 +55,6 @@ export const updateCompany = async (req, res) => {
       "newsSources",
     ];
 
-    // Compliance controls. Turning off opt-in enforcement or quiet hours has
-    // legal consequences for the tenant, so it is restricted to an admin.
     const COMPLIANCE_FIELDS = [
       "complianceOptInRequired",
       "smsQuietHoursEnabled",
@@ -188,7 +187,28 @@ export const getCompanyBranding = async (req, res) => {
   }
 };
 
-export const submitVerificationDocument = async (req, res) => {
+function nextVerificationStatus(current, { verificationDocUrl, agreementDocUrl }) {
+  if (current === "VERIFIED") return "VERIFIED";
+  return verificationDocUrl && agreementDocUrl ? "SUBMITTED" : "PENDING";
+}
+
+async function notifySuperAdminOfSubmission(company) {
+  try {
+    const superAdminEmail = process.env.SUPERADMIN_EMAIL;
+    if (!superAdminEmail) return;
+    const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/verifications`;
+    await MailService.sendEmail({
+      to: superAdminEmail,
+      subject: `Onboarding documents submitted: ${company.name}`,
+      html: Templates.getAdminVerificationDocEmail(company.name, adminUrl),
+      allowPlatformSender: true,
+    });
+  } catch (mailErr) {
+    console.error("[Verification] Failed to notify super admin of submission:", mailErr);
+  }
+}
+
+async function storeOnboardingDocument(req, res, { profile, bucket, fallbackName, columnsFor, errorLabel }) {
   try {
     const session = req.user;
 
@@ -206,55 +226,80 @@ export const submitVerificationDocument = async (req, res) => {
     }
 
     const companyId = session.companyId;
-    await assertUploadSafe(file, "verificationDoc");
-    const originalName = file.originalname || "document.png";
+    await assertUploadSafe(file, profile);
+
+    const existing = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { verificationStatus: true, verificationDocUrl: true, agreementDocUrl: true },
+    });
+    if (!existing) {
+      return res.status(404).json({ message: "Company not found" });
+    }
+
+    const originalName = file.originalname || fallbackName;
     const { ref: url } = await uploadObject({
-      bucket: BUCKETS.verificationDocs,
-      key: buildStorageKey(companyId, originalName, "document.png"),
+      bucket,
+      key: buildStorageKey(companyId, originalName, fallbackName),
       buffer: file.buffer,
       contentType: file.mimetype,
       isPublic: false,
     });
 
+    const columns = columnsFor(url);
+    const merged = { ...existing, ...columns };
+    const status = nextVerificationStatus(existing.verificationStatus, merged);
+
     const company = await prisma.company.update({
       where: { id: companyId },
-      data: {
-        verificationDocUrl: url,
-        verificationStatus: "SUBMITTED",
-        verificationSubmittedAt: new Date(),
-      },
+      data: { ...columns, verificationStatus: status },
     });
 
-    try {
-      const superAdminEmail = process.env.SUPERADMIN_EMAIL;
-      if (superAdminEmail) {
-        const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/verifications`;
-        await MailService.sendEmail({
-          to: superAdminEmail,
-          subject: `Verification document submitted: ${company.name}`,
-          html: Templates.getAdminVerificationDocEmail(company.name, adminUrl),
-          // Platform-to-superadmin notice, not tenant mail.
-          allowPlatformSender: true,
-        });
-      }
-    } catch (mailErr) {
-      console.error("[Verification] Failed to notify super admin of submission:", mailErr);
+    // Only worth the Super Admin's attention once there is a complete set to review.
+    if (status === "SUBMITTED" && existing.verificationStatus !== "SUBMITTED") {
+      await notifySuperAdminOfSubmission(company);
     }
 
     return res.json({
       verificationStatus: company.verificationStatus,
       verificationDocUrl: await resolveDownloadUrl(company.verificationDocUrl),
+      agreementDocUrl: await resolveDownloadUrl(company.agreementDocUrl),
+      agreementVersion: company.agreementVersion,
     });
   } catch (error) {
     if (error instanceof UploadRejected) {
       return res.status(error.status).json({ message: error.message, code: error.code });
     }
-    console.error("Error submitting verification document:", error);
+    console.error(`Error submitting ${errorLabel}:`, error);
     return res
       .status(error?.status || 500)
-      .json({ message: error?.status ? error.message : "Error submitting verification document" });
+      .json({ message: error?.status ? error.message : `Error submitting ${errorLabel}` });
   }
-};
+}
+
+export const submitVerificationDocument = (req, res) =>
+  storeOnboardingDocument(req, res, {
+    profile: "verificationDoc",
+    bucket: BUCKETS.verificationDocs,
+    fallbackName: "document.png",
+    columnsFor: (url) => ({
+      verificationDocUrl: url,
+      verificationSubmittedAt: new Date(),
+    }),
+    errorLabel: "verification document",
+  });
+
+export const submitAgreementDocument = (req, res) =>
+  storeOnboardingDocument(req, res, {
+    profile: "agreementDoc",
+    bucket: BUCKETS.agreementDocs,
+    fallbackName: "signed-agreement.pdf",
+    columnsFor: (url) => ({
+      agreementDocUrl: url,
+      agreementSubmittedAt: new Date(),
+      agreementVersion: AGREEMENT_VERSION,
+    }),
+    errorLabel: "signed agreement",
+  });
 
 export const uploadCompanyLogo = async (req, res) => {
   try {

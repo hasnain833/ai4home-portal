@@ -105,6 +105,10 @@ export const getMe = async (req, res) => {
       verificationDocUrl: await resolveDownloadUrl(
         dbUser.company?.verificationDocUrl,
       ),
+      agreementDocUrl: await resolveDownloadUrl(
+        dbUser.company?.agreementDocUrl,
+      ),
+      agreementVersion: dbUser.company?.agreementVersion || null,
       avatar: avatarUrl,
       companyLogo: dbUser.company?.logo || null,
       companyName: dbUser.company?.name || null,

@@ -43,6 +43,9 @@ export const UPLOAD_PROFILES = {
   kbDocument: { types: ["pdf", "docx", "txt", "csv"], maxBytes: 25 * MB, label: "knowledge base document" },
   image: { types: ["png", "jpg", "gif", "webp"], maxBytes: 5 * MB, label: "image" },
   verificationDoc: { types: ["png", "jpg", "webp", "pdf"], maxBytes: 10 * MB, label: "verification document" },
+  // A signed agreement is usually a scan or a phone photo of two pages, so the
+  // same image types are accepted as for the verification document.
+  agreementDoc: { types: ["pdf", "png", "jpg", "webp"], maxBytes: 10 * MB, label: "signed agreement" },
 };
 
 function extensionOf(filename) {

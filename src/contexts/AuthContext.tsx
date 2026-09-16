@@ -45,6 +45,9 @@ export interface User {
   // Tenant onboarding gate: PENDING | SUBMITTED | VERIFIED
   verificationStatus?: string;
   verificationDocUrl?: string | null;
+  // Signed Platform Services Agreement, reviewed alongside the document above.
+  agreementDocUrl?: string | null;
+  agreementVersion?: string | null;
 }
 
 interface AuthContextType {

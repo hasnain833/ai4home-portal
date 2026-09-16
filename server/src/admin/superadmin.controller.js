@@ -30,6 +30,9 @@ export const getCompanies = async (req, res) => {
         verificationDocUrl: await resolveDownloadUrl(company.verificationDocUrl, {
           expiresIn: 900,
         }),
+        agreementDocUrl: await resolveDownloadUrl(company.agreementDocUrl, {
+          expiresIn: 900,
+        }),
       })),
     );
 
@@ -155,6 +158,9 @@ export const verifyCompany = async (req, res) => {
           verificationDocUrl: null,
           verificationSubmittedAt: null,
           verifiedAt: null,
+          agreementDocUrl: null,
+          agreementSubmittedAt: null,
+          agreementVersion: null,
         },
       });
       return res.json(company);

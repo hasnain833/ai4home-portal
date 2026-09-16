@@ -7,6 +7,7 @@ import {
   getCompanyBranding,
   uploadCompanyLogo,
   submitVerificationDocument,
+  submitAgreementDocument,
 } from "../controllers/company.controller.js";
 import { handleUploadErrors } from "../middlewares/upload.js";
 
@@ -31,5 +32,6 @@ router.options("/branding", (req, res) => {
 
 router.post("/logo", requireAuth, uploadFile, uploadCompanyLogo);
 router.post("/verification", requireAuth, uploadFile, submitVerificationDocument);
+router.post("/agreement", requireAuth, uploadFile, submitAgreementDocument);
 
 export default router;

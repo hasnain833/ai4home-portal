@@ -90,6 +90,9 @@ model Company {
   verificationDocUrl      String?
   verificationSubmittedAt DateTime?
   verifiedAt              DateTime?
+  agreementDocUrl         String?
+  agreementSubmittedAt    DateTime?
+  agreementVersion        String?
   automationsKillSwitch   Boolean                 @default(false)
   automationDailyCap      Int                     @default(1000)
   campaignExitConditions  Json?

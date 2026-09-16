@@ -2,19 +2,13 @@ import { createClient } from "@supabase/supabase-js";
 
 export const BUCKETS = {
   salesKb: "sales_knowledge_base",
-  // Named for the bucket the warranty KB has always used. Note that documents
-  // uploaded through controllers/knowledge-base.controller.js land there via a
-  // PUBLIC bucket and a public URL; uploads through this module are private and
-  // read back through signed URLs.
   warrantyKb: "knowledge_base",
   verificationDocs: "verification_docs",
+  agreementDocs: "agreement_docs",
   companyLogos: "company_logos",
 };
 
 const STORAGE_SCHEME = "storage://";
-// 5 minutes: long enough to click through to a document, short enough that a
-// leaked link is worthless. Callers needing longer (the KB ingester) pass their
-// own value, so this does not need to be configurable per deployment.
 export const DEFAULT_SIGNED_URL_TTL = 300;
 
 let cachedClient = null;

@@ -22,6 +22,9 @@ interface CompanyRecord {
   verificationStatus: string;
   verificationDocUrl: string | null;
   verificationSubmittedAt: string | null;
+  agreementDocUrl: string | null;
+  agreementSubmittedAt: string | null;
+  agreementVersion: string | null;
   verifiedAt: string | null;
   warrantyEnabled: boolean;
   salesEnabled: boolean;
@@ -156,25 +159,57 @@ export default function AdminVerificationsPage() {
                     {statusBadge(company.verificationStatus)}
                   </div>
 
-                  {/* Document preview */}
-                  <div className="mb-3 flex h-40 items-center justify-center overflow-hidden rounded-lg border border-dashed border-border bg-muted/40">
-                    {company.verificationDocUrl ? (
-                      <a
-                        href={company.verificationDocUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group relative flex h-full w-full flex-col items-center justify-center bg-slate-50 hover:bg-slate-100 transition dark:bg-slate-800 dark:hover:bg-slate-700"
-                      >
-                        <FileImage className="h-10 w-10 text-slate-400 mb-2 group-hover:text-[#b48c3c] transition-colors" />
-                        <span className="text-sm font-medium text-slate-600 dark:text-slate-300 group-hover:text-[#b48c3c]">
-                          View PDF Invoice
-                        </span>
-                      </a>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
-                        <FileImage className="h-6 w-6" />
-                        <span className="text-xs">No document uploaded yet</span>
-                      </div>
+                  {/* Both onboarding documents — reviewed together, one approval. */}
+                  <div className="mb-3 space-y-2">
+                    {(
+                      [
+                        {
+                          key: "agreement",
+                          url: company.agreementDocUrl,
+                          label: "Signed agreement",
+                          hint: company.agreementVersion
+                            ? `Version ${company.agreementVersion}`
+                            : "Platform Services Agreement",
+                        },
+                        {
+                          key: "verification",
+                          url: company.verificationDocUrl,
+                          label: "Business document",
+                          hint: "Invoice or proof of business",
+                        },
+                      ] as const
+                    ).map((doc) =>
+                      doc.url ? (
+                        <a
+                          key={doc.key}
+                          href={doc.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group flex items-center gap-2.5 rounded-lg border border-border bg-slate-50 px-3 py-2.5 transition hover:border-[#b48c3c] hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700"
+                        >
+                          <FileImage className="h-5 w-5 shrink-0 text-slate-400 transition-colors group-hover:text-[#b48c3c]" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-slate-700 group-hover:text-[#b48c3c] dark:text-slate-200">
+                              {doc.label}
+                            </span>
+                            <span className="block truncate text-[11px] text-muted-foreground">
+                              {doc.hint}
+                            </span>
+                          </span>
+                          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                        </a>
+                      ) : (
+                        <div
+                          key={doc.key}
+                          className="flex items-center gap-2.5 rounded-lg border border-dashed border-border bg-muted/40 px-3 py-2.5 text-muted-foreground"
+                        >
+                          <FileImage className="h-5 w-5 shrink-0" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">{doc.label}</span>
+                            <span className="block text-[11px]">Not uploaded yet</span>
+                          </span>
+                        </div>
+                      ),
                     )}
                   </div>
 
@@ -205,7 +240,8 @@ export default function AdminVerificationsPage() {
                           className="flex-1 bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90"
                           disabled={
                             actingId === company.id ||
-                            !company.verificationDocUrl
+                            !company.verificationDocUrl ||
+                            !company.agreementDocUrl
                           }
                           onClick={() => handleAction(company.id, "approve")}
                         >

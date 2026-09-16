@@ -273,7 +273,7 @@ export default function SalesKnowledgeBasePage() {
               </h1>
               <p className="text-muted-foreground text-sm mt-1 flex items-center gap-1.5">
                 <Database className="h-3.5 w-3.5" />
-                Upload brand, product & policy docs — indexed for the Sales AI features (RAG).
+                Upload brand, product & policy docs — indexed for the Sales AI features.
               </p>
             </div>
             <Button variant="outline" size="sm" onClick={loadDocs} className="gap-2 h-9">
