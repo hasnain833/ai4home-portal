@@ -5,6 +5,16 @@ import { getCoverageStatus, describeCoverage, COVERAGE } from "./coverage.js";
 import { classifyClaim } from "./warranty-classify.js";
 import { createWarrantyTicket, escalateWarrantyTicket, ticketUrlFor } from "./warranty-ticket.js";
 import {
+  SEVERITY,
+  detectHazard,
+  homeownerText,
+  safetyLine,
+  mentionsSafetyAction,
+  alreadyAdvised,
+  hazardNotice,
+} from "./warranty-hazards.js";
+import { absorbIssueDetails, describeKnown } from "./warranty-known.js";
+import {
   INTAKE_SYSTEM_PROMPT,
   IDENTIFY_SYSTEM_PROMPT,
   DIAGNOSTIC_SYSTEM_PROMPT,
@@ -13,7 +23,9 @@ import {
   COMPLIANCE_REVIEW_TEMPLATE,
   KB_EMPTY_CONTEXT,
   renderTemplate,
+  AGENT_TYPES,
 } from "../prompts/index.js";
+import { getLivePrompts } from "../prompts/live.js";
 
 const MAX_TRACKED_KB_REFS = 12;
 
@@ -88,6 +100,14 @@ export function matchPropertyChoice(message, choices) {
   return null;
 }
 
+/** Deliberately loose: it only has to be good enough to try a lookup with. */
+const EMAIL_RE = /[^\s<>@,;]+@[^\s<>@,;]+\.[a-z]{2,}/i;
+
+function emailIn(text) {
+  const match = String(text || "").match(EMAIL_RE);
+  return match ? match[0].replace(/[.,;]+$/, "") : null;
+}
+
 function trackKbRefs(issueState, results) {
   const existing = Array.isArray(issueState.kbRefs) ? issueState.kbRefs : [];
   const seen = new Set(existing.map((r) => r.documentId));
@@ -105,6 +125,30 @@ function trackKbRefs(issueState, results) {
   }
 
   issueState.kbRefs = merged.slice(-MAX_TRACKED_KB_REFS);
+}
+
+const MAX_QUERY_CHARS = 600;
+
+function retrievalQuery(issueState, newMsg) {
+  const seen = new Set();
+  const parts = [
+    issueState.issueSummary,
+    issueState.fixtureHint,
+    issueState.locationHint,
+    issueState.symptom,
+    newMsg,
+  ];
+
+  const unique = [];
+  for (const part of parts) {
+    const value = String(part || "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(value);
+  }
+  return unique.join(". ").slice(0, MAX_QUERY_CHARS);
 }
 
 async function retrieveContext({ companyId, question, communityId, issueState, includeSandbox = false }) {
@@ -239,6 +283,24 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     communityId = property?.communityId || null;
   }
 
+  const said = homeownerText(convo.transcript || [], newMsg);
+  absorbIssueDetails(issueState, said);
+
+  // The issue, captured on whichever turn it arrives. It used to be recorded
+  // only while the phase was INTAKE, which a message carrying both the problem
+  // and an email address now skips past.
+  if (!issueState.issueSummary) {
+    const candidate = String(newMsg || "").replace(EMAIL_RE, "").trim();
+    if (candidate.length > 12) issueState.issueSummary = candidate.slice(0, 600);
+  }
+
+  const hazard = detectHazard(said);
+
+  if (hazard && !issueState.safetyAdvised && alreadyAdvised(convo.transcript, hazard)) {
+    issueState.safetyAdvised = true;
+    issueState.hazardKey = hazard.key;
+  }
+
   const adoptProperty = async (chosen) => {
     property = chosen;
     propertyId = chosen.id;
@@ -266,9 +328,11 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
 
 
   const finish = async (rawReplyText, nextPhase) => {
-    // Normalised here, the single point every branch returns through, so the
-    // stored transcript and the reply on the wire always agree.
     const replyText = unescapeModelText(rawReplyText);
+    // These describe what happened on this turn; the next turn's prompt must
+    // not still be told the property was located "just now".
+    delete issueState.justIdentified;
+    delete issueState.lookupFailed;
     const finalTranscript = [...transcript, { role: "agent", content: replyText, at: new Date().toISOString() }];
     if (!sandboxMode) {
       await prisma.warrantyConversation.update({
@@ -281,22 +345,70 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
         },
       });
     }
-    return { reply: replyText, phase: nextPhase, kbHits, options: turnOptions };
+    return { reply: replyText, phase: nextPhase, issueState, kbHits, options: turnOptions };
   };
 
-  if (currentPhase === "IDENTIFY" && Array.isArray(issueState.propertyChoices)) {
-    const choice = matchPropertyChoice(newMsg, issueState.propertyChoices);
+  if (!propertyId && homeownerId) {
+    const owned = await prisma.property
+      .findMany({ where: { companyId: company.id, homeownerId }, orderBy: { createdAt: "desc" } })
+      .catch(() => []);
+
+    if (owned.length === 1) {
+      await adoptProperty(owned[0]);
+      if (currentPhase === "IDENTIFY") currentPhase = "DIAGNOSE";
+    }
+  }
+
+  const homeowner = homeownerId
+    ? await prisma.user
+        .findUnique({ where: { id: homeownerId }, select: { name: true, email: true } })
+        .catch(() => null)
+    : null;
+
+  const community = communityId
+    ? await prisma.community
+        .findUnique({ where: { id: communityId }, select: { name: true } })
+        .catch(() => null)
+    : null;
+
+  if (!propertyId && currentPhase !== "RESOLVE") {
+    const choice = Array.isArray(issueState.propertyChoices)
+      ? matchPropertyChoice(newMsg, issueState.propertyChoices)
+      : null;
+
     if (choice) {
       const chosen = await prisma.property.findUnique({ where: { id: choice.id } }).catch(() => null);
       if (chosen && chosen.companyId === company.id) {
-        const coverage = await adoptProperty(chosen);
-        const coverageLine = describeCoverage(coverage);
-        const reply = [
-          `Thanks — I've got your home at ${chosen.address}.`,
-          coverageLine,
-          "Could you tell me a bit more about the issue: where in the home it is, and when you first noticed it?",
-        ].filter(Boolean).join(" ");
-        return finish(reply, "DIAGNOSE");
+        await adoptProperty(chosen);
+        issueState.justIdentified = true;
+        currentPhase = "DIAGNOSE";
+      }
+    } else {
+      const email = emailIn(newMsg);
+      if (email) {
+        const matches = await prisma.property
+          .findMany({
+            where: {
+              companyId: company.id,
+              homeowner: { email: { equals: email, mode: "insensitive" } },
+            },
+            orderBy: { createdAt: "desc" },
+          })
+          .catch(() => []);
+
+        if (matches.length === 1) {
+          await adoptProperty(matches[0]);
+          issueState.justIdentified = true;
+          delete issueState.lookupFailed;
+          currentPhase = "DIAGNOSE";
+        } else if (matches.length > 1) {
+          issueState.propertyChoices = matches.map((p) => ({ id: p.id, address: p.address }));
+          turnOptions = matches.map((p) => p.address);
+          currentPhase = "IDENTIFY";
+        } else {
+          issueState.lookupFailed = email;
+          currentPhase = "IDENTIFY";
+        }
       }
     }
   }
@@ -305,12 +417,12 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   let tool = ORCHESTRATOR_TOOLS.RESPOND;
   let kbContext = "";
 
-  // Phase prompts: use draftPrompts from the lab if provided, else the shipped defaults.
+  const live = draftPrompts ? null : await getLivePrompts(AGENT_TYPES.WARRANTY);
   const phasePrompts = {
-    INTAKE:   (draftPrompts?.INTAKE   ?? INTAKE_SYSTEM_PROMPT),
-    IDENTIFY: (draftPrompts?.IDENTIFY ?? IDENTIFY_SYSTEM_PROMPT),
-    DIAGNOSE: (draftPrompts?.DIAGNOSE ?? DIAGNOSTIC_SYSTEM_PROMPT),
-    RESOLVE:  (draftPrompts?.RESOLVE  ?? RESOLUTION_SYSTEM_PROMPT),
+    INTAKE:   (draftPrompts?.INTAKE   ?? live?.INTAKE   ?? INTAKE_SYSTEM_PROMPT),
+    IDENTIFY: (draftPrompts?.IDENTIFY ?? live?.IDENTIFY ?? IDENTIFY_SYSTEM_PROMPT),
+    DIAGNOSE: (draftPrompts?.DIAGNOSE ?? live?.DIAGNOSE ?? DIAGNOSTIC_SYSTEM_PROMPT),
+    RESOLVE:  (draftPrompts?.RESOLVE  ?? live?.RESOLVE  ?? RESOLUTION_SYSTEM_PROMPT),
   };
 
   // 2. Select Agent based on Phase
@@ -351,7 +463,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     ({ context: kbContext, results: kbHits } = await retrieveContext({
       includeSandbox: sandboxMode,
       companyId: kbCompanyId,
-      question: newMsg,
+      question: retrievalQuery(issueState, newMsg),
       communityId,
       issueState,
     }));
@@ -373,7 +485,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     ({ context: kbContext, results: kbHits } = await retrieveContext({
       includeSandbox: sandboxMode,
       companyId: kbCompanyId,
-      question: newMsg,
+      question: retrievalQuery(issueState, newMsg),
       communityId,
       issueState,
     }));
@@ -384,6 +496,16 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     issueState: JSON.stringify(issueState || {}),
     kbContext,
     coverageStatus: issueState.coverage?.status || COVERAGE.UNKNOWN,
+    knownDetails: describeKnown({
+      property,
+      homeowner,
+      community: community?.name || null,
+      issueState,
+    }),
+    hazardNotice: hazardNotice(hazard, {
+      advised: Boolean(issueState.safetyAdvised),
+      identified: Boolean(propertyId),
+    }),
   });
 
   const input = await toolCall({
@@ -407,9 +529,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   let nextPhase = currentPhase;
 
   if (currentPhase === "INTAKE") {
-    if (!issueState.issueSummary && newMsg.trim().length > 12) {
-      issueState.issueSummary = newMsg.trim().slice(0, 600);
-    }
     if (input.transition_phase === "IDENTIFY") {
       nextPhase = "IDENTIFY";
     } else if (input.transition_phase !== "STAY" && issueState.issueSummary) {
@@ -432,12 +551,12 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
 
       if (properties.length === 1) {
         const coverage = await adoptProperty(properties[0]);
-        const coverageLine = describeCoverage(coverage);
-        replyText = [
-          `Thanks! I've located your property at ${properties[0].address}.`,
-          coverageLine,
-          "To help me understand the issue, could you tell me where in the home it is and when it started?",
-        ].filter(Boolean).join(" ");
+        issueState.justIdentified = true;
+        replyText =
+          input.message ||
+          [`Thanks — I've got your home at ${properties[0].address}.`, describeCoverage(coverage)]
+            .filter(Boolean)
+            .join(" ");
         nextPhase = "DIAGNOSE";
       } else if (properties.length > 1) {
         issueState.propertyChoices = properties.map((p) => ({ id: p.id, address: p.address }));
@@ -614,6 +733,23 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
           }
         }
       }
+    }
+  }
+
+  if (hazard && !issueState.safetyAdvised) {
+    const identified = Boolean(propertyId) || nextPhase === "DIAGNOSE" || nextPhase === "RESOLVE";
+    const due = hazard.severity === SEVERITY.EMERGENCY || identified;
+
+    if (mentionsSafetyAction(replyText, hazard)) {
+      issueState.safetyAdvised = true;
+      issueState.hazardKey = hazard.key;
+    } else if (due) {
+      const line = safetyLine(hazard);
+      replyText = gateTriggered && safetyCheck.is_emergency
+        ? `${replyText}\n\n${line}`
+        : `${line}\n\n${replyText}`;
+      issueState.safetyAdvised = true;
+      issueState.hazardKey = hazard.key;
     }
   }
 

@@ -30,6 +30,17 @@ const TYPES = {
     mime: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
     magic: "zip",
   },
+  xlsx: {
+    ext: ["xlsx"],
+    mime: [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "application/zip",
+      "application/x-zip-compressed",
+      "application/octet-stream",
+    ],
+    magic: "zip",
+  },
   txt: { ext: ["txt", "md"], mime: ["text/plain", "text/markdown"], magic: null },
   csv: { ext: ["csv"], mime: ["text/csv", "application/csv", "text/plain"], magic: null },
   png: { ext: ["png"], mime: ["image/png"], magic: "png" },
@@ -40,11 +51,13 @@ const TYPES = {
 
 // Presets used by the upload routes.
 export const UPLOAD_PROFILES = {
-  kbDocument: { types: ["pdf", "docx", "txt", "csv"], maxBytes: 25 * MB, label: "knowledge base document" },
+  kbDocument: {
+    types: ["pdf", "docx", "xlsx", "txt", "csv"],
+    maxBytes: 25 * MB,
+    label: "knowledge base document",
+  },
   image: { types: ["png", "jpg", "gif", "webp"], maxBytes: 5 * MB, label: "image" },
   verificationDoc: { types: ["png", "jpg", "webp", "pdf"], maxBytes: 10 * MB, label: "verification document" },
-  // A signed agreement is usually a scan or a phone photo of two pages, so the
-  // same image types are accepted as for the verification document.
   agreementDoc: { types: ["pdf", "png", "jpg", "webp"], maxBytes: 10 * MB, label: "signed agreement" },
 };
 
@@ -125,6 +138,11 @@ function validateStructure(file, profile) {
 
   const byExtension = allowed.find((t) => t.ext.includes(ext));
   if (!byExtension) {
+    if (ext === "xls" && profile.types.includes("xlsx")) {
+      throw new UploadRejected(
+        `"${safeFileName(file.originalname)}" is a legacy Excel 97-2003 workbook. Open it in Excel and save it as .xlsx, then upload again.`,
+      );
+    }
     const list = allowed.flatMap((t) => t.ext).join(", ");
     throw new UploadRejected(
       `"${safeFileName(file.originalname)}" isn't an accepted ${profile.label}. Allowed types: ${list}.`,

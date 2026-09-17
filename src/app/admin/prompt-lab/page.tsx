@@ -203,6 +203,10 @@ export default function PromptLabPage() {
   const [wInput, setWInput] = useState("");
   const [wSending, setWSending] = useState(false);
   const [wChatPhase, setWChatPhase] = useState("INTAKE");
+  // The sandbox keeps no conversation row, so what the agent worked out last
+  // turn — the property, the safety step it already gave — only survives if
+  // the client hands it back.
+  const [wIssueState, setWIssueState] = useState<Record<string, unknown>>({});
   const wChatEndRef = useRef<HTMLDivElement>(null);
 
   const systemRef = useRef<HTMLTextAreaElement>(null);
@@ -556,6 +560,7 @@ export default function PromptLabPage() {
         body: JSON.stringify({
           draft: wDraft,
           phase: wChatPhase,
+          issueState: wIssueState,
           communityId: wCommunityId,
           messages: transcript.map((m) => ({ role: m.role, content: m.content })),
         }),
@@ -568,6 +573,7 @@ export default function PromptLabPage() {
         return;
       }
       if (data.phase) setWChatPhase(data.phase);
+      if (data.issueState) setWIssueState(data.issueState);
       setWMessages((prev) => [
         ...prev,
         { id: `wa-${Date.now()}`, role: "agent", content: data.reply || "",
@@ -1271,7 +1277,7 @@ export default function PromptLabPage() {
                   </Badge>
                 </div>
                 <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
-                  onClick={() => { setWMessages([]); setWChatPhase("INTAKE"); }}>
+                  onClick={() => { setWMessages([]); setWChatPhase("INTAKE"); setWIssueState({}); }}>
                   <RotateCcw className="h-3.5 w-3.5" /> Clear chat
                 </Button>
               </CardHeader>

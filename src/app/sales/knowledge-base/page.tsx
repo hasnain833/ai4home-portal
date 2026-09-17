@@ -55,10 +55,12 @@ const CATEGORIES = [
   { value: "compliance", label: "Compliance" },
 ];
 
-const ACCEPTED = ".pdf,.docx,.txt,.md";
+const ACCEPTED = ".pdf,.docx,.xlsx,.csv,.txt,.md";
 const ACCEPTED_MIME = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
   "text/plain",
   "text/markdown",
 ];
@@ -155,9 +157,15 @@ export default function SalesKnowledgeBasePage() {
 
     for (const file of arr) {
       const isAllowed =
-        ACCEPTED_MIME.includes(file.type) || /\.(pdf|docx|txt|md)$/i.test(file.name);
+        // Extension wins: Windows sends .xlsx as a generic ZIP often enough
+        // that a MIME-only check rejects perfectly good workbooks.
+        /\.(pdf|docx|xlsx|csv|txt|md)$/i.test(file.name) || ACCEPTED_MIME.includes(file.type);
       if (!isAllowed) {
-        toast.error(`Skipped ${file.name}: only PDF, DOCX, TXT, or MD are allowed`);
+        toast.error(
+          /\.xls$/i.test(file.name)
+            ? `Skipped ${file.name}: save legacy .xls workbooks as .xlsx first`
+            : `Skipped ${file.name}: only PDF, DOCX, XLSX, CSV, TXT, or MD are allowed`,
+        );
         fail++;
         continue;
       }
@@ -286,7 +294,7 @@ export default function SalesKnowledgeBasePage() {
             <CardHeader className="border-b">
               <CardTitle className="text-sm font-bold">Upload Documents</CardTitle>
               <CardDescription className="text-xs">
-                PDF, DOCX, or TXT up to 25MB. Files are virus-scanned, stored privately, then chunked, embedded, and indexed automatically.
+                PDF, DOCX, XLSX, CSV, or TXT up to 25MB. Files are virus-scanned, stored privately, then chunked, embedded, and indexed automatically. Spreadsheets are indexed a row at a time, with the column headers kept on every row.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-4">

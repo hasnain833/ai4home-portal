@@ -348,7 +348,7 @@ export default function KnowledgeBasePanel({
           type="file"
           multiple
           className="hidden"
-          accept=".pdf,.docx,.txt,.csv"
+          accept=".pdf,.docx,.xlsx,.txt,.csv"
           onChange={(e) => uploadMany(Array.from(e.target.files || []))}
         />
         <div
@@ -380,7 +380,7 @@ export default function KnowledgeBasePanel({
                 Drag &amp; drop files here, or click to browse
               </span>
               <span className="mt-1 block">
-                Several at once is fine. PDF, DOCX, TXT, or CSV, up to 25MB each.
+                Several at once is fine. PDF, DOCX, XLSX, TXT, or CSV, up to 25MB each.
               </span>
               {supportsCommunities && communityId !== PLATFORM && (
                 <span className="mt-1.5 flex items-center justify-center gap-1.5 font-medium text-[#b48c3c]">
@@ -409,15 +409,40 @@ export default function KnowledgeBasePanel({
 
       {/* Retrieval health */}
       {retrieval && retrieval.status !== "SEMANTIC" && (
-        <div className="flex shrink-0 items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-          <span>
-            Retrieval is <strong>{retrieval.status}</strong>
-            {typeof retrieval.coverage === "number" && ` — ${retrieval.coverage}% of chunks embedded`}
-            {retrieval.detail ? `. ${retrieval.detail}` : "."}{" "}
-            {retrieval.status !== "EMPTY" &&
-              "Answers fall back to keyword matching until embeddings finish."}
-          </span>
+        <div className="shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+            <span>
+              Retrieval is <strong>{retrieval.status}</strong>
+              {retrieval.detail ? `. ${retrieval.detail}` : "."}{" "}
+              {retrieval.status !== "EMPTY" &&
+                "Answers fall back to keyword matching until embeddings finish."}
+            </span>
+          </div>
+          {typeof retrieval.coverage === "number" && (retrieval.totalChunks || 0) > 0 && (
+            <div className="mt-1.5 flex items-center gap-2 pl-5.5">
+              <div
+                role="progressbar"
+                aria-label="Chunks embedded"
+                aria-valuenow={retrieval.coverage}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                className="h-1.5 flex-1 overflow-hidden rounded-full bg-amber-200 dark:bg-amber-900/60"
+              >
+                <div
+                  className="h-full rounded-full bg-amber-500 transition-[width] duration-500 ease-out dark:bg-amber-400"
+                  // A sliver of fill so "started" never renders as "nothing yet".
+                  style={{
+                    width: retrieval.coverage > 0 ? `${Math.max(2, Math.min(100, retrieval.coverage))}%` : 0,
+                  }}
+                />
+              </div>
+              <span className="shrink-0 tabular-nums text-[10px] text-amber-800/80 dark:text-amber-200/70">
+                {(retrieval.embeddedChunks ?? 0).toLocaleString()} /{" "}
+                {(retrieval.totalChunks ?? 0).toLocaleString()} chunks
+              </span>
+            </div>
+          )}
         </div>
       )}
 

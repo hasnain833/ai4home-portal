@@ -10,6 +10,11 @@ import {
 } from "../prompts/index.js";
 import { AGENT_TYPES } from "../prompts/registry.js";
 import { getLivePrompts, invalidateLivePrompts } from "../prompts/live.js";
+import { detectHazard, hazardNotice } from "../lib/warranty-hazards.js";
+import { describeKnown } from "../lib/warranty-known.js";
+
+/** Fixed so the preview renders the same text every time it is opened. */
+const SAMPLE_COVERAGE_END = "2029-01-09T00:00:00.000Z";
 
 function denyUnlessSuperAdmin(req, res) {
   if (!req.user?.isSuperAdmin) {
@@ -289,6 +294,8 @@ export const warrantyPromptLabChat = async (req, res) => {
     return res.json({
       reply: result.reply,
       phase: result.phase,
+      // The sandbox stores nothing, so the client carries the state forward.
+      issueState: result.issueState || {},
       latencyMs: Date.now() - startedAt,
       communityId: sandboxCommunityId,
       retrieved: describeChunks(result.kbHits),
@@ -310,11 +317,23 @@ export const previewWarrantyPrompt = async (req, res) => {
     const company = await prisma.company.findFirst({ orderBy: { createdAt: "asc" } });
     if (!company) return res.status(400).json({ message: "No company exists to preview against." });
 
+    // Sample values, not empty strings: a preview showing an empty safety block
+    // would hide the part of the prompt most worth reading before it goes live.
     const rendered = renderTemplate(draft[phase] || "", {
       companyName: company.name,
       issueState: "{}",
       kbContext: "[KB context would appear here]",
       coverageStatus: "UNKNOWN",
+      knownDetails: describeKnown({
+        homeowner: { name: "[Homeowner name]", email: "[homeowner@example.com]" },
+        property: { address: "[123 Example Street]" },
+        issueState: {
+          coverage: { status: "VALID", endDate: SAMPLE_COVERAGE_END, daysRemaining: 400 },
+          issueSummary: "[what they reported]",
+          locationHint: "kitchen",
+        },
+      }),
+      hazardNotice: hazardNotice(detectHazard("I see water under the kitchen sink")),
     });
 
     return res.json({ phase, rendered, companyName: company.name, validation: validateWarrantyDraft(draft) });

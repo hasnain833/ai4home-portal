@@ -145,14 +145,14 @@ export default function KnowledgeBasePage() {
 
     for (let i = 0; i < fileArray.length; i++) {
       const file = fileArray[i];
-      const allowedTypes = [
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      ];
-      if (!allowedTypes.includes(file.type)) {
+      // Matched on extension rather than MIME: Windows reports .xlsx as a
+      // generic ZIP often enough that a MIME check drops valid workbooks.
+      if (!/\.(pdf|docx|xlsx|csv)$/i.test(file.name)) {
         showToast(
           "error",
-          `Skipped ${file.name}: Only PDF and DOCX files are allowed`,
+          /\.xls$/i.test(file.name)
+            ? `Skipped ${file.name}: save legacy .xls workbooks as .xlsx first`
+            : `Skipped ${file.name}: Only PDF, DOCX, XLSX and CSV files are allowed`,
         );
         failCount++;
         continue;
@@ -457,7 +457,7 @@ export default function KnowledgeBasePage() {
                       Drag & Drop files here
                     </h3>
                     <p className="text-sm text-muted-foreground mb-4">
-                      or click to browse (PDF/DOCX max 10MB)
+                      or click to browse (PDF, DOCX, XLSX or CSV — max 10MB)
                     </p>
 
                     {uploading && (
@@ -471,7 +471,7 @@ export default function KnowledgeBasePage() {
                     type="file"
                     ref={fileInputRef}
                     className="hidden"
-                    accept=".pdf,.docx"
+                    accept=".pdf,.docx,.xlsx,.csv"
                     multiple
                     onChange={(e) => {
                       if (e.target.files)

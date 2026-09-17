@@ -5,41 +5,35 @@ import { createRequire } from "module";
 import { upsertChunks } from "../../services/vector-store.service.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { resolveDownloadUrl } from "../../lib/storage.js";
+import { chunkText, chunkTable, chunkSheets } from "../../lib/kb-chunking.js";
+import {
+  isSpreadsheetFile,
+  isLegacyExcelFile,
+  readSheets,
+  sheetsToText,
+} from "../../lib/spreadsheet.js";
 
+export { chunkText };
 
 const require = createRequire(import.meta.url);
-const MAX_CHARS = 1000;
-const OVERLAP = 150;
 
 
-export function chunkText(text) {
-  const clean = (text || "").replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
-  if (!clean) return [];
-  const paras = clean.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-
-  const chunks = [];
-  let buf = "";
-  for (const para of paras) {
-    if ((buf + "\n\n" + para).length > MAX_CHARS && buf) {
-      chunks.push(buf.trim());
-      buf = buf.slice(Math.max(0, buf.length - OVERLAP));
-    }
-    buf = buf ? `${buf}\n\n${para}` : para;
-
-    while (buf.length > MAX_CHARS) {
-      chunks.push(buf.slice(0, MAX_CHARS).trim());
-      buf = buf.slice(MAX_CHARS - OVERLAP);
-    }
-  }
-  if (buf.trim()) chunks.push(buf.trim());
-  return chunks.filter((c) => c.length > 20);
+async function fetchBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch document (${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
 }
 
 export async function extractText(url, name) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch document (${res.status})`);
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const buffer = await fetchBuffer(url);
   const lower = (name || url).toLowerCase();
+
+  if (isLegacyExcelFile(lower)) {
+    throw new Error(
+      "Legacy .xls workbooks aren't supported. Open it in Excel and save it as .xlsx, then upload again.",
+    );
+  }
+  if (isSpreadsheetFile(lower)) return sheetsToText(readSheets(buffer));
 
   if (lower.endsWith(".pdf")) {
     const mod = require("pdf-parse");
@@ -66,6 +60,18 @@ export async function extractText(url, name) {
   return buffer.toString("utf-8");
 }
 
+async function buildChunks(sourceUrl, name) {
+  if (isSpreadsheetFile(name)) {
+    const sheets = readSheets(await fetchBuffer(sourceUrl));
+    const rows = chunkSheets(sheets);
+    return rows.length ? rows : chunkText(sheetsToText(sheets));
+  }
+
+  const text = await extractText(sourceUrl, name);
+  const rows = /\.csv$/i.test(name || "") ? chunkTable(text) : [];
+  return rows.length ? rows : chunkText(text);
+}
+
 export async function runKbIngestion(documentId, companyId) {
   const doc = await prisma.salesKB.findUnique({ where: { id: documentId } });
   if (!doc) return { status: "skipped", reason: "document-not-found" };
@@ -80,8 +86,7 @@ export async function runKbIngestion(documentId, companyId) {
     if (!sourceUrl) {
       throw new Error("Document file is missing from storage.");
     }
-    const text = await extractText(sourceUrl, doc.name);
-    const chunks = chunkText(text);
+    const chunks = await buildChunks(sourceUrl, doc.name);
 
     if (!chunks.length) {
       await prisma.salesKB.update({
