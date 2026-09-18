@@ -58,6 +58,40 @@ function emailDashBox(content) {
 
 export const Templates = {
 
+  // --- Account email change ---
+
+  /// Sent to the NEW address. Clicking the link is what proves the person
+  /// asking for the change can actually receive mail there.
+  getEmailChangeVerifyEmail: (name, oldEmail, newEmail, confirmUrl, hoursValid) => {
+    const content = `
+      <p>Hi ${name || "there"},</p>
+      <p>A request was made to change the sign-in email on your account from
+      <strong>${oldEmail}</strong> to <strong>${newEmail}</strong>.</p>
+      <p>Confirm below and this address becomes the one you sign in with. Until you do,
+      nothing changes and you keep signing in with your current address.</p>
+      ${emailButton(confirmUrl, "Confirm this email address")}
+      <p style="font-size: 14px; color: ${COLORS.textMuted};">This link expires in ${hoursValid} hours.
+      If you did not request this, you can ignore this email — the change will not happen.</p>
+    `;
+    return wrapEmail(content, "Confirm your new email");
+  },
+
+  /// Sent to the OLD address at the same time, so a change made from a hijacked
+  /// session cannot go unnoticed by whoever actually owns the account.
+  getEmailChangeNoticeEmail: (name, oldEmail, newEmail, hoursValid) => {
+    const content = `
+      <p>Hi ${name || "there"},</p>
+      <p>Someone requested that the sign-in email on your account be changed from
+      <strong>${oldEmail}</strong> to <strong>${newEmail}</strong>.</p>
+      <p>This is a notice only — no action is needed if you made this request. The change
+      takes effect only after it is confirmed from the new address, within ${hoursValid} hours.</p>
+      ${emailHighlightBox("Did not request this?")}
+      <p>Change your password immediately and contact your administrator. As long as the
+      request is not confirmed, your current address stays in place.</p>
+    `;
+    return wrapEmail(content, "Sign-in email change requested");
+  },
+
   // --- Mail Service (ticket updates) ---
 
   getTicketUpdateEmail: (homeownerName, ticketId, statusLabel, portalUrl, companyName) => {

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
+import { SignInEmailField } from "@/components/auth/SignInEmailField";
 
 // Types
 interface CompanyData {
@@ -350,18 +351,28 @@ export default function CompanyPage() {
                       )}
                     </div>
 
+                    <SignInEmailField onNotify={showToast} />
+
                     <div>
-                      <Label className="text-sm font-semibold">Email *</Label>
+                      <Label className="text-sm font-semibold">
+                        Company Contact Email *
+                      </Label>
                       <div className="relative">
                         <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input
                           type="email"
-                          className="pl-9 bg-muted/50 text-muted-foreground cursor-not-allowed"
+                          className="pl-9"
                           value={company.email}
-                          disabled
-                          readOnly
+                          onChange={(e) =>
+                            setCompany({ ...company, email: e.target.value })
+                          }
+                          placeholder="contact@company.com"
                         />
                       </div>
+                      <p className="text-xs text-muted-foreground mt-1.5">
+                        The address homeowners and the platform use to reach the business.
+                        Separate from your sign-in email above.
+                      </p>
                       {errors.email && (
                         <motion.p
                           initial={{ opacity: 0, y: -5 }}

@@ -5,6 +5,9 @@ import { getMessagingConfig } from "../lib/messaging-config.js";
 import { MAIL_OUTCOME } from "../services/mail-service.js";
 import { syncTicketToERP } from "../services/erp-service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
+import { normalizePriority, TICKET_PRIORITIES } from "../lib/warranty-classify.js";
+
+const TICKET_STATUSES = ["OPEN", "DISPATCHED", "RESOLVED"];
 
 export const getTickets = async (req, res) => {
   try {
@@ -100,10 +103,15 @@ export const createTicket = async (req, res) => {
         propertyId,
         homeownerId,
         companyId: property.homeowner?.companyId ?? null,
-        priority: isEmergency ? "URGENT" : (priority || "MEDIUM"),
+        priority: normalizePriority(priority, {
+          isEmergency: !!isEmergency,
+          text: `${issueType || ""} ${ticketType || ""}`,
+        }),
         isEmergency: !!isEmergency,
         warrantyYear,
-        status: isEmergency ? "ESCALATED" : "OPEN",
+        // Emergencies no longer get their own status — they are carried by
+        // isEmergency + URGENT priority, and still start life OPEN.
+        status: "OPEN",
       },
     });
 
@@ -206,6 +214,17 @@ export const updateTicket = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
+    if (status && !TICKET_STATUSES.includes(status)) {
+      return res.status(400).json({
+        message: `Invalid status. Expected one of: ${TICKET_STATUSES.join(", ")}`,
+      });
+    }
+    if (priority && !TICKET_PRIORITIES.includes(priority)) {
+      return res.status(400).json({
+        message: `Invalid priority. Expected one of: ${TICKET_PRIORITIES.join(", ")}`,
+      });
+    }
+
     const updatedData = {};
     if (status) {
       updatedData.status = status;
@@ -242,7 +261,7 @@ export const updateTicket = async (req, res) => {
     if (status && status !== oldTicket.status) {
       try {
         const reason =
-          status === "ESCALATED" ? "escalation" : status === "RESOLVED" ? "resolution" : "status-change";
+          status === "RESOLVED" ? "resolution" : oldTicket.isEmergency ? "escalation" : "status-change";
         await syncTicketToERP(ticket.id, { reason });
       } catch (erpError) {
         console.error(`[Ticket API] ERP sync on status change failed for #${ticket.id}:`, erpError.message);

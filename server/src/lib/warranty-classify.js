@@ -24,6 +24,15 @@ const EMERGENCY_PATTERNS = [
   /\bno\s*heat\b.*\bfreez/i,
 ];
 
+const WATER_LEAK_PATTERNS = [
+  /\bwater\s*(leak|leaking|damage|stain|spot)/i,
+  /\bleak(ing|s|ed)?\b[^.\n]{0,40}\b(water|pipes?|plumbing|faucets?|sinks?|toilets?|showers?|tubs?|drains?|valves?|water\s*heaters?|roof|ceiling|slab)\b/i,
+  /\b(water|pipes?|plumbing|faucets?|sinks?|toilets?|showers?|tubs?|drains?|valves?|water\s*heaters?|roof|ceiling|slab)\b[^.\n]{0,40}\bleak(ing|s|ed)?\b/i,
+  /\bdrip(s|ping|ped)?\b[^.\n]{0,30}\b(water|pipes?|faucets?|sinks?|ceiling|showers?)\b/i,
+  /\b(water|pipes?|faucets?|sinks?|ceiling|showers?)\b[^.\n]{0,30}\bdrip(s|ping|ped)?\b/i,
+  /\bwet\s*(spot|patch|drywall|carpet|ceiling|floor)\b/i,
+];
+
 const ISSUE_TYPE_HINTS = [
   [/\b(dishwashers?|ovens?|ranges?|microwaves?|disposals?|refrigerators?|fridges?|washers?|dryers?|appliances?)\b/i, "Appliances"],
   [/\b(water\s*heaters?|hot\s*water\s*(heaters?|tanks?)|tankless)\b/i, "Plumbing"],
@@ -53,7 +62,12 @@ const CLASSIFY_TOOL = {
         type: "string",
         enum: TICKET_PRIORITIES,
         description:
-          "URGENT for a life-safety risk or an actively worsening failure, HIGH when the home is not usable as normal, MEDIUM for a real defect that can wait a few days, LOW for cosmetic issues.",
+          "URGENT for a life-safety risk, an actively worsening failure, or any water leak. " +
+          "HIGH when something the household depends on daily is unusable: no heat, no cooling, " +
+          "no hot water, the only bathroom, power to a main room. " +
+          "MEDIUM for a real defect the home can work around while it waits a few days. " +
+          "LOW for cosmetic and minor finish issues: paint, caulk, grout, a squeak, a sticking " +
+          "door, nail pops. Most claims are MEDIUM or LOW — reserve HIGH for a genuine loss of function.",
       },
       symptom: {
         type: "string",
@@ -88,6 +102,11 @@ export function matchesEmergencyPattern(text) {
   return EMERGENCY_PATTERNS.some((re) => re.test(s));
 }
 
+export function matchesWaterLeak(text) {
+  const s = String(text || "");
+  return WATER_LEAK_PATTERNS.some((re) => re.test(s));
+}
+
 export function homeownerLinesOnly(context) {
   return String(context || "")
     .split("\n")
@@ -103,8 +122,9 @@ export function guessIssueType(text) {
   return "General Warranty";
 }
 
-export function normalizePriority(value, { isEmergency = false } = {}) {
+export function normalizePriority(value, { isEmergency = false, text = "" } = {}) {
   if (isEmergency) return "URGENT";
+  if (matchesWaterLeak(text)) return "URGENT";
   const upper = String(value || "").toUpperCase().trim();
   return TICKET_PRIORITIES.includes(upper) ? upper : "MEDIUM";
 }
@@ -114,7 +134,7 @@ export function classifyClaimHeuristic(description) {
   const isEmergency = matchesEmergencyPattern(text);
   return {
     issueType: guessIssueType(text),
-    priority: normalizePriority(isEmergency ? "URGENT" : "MEDIUM", { isEmergency }),
+    priority: normalizePriority(isEmergency ? "URGENT" : "MEDIUM", { isEmergency, text }),
     symptom: text.slice(0, 200),
     location: "",
     isEmergency,
@@ -164,7 +184,11 @@ export async function classifyClaim({ companyId, description, context = "" }) {
 
   return {
     issueType: String(input.issue_type || "").trim().slice(0, 80) || fallback.issueType,
-    priority: normalizePriority(input.priority, { isEmergency }),
+    priority: normalizePriority(input.priority, {
+      isEmergency,
+      text: `${text}
+${homeownerLinesOnly(context)}`,
+    }),
     symptom: String(input.symptom || "").trim().slice(0, 300) || fallback.symptom,
     location: String(input.location || "").trim().slice(0, 120),
     isEmergency,

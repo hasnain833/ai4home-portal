@@ -50,7 +50,7 @@ interface KPIs {
   avgResolutionTime: string;
 }
 
-type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "ESCALATED";
+type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
 type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 
 interface Ticket {
@@ -72,10 +72,9 @@ interface Ticket {
 
 const statusColors: Record<string, string> = {
   OPEN: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  IN_PROGRESS:
+  DISPATCHED:
     "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
   RESOLVED: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  ESCALATED: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
 };
 
 const statusStyles: Record<
@@ -88,7 +87,7 @@ const statusStyles: Record<
     border: "border-sky-200 dark:border-sky-900/50",
     dot: "bg-sky-500",
   },
-  IN_PROGRESS: {
+  DISPATCHED: {
     bg: "bg-amber-50 dark:bg-amber-950/20",
     text: "text-amber-700 dark:text-amber-400",
     border: "border-amber-200 dark:border-amber-900/50",
@@ -99,12 +98,6 @@ const statusStyles: Record<
     text: "text-emerald-700 dark:text-emerald-400",
     border: "border-emerald-200 dark:border-emerald-900/50",
     dot: "bg-emerald-500",
-  },
-  ESCALATED: {
-    bg: "bg-rose-50 dark:bg-rose-950/20",
-    text: "text-rose-700 dark:text-rose-400",
-    border: "border-rose-200 dark:border-rose-900/50",
-    dot: "bg-rose-500",
   },
 };
 

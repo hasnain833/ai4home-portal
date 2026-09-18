@@ -33,9 +33,9 @@ export const getDashboardStats = async (req, res) => {
     ] = await prisma.$transaction([
       prisma.ticket.count({ where: periodScope }),
       prisma.ticket.count({ where: { status: "OPEN", ...periodScope } }),
-      prisma.ticket.count({ where: { status: "IN_PROGRESS", ...periodScope } }),
+      prisma.ticket.count({ where: { status: "DISPATCHED", ...periodScope } }),
       prisma.ticket.count({ where: { status: "RESOLVED", ...periodScope } }),
-      prisma.ticket.count({ where: { status: "ESCALATED", ...periodScope } }),
+      prisma.ticket.count({ where: { isEmergency: true, ...periodScope } }),
       prisma.ticket.count({
         where: {
           status: "RESOLVED",
@@ -64,7 +64,7 @@ export const getDashboardStats = async (req, res) => {
       }),
       prisma.ticket.findFirst({
         where: {
-          status: { in: ["ESCALATED", "RESOLVED"] },
+          OR: [{ isEmergency: true }, { status: "RESOLVED" }],
           homeowner: { companyId: session.companyId || "demo-company" },
           updatedAt: { gte: sinceDate }
         },
@@ -133,7 +133,7 @@ export const getDashboardStats = async (req, res) => {
           : "Not Connected",
         kbDocs: kbDocsCount > 0 ? `${kbDocsCount} Active Document${kbDocsCount > 1 ? "s" : ""} Scoped` : "No Documents Scoped",
         lastEscalation: lastEscalationTicket
-          ? `${timeAgo(lastEscalationTicket.updatedAt)} · ${lastEscalationTicket.status === "ESCALATED" ? "escalated to staff" : "resolved by staff"}`
+          ? `${timeAgo(lastEscalationTicket.updatedAt)} · ${lastEscalationTicket.status !== "RESOLVED" && lastEscalationTicket.isEmergency ? "escalated to staff" : "resolved by staff"}`
           : "No recent activity"
       }
     };

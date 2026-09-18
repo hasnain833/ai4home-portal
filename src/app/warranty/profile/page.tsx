@@ -12,12 +12,12 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Camera, Circle, Pencil, X, Check, CheckCircle2, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { SignInEmailField } from "@/components/auth/SignInEmailField";
 
 export default function ProfilePage() {
   const { user, updateProfile, updateAvatar } = useAuth();
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editedName, setEditedName] = useState("");
-  const [editedEmail, setEditedEmail] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -36,7 +36,6 @@ export default function ProfilePage() {
   useEffect(() => {
     if (user) {
       setEditedName(user.name || "");
-      setEditedEmail(user.email || "");
     }
   }, [user]);
 
@@ -104,7 +103,6 @@ export default function ProfilePage() {
                   onClick={() => {
                     setIsEditingProfile(false);
                     setEditedName(user?.name || "");
-                    setEditedEmail(user?.email || "");
                   }}
                 >
                   <X className="h-4 w-4" />
@@ -114,13 +112,9 @@ export default function ProfilePage() {
                   className="gap-2"
                   disabled={isSaving}
                   onClick={async () => {
-                    if (!editedEmail.trim()) {
-                      setToastMessage({ type: "error", text: "Email address cannot be empty." });
-                      return;
-                    }
                     setIsSaving(true);
                     try {
-                      await updateProfile({ name: editedName, email: editedEmail });
+                      await updateProfile({ name: editedName });
                       setToastMessage({ type: "success", text: "Profile updated successfully!" });
                       setIsEditingProfile(false);
                     } catch (err: any) {
@@ -191,19 +185,9 @@ export default function ProfilePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="email" className="flex items-center gap-1.5">
-                      Email Address
-                    </Label>
-                    {isEditingProfile ? (
-                      <Input
-                        id="email"
-                        type="email"
-                        value={editedEmail}
-                        onChange={(e) => setEditedEmail(e.target.value)}
-                      />
-                    ) : (
-                      <Input id="email" value={user?.email || ""} disabled className="bg-muted" />
-                    )}
+                    <SignInEmailField
+                      onNotify={(type, text) => setToastMessage({ type, text })}
+                    />
                   </div>
 
                   <div className="space-y-2">

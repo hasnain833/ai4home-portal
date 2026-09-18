@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
 import { apiFetch, ApiError } from "@/lib/api";
 import { toast } from "sonner";
 
-type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "ESCALATED";
+type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
 type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 
 /** One knowledge-base document the agent drew on, as buildKbReferences stores it. */
@@ -73,12 +73,11 @@ type TicketDetailData = {
 
 type DiagnosticInfo = Record<string, string>;
 
-const statusFlow: TicketStatus[] = ["OPEN", "IN_PROGRESS", "RESOLVED", "ESCALATED"];
+const statusFlow: TicketStatus[] = ["OPEN", "DISPATCHED", "RESOLVED"];
 const statusLabels: Record<TicketStatus, string> = {
   OPEN: "Open",
-  IN_PROGRESS: "In Progress",
+  DISPATCHED: "Dispatched",
   RESOLVED: "Resolved",
-  ESCALATED: "Escalated",
 };
 
 function normalizeDiagnosticValue(value: unknown): string {
@@ -163,7 +162,7 @@ const statusStyles: Record<TicketStatus, { bg: string, text: string, border: str
     border: "border-sky-200 dark:border-sky-900/50",
     dot: "bg-sky-500",
   },
-  IN_PROGRESS: {
+  DISPATCHED: {
     bg: "bg-amber-50 dark:bg-amber-950/20",
     text: "text-amber-700 dark:text-amber-400",
     border: "border-amber-200 dark:border-amber-900/50",
@@ -174,12 +173,6 @@ const statusStyles: Record<TicketStatus, { bg: string, text: string, border: str
     text: "text-emerald-700 dark:text-emerald-400",
     border: "border-emerald-200 dark:border-emerald-900/50",
     dot: "bg-emerald-500",
-  },
-  ESCALATED: {
-    bg: "bg-rose-50 dark:bg-rose-950/20",
-    text: "text-rose-700 dark:text-rose-400",
-    border: "border-rose-200 dark:border-rose-900/50",
-    dot: "bg-rose-500",
   },
 };
 

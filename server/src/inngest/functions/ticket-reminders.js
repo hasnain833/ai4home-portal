@@ -8,7 +8,9 @@ const STANDARD_INTERVAL_HOURS = 48;
 const EMERGENCY_INTERVAL_HOURS = 4;
 const MAX_REMINDERS = 3;
 const BATCH_SIZE = 200;
-const CHASEABLE_STATUSES = ["OPEN", "ESCALATED"];
+// Once a trade is dispatched the ticket is someone's job — only unassigned
+// OPEN tickets still need chasing.
+const CHASEABLE_STATUSES = ["OPEN"];
 
 const isUrgent = (ticket) => ticket.isEmergency || ticket.priority === "URGENT";
 

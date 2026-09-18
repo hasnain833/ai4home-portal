@@ -15,9 +15,8 @@ enum Role {
 
 enum TicketStatus {
   OPEN
-  IN_PROGRESS
+  DISPATCHED
   RESOLVED
-  ESCALATED
 }
 
 enum TicketPriority {
@@ -43,6 +42,12 @@ model User {
   hasSalesAccess        Boolean                @default(false)
   salesPermissions      String[]               @default([])
   lastActiveWorkspace   String?                @default("warranty")
+  // An email change is only applied once the new address is confirmed, so the
+  // requested address parks here until then. The token is stored as a SHA-256
+  // hash — the raw value only ever exists in the confirmation link.
+  pendingEmail          String?
+  emailChangeTokenHash  String?
+  emailChangeExpiresAt  DateTime?
   ownedLeads            Lead[]                 @relation("LeadOwner")
   agentAppointments     SalesAppointment[]     @relation("AgentAppointments")
   contentCalendars      ContentCalendar[]

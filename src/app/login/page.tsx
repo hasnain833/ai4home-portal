@@ -94,6 +94,26 @@ function AuthContainer() {
     } else if (searchParams.get("reset") === "success") {
       setSuccess("Password reset successfully! You can now sign in with your new password.");
     }
+
+    // Landing back here from a confirmation link in an email-change message.
+    const emailChange = searchParams.get("emailChange");
+    if (emailChange === "success") {
+      const confirmed = searchParams.get("email") || "";
+      setSuccess(
+        confirmed
+          ? `Email confirmed. Sign in with ${confirmed} from now on.`
+          : "Email confirmed. Sign in with your new address from now on.",
+      );
+      if (confirmed) setLoginEmail(confirmed);
+    } else if (emailChange === "expired") {
+      setError("That confirmation link has expired. Request the email change again.");
+    } else if (emailChange === "taken") {
+      setError("That email address has since been claimed by another account.");
+    } else if (emailChange === "invalid") {
+      setError("That confirmation link is not valid. It may have already been used.");
+    } else if (emailChange === "failed") {
+      setError("We could not complete the email change. Your current address still works.");
+    }
   }, [searchParams]);
 
 

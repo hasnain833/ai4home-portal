@@ -115,7 +115,10 @@ export async function createWarrantyTicket({
 
   const warrantyYear = property?.coeDate ? calculateWarrantyYear(property.coeDate) : 1;
   const isEmergency = !!classification?.isEmergency;
-  const priority = normalizePriority(classification?.priority, { isEmergency });
+  const priority = normalizePriority(classification?.priority, {
+    isEmergency,
+    text: String(description || classification?.summary || ""),
+  });
   const issueType = String(classification?.issueType || "General Warranty").slice(0, 80);
 
   const ticket = await prisma.ticket.create({
@@ -133,7 +136,7 @@ export async function createWarrantyTicket({
       isEmergency,
       priority,
       warrantyYear,
-      status: isEmergency ? "ESCALATED" : "OPEN",
+      status: "OPEN",
       erpSyncStatus: "PENDING",
     },
   });
@@ -160,14 +163,13 @@ export async function escalateWarrantyTicket(ticketId, { reason = "Emergency det
 
   const existing = await prisma.ticket.findUnique({ where: { id: ticketId } }).catch(() => null);
   if (!existing) return null;
-  if (existing.isEmergency && existing.status === "ESCALATED") return existing;
+  if (existing.isEmergency) return existing;
 
   const ticket = await prisma.ticket.update({
     where: { id: ticketId },
     data: {
       isEmergency: true,
       priority: "URGENT",
-      status: "ESCALATED",
       description: existing.description
         ? `${existing.description}\n\n[Escalated] ${reason}`.slice(0, 5000)
         : String(reason).slice(0, 5000),
@@ -180,7 +182,7 @@ export async function escalateWarrantyTicket(ticketId, { reason = "Emergency det
     console.error(`[Warranty Ticket] ERP escalation sync failed for #${ticket.id}:`, err.message);
   }
 
-  if (existing.status !== "ESCALATED") {
+  if (!existing.isEmergency) {
     try {
       await MessagingService.notifyTicketStatusChange(ticket.id, ticket.status);
     } catch (err) {

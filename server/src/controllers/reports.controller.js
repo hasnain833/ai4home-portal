@@ -74,8 +74,8 @@ export const getAnalytics = async (req, res) => {
 
     const totalTickets = tickets.length;
     const resolvedTickets = tickets.filter(t => t.status === "RESOLVED");
-    const escalatedTickets = tickets.filter(t => t.status === "ESCALATED" || t.isEmergency);
-    const openTickets = tickets.filter(t => t.status === "OPEN" || t.status === "IN_PROGRESS");
+    const escalatedTickets = tickets.filter(t => t.isEmergency);
+    const openTickets = tickets.filter(t => t.status === "OPEN" || t.status === "DISPATCHED");
 
     const resolutionRate = totalTickets > 0
       ? Math.round((resolvedTickets.length / totalTickets) * 100)

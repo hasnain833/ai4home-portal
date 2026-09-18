@@ -42,6 +42,10 @@ export interface User {
   // was granted. Absent until /api/auth/me has answered.
   salesPermissions?: string[];
   lastActiveWorkspace?: string;
+  // A sign-in email change that has been requested but not yet confirmed from
+  // the new address. Null once confirmed or cancelled.
+  pendingEmail?: string | null;
+  emailChangeExpiresAt?: string | null;
   // Tenant onboarding gate: PENDING | SUBMITTED | VERIFIED
   verificationStatus?: string;
   verificationDocUrl?: string | null;

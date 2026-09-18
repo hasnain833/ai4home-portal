@@ -85,8 +85,13 @@ export const getMe = async (req, res) => {
       ? "VERIFIED"
       : dbUser.company?.verificationStatus || "VERIFIED";
 
-    // The row carries the bcrypt hash; never let it reach the client.
-    const { password: _password, ...safeUser } = dbUser;
+    // The row carries the bcrypt hash and the email-change token hash; neither
+    // may reach the client. pendingEmail/expiry do go out — the UI shows them.
+    const {
+      password: _password,
+      emailChangeTokenHash: _emailChangeTokenHash,
+      ...safeUser
+    } = dbUser;
 
     return res.json({
       ...safeUser,
@@ -136,55 +141,12 @@ export const updateProfile = async (req, res) => {
     if (lastActiveWorkspace)
       updateData.lastActiveWorkspace = lastActiveWorkspace;
 
-    if (email && email.toLowerCase() !== req.user.email.toLowerCase()) {
-      const emailLower = email.toLowerCase();
-      // 1. Verify email is not already taken in DB
-      const existingUser = await prisma.user.findUnique({
-        where: { email: emailLower },
+    // A sign-in email change is not applied inline any more: it has to be
+    // confirmed from the new address first. See requestEmailChange.
+    if (email && email.toLowerCase() !== String(req.user.email || "").toLowerCase()) {
+      return res.status(400).json({
+        message: "Use POST /api/auth/email-change to change your sign-in email — it must be confirmed from the new address.",
       });
-      if (existingUser) {
-        return res
-          .status(400)
-          .json({ message: "An account with this email already exists" });
-      }
-
-      // 2. Find corresponding Supabase Auth user
-      const supabaseAdmin = getSupabaseAdmin();
-      const { data: usersData, error: listError } =
-        await supabaseAdmin.auth.admin.listUsers();
-      if (listError) {
-        console.error("Supabase user list error:", listError);
-        return res
-          .status(500)
-          .json({ message: "Failed to verify authentication account" });
-      }
-
-      const supabaseUser = usersData.users.find(
-        (u) => u.email.toLowerCase() === req.user.email.toLowerCase(),
-      );
-
-      if (!supabaseUser) {
-        return res
-          .status(404)
-          .json({ message: "Supabase user not found for current email" });
-      }
-
-      // 3. Update Supabase Auth user email and automatically confirm it
-      const { error: authError } =
-        await supabaseAdmin.auth.admin.updateUserById(supabaseUser.id, {
-          email: emailLower,
-          email_confirm: true,
-        });
-
-      if (authError) {
-        console.error("Supabase auth email update error:", authError);
-        return res.status(400).json({
-          message:
-            authError.message || "Failed to update authentication account",
-        });
-      }
-
-      updateData.email = emailLower;
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -211,6 +173,223 @@ export const updateProfile = async (req, res) => {
     });
   } catch (error) {
     console.error("Profile update error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const EMAIL_CHANGE_TTL_HOURS = 24;
+const EMAIL_RE = /^\S+@\S+\.\S+$/;
+
+const hashToken = (raw) => crypto.createHash("sha256").update(String(raw)).digest("hex");
+
+// Supabase's admin API has no lookup-by-email, so page through until the address
+// turns up rather than trusting listUsers()' first page to hold every user.
+const findSupabaseUserByEmail = async (supabaseAdmin, email) => {
+  const target = String(email).toLowerCase();
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw new Error(error.message);
+    const users = data?.users || [];
+    const match = users.find((u) => String(u.email || "").toLowerCase() === target);
+    if (match) return match;
+    if (users.length < 200) return null;
+  }
+  return null;
+};
+
+/// Step 1 of a sign-in email change: park the requested address and mail a
+/// confirmation link to it. Nothing about the account changes here — the current
+/// address keeps working until the new one is confirmed.
+export const requestEmailChange = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+    if (req.user.isSuperAdmin && req.user.id === "env-superadmin") {
+      return res.status(400).json({
+        message:
+          "The environment super-admin address is set in configuration and cannot be changed here.",
+      });
+    }
+
+    const newEmail = String(req.body?.email || "").trim().toLowerCase();
+    const currentEmail = String(req.user.email || "").toLowerCase();
+
+    if (!newEmail) return res.status(400).json({ message: "Email is required" });
+    if (!EMAIL_RE.test(newEmail)) return res.status(400).json({ message: "Invalid email format" });
+    if (newEmail === currentEmail) {
+      return res.status(400).json({ message: "That is already your sign-in email" });
+    }
+
+    const taken = await prisma.user.findUnique({ where: { email: newEmail } });
+    if (taken) {
+      return res.status(400).json({ message: "An account with this email already exists" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email: currentEmail } });
+    if (!user) return res.status(404).json({ message: "User profile not found" });
+
+    if (!MailService.hasPlatformSender()) {
+      // Refuse rather than parking a change whose confirmation link will never
+      // arrive — the user would be left waiting on an email that cannot be sent.
+      return res.status(503).json({
+        message:
+          "Email is not configured on this deployment, so the confirmation link cannot be sent. " +
+          "Set SMTP_USER and SMTP_PASS and try again.",
+      });
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TTL_HOURS * 60 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        pendingEmail: newEmail,
+        emailChangeTokenHash: hashToken(rawToken),
+        emailChangeExpiresAt: expiresAt,
+      },
+    });
+
+    const confirmUrl = `${process.env.NEXT_PUBLIC_URL}/api/auth/email-change/confirm?token=${rawToken}`;
+
+    const verify = await MailService.sendEmail({
+      to: newEmail,
+      subject: "Confirm your new sign-in email",
+      html: Templates.getEmailChangeVerifyEmail(
+        user.name,
+        currentEmail,
+        newEmail,
+        confirmUrl,
+        EMAIL_CHANGE_TTL_HOURS,
+      ),
+      allowPlatformSender: true,
+    });
+
+    if (!verify?.success) {
+      // Do not leave a pending change hanging on an email that never went out.
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { pendingEmail: null, emailChangeTokenHash: null, emailChangeExpiresAt: null },
+      });
+      console.error("[Auth] Email-change verification mail failed:", verify?.error);
+      return res
+        .status(502)
+        .json({ message: "Could not send the confirmation email. Please try again." });
+    }
+
+    // Best-effort heads-up to the address being replaced; its failure must not
+    // undo a change request whose confirmation link already landed.
+    try {
+      await MailService.sendEmail({
+        to: currentEmail,
+        subject: "Sign-in email change requested",
+        html: Templates.getEmailChangeNoticeEmail(
+          user.name,
+          currentEmail,
+          newEmail,
+          EMAIL_CHANGE_TTL_HOURS,
+        ),
+        allowPlatformSender: true,
+      });
+    } catch (noticeError) {
+      console.error("[Auth] Email-change notice to the old address failed:", noticeError.message);
+    }
+
+    return res.json({
+      message: `Confirmation sent to ${newEmail}. Your sign-in email changes once you open that link.`,
+      pendingEmail: newEmail,
+      expiresAt,
+    });
+  } catch (error) {
+    console.error("[Auth] Email change request failed:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/// Step 2: the link from the new address. Applies the change to Supabase Auth
+/// (the actual sign-in identity) and to the local user row, then bounces the
+/// browser to the login page.
+export const confirmEmailChange = async (req, res) => {
+  const redirect = (params) =>
+    res.redirect(`${process.env.NEXT_PUBLIC_URL}/login?${new URLSearchParams(params).toString()}`);
+
+  try {
+    const rawToken = String(req.query?.token || "");
+    if (!rawToken) return redirect({ emailChange: "invalid" });
+
+    const user = await prisma.user.findFirst({
+      where: { emailChangeTokenHash: hashToken(rawToken) },
+    });
+
+    if (!user || !user.pendingEmail) return redirect({ emailChange: "invalid" });
+
+    const clearPending = () =>
+      prisma.user.update({
+        where: { id: user.id },
+        data: { pendingEmail: null, emailChangeTokenHash: null, emailChangeExpiresAt: null },
+      });
+
+    if (!user.emailChangeExpiresAt || user.emailChangeExpiresAt.getTime() < Date.now()) {
+      await clearPending();
+      return redirect({ emailChange: "expired" });
+    }
+
+    const newEmail = user.pendingEmail.toLowerCase();
+
+    // Re-check: the address may have been claimed by someone else since the
+    // change was requested.
+    const taken = await prisma.user.findUnique({ where: { email: newEmail } });
+    if (taken && taken.id !== user.id) {
+      await clearPending();
+      return redirect({ emailChange: "taken" });
+    }
+
+    // Sign-in lives in Supabase Auth, so that record has to move first — if it
+    // fails, the local row must stay put or the account is locked out.
+    const supabaseAdmin = getSupabaseAdmin();
+    const supabaseUser = await findSupabaseUserByEmail(supabaseAdmin, user.email);
+    if (!supabaseUser) {
+      console.error(`[Auth] No Supabase auth user for ${user.email} — email change aborted.`);
+      return redirect({ emailChange: "failed" });
+    }
+
+    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(supabaseUser.id, {
+      email: newEmail,
+      email_confirm: true,
+    });
+    if (authError) {
+      console.error("[Auth] Supabase email update failed:", authError.message);
+      return redirect({ emailChange: "failed" });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        email: newEmail,
+        pendingEmail: null,
+        emailChangeTokenHash: null,
+        emailChangeExpiresAt: null,
+      },
+    });
+
+    console.log(`[Auth] Sign-in email changed for user ${user.id}.`);
+    return redirect({ emailChange: "success", email: newEmail });
+  } catch (error) {
+    console.error("[Auth] Email change confirmation failed:", error);
+    return redirect({ emailChange: "failed" });
+  }
+};
+
+/// Drops a pending change so the field stops showing "awaiting confirmation".
+export const cancelEmailChange = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+    await prisma.user.updateMany({
+      where: { email: String(req.user.email || "").toLowerCase() },
+      data: { pendingEmail: null, emailChangeTokenHash: null, emailChangeExpiresAt: null },
+    });
+    return res.json({ message: "Pending email change cancelled" });
+  } catch (error) {
+    console.error("[Auth] Cancel email change failed:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

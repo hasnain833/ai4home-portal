@@ -40,7 +40,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 
 // Types
-type TicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED" | "ESCALATED";
+type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
 type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 
 interface Ticket {
@@ -93,7 +93,7 @@ const statusStyles: Record<TicketStatus, { bg: string, text: string, border: str
     border: "border-sky-200 dark:border-sky-900/50",
     dot: "bg-sky-500",
   },
-  IN_PROGRESS: {
+  DISPATCHED: {
     bg: "bg-amber-50 dark:bg-amber-950/20",
     text: "text-amber-700 dark:text-amber-400",
     border: "border-amber-200 dark:border-amber-900/50",
@@ -104,12 +104,6 @@ const statusStyles: Record<TicketStatus, { bg: string, text: string, border: str
     text: "text-emerald-700 dark:text-emerald-400",
     border: "border-emerald-200 dark:border-emerald-900/50",
     dot: "bg-emerald-500",
-  },
-  ESCALATED: {
-    bg: "bg-rose-50 dark:bg-rose-950/20",
-    text: "text-rose-700 dark:text-rose-400",
-    border: "border-rose-200 dark:border-rose-900/50",
-    dot: "bg-rose-500",
   },
 };
 
@@ -351,9 +345,8 @@ export default function TicketsPage() {
                       <SelectContent>
                         <SelectItem value="all">All Statuses</SelectItem>
                         <SelectItem value="OPEN">Open</SelectItem>
-                        <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                        <SelectItem value="DISPATCHED">Dispatched</SelectItem>
                         <SelectItem value="RESOLVED">Resolved</SelectItem>
-                        <SelectItem value="ESCALATED">Escalated</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
