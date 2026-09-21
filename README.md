@@ -128,14 +128,19 @@ The following represents the complete list of environment variables used across 
 | `INNGEST_SIGNING_KEY` | Backend | Validates webhook requests from Inngest |
 | `INNGEST_DEV` | Backend | Local dev mode toggle (`1`) |
 
-| `SENDER_EMAIL` | Backend | Transactional emails sender address |
-| `SMTP_HOST` | Backend | Transactional emails SMTP host |
-| `SMTP_PORT` | Backend | Transactional emails SMTP port |
-| `SMTP_USER` | Backend | Transactional emails SMTP user |
-| `SMTP_PASS` | Backend | Transactional emails SMTP password |
-| `TWILIO_ACCOUNT_SID` | Backend | Inbound SMS fallback / sending |
-| `TWILIO_AUTH_TOKEN` | Backend | Inbound SMS fallback / sending |
-| `TWILIO_FROM_NUMBER` | Backend | Inbound SMS fallback / sending |
+| `SENDER_EMAIL` | Backend | Platform sending address for **all** email. Its domain needs SPF/DKIM/DMARC |
+| `SMTP_HOST` | Backend | Platform SMTP host (Brevo) |
+| `SMTP_PORT` | Backend | Platform SMTP port |
+| `SMTP_USER` | Backend | Platform SMTP user |
+| `SMTP_PASS` | Backend | Platform SMTP password |
+| `INBOUND_EMAIL_DOMAIN` | Backend | Optional. Routes replies to `reply+<companyId>@` so the sales agent sees them |
+| `SMS_PROVIDER` | Backend | Starting SMS provider. A superadmin overrides this at `/admin/messaging` |
+| `TWILIO_ACCOUNT_SID` | Backend | Platform Twilio credentials |
+| `TWILIO_AUTH_TOKEN` | Backend | Platform Twilio credentials (also verifies inbound webhooks) |
+| `TWILIO_FROM_NUMBER` | Backend | Shared platform sending number |
+| `TELNYX_API_KEY` | Backend | Platform Telnyx credentials |
+| `TELNYX_PUBLIC_KEY` | Backend | Verifies inbound Telnyx webhooks |
+| `TELNYX_FROM_NUMBER` | Backend | Shared platform sending number |
 | `GOOGLE_CLIENT_ID` | Backend | Google Cloud OAuth for Calendar/Meet |
 | `GOOGLE_CLIENT_SECRET` | Backend | Google Cloud OAuth for Calendar/Meet |
 | `GOOGLE_REDIRECT_URI` | Backend | Google Cloud OAuth for Calendar/Meet |

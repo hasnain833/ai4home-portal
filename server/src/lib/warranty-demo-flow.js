@@ -1,6 +1,6 @@
 import { toolCall } from "./llm.js";
 import { queryDetailed as kbQueryDetailed } from "../services/warranty-vector.service.js";
-import { getCoverageStatus, describeCoverage } from "./coverage.js";
+import { getCoverageStatus } from "./coverage.js";
 import { classifyClaimHeuristic } from "./warranty-classify.js";
 import { DEMO_PROPERTIES, DEMO_HOMEOWNER_EMAIL, demoTicketConfirmation } from "./warranty-demo.js";
 import { matchPropertyChoice } from "./warranty-orchestrator.js";
@@ -160,15 +160,13 @@ function selectProperty(property, state) {
   next.coverage = { status: coverage.status, endDate: coverage.endDate };
   next.phase = "DIAGNOSE";
 
-  const line = describeCoverage(coverage);
+  // Coverage is tracked on `next.coverage` but not announced — the homeowner
+  // hears their end date only when they ask for it.
   return reply(
     [
       `Got it — ${property.address}.`,
-      line,
       "Ask me anything about the warranty, or tell me what's wrong and I'll file a claim.",
-    ]
-      .filter(Boolean)
-      .join(" "),
+    ].join(" "),
     "DIAGNOSE",
     next,
   );

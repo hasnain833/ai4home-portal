@@ -3,6 +3,7 @@ import { ComplianceService } from "../services/compliance-service.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
+import { normalizePhone } from "../services/sms.service.js";
 
 async function markLeadEngaged(leadId) {
   await prisma.lead.updateMany({
@@ -451,14 +452,20 @@ export const unsubscribeWebhook = async (req, res) => {
 
 
 
+// Replies come back to reply+<companyId>@<inbound domain> when an inbound
+// domain is configured, which makes attribution exact rather than inferred.
+function companyIdFromReplyAddress(to) {
+  const addresses = Array.isArray(to) ? to : to ? [to] : [];
+  for (const entry of addresses) {
+    const address = typeof entry === "string" ? entry : entry?.Address;
+    const match = /(?:^|<)\s*reply\+([A-Za-z0-9_-]+)@/i.exec(String(address || ""));
+    if (match) return match[1];
+  }
+  return null;
+}
+
 export const processBrevoInboundEmail = async (req, res) => {
   try {
-    const companyId = req.query.companyId || req.body.companyId;
-
-    if (!companyId) {
-      return res.status(400).json({ message: "companyId is required." });
-    }
-
     const { items } = req.body;
     if (!items || !Array.isArray(items)) {
       return res.status(400).json({ message: "Invalid payload format. Expected 'items' array." });
@@ -477,12 +484,39 @@ export const processBrevoInboundEmail = async (req, res) => {
       }
 
       const normalizedEmail = fromEmail.trim().toLowerCase();
+
+      // Attribution, best source first: the tenant id encoded in the address
+      // they replied to, then an explicit query parameter, then what we know we
+      // last sent them. Ambiguity is left unrouted rather than guessed at.
+      let companyId =
+        companyIdFromReplyAddress(item.To) ||
+        req.query.companyId ||
+        req.body.companyId ||
+        null;
+
+      if (!companyId) {
+        const resolution = await resolveInboundCompany(normalizedEmail, "EMAIL");
+        companyId = resolution.companyId;
+        if (!companyId) {
+          console.warn(
+            `[Brevo Webhook] \u26a0 Could not attribute reply from ${normalizedEmail} ` +
+              `(${resolution.reason}). Not routing it.`,
+          );
+          continue;
+        }
+        console.log(`[Brevo Webhook] attributed ${normalizedEmail} to ${companyId} (${resolution.reason}).`);
+      }
+
       const leads = await prisma.lead.findMany({
         where: {
           companyId,
           email: normalizedEmail,
         },
       });
+
+      if (leads.length === 0) {
+        console.warn(`[Brevo Webhook] \u26a0 No lead with email ${normalizedEmail} in company ${companyId}.`);
+      }
 
       for (const lead of leads) {
         const replyContent = textBody || htmlBody || "No body content";
@@ -526,6 +560,82 @@ function twiml(message) {
 // Provider-agnostic handling of one inbound SMS: opt-out/opt-in keywords first,
 // then reply-detection (exit sequences + wake the AI agent) for matching leads.
 // Returns { complianceReply } when a keyword was handled, else {}.
+// How far back an outbound message still counts as "the conversation they are
+// replying to", and the window inside which two tenants messaging the same
+// number makes the reply genuinely ambiguous.
+const CONVERSATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const CONTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// A shared sending number carries no tenant identity, so an inbound reply has
+// to be attributed from what we know we sent. Ambiguity fails closed: routing a
+// lead's reply to the wrong builder exposes one customer's message to another,
+// which is worse than not routing it at all.
+function normalizeContactFor(channel, value) {
+  return channel === "SMS"
+    ? normalizePhone(value)
+    : String(value || "").trim().toLowerCase();
+}
+
+async function resolveInboundCompany(sender, channel = "SMS") {
+  const recipient = normalizeContactFor(channel, sender);
+  if (!recipient) return { companyId: null, reason: "no-contact" };
+
+  const since = new Date(Date.now() - CONVERSATION_WINDOW_MS);
+  const outbound = await prisma.messageUsage
+    .findMany({
+      where: {
+        channel,
+        recipient,
+        companyId: { not: null },
+        // A rejected send never reached them, so it is not a conversation they
+        // could be replying to — and counting it would invent contention.
+        outcome: "sent",
+        createdAt: { gte: since },
+      },
+      select: { companyId: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    })
+    .catch(() => []);
+
+  if (outbound.length) {
+    const distinct = [...new Set(outbound.map((r) => r.companyId))];
+    if (distinct.length === 1) {
+      return { companyId: distinct[0], reason: "last-conversation" };
+    }
+
+    // Several tenants have messaged this number. Only the most recent one is a
+    // safe guess, and only if nobody else was also talking to them just now.
+    const contentionSince = Date.now() - CONTENTION_WINDOW_MS;
+    const recent = outbound.filter((r) => r.createdAt.getTime() >= contentionSince);
+    const recentDistinct = [...new Set(recent.map((r) => r.companyId))];
+    if (recentDistinct.length === 1) {
+      return { companyId: recentDistinct[0], reason: "most-recent-conversation" };
+    }
+    return { companyId: null, reason: "ambiguous-conversation", candidates: distinct };
+  }
+
+  // Nothing sent from here — fall back to the number being a lead for exactly
+  // one tenant.
+  const leads = await prisma.lead
+    .findMany({
+      where:
+        channel === "SMS"
+          ? { phone: { contains: recipient.slice(-10) } }
+          : { email: recipient },
+      select: { companyId: true },
+    })
+    .catch(() => []);
+
+  const leadCompanies = [...new Set(leads.map((l) => l.companyId))];
+  if (leadCompanies.length === 1) return { companyId: leadCompanies[0], reason: "unique-lead" };
+  if (leadCompanies.length > 1) {
+    return { companyId: null, reason: "ambiguous-lead", candidates: leadCompanies };
+  }
+
+  return { companyId: null, reason: "unknown" };
+}
+
 async function routeInboundSms({ companyId, sender, body, toNumber, provider }) {
   console.log(`[SMS IN] ← inbound SMS (${provider}) | company=${companyId} from=${sender || "?"} to=${toNumber || "?"} | body="${(body || "").replace(/\s+/g, " ").slice(0, 160)}"`);
 
@@ -543,24 +653,50 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
     return { complianceReply: result.replyText };
   }
 
+  // The keyword handler above deliberately ran with the companyId as it
+  // arrived: on a shared number a STOP is carrier-scoped to the number, so it
+  // has to suppress platform-wide rather than for one tenant. Agent routing is
+  // the opposite — it needs to know exactly whose lead this is.
+  let resolvedCompanyId = companyId;
+  if (!resolvedCompanyId) {
+    const resolution = await resolveInboundCompany(sender, "SMS");
+    resolvedCompanyId = resolution.companyId;
+
+    if (!resolvedCompanyId) {
+      console.warn(
+        `[SMS IN] ⚠ Could not attribute reply from ${sender} to a tenant (${resolution.reason}` +
+          `${resolution.candidates ? `, candidates: ${resolution.candidates.join(", ")}` : ""}). ` +
+          `Not routing it — a reply sent to the wrong builder is worse than one left unrouted.`,
+      );
+      return { unattributed: true, reason: resolution.reason };
+    }
+
+    console.log(`[SMS IN] attributed reply from ${sender} to company ${resolvedCompanyId} (${resolution.reason}).`);
+  }
+
   const leads = await prisma.lead.findMany({
     where: {
-      companyId,
+      companyId: resolvedCompanyId,
       phone: { contains: normalizedContact.slice(-10) },
     },
   });
 
-  console.log(`[SMS IN] matched ${leads.length} lead(s) for ${sender} in company ${companyId}${leads.length === 0 ? " — no lead with this phone, nothing to trigger" : ""}.`);
+  if (leads.length === 0) {
+    console.warn(`[SMS IN] ⚠ No lead with phone ${sender} in company ${resolvedCompanyId} — nothing to trigger.`);
+    return { unmatched: true };
+  }
+
+  console.log(`[SMS IN] matched ${leads.length} lead(s) for ${sender} in company ${resolvedCompanyId}.`);
 
   for (const lead of leads) {
     const { inngest } = await import("../lib/inngest.js");
     await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
     await inngest.send({
       name: "lead.reply.received",
-      data: { leadId: lead.id, companyId, channel: "SMS", body, sender },
+      data: { leadId: lead.id, companyId: resolvedCompanyId, channel: "SMS", body, sender },
     });
     await markLeadEngaged(lead.id);
-    await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "SMS" } });
+    await triggerAutomation({ companyId: resolvedCompanyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "SMS" } });
     console.log(`[SMS IN] → triggered AI agent (lead.reply.received) for lead=${lead.id} (${lead.firstName || ""} ${lead.lastName || ""})`);
   }
 
@@ -571,10 +707,10 @@ export const processTwilioInboundSms = async (req, res) => {
   const sendTwiml = (message) => res.status(200).type("text/xml").send(twiml(message));
 
   try {
-    const companyId = req.query.companyId || req.body?.companyId;
-    if (!companyId) {
-      return res.status(400).json({ message: "companyId is required." });
-    }
+    // No companyId means this arrived on the shared number's static webhook
+    // rather than in reply to a send of ours. It is still handled — a dropped
+    // STOP is a compliance failure, not a routing inconvenience.
+    const companyId = req.query.companyId || req.body?.companyId || null;
 
     const { complianceReply } = await routeInboundSms({
       companyId,
@@ -593,10 +729,7 @@ export const processTwilioInboundSms = async (req, res) => {
 
 export const processTelnyxInboundSms = async (req, res) => {
   try {
-    const companyId = req.query.companyId || req.body?.companyId;
-    if (!companyId) {
-      return res.status(400).json({ message: "companyId is required." });
-    }
+    const companyId = req.query.companyId || req.body?.companyId || null;
 
     const event = req.body?.data;
     const eventType = event?.event_type;

@@ -7,8 +7,8 @@ import {
 const BOOKING_ROLES = ["ADMIN", "STAFF"];
 
 const NOT_CONFIGURED_NOTICE =
-  "Saved, and visible in the portal, but no email was sent: email is not configured " +
-  "for this workspace. Add your SMTP credentials in Settings > Email, SMS & News.";
+  "Saved, and visible in the portal, but no email was sent: email delivery is " +
+  "temporarily unavailable. Please contact support if this continues.";
 
 
 async function accessibleTicket(session, ticketId) {

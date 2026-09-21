@@ -6,6 +6,21 @@ import {
   normalizeNewsSources,
 } from "../lib/news-sources.js";
 import { decryptDetailed, encryptionKeyStatus, isEncrypted } from "../lib/crypto.js";
+import {
+  SMS_PROVIDERS,
+  SMS_PROVIDER_SETTING_KEY,
+  resolveSystemConfig,
+  getActiveSmsProvider,
+  invalidateSmsProviderCache,
+  verifyProviderCredentials,
+} from "../services/sms.service.js";
+import { MailService } from "../services/mail-service.js";
+import {
+  DEFAULT_PRICING,
+  PRICING_SETTING_KEY,
+  getPricing,
+  invalidatePricingCache,
+} from "../lib/usage.js";
 
 function denyUnlessSuperAdmin(req, res) {
   if (!req.user?.isSuperAdmin) {
@@ -386,6 +401,192 @@ export const getSecurityPosture = async (req, res) => {
     });
   } catch (error) {
     console.error("[Platform getSecurityPosture] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// ─── Platform messaging spend ────────────────────────────────────────────────
+// All messaging is billed to the platform now, so this is our own cost view:
+// what each tenant is spending, on which channel, and which providers are live.
+
+const MONTHS_BACK = 6;
+
+export const getMessagingSpend = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+
+    const since = new Date();
+    since.setMonth(since.getMonth() - MONTHS_BACK);
+    since.setDate(1);
+    since.setHours(0, 0, 0, 0);
+
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const [byCompany, byChannel, recent, companies, activeProvider, pricing] = await Promise.all([
+      prisma.messageUsage.groupBy({
+        by: ["companyId", "channel"],
+        where: { createdAt: { gte: monthStart } },
+        _sum: { units: true, costMicros: true },
+      }),
+      prisma.messageUsage.groupBy({
+        by: ["channel", "outcome"],
+        where: { createdAt: { gte: since } },
+        _sum: { units: true, costMicros: true },
+      }),
+      prisma.messageUsage.findMany({
+        where: { createdAt: { gte: since } },
+        select: { channel: true, costMicros: true, units: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 5000,
+      }),
+      prisma.company.findMany({ select: { id: true, name: true } }),
+      getActiveSmsProvider(),
+      getPricing(),
+    ]);
+
+    const nameOf = new Map(companies.map((c) => [c.id, c.name]));
+
+    // Roll the per-channel rows up into one row per tenant for the table.
+    const tenants = new Map();
+    for (const row of byCompany) {
+      const id = row.companyId || "unattributed";
+      if (!tenants.has(id)) {
+        tenants.set(id, {
+          companyId: row.companyId,
+          name: nameOf.get(row.companyId) || "Unattributed",
+          costMicros: 0,
+          channels: {},
+        });
+      }
+      const t = tenants.get(id);
+      t.costMicros += row._sum.costMicros || 0;
+      t.channels[row.channel] = {
+        units: row._sum.units || 0,
+        costMicros: row._sum.costMicros || 0,
+      };
+    }
+
+    // Month-by-month totals for the trend line.
+    const monthly = new Map();
+    for (const row of recent) {
+      const key = `${row.createdAt.getFullYear()}-${String(row.createdAt.getMonth() + 1).padStart(2, "0")}`;
+      monthly.set(key, (monthly.get(key) || 0) + (row.costMicros || 0));
+    }
+
+    const smsConfig = resolveSystemConfig(activeProvider);
+
+    return res.json({
+      monthToDate: {
+        tenants: [...tenants.values()].sort((a, b) => b.costMicros - a.costMicros),
+        totalCostMicros: [...tenants.values()].reduce((sum, t) => sum + t.costMicros, 0),
+      },
+      byChannel: byChannel.map((r) => ({
+        channel: r.channel,
+        outcome: r.outcome,
+        units: r._sum.units || 0,
+        costMicros: r._sum.costMicros || 0,
+      })),
+      monthly: [...monthly.entries()].sort().map(([month, costMicros]) => ({ month, costMicros })),
+      pricing,
+      providers: {
+        sms: {
+          active: smsConfig?.provider || null,
+          // Credentials live in env; this only reports whether they are present.
+          available: SMS_PROVIDERS.filter((name) => !!resolveSystemConfig(name)),
+          all: SMS_PROVIDERS,
+        },
+        email: {
+          configured: MailService.hasPlatformSender(),
+          sendingAddress: MailService.SENDER_EMAIL,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[Platform getMessagingSpend] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const setSmsProvider = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+
+    const { provider } = req.body;
+    if (!SMS_PROVIDERS.includes(provider)) {
+      return res
+        .status(400)
+        .json({ message: `provider must be one of: ${SMS_PROVIDERS.join(", ")}` });
+    }
+
+    // Switching to a provider that cannot actually send would stop all SMS
+    // silently, so the credentials are checked live before committing.
+    const check = await verifyProviderCredentials(provider);
+    if (!check.ok) {
+      return res.status(400).json({ message: `${provider} is not usable: ${check.reason}` });
+    }
+
+    await prisma.platformSetting.upsert({
+      where: { key: SMS_PROVIDER_SETTING_KEY },
+      create: { key: SMS_PROVIDER_SETTING_KEY, value: { provider } },
+      update: { value: { provider } },
+    });
+    invalidateSmsProviderCache();
+
+    await writeAuditLog({
+      req,
+      action: "PLATFORM_SMS_PROVIDER_CHANGED",
+      targetType: "PlatformSetting",
+      targetId: SMS_PROVIDER_SETTING_KEY,
+      metadata: { provider },
+    });
+
+    return res.json({ provider });
+  } catch (error) {
+    console.error("[Platform setSmsProvider] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const setMessagingPricing = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+
+    const incoming = req.body?.pricing;
+    if (!incoming || typeof incoming !== "object") {
+      return res.status(400).json({ message: "`pricing` must be an object" });
+    }
+
+    // Only known keys are stored, and only as non-negative numbers — a bad rate
+    // silently corrupts every cost figure on the dashboard.
+    const next = {};
+    for (const key of Object.keys(DEFAULT_PRICING)) {
+      const value = Number(incoming[key]);
+      if (!Number.isFinite(value) || value < 0) {
+        return res.status(400).json({ message: `${key} must be a number of 0 or more` });
+      }
+      next[key] = Math.round(value);
+    }
+
+    await prisma.platformSetting.upsert({
+      where: { key: PRICING_SETTING_KEY },
+      create: { key: PRICING_SETTING_KEY, value: next },
+      update: { value: next },
+    });
+    invalidatePricingCache();
+
+    await writeAuditLog({
+      req,
+      action: "PLATFORM_MESSAGING_PRICING_CHANGED",
+      targetType: "PlatformSetting",
+      targetId: PRICING_SETTING_KEY,
+      metadata: next,
+    });
+
+    return res.json({ pricing: next });
+  } catch (error) {
+    console.error("[Platform setMessagingPricing] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

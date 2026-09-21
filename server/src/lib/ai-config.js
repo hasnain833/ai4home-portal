@@ -1,3 +1,5 @@
+import { recordUsage, aiCostMicros } from "./usage.js";
+
 export const AI_PROVIDER = "ANTHROPIC";
 export const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 export const FAST_MODEL = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
@@ -53,12 +55,19 @@ export function aiUnavailableMessage() {
   return describeAiUnavailable(resolveAiConfig().reason);
 }
 
-export function recordAiUsage(companyId, cfg, usage) {
+export function recordAiUsage(companyId, cfg, usage, source = null) {
   if (!usage) return;
   const input = usage.input_tokens ?? usage.prompt_tokens ?? 0;
   const output = usage.output_tokens ?? usage.completion_tokens ?? 0;
   if (!input && !output) return;
-  console.log(
-    `[AI Usage] company=${companyId} model=${cfg?.model} in=${input} out=${output}`,
-  );
+
+  // Fire and forget: AI calls must not wait on the usage ledger.
+  void recordUsage({
+    companyId,
+    channel: "AI",
+    provider: cfg?.model || DEFAULT_MODEL,
+    units: input + output,
+    costMicros: aiCostMicros(cfg?.model, input, output),
+    source,
+  });
 }

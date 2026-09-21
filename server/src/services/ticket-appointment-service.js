@@ -1,8 +1,8 @@
 import prisma from "../lib/prisma.js";
 import { MessagingService } from "./messaging-service.js";
-import { getMessagingConfig } from "../lib/messaging-config.js";
+import { MailService } from "./mail-service.js";
 import { Templates } from "./templates.js";
-import { companyAdmins, writeNotifications, emailIsConfigured } from "./notification-service.js";
+import { companyAdmins, writeNotifications } from "./notification-service.js";
 
 const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
 
@@ -64,8 +64,7 @@ async function dispatch(appointment, kind, { windowLabel = null } = {}) {
   const whenLabel = formatWhen(appointment.scheduledAt, tz);
   const details = detailsFor(appointment, whenLabel);
 
-  const { smtpConfig } = await getMessagingConfig(companyId);
-  const emailReady = emailIsConfigured(smtpConfig);
+  const emailReady = MailService.hasPlatformSender();
 
   const admins = await companyAdmins(companyId);
 
@@ -141,7 +140,8 @@ async function dispatch(appointment, kind, { windowLabel = null } = {}) {
       html: htmlFor(role),
       fromName: companyName,
       fromEmail: company?.email || undefined,
-      smtpConfig,
+      companyId,
+      source: "ticket-appointment",
     });
 
   let emailed = 0;

@@ -5,7 +5,7 @@ import { MailService } from "../../services/mail-service.js";
 import { sendSms, smsSent } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { Templates } from "../../services/templates.js";
-import { getMessagingConfig } from "../../lib/messaging-config.js";
+import { getSenderIdentity } from "../../lib/messaging-config.js";
 import {
   getAvailableSlots,
   bookSlot,
@@ -63,10 +63,10 @@ async function sendLeadMessage(lead, channel, text, subject) {
     return { channel: effective, body: text, skipped: true, blocked: true, outcome: gate.reason };
   }
 
-  const { smtpConfig, smsConfig } = await getMessagingConfig(lead.companyId);
+  const { replyTo } = await getSenderIdentity(lead.companyId);
   if (channel === "SMS" && lead.phone) {
     const body = ComplianceService.addSmsOptOutSuffix(text);
-    const result = await sendSms({ to: lead.phone, body, smsConfig });
+    const result = await sendSms({ to: lead.phone, body, companyId: lead.companyId, source: "appointment" });
     if (!smsSent(result)) {
       console.warn(
         `[Appointment Agent] SMS to ${lead.phone} not delivered (${result.outcome}): ${result.error}`,
@@ -80,7 +80,9 @@ async function sendLeadMessage(lead, channel, text, subject) {
       subject: subject || "Scheduling your visit",
       html: brandedEmail(lead.company?.name || "Scheduling", text),
       fromName: lead.company?.name || undefined,
-      smtpConfig,
+      replyTo,
+      companyId: lead.companyId,
+      source: "appointment",
     });
     if (!result.success) {
       console.warn(
@@ -540,7 +542,7 @@ async function escalate(lead, channel, convoId, transcript, reason, leadMessage)
   });
 
   try {
-    const { smtpConfig } = await getMessagingConfig(lead.companyId);
+    const { replyTo } = await getSenderIdentity(lead.companyId);
     const agentId = await resolveAgentId(lead);
     const agent = agentId ? await prisma.user.findUnique({ where: { id: agentId }, select: { email: true } }) : null;
     const to = agent?.email || lead.company?.email;
@@ -553,7 +555,9 @@ async function escalate(lead, channel, convoId, transcript, reason, leadMessage)
           lead.email || lead.phone || "no contact",
           reason
         ),
-        smtpConfig,
+        replyTo,
+        companyId: lead.companyId,
+        source: "appointment",
       });
     }
   } catch (e) {

@@ -182,7 +182,8 @@ export const verifyCompany = async (req, res) => {
           to: company.email,
           subject: "Your invoice is approved – workspace active",
           html: Templates.getWorkspaceActiveEmail(company.name, portalUrl),
-          allowPlatformSender: true,
+          companyId,
+          source: "workspace-activated",
         });
       }
     } catch (mailErr) {

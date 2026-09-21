@@ -11,6 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -36,6 +38,10 @@ import {
   CheckCircle2,
   AlertCircle,
   RotateCcw,
+  Plus,
+  X,
+  Loader2,
+  Ticket as TicketIcon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -60,6 +66,49 @@ interface Ticket {
   createdAt: string;
   warrantyYear: number;
 }
+
+interface HomeownerOption {
+  id: string;
+  name: string | null;
+  email: string;
+}
+
+interface PropertyOption {
+  id: string;
+  address: string;
+  homeownerId: string;
+}
+
+// Mirrors the categories the classifier assigns to AI-created tickets
+// (server/src/lib/warranty-classify.js) so manual and automatic tickets stay in
+// the same taxonomy and the Issue filter keeps working across both.
+const ISSUE_TYPES = [
+  "Appliances",
+  "Cabinets & Trim",
+  "Drywall & Paint",
+  "Electrical",
+  "Flooring",
+  "General Warranty",
+  "HVAC",
+  "Plumbing",
+  "Roofing",
+  "Structural",
+  "Windows & Doors",
+];
+
+const PRIORITY_OPTIONS: TicketPriority[] = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+
+const EMPTY_TICKET_FORM = {
+  homeownerId: "",
+  propertyId: "",
+  issueType: "",
+  // Distinguishes these from the agent's tickets, which it stamps "AI Chat".
+  ticketType: "Manual Entry",
+  description: "",
+  priority: "MEDIUM" as TicketPriority,
+  isEmergency: false,
+  notifyHomeowner: true,
+};
 
 // Animation variants
 const containerVariants = {
@@ -147,6 +196,15 @@ export default function TicketsPage() {
 
   // Role-based filtering
   const isHomeowner = user?.role === "homeowner";
+  const canManage = user?.role === "admin" || user?.role === "staff";
+
+  // Create-ticket modal
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState(EMPTY_TICKET_FORM);
+  const [createError, setCreateError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [homeowners, setHomeowners] = useState<HomeownerOption[]>([]);
+  const [allProperties, setAllProperties] = useState<PropertyOption[]>([]);
 
   // Declared above fetchTickets, which calls it: referencing it later would
   // capture a binding that is not initialised at definition time.
@@ -181,6 +239,39 @@ export default function TicketsPage() {
   useEffect(() => {
     fetchTickets();
   }, [fetchTickets]);
+
+  // Options for the create modal. /api/properties already returns every
+  // property in the company with its homeownerId, so the property list is
+  // narrowed per homeowner on the client rather than with a second round trip.
+  useEffect(() => {
+    if (!canManage) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [ownerRes, propertyRes] = await Promise.all([
+          fetch("/api/users?role=homeowner"),
+          fetch("/api/properties"),
+        ]);
+        if (cancelled) return;
+        if (ownerRes.ok) setHomeowners(await ownerRes.json());
+        if (propertyRes.ok) setAllProperties(await propertyRes.json());
+      } catch (error) {
+        console.error("Error loading ticket form options:", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canManage]);
+
+  // The API rejects a property that is not the selected homeowner's, so the
+  // dropdown must never offer one.
+  const homeownerProperties = useMemo(
+    () => allProperties.filter((p) => p.homeownerId === createForm.homeownerId),
+    [allProperties, createForm.homeownerId],
+  );
 
   // Filter tickets based on search and filters
   const filteredTickets = useMemo(() => {
@@ -228,6 +319,74 @@ export default function TicketsPage() {
     setYear("all");
     setDateRange("all");
     showToast("success", "Filters reset");
+  };
+
+  const openCreateModal = () => {
+    setCreateForm(EMPTY_TICKET_FORM);
+    setCreateError("");
+    setIsCreateOpen(true);
+  };
+
+  const closeCreateModal = () => {
+    setIsCreateOpen(false);
+    setCreateForm(EMPTY_TICKET_FORM);
+    setCreateError("");
+  };
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateError("");
+
+    if (!createForm.homeownerId) {
+      setCreateError("Please select a homeowner.");
+      return;
+    }
+    if (!createForm.propertyId) {
+      setCreateError("Please select a property.");
+      return;
+    }
+    if (!createForm.issueType) {
+      setCreateError("Please select an issue type.");
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const response = await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          homeownerId: createForm.homeownerId,
+          propertyId: createForm.propertyId,
+          issueType: createForm.issueType,
+          ticketType: createForm.ticketType.trim() || null,
+          description: createForm.description.trim() || null,
+          // The server escalates emergencies to URGENT regardless; sending it
+          // outright keeps the request honest about what was asked for.
+          priority: createForm.isEmergency ? "URGENT" : createForm.priority,
+          isEmergency: createForm.isEmergency,
+          notifyHomeowner: createForm.notifyHomeowner,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setCreateError(data.message || "Failed to create ticket.");
+        return;
+      }
+
+      closeCreateModal();
+      await fetchTickets(true);
+      // `notice` carries the "email is not configured" warning when the server
+      // could not send what was asked for.
+      showToast(data.notice ? "error" : "success", data.notice || "Ticket created");
+    } catch (error) {
+      console.error("Error creating ticket:", error);
+      setCreateError("Error connecting to server.");
+    } finally {
+      setCreating(false);
+    }
   };
 
   const handleRefresh = async () => {
@@ -285,9 +444,18 @@ export default function TicketsPage() {
               initial={{ opacity: 0, y: -50, x: "-50%" }}
               animate={{ opacity: 1, y: 0, x: "-50%" }}
               exit={{ opacity: 0, y: -50, x: "-50%" }}
-              className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
+              className={cn(
+                "fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 border max-w-md",
+                toastMessage.type === "error"
+                  ? "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border-red-200"
+                  : "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border-green-200",
+              )}
             >
-              <CheckCircle2 className="h-5 w-5" />
+              {toastMessage.type === "error" ? (
+                <AlertCircle className="h-5 w-5 shrink-0" />
+              ) : (
+                <CheckCircle2 className="h-5 w-5 shrink-0" />
+              )}
               <span className="text-sm font-medium">{toastMessage.text}</span>
             </motion.div>
           )}
@@ -316,6 +484,12 @@ export default function TicketsPage() {
                 <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
+              {canManage && (
+                <Button onClick={openCreateModal} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create Ticket
+                </Button>
+              )}
             </div>
           </motion.div>
 
@@ -591,6 +765,234 @@ export default function TicketsPage() {
               </CardContent>
             </Card>
           </motion.div>
+
+          {/* Create Ticket Modal */}
+          <AnimatePresence>
+            {isCreateOpen && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-lg shadow-2xl relative border dark:border-gray-800 my-8"
+                >
+                  <button
+                    type="button"
+                    onClick={closeCreateModal}
+                    className="absolute right-4 top-4 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-400 hover:text-gray-600 transition"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+
+                  <div className="flex items-center gap-3 mb-5 border-b dark:border-gray-800 pb-4">
+                    <div className="bg-[#0F3B3D] p-2.5 rounded-2xl text-white">
+                      <TicketIcon className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-[#0F3B3D] dark:text-[#E8B86B]">
+                        Create Ticket
+                      </h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Log a warranty claim on a homeowner&apos;s behalf.
+                      </p>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleCreateSubmit} className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label className="font-semibold">Homeowner</Label>
+                      <Select
+                        value={createForm.homeownerId}
+                        onValueChange={(val) =>
+                          // The chosen property must belong to the homeowner,
+                          // so switching homeowner clears it.
+                          setCreateForm((f) => ({ ...f, homeownerId: val, propertyId: "" }))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select homeowner..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {homeowners.map((h) => (
+                            <SelectItem key={h.id} value={h.id}>
+                              {h.name || h.email} &mdash; {h.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="font-semibold">Property</Label>
+                      <Select
+                        value={createForm.propertyId}
+                        onValueChange={(val) => setCreateForm((f) => ({ ...f, propertyId: val }))}
+                        disabled={!createForm.homeownerId}
+                      >
+                        <SelectTrigger>
+                          <SelectValue
+                            placeholder={
+                              createForm.homeownerId
+                                ? "Select property..."
+                                : "Select a homeowner first"
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {homeownerProperties.map((prop) => (
+                            <SelectItem key={prop.id} value={prop.id}>
+                              {prop.address}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {createForm.homeownerId && homeownerProperties.length === 0 && (
+                        <p className="text-xs text-amber-600">
+                          This homeowner has no registered properties. Add one on the Properties
+                          page first.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="font-semibold">Issue Type</Label>
+                        <Select
+                          value={createForm.issueType}
+                          onValueChange={(val) => setCreateForm((f) => ({ ...f, issueType: val }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select issue..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ISSUE_TYPES.map((t) => (
+                              <SelectItem key={t} value={t}>
+                                {t}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="ticketType" className="font-semibold">Ticket Type</Label>
+                        <Input
+                          id="ticketType"
+                          placeholder="e.g. Manual Entry"
+                          value={createForm.ticketType}
+                          onChange={(e) =>
+                            setCreateForm((f) => ({ ...f, ticketType: e.target.value }))
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ticketDescription" className="font-semibold">Description</Label>
+                      <Textarea
+                        id="ticketDescription"
+                        rows={4}
+                        placeholder="What did the homeowner report?"
+                        value={createForm.description}
+                        onChange={(e) =>
+                          setCreateForm((f) => ({ ...f, description: e.target.value }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="font-semibold">Priority</Label>
+                      <Select
+                        value={createForm.isEmergency ? "URGENT" : createForm.priority}
+                        onValueChange={(val) =>
+                          setCreateForm((f) => ({ ...f, priority: val as TicketPriority }))
+                        }
+                        disabled={createForm.isEmergency}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select priority..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PRIORITY_OPTIONS.map((level) => (
+                            <SelectItem key={level} value={level}>
+                              {level}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {createForm.isEmergency && (
+                        <p className="text-xs text-gray-400 dark:text-slate-500">
+                          Emergencies are always URGENT.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-3 rounded-2xl border dark:border-gray-800 p-3">
+                      <div className="flex items-start gap-2.5">
+                        <Checkbox
+                          id="isEmergency"
+                          checked={createForm.isEmergency}
+                          onCheckedChange={(checked) =>
+                            setCreateForm((f) => ({ ...f, isEmergency: checked === true }))
+                          }
+                          className="mt-0.5"
+                        />
+                        <Label htmlFor="isEmergency" className="font-normal leading-snug cursor-pointer">
+                          Mark as emergency
+                          <span className="block text-xs text-gray-400 dark:text-slate-500">
+                            Flags the ticket and forces URGENT priority.
+                          </span>
+                        </Label>
+                      </div>
+
+                      <div className="flex items-start gap-2.5">
+                        <Checkbox
+                          id="notifyHomeowner"
+                          checked={createForm.notifyHomeowner}
+                          onCheckedChange={(checked) =>
+                            setCreateForm((f) => ({ ...f, notifyHomeowner: checked === true }))
+                          }
+                          className="mt-0.5"
+                        />
+                        <Label htmlFor="notifyHomeowner" className="font-normal leading-snug cursor-pointer">
+                          Email the homeowner
+                          <span className="block text-xs text-gray-400 dark:text-slate-500">
+                            Unticked, the ticket is still created and admins are notified in the
+                            portal &mdash; but nothing is emailed.
+                          </span>
+                        </Label>
+                      </div>
+                    </div>
+
+                    {createError && (
+                      <div className="text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-xl text-sm font-semibold">
+                        {createError}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 justify-end pt-3 border-t dark:border-gray-800">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={closeCreateModal}
+                        className="text-gray-600"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={creating}
+                        className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-semibold gap-2"
+                      >
+                        {creating ? (
+                          <><Loader2 className="h-4 w-4 animate-spin" /> Creating...</>
+                        ) : "Create Ticket"}
+                      </Button>
+                    </div>
+                  </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
         </motion.div>
       </PortalLayout>
     </ProtectedRoute>

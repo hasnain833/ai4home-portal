@@ -51,6 +51,7 @@ interface Property {
   state: string | null;
   zipCode: string | null;
   areaOfHome: string | null;
+  units: number | null;
   coeDate: string | null;
   coverageTerm: string | null;
   homeownerId: string;
@@ -74,14 +75,18 @@ const fadeInUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
 };
 
+// Coverage is always one year; the server derives the real end date from the
+// COE date, so this is display only.
+const COVERAGE_TERM_YEARS = 1;
+
 const EMPTY_FORM = {
   address: "",
   city: "",
   stateVal: "",
   zipCode: "",
   areaOfHome: "",
+  units: "",
   coeDate: "",
-  coverageTermYears: "1",
   homeownerId: "",
 };
 
@@ -101,7 +106,7 @@ export default function PropertiesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Property | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // Fixed reference point for warranty-year maths — see getWarrantyYear below.
+  // Fixed reference point for coverage maths — see getCoverageState below.
   const [now] = useState(() => Date.now());
 
   // Form state
@@ -155,10 +160,8 @@ export default function PropertiesPage() {
       stateVal: p.state || "",
       zipCode: p.zipCode || "",
       areaOfHome: p.areaOfHome || "",
+      units: p.units != null ? String(p.units) : "",
       coeDate: p.coeDate ? new Date(p.coeDate).toISOString().split("T")[0] : "",
-      coverageTermYears: (p.coeDate && p.coverageTerm)
-        ? Math.max(1, new Date(p.coverageTerm).getFullYear() - new Date(p.coeDate).getFullYear()).toString()
-        : "1",
       homeownerId: p.homeownerId,
     });
     setFormError("");
@@ -189,21 +192,14 @@ export default function PropertiesPage() {
       return;
     }
 
-    let computedCoverageTerm = null;
-    if (form.coeDate && form.coverageTermYears) {
-      const d = new Date(form.coeDate);
-      d.setFullYear(d.getFullYear() + parseInt(form.coverageTermYears, 10));
-      computedCoverageTerm = d.toISOString().split("T")[0];
-    }
-
     const body = {
       address: form.address,
       city: form.city || null,
       state: form.stateVal || null,
       zipCode: form.zipCode || null,
       areaOfHome: form.areaOfHome || null,
+      units: form.units || null,
       coeDate: form.coeDate || null,
-      coverageTerm: computedCoverageTerm,
       homeownerId: form.homeownerId || undefined,
     };
 
@@ -261,12 +257,17 @@ export default function PropertiesPage() {
     }
   };
 
-  const getWarrantyYear = (coeDate: string | null) => {
-    if (!coeDate) return 1;
-    const diff = (now - new Date(coeDate).getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-    if (diff <= 1) return 1;
-    if (diff <= 2) return 2;
-    return 10;
+  // Coverage runs for exactly one year from the COE date, so a property is
+  // either inside that year or past it — there are no longer warranty tiers.
+  const getCoverageState = (coverageTerm: string | null) => {
+    if (!coverageTerm) return { label: "No Coverage", active: false, endsOn: null };
+    const end = new Date(coverageTerm);
+    const active = end.getTime() >= now;
+    return {
+      label: active ? "Coverage Active" : "Coverage Expired",
+      active,
+      endsOn: end.toLocaleDateString(),
+    };
   };
 
   const filteredProperties = properties.filter((p) => {
@@ -335,7 +336,7 @@ export default function PropertiesPage() {
             <motion.div variants={fadeInUp} className="grid gap-6 grid-cols-1 md:grid-cols-2">
               {properties.length > 0 ? (
                 properties.map((p) => {
-                  const coverageYear = getWarrantyYear(p.coeDate);
+                  const coverage = getCoverageState(p.coverageTerm);
                   return (
                     <motion.div key={p.id} whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
                       <Card className="overflow-hidden hover:shadow-lg transition-all border-l-4 border-l-[#0F3B3D] bg-white dark:bg-slate-900/60 dark:border-l-[#a0c5c7]">
@@ -352,7 +353,15 @@ export default function PropertiesPage() {
                                 </p>
                               </div>
                             </div>
-                            <Badge className="bg-[#0F3B3D] dark:bg-[#b48c3c] text-white shrink-0">Year {coverageYear} Coverage</Badge>
+                            <Badge
+                              className={`shrink-0 text-white ${
+                                coverage.active
+                                  ? "bg-[#0F3B3D] dark:bg-[#b48c3c]"
+                                  : "bg-gray-400 dark:bg-gray-600"
+                              }`}
+                            >
+                              {coverage.label}
+                            </Badge>
                           </div>
                         </div>
                         <CardContent className="pt-5 space-y-4">
@@ -365,9 +374,9 @@ export default function PropertiesPage() {
                               </span>
                             </div>
                             <div>
-                              <span className="text-gray-400 dark:text-slate-500 block text-xs uppercase font-medium">Warranty Term</span>
+                              <span className="text-gray-400 dark:text-slate-500 block text-xs uppercase font-medium">Coverage Ends</span>
                               <span className="font-semibold text-[#b48c3c] mt-1 block">
-                                {coverageYear === 1 ? "1-Year Workmanship" : coverageYear === 2 ? "2-Year Distribution" : "10-Year Structural"}
+                                {coverage.endsOn ?? "N/A"}
                               </span>
                             </div>
                           </div>
@@ -408,6 +417,7 @@ export default function PropertiesPage() {
                           <TableHead>Property Address</TableHead>
                           <TableHead>City &amp; Zip</TableHead>
                           <TableHead>Area</TableHead>
+                          <TableHead>Units</TableHead>
                           <TableHead>Homeowner</TableHead>
                           <TableHead>Coverage Term</TableHead>
                           <TableHead className="text-right">Actions</TableHead>
@@ -415,7 +425,7 @@ export default function PropertiesPage() {
                       </TableHeader>
                       <TableBody>
                         {filteredProperties.map((p) => {
-                          const year = getWarrantyYear(p.coeDate);
+                          const coverage = getCoverageState(p.coverageTerm);
                           return (
                             <TableRow key={p.id}>
                               <TableCell className="font-semibold text-gray-800 dark:text-slate-100">
@@ -428,7 +438,10 @@ export default function PropertiesPage() {
                                 {p.city || "N/A"}{p.zipCode ? `, ${p.zipCode}` : ""}
                               </TableCell>
                               <TableCell className="text-gray-500 dark:text-slate-400 whitespace-nowrap">
-                                {p.areaOfHome + " sq ft" || "N/A"}
+                                {p.areaOfHome ? `${p.areaOfHome} sq ft` : "N/A"}
+                              </TableCell>
+                              <TableCell className="text-gray-500 dark:text-slate-400">
+                                {p.units ?? "N/A"}
                               </TableCell>
                               <TableCell>
                                 <div className="flex flex-col">
@@ -438,7 +451,7 @@ export default function PropertiesPage() {
                               </TableCell>
                               <TableCell>
                                 <Badge className="bg-[#0F3B3D]/10 text-[#0F3B3D] hover:bg-[#0F3B3D]/15 dark:bg-[#0F3B3D]/25 dark:text-[#a0c5c7] dark:hover:bg-[#0F3B3D]/35 font-semibold border-none">
-                                  {p.coverageTerm ? new Date(p.coverageTerm).toLocaleDateString() : `Year ${year}`}
+                                  {coverage.endsOn ?? "N/A"}
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-right">
@@ -588,6 +601,18 @@ export default function PropertiesPage() {
 
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
+                        <Label htmlFor="units" className="font-semibold">No. of Units</Label>
+                        <Input
+                          id="units"
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="e.g. 2"
+                          value={form.units}
+                          onChange={(e) => setForm((f) => ({ ...f, units: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
                         <Label htmlFor="coeDate" className="font-semibold">COE Date (Warranty Activation)</Label>
                         <div className="relative">
                           <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -600,16 +625,22 @@ export default function PropertiesPage() {
                           />
                         </div>
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label htmlFor="coverageTermYears" className="font-semibold">Coverage Term (Years)</Label>
                         <Input
                           id="coverageTermYears"
                           type="number"
-                          min="1"
-                          placeholder="e.g. 1"
-                          value={form.coverageTermYears}
-                          onChange={(e) => setForm((f) => ({ ...f, coverageTermYears: e.target.value }))}
+                          value={COVERAGE_TERM_YEARS}
+                          disabled
+                          readOnly
+                          className="bg-gray-100 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-slate-400"
                         />
+                        <p className="text-xs text-gray-400 dark:text-slate-500">
+                          Fixed at 1 year — coverage ends one year after the COE date.
+                        </p>
                       </div>
                     </div>
 

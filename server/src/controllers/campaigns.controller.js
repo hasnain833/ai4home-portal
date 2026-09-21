@@ -252,7 +252,7 @@ async function unsendableChannelWarnings(companyId, steps) {
   if (!types.has("EMAIL") && !types.has("SMS")) return [];
 
   const { getMessagingCapabilities } = await import("../lib/messaging-config.js");
-  const caps = await getMessagingCapabilities(companyId);
+  const caps = await getMessagingCapabilities();
 
   const warnings = [];
   if (types.has("SMS") && !caps.sms.configured) {

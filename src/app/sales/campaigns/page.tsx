@@ -45,6 +45,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { describeSmsCost } from "@/lib/sms-segments";
+import { useAuth } from "@/contexts/AuthContext";
 
 const DEFAULT_EMAIL_SUBJECT = "Checking in from {companyName}";
 const DEFAULT_EMAIL_BODY = `Hi {firstName},
@@ -82,6 +84,8 @@ const buildDefaultEmailStep = () => ({
 });
 
 export default function CampaignsPage() {
+  const { user } = useAuth();
+  const companyName = user?.companyName || null;
   const { emailConfigured, smsConfigured } = useMessagingCapabilities();
 
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -254,7 +258,7 @@ export default function CampaignsPage() {
         for (const w of saved.warnings || []) toast.warning(w, { duration: 8000 });
       } else {
         // Editing steps on a running campaign is refused when the new steps need
-        // a channel the workspace has not configured.
+        // a channel the platform cannot currently deliver on.
         const data = await res.json().catch(() => ({}));
         toast.error(data?.message || "Failed to save step.", { duration: 10000 });
       }
@@ -489,10 +493,10 @@ export default function CampaignsPage() {
               <span>
                 <strong>
                   {!emailConfigured && !smsConfigured
-                    ? "Email and SMS are not configured."
+                    ? "Email and SMS are temporarily unavailable."
                     : !smsConfigured
-                      ? "SMS is not configured."
-                      : "Email is not configured."}
+                      ? "SMS is temporarily unavailable."
+                      : "Email is temporarily unavailable."}
                 </strong>{" "}
                 Steps on that channel will not be delivered. Set it up in{" "}
                 <a href="/sales/settings" className="font-semibold underline underline-offset-2">
@@ -758,10 +762,10 @@ export default function CampaignsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="EMAIL" disabled={!emailConfigured}>
-                      {emailConfigured ? "Email" : "Email — not configured"}
+                      {emailConfigured ? "Email" : "Email — unavailable"}
                     </SelectItem>
                     <SelectItem value="SMS" disabled={!smsConfigured}>
-                      {smsConfigured ? "SMS" : "SMS — not configured"}
+                      {smsConfigured ? "SMS" : "SMS — unavailable"}
                     </SelectItem>
                     <SelectItem value="DELAY">Wait Condition</SelectItem>
                   </SelectContent>
@@ -820,6 +824,27 @@ export default function CampaignsPage() {
                       onChange={(e) => setNewStep({ ...newStep, body: e.target.value })}
                       placeholder={`Enter ${newStep.type} message content...`}
                     />
+                    {newStep.type === "SMS" && newStep.body.trim() && (() => {
+                      // The company-name prefix and opt-out line are appended
+                      // server-side, so the real segment cost is invisible here.
+                      const cost = describeSmsCost(newStep.body, companyName);
+                      return (
+                        <p
+                          className={`text-[11px] ${
+                            cost.segments > 1 ? "text-amber-600 font-medium" : "text-muted-foreground"
+                          }`}
+                        >
+                          {cost.characters} characters &rarr;{" "}
+                          <strong>
+                            {cost.segments} segment{cost.segments === 1 ? "" : "s"}
+                          </strong>
+                          {cost.segments > 1
+                            ? ` — billed as ${cost.segments} messages`
+                            : ` · ${cost.remaining} left before a second segment`}
+                          {cost.overhead > 0 && ` (${cost.overhead} chars added automatically)`}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </>
               )}

@@ -3,7 +3,7 @@ import prisma from "../../lib/prisma.js";
 import { MailService, mailShouldPark } from "../../services/mail-service.js";
 import { sendSms, smsSent, smsShouldPark } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
-import { getMessagingConfig } from "../../lib/messaging-config.js";
+import { getSenderIdentity } from "../../lib/messaging-config.js";
 import { buildPrismaWhereClause } from "../../controllers/segments.controller.js";
 import { htmlToText, looksLikeHtml } from "../../lib/sanitize-html.js";
 import { withActiveLeadFilter } from "../../lib/lead-audience.js";
@@ -127,7 +127,7 @@ export const sendAnnouncement = inngest.createFunction(
       }));
     });
 
-    const { smtpConfig, smsConfig } = await getMessagingConfig(announcement.companyId);
+    const { replyTo } = await getSenderIdentity(announcement.companyId);
     const tag = `ann_${announcementId}`;
 
     const totals = { sent: 0, failed: 0, skipped: 0 };
@@ -161,7 +161,9 @@ export const sendAnnouncement = inngest.createFunction(
                   subject,
                   html: finalHtml,
                   fromName: lead.companyName || undefined,
-                  smtpConfig,
+                  replyTo,
+                  companyId: announcement.companyId,
+                  source: "announcement",
                   headers: { "X-Mailin-Tag": tag },
                 });
                 if (result.success) {
@@ -198,7 +200,7 @@ export const sendAnnouncement = inngest.createFunction(
                 const base = looksLikeHtml(rendered) ? htmlToText(rendered) : rendered;
                 const withCta = announcement.ctaLink ? `${base} ${announcement.ctaLink}` : base;
                 const smsBody = ComplianceService.addSmsOptOutSuffix(withCta);
-                const smsResult = await sendSms({ to: lead.phone, body: smsBody, smsConfig, tag });
+                const smsResult = await sendSms({ to: lead.phone, body: smsBody, tag, companyId: announcement.companyId, source: "announcement" });
                 if (smsSent(smsResult)) {
                   sent += 1;
                 } else if (smsShouldPark(smsResult)) {

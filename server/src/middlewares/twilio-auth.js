@@ -1,6 +1,4 @@
 import crypto from "crypto";
-import prisma from "../lib/prisma.js";
-import { decryptSafe } from "../lib/crypto.js";
 
 function getRequestUrl(req) {
   if (process.env.NEXT_PUBLIC_URL) {
@@ -30,14 +28,7 @@ export async function verifyTwilioSignature(req, res, next) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    let authToken = process.env.TWILIO_AUTH_TOKEN;
-    const companyId = req.query.companyId || req.body?.companyId;
-    if (companyId) {
-      const integration = await prisma.integration.findFirst({
-        where: { companyId, platform: "TWILIO_SMS" },
-      });
-      if (integration?.secretKey) authToken = decryptSafe(integration.secretKey);
-    }
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
 
     if (!authToken) {
       console.warn("[Twilio Auth] No Auth Token available to validate signature.");

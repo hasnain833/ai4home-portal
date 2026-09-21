@@ -201,7 +201,8 @@ async function notifySuperAdminOfSubmission(company) {
       to: superAdminEmail,
       subject: `Onboarding documents submitted: ${company.name}`,
       html: Templates.getAdminVerificationDocEmail(company.name, adminUrl),
-      allowPlatformSender: true,
+      companyId: company.id,
+      source: "verification-submitted",
     });
   } catch (mailErr) {
     console.error("[Verification] Failed to notify super admin of submission:", mailErr);

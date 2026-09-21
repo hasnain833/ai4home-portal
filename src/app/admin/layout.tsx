@@ -26,6 +26,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   FlaskConical,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -44,6 +45,7 @@ const adminNavItems = [
     href: "/admin/sales-agent-appointments",
     icon: CalendarRange,
   },
+  { name: "Messaging", href: "/admin/messaging", icon: Send },
   { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical },
 ];
 

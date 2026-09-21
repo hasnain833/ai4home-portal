@@ -1,7 +1,7 @@
 import { toolCall } from "./llm.js";
 import prisma from "./prisma.js";
 import { queryDetailed as kbQueryDetailed } from "../services/warranty-vector.service.js";
-import { getCoverageStatus, describeCoverage, COVERAGE } from "./coverage.js";
+import { getCoverageStatus, COVERAGE } from "./coverage.js";
 import { classifyClaim } from "./warranty-classify.js";
 import { createWarrantyTicket, escalateWarrantyTicket, ticketUrlFor } from "./warranty-ticket.js";
 import {
@@ -550,13 +550,14 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       });
 
       if (properties.length === 1) {
-        const coverage = await adoptProperty(properties[0]);
+        await adoptProperty(properties[0]);
         issueState.justIdentified = true;
+        // The coverage end date is deliberately NOT volunteered here. It stays in
+        // the model's known-details context so it can answer if the homeowner
+        // asks, but confirming the property should not announce their expiry.
         replyText =
           input.message ||
-          [`Thanks — I've got your home at ${properties[0].address}.`, describeCoverage(coverage)]
-            .filter(Boolean)
-            .join(" ");
+          `Thanks — I've got your home at ${properties[0].address}.`;
         nextPhase = "DIAGNOSE";
       } else if (properties.length > 1) {
         issueState.propertyChoices = properties.map((p) => ({ id: p.id, address: p.address }));

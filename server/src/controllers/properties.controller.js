@@ -1,5 +1,22 @@
 import prisma from "../lib/prisma.js";
 
+const COVERAGE_YEARS = 1;
+
+function coverageTermFor(coeDate) {
+  if (!coeDate) return null;
+  const coe = new Date(coeDate);
+  if (Number.isNaN(coe.getTime())) return null;
+  const end = new Date(coe.getTime());
+  end.setFullYear(end.getFullYear() + COVERAGE_YEARS);
+  return end;
+}
+
+function parseUnits(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export const getProperties = async (req, res) => {
   try {
     const session = req.user;
@@ -43,7 +60,7 @@ export const createProperty = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { address, city, state, zipCode, coeDate, areaOfHome, homeownerId, coverageTerm } = req.body;
+    const { address, city, state, zipCode, coeDate, areaOfHome, units, homeownerId } = req.body;
 
     if (!address) {
       return res.status(400).json({ message: "Address is required" });
@@ -80,8 +97,9 @@ export const createProperty = async (req, res) => {
         state: state || null,
         zipCode: zipCode || null,
         areaOfHome: areaOfHome || null,
+        units: parseUnits(units),
         coeDate: coeDate ? new Date(coeDate) : null,
-        coverageTerm: coverageTerm ? new Date(coverageTerm) : null,
+        coverageTerm: coverageTermFor(coeDate),
         homeownerId: assignedHomeownerId,
         companyId,
       },
@@ -107,7 +125,7 @@ export const updateProperty = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    const { address, city, state, zipCode, coeDate, areaOfHome, homeownerId, coverageTerm } = req.body;
+    const { address, city, state, zipCode, coeDate, areaOfHome, units, homeownerId } = req.body;
 
     const property = await prisma.property.update({
       where: { id },
@@ -117,8 +135,9 @@ export const updateProperty = async (req, res) => {
         state: state || null,
         zipCode: zipCode || null,
         areaOfHome: areaOfHome || null,
+        units: parseUnits(units),
         coeDate: coeDate ? new Date(coeDate) : null,
-        coverageTerm: coverageTerm ? new Date(coverageTerm) : null,
+        coverageTerm: coverageTermFor(coeDate),
         ...(homeownerId && { homeownerId }),
       },
       include: {

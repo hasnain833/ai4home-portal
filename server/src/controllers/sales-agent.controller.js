@@ -24,8 +24,11 @@ export const bookAppointment = async (req, res) => {
     const customerSms = await sendSms({
       to: phone,
       body: `Hi ${name}, your appointment with AI4Homebuilders is confirmed for ${preferredTime}. We look forward to speaking with you!`,
-      smsConfig: "SYSTEM",
       tag: "sales-agent-booking",
+      // The platform's own booking flow — there is no tenant to attribute to,
+      // and the copy already names AI4Homebuilders.
+      source: "sales-agent-booking",
+      brand: false,
     });
     if (!smsSent(customerSms)) {
       console.error(
@@ -38,8 +41,8 @@ export const bookAppointment = async (req, res) => {
       await MailService.sendEmail({
         to: email,
         subject: "Appointment Confirmed - AI4Homebuilders",
-        allowPlatformSender: true,
-        html: `
+        source: "sales-agent-booking",
+          html: `
           <h3>Appointment Confirmed</h3>
           <p>Hi ${name},</p>
           <p>Your appointment with AI4Homebuilders has been successfully booked.</p>
@@ -60,7 +63,9 @@ export const bookAppointment = async (req, res) => {
       const adminSms = await sendSms({
         to: adminPhone,
         body: `New Appointment! Name: ${name}, Phone: ${phone}, Time: ${preferredTime}`,
-        smsConfig: "SYSTEM",
+        source: "sales-agent-booking",
+        // Internal alert to platform staff, so it carries no tenant branding.
+        brand: false,
       });
       if (!smsSent(adminSms)) {
         console.error(
@@ -76,6 +81,7 @@ export const bookAppointment = async (req, res) => {
         await MailService.sendEmail({
           to: adminEmail,
           subject: "New Sales Agent Appointment Booked",
+          source: "sales-agent-booking",
           html: `
             <h3>New Appointment</h3>
             <p>A new appointment has been booked via the Sales Agent.</p>
@@ -86,8 +92,7 @@ export const bookAppointment = async (req, res) => {
               <li><strong>Preferred Time:</strong> ${preferredTime}</li>
             </ul>
           `,
-          allowPlatformSender: true,
-        });
+            });
       } catch (adminEmailError) {
         console.error("[Sales Agent Booking] Failed to send Email to admin:", adminEmailError);
       }
@@ -179,7 +184,7 @@ export const sendAgentMessage = async (req, res) => {
       const to = normalizePhone(phone);
       // Every platform text carries the opt-out line, same as the agent's own.
       const body = ComplianceService.addSmsOptOutSuffix(text);
-      const result = await sendSms({ to, body, smsConfig: "SYSTEM", tag: "botpress-message" });
+      const result = await sendSms({ to, body, tag: "botpress-message", source: "sales-agent", brand: false });
       const delivered = smsSent(result);
       if (!delivered) {
         console.error(
@@ -204,7 +209,7 @@ export const sendAgentMessage = async (req, res) => {
         subject: (typeof subject === "string" && subject.trim()) || `A message from ${PLATFORM_SENDER_NAME}`,
         html: Templates.getBrandedAgentEmail(lines, PLATFORM_SENDER_NAME),
         fromName: PLATFORM_SENDER_NAME,
-        allowPlatformSender: true,
+        source: "sales-agent",
       });
       if (!result.success) {
         console.error(

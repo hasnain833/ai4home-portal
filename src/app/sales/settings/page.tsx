@@ -184,7 +184,7 @@ function SettingsPageContent() {
   const [teamMembers, setTeamMembers] = useState<{ id: string; name: string | null; email: string }[]>([]);
   const [voiceProfile, setVoiceProfile] = useState("professional");
   const [complianceOptInRequired, setComplianceOptInRequired] = useState(true);
-  const [smsQuietHoursEnabled, setSmsQuietHoursEnabled] = useState(true);
+  const [smsQuietHoursEnabled, setSmsQuietHoursEnabled] = useState(false);
   const [quietHoursStart, setQuietHoursStart] = useState(8);
   const [quietHoursEnd, setQuietHoursEnd] = useState(21);
   const [quietHoursTimezone, setQuietHoursTimezone] = useState("");

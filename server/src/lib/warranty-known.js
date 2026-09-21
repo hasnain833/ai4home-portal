@@ -1,4 +1,4 @@
-import { describeCoverage } from "./coverage.js";
+import { formatCoverageDate } from "./coverage.js";
 
 const ROOMS = [
   "kitchen",
@@ -126,17 +126,20 @@ const FIXTURE_ROOMS = {
   refrigerator: "kitchen",
 };
 
+// Stated as a bare fact on file, not as a sentence to the homeowner. The agent
+// must not volunteer the end date, so this deliberately avoids handing it a
+// ready-made line to recite.
 function coverageSummary(issueState) {
   const coverage = issueState?.coverage;
   if (!coverage || !coverage.status || coverage.status === "UNKNOWN")
     return null;
 
-  const described = describeCoverage({
-    status: coverage.status,
-    endDate: coverage.endDate ? new Date(coverage.endDate) : null,
-    daysRemaining: coverage.daysRemaining,
-  });
-  return described ? `${coverage.status} — ${described}` : coverage.status;
+  const when = formatCoverageDate(coverage.endDate);
+  if (!when) return coverage.status;
+
+  return coverage.status === "EXPIRED"
+    ? `${coverage.status} — ended ${when}`
+    : `${coverage.status} — runs through ${when}`;
 }
 
 export function describeKnown({
@@ -157,7 +160,10 @@ export function describeKnown({
     );
 
   const coverage = coverageSummary(issueState);
-  if (coverage) lines.push(`Warranty coverage: ${coverage}`);
+  if (coverage)
+    lines.push(
+      `Warranty coverage on file: ${coverage}. Do NOT volunteer this — state it only if the homeowner asks about their coverage or when it ends.`,
+    );
 
   if (issueState.issueSummary)
     lines.push(`Issue reported: ${issueState.issueSummary}`);

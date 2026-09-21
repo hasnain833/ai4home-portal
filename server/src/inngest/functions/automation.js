@@ -3,7 +3,7 @@ import prisma from "../../lib/prisma.js";
 import { MailService, MAIL_OUTCOME } from "../../services/mail-service.js";
 import { MessagingService } from "../../services/messaging-service.js";
 import { SMS_OUTCOME, smsSent } from "../../services/sms.service.js";
-import { getMessagingConfig, missingChannelsForSteps } from "../../lib/messaging-config.js";
+import { getSenderIdentity, missingChannelsForSteps } from "../../lib/messaging-config.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
 import { Templates } from "../../services/templates.js";
@@ -73,7 +73,7 @@ export async function executeAction(action, lead, ctx = {}) {
   const budget = ctx.sendBudget;
   // One credential read per run instead of one per action: this used to hit the
   // database and decrypt on every single action for every single lead.
-  const loadMessaging = ctx.loadMessaging || (() => getMessagingConfig(lead.companyId));
+  const loadMessaging = ctx.loadMessaging || (() => getSenderIdentity(lead.companyId));
 
   switch (type) {
     case "PAUSE_CAMPAIGNS": {
@@ -151,7 +151,7 @@ export async function executeAction(action, lead, ctx = {}) {
         : null;
       const to = owner?.email || lead.company?.email;
       if (!to) return { type, skipped: "no owner/company email" };
-      const { smtpConfig } = await loadMessaging();
+      const { replyTo } = await loadMessaging();
       const notifyResult = await MailService.sendEmail({
         to,
         subject: `[Automation] Follow up: ${lead.firstName} ${lead.lastName}`,
@@ -161,7 +161,9 @@ export async function executeAction(action, lead, ctx = {}) {
           escapeHtml(params.message || "Please review this lead in the Sales workspace."),
           lead.company?.name
         ),
-        smtpConfig,
+        replyTo,
+        companyId: lead.companyId,
+        source: "automation",
       });
       if (notifyResult.outcome === MAIL_OUTCOME.NOT_CONFIGURED) {
         return { type, skipped: "email not configured" };
@@ -179,8 +181,8 @@ export async function executeAction(action, lead, ctx = {}) {
       if (budget && budget.remaining <= 0) return { type, skipped: "daily cap reached" };
       const subject = mergeFields(params.subject || "A quick note", lead, false);
       const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">${mergeFields(params.body || "", lead, true)}</div>`;
-      const { smtpConfig } = await loadMessaging();
-      const r = await MessagingService.sendEmail({ companyId: lead.companyId, to: lead.email, subject, html, smtpConfig });
+      const { replyTo } = await loadMessaging();
+      const r = await MessagingService.sendEmail({ companyId: lead.companyId, to: lead.email, subject, html, replyTo, source: "automation" });
       if (r?.blocked) return { type, skipped: r.reason || "send blocked" };
       if (r?.outcome === MAIL_OUTCOME.NOT_CONFIGURED) return { type, skipped: "email not configured" };
       if (!r?.success) return { type, failed: true, to: lead.email, error: r?.error || "Unknown error" };
@@ -194,9 +196,7 @@ export async function executeAction(action, lead, ctx = {}) {
       if (budget && budget.remaining <= 0) return { type, skipped: "daily cap reached" };
       const body = mergeFields(params.body || "", lead, false);
       if (!body.trim()) return { type, skipped: "empty body" };
-      const { smsConfig } = await loadMessaging();
-      if (!smsConfig) return { type, skipped: "sms not configured" };
-      const r = await MessagingService.sendSms({ companyId: lead.companyId, to: lead.phone, body, smsConfig });
+      const r = await MessagingService.sendSms({ companyId: lead.companyId, to: lead.phone, body, source: "automation" });
       if (r?.blocked) return { type, skipped: r.reason || "send blocked" };
       if (r?.outcome === SMS_OUTCOME.NOT_CONFIGURED) return { type, skipped: "sms not configured" };
       if (!smsSent(r)) return { type, failed: true, to: lead.phone, error: r?.error || "Unknown error" };
@@ -269,7 +269,7 @@ export async function evaluateRulesForTrigger({ companyId, leadId, triggerEvent 
   const sendBudget = { remaining: Math.max(0, cap - countSentActions(todaysRuns)) };
   // Lazily loaded once, then shared by every action this trigger runs.
   let messagingPromise = null;
-  const loadMessaging = () => (messagingPromise ||= getMessagingConfig(companyId));
+  const loadMessaging = () => (messagingPromise ||= getSenderIdentity(companyId));
 
   let executed = 0;
   for (const rule of rules) {

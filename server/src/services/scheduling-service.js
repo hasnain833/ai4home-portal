@@ -6,7 +6,7 @@ import { MailService } from "./mail-service.js";
 import { sendSms, smsSent } from "./sms.service.js";
 import { ComplianceService } from "./compliance-service.js";
 import { Templates, SmsTemplates } from "./templates.js";
-import { getMessagingConfig } from "../lib/messaging-config.js";
+import { getSenderIdentity } from "../lib/messaging-config.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "./salesforce-writeback.js";
 import { appointmentTokenData } from "../lib/public-tokens.js";
@@ -189,7 +189,7 @@ async function sendConfirmations(lead, appointment, tz) {
   const meet = appointment.meetingLink;
   const portal = process.env.NEXT_PUBLIC_URL || "";
   const rescheduleUrl = `${portal}/book/manage/${appointment.rescheduleToken}`;
-  const { smtpConfig, smsConfig } = await getMessagingConfig(lead.companyId);
+  const { replyTo } = await getSenderIdentity(lead.companyId);
 
   if (lead.email) {
     const html = Templates.getAppointmentConfirmationEmail(
@@ -203,7 +203,9 @@ async function sendConfirmations(lead, appointment, tz) {
       subject: `Confirmed: ${appointment.title} — ${when}`,
       html,
       fromName: lead.company?.name || undefined,
-      smtpConfig,
+      replyTo,
+      companyId: lead.companyId,
+      source: "scheduling",
     });
   }
 
@@ -211,7 +213,7 @@ async function sendConfirmations(lead, appointment, tz) {
     const body = ComplianceService.addSmsOptOutSuffix(
       `Your ${appointment.title} is confirmed for ${when}.${meet ? ` Join: ${meet}` : ""} Manage: ${rescheduleUrl}`
     );
-    const result = await sendSms({ to: lead.phone, body, smsConfig });
+    const result = await sendSms({ to: lead.phone, body, companyId: lead.companyId, source: "scheduling" });
     if (!smsSent(result)) {
       console.warn(
         `[Scheduling] Confirmation SMS to ${lead.phone} not delivered (${result.outcome}): ${result.error}`,
@@ -274,7 +276,7 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
   await prisma.salesAppointment.delete({ where: { id: appt.id } });
 
   try {
-    const { smtpConfig, smsConfig } = await getMessagingConfig(appt.lead.companyId);
+    const { replyTo } = await getSenderIdentity(appt.lead.companyId);
     const when = formatSlotLabel(appt.time, tz);
     if (appt.lead.email) {
       await MailService.sendEmail({
@@ -287,14 +289,17 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
           null
         ),
         fromName: appt.lead.company?.name || undefined,
-        smtpConfig,
+        replyTo,
+        companyId: appt.lead.companyId,
+        source: "scheduling",
       });
     }
     if (appt.lead.phone) {
       const result = await sendSms({
         to: appt.lead.phone,
         body: `Your ${appt.title} for ${when} has been cancelled. Reply to rebook.`,
-        smsConfig,
+        companyId: appt.lead.companyId,
+        source: "scheduling",
       });
       if (!smsSent(result)) {
         console.warn(

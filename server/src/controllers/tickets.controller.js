@@ -1,7 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { calculateWarrantyYear } from "../lib/utils.js";
 import { MessagingService } from "../services/messaging-service.js";
-import { getMessagingConfig } from "../lib/messaging-config.js";
 import { MAIL_OUTCOME } from "../services/mail-service.js";
 import { syncTicketToERP } from "../services/erp-service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
@@ -68,8 +67,23 @@ export const createTicket = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { issueType, ticketType, propertyId, priority, isEmergency } = req.body;
+    const {
+      issueType,
+      ticketType,
+      description,
+      propertyId,
+      priority,
+      isEmergency,
+      notifyHomeowner = true,
+    } = req.body;
     let { homeownerId } = req.body;
+
+    if (!String(issueType || "").trim()) {
+      return res.status(400).json({ message: "issueType is required" });
+    }
+    if (!propertyId) {
+      return res.status(400).json({ message: "propertyId is required" });
+    }
 
     // Enforce homeownerId for homeowners
     if (session.role === "HOMEOWNER") {
@@ -100,6 +114,7 @@ export const createTicket = async (req, res) => {
         // id omitted — Supabase/Prisma auto-assigns a cuid
         issueType,
         ticketType,
+        description: String(description || "").trim().slice(0, 5000) || null,
         propertyId,
         homeownerId,
         companyId: property.homeowner?.companyId ?? null,
@@ -109,27 +124,24 @@ export const createTicket = async (req, res) => {
         }),
         isEmergency: !!isEmergency,
         warrantyYear,
-        // Emergencies no longer get their own status — they are carried by
-        // isEmergency + URGENT priority, and still start life OPEN.
         status: "OPEN",
       },
     });
 
-    // SRS §4.2.7: write claim data to the connected ERP on creation/escalation.
-    // Non-blocking — an ERP outage must not fail ticket creation.
     try {
       await syncTicketToERP(ticket.id, { reason: isEmergency ? "escalation" : "creation" });
     } catch (erpError) {
       console.error(`[Ticket API] ERP sync on creation failed for #${ticket.id}:`, erpError.message);
     }
 
-    // Notify the homeowner and every company admin. The in-portal notification
-    // always lands; email only goes out if this workspace has SMTP credentials.
-    const notifyResult = await notifyTicketCreated(ticket.id);
+    const notifyResult = await notifyTicketCreated(ticket.id, {
+      sendEmail: notifyHomeowner !== false,
+    });
+    
     const notice =
       notifyResult.emailConfigured === false
-        ? "Ticket created and visible in the portal, but no email was sent: email is not " +
-          "configured for this workspace. Add your SMTP credentials in Settings > Email, SMS & News."
+        ? "Ticket created and visible in the portal, but no email was sent: email delivery " +
+          "is temporarily unavailable. Please contact support if this continues."
         : null;
 
     return res.json(notice ? { ...ticket, notice } : ticket);
@@ -228,8 +240,6 @@ export const updateTicket = async (req, res) => {
     const updatedData = {};
     if (status) {
       updatedData.status = status;
-      // Reminders measure how long a ticket has sat OPEN, so any status change
-      // restarts the clock — including a re-open.
       updatedData.reminderCount = 0;
       updatedData.lastReminderAt = null;
     }
@@ -270,7 +280,6 @@ export const updateTicket = async (req, res) => {
       if (oldTicket.homeowner?.email) {
         try {
           // Extract SMTP config if available
-          const { smtpConfig } = await getMessagingConfig(oldTicket.homeowner.companyId);
           const mailResult = await MessagingService.sendTicketStatusUpdate({
             companyId: oldTicket.homeowner.companyId,
             to: oldTicket.homeowner.email,
@@ -278,7 +287,6 @@ export const updateTicket = async (req, res) => {
             ticketId: ticket.id,
             status,
             company: oldTicket.homeowner.company,
-            smtpConfig,
           });
 
           if (mailResult.blocked) {
@@ -288,8 +296,8 @@ export const updateTicket = async (req, res) => {
             // not go out. Surfaced on the response so staff know to follow up
             // rather than assuming the homeowner was told.
             notice =
-              "Ticket updated, but the homeowner was not emailed: email is not configured for this workspace. " +
-              "Add your SMTP credentials in Settings > Email, SMS & News.";
+              "Ticket updated, but the homeowner was not emailed: email delivery is " +
+              "temporarily unavailable. Please contact support if this continues.";
             console.warn(`[Ticket API] Status email not sent to ${oldTicket.homeowner.email} — email not configured.`);
           } else if (!mailResult.success) {
             console.error("[Ticket API] Mail failed to send but ticket updated:", mailResult.error);

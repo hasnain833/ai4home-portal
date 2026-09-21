@@ -92,8 +92,8 @@ export async function replayDeadLetter(companyId, id) {
   }
 
   const { MessagingService } = await import("../services/messaging-service.js");
-  const { getMessagingConfig } = await import("./messaging-config.js");
-  const { smtpConfig, smsConfig } = await getMessagingConfig(companyId);
+  const { getSenderIdentity } = await import("./messaging-config.js");
+  const { replyTo } = await getSenderIdentity(companyId);
 
   const payload = row.payload || {};
   let result;
@@ -104,7 +104,8 @@ export async function replayDeadLetter(companyId, id) {
         companyId,
         to: payload.to,
         body: payload.body,
-        smsConfig,
+        companyId,
+        source: "dead-letter-replay",
         addOptOut: false,
       });
       if (result?.blocked) {
@@ -127,7 +128,9 @@ export async function replayDeadLetter(companyId, id) {
         subject: payload.subject,
         html: payload.html,
         fromName: payload.fromName || undefined,
-        smtpConfig,
+        replyTo,
+        companyId,
+        source: "dead-letter-replay",
       });
       if (result?.blocked) {
         return { success: false, reason: result.reason || "Blocked by compliance" };

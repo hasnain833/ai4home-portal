@@ -201,7 +201,7 @@ export function NotificationBell({
                   // the notification and the email went out together.
                   <p className="flex items-center gap-1 pl-4 text-[11px] text-amber-600">
                     <MailWarning className="h-3 w-3 shrink-0" />
-                    No email sent — email is not configured for this workspace.
+                    No email sent — email delivery is temporarily unavailable.
                   </p>
                 )}
               </button>

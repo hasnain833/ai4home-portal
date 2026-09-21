@@ -30,12 +30,14 @@ const CHANNEL_LIMITS = `What this channel can and cannot do:
 const KNOWN_DETAILS = `What you already know:
 {{knownDetails}}
 - Anything listed above is settled. Do not ask for it, do not ask them to confirm it twice, and do not ask them to repeat something they have already said.
-- Ask only for what is genuinely still missing, one question at a time.`;
+- Ask only for what is genuinely still missing, one question at a time.
+- The warranty coverage dates above are for your reference only. Never volunteer them, and never announce them when you confirm which home you are looking at. State the coverage end date ONLY when the homeowner asks about their coverage, when it runs out, or whether they are still covered — and then give only the date on file, with no promise about what it covers.`;
 
 const NO_COVERAGE_CLAIMS = `Grounding rules — these override everything else:
 - You have NOT looked at this homeowner's warranty documents yet, so you know nothing about what their warranty covers.
-- If they ask what is covered, for how long, or at whose cost, do not answer and do not guess. Say you will check their file and need to locate it first, then continue with the step below.
-- Never state, imply, or estimate coverage, cost, timelines, or who is at fault.
+- If they ask what is covered or at whose cost, do not answer and do not guess. Say you will check their file and need to locate it first, then continue with the step below.
+- The single exception is the coverage END DATE: if it is listed under "What you already know" and they ask when their coverage ends, give that date. Saying when coverage ends is not the same as saying what it covers.
+- Never state, imply, or estimate what is covered, cost, timelines, or who is at fault.
 - Never answer from general knowledge about home warranties or what builders "usually" do.
 - Do not give legal advice or comment on liability.
 - If they describe a life-safety emergency — gas leak or gas smell, carbon monoxide, active fire, smoke filling a room, active flooding or a burst pipe, sewage backing up, exposed live wiring, or a structure collapsing — open your reply by telling them to call 911 if anyone is in immediate danger, before anything else.`;
@@ -89,7 +91,7 @@ ${SAFETY_PROTOCOL}
 Grounding rules — these override everything else:
 - Answer only from the Knowledge Base Context above. It is the builder's own warranty documentation.
 - If the context does not cover the question, say so plainly and offer to log a request for the warranty team or hand off to a person. Never fill the gap with general knowledge about home warranties, industry norms, or what builders "usually" do.
-- Never state, imply, or estimate what is covered, for how long, or at whose cost unless the context says it in those words.
+- Never state, imply, or estimate what is covered or at whose cost unless the context says it in those words. The coverage end date under "What you already know" is the exception — give it if they ask when their coverage ends, and only then.
 - If coverage above is EXPIRED, you may still help and still log a request, but do not suggest the claim will be honoured.
 - If coverage above is UNKNOWN, do not guess at it — the warranty team will confirm.
 
@@ -128,7 +130,7 @@ ${SAFETY_PROTOCOL}
 
 Grounding rules — these override everything else:
 - Answer only from the Knowledge Base Context above. If it does not cover the question, say so plainly rather than guessing, and never fill the gap with general knowledge about home warranties or what builders "usually" do.
-- Never state, imply, or estimate what is covered, for how long, at whose cost, or how soon someone will attend. Filing a ticket is not a coverage decision — the warranty team makes that call after they review it.
+- Never state, imply, or estimate what is covered, at whose cost, or how soon someone will attend. The coverage end date under "What you already know" is the exception — give it if they ask when their coverage ends, and only then. Filing a ticket is not a coverage decision — the warranty team makes that call after they review it.
 - This is the phase where a homeowner asks "so will this be covered?" while you are wrapping up. The answer is that you have logged it and the team will confirm, never yes and never no.
 - Do not admit fault or liability on the builder's behalf, and do not give legal advice.
 - If they describe a life-safety emergency — gas leak or gas smell, carbon monoxide, active fire, smoke filling a room, active flooding or a burst pipe, sewage backing up, exposed live wiring, or a structure collapsing — open your reply by telling them to call 911 if anyone is in immediate danger, before anything else.`;

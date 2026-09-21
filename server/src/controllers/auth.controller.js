@@ -254,6 +254,8 @@ export const requestEmailChange = async (req, res) => {
     const verify = await MailService.sendEmail({
       to: newEmail,
       subject: "Confirm your new sign-in email",
+      companyId: user.companyId,
+      source: "email-change",
       html: Templates.getEmailChangeVerifyEmail(
         user.name,
         currentEmail,
@@ -261,7 +263,6 @@ export const requestEmailChange = async (req, res) => {
         confirmUrl,
         EMAIL_CHANGE_TTL_HOURS,
       ),
-      allowPlatformSender: true,
     });
 
     if (!verify?.success) {
@@ -288,7 +289,8 @@ export const requestEmailChange = async (req, res) => {
           newEmail,
           EMAIL_CHANGE_TTL_HOURS,
         ),
-        allowPlatformSender: true,
+        companyId: user.companyId,
+        source: "email-change-notice",
       });
     } catch (noticeError) {
       console.error("[Auth] Email-change notice to the old address failed:", noticeError.message);
@@ -569,7 +571,8 @@ export const signup = async (req, res) => {
       to: companyEmail,
       subject: "Verify Your Account",
       html: Templates.getSignupVerificationEmail(companyName, actionLink),
-      allowPlatformSender: true,
+      companyId: newCompany.id,
+      source: "signup-verification",
     });
 
     if (!verificationMail.success) {
@@ -604,7 +607,8 @@ export const signup = async (req, res) => {
           to: adminNotifyEmail,
           subject: `New tenant registration: ${companyName}`,
           html: Templates.getAdminNewTenantEmail(companyName, companyEmail, companyPhone, adminUrl),
-          allowPlatformSender: true,
+          companyId: newCompany.id,
+          source: "new-tenant-alert",
         });
       } else {
         console.warn(
@@ -617,7 +621,10 @@ export const signup = async (req, res) => {
           to: adminNotifyPhone,
           tag: "tenant-registration",
           body: SmsTemplates.getAdminNewTenantSms(companyName, companyEmail, companyPhone),
-          smsConfig: "SYSTEM",
+          companyId: newCompany.id,
+          source: "new-tenant-alert",
+          // Addressed to platform staff, not the tenant, so it is not branded.
+          brand: false,
         });
         if (!smsSent(adminSms)) {
           console.warn(

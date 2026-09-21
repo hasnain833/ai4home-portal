@@ -67,7 +67,7 @@ async function missingChannelsForRule(companyId, rule) {
   const needsSms = types.has("SEND_SMS");
   if (!needsEmail && !needsSms) return [];
 
-  const caps = await getMessagingCapabilities(companyId);
+  const caps = await getMessagingCapabilities();
   const missing = [];
   if (needsEmail && !caps.email.configured) missing.push("Email");
   if (needsSms && !caps.sms.configured) missing.push("SMS");

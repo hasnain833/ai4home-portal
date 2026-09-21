@@ -20,6 +20,9 @@ import {
   getSupportLeads,
   getSupportAccessLog,
   getSecurityPosture,
+  getMessagingSpend,
+  setSmsProvider,
+  setMessagingPricing,
 } from "../admin/platform.controller.js";
 import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
 import {
@@ -54,6 +57,10 @@ import multer from "multer";
 import { handleUploadErrors } from "../middlewares/upload.js";
 
 const router = express.Router();
+
+router.get("/messaging/spend", requireAuth, getMessagingSpend);
+router.patch("/messaging/sms-provider", requireAuth, setSmsProvider);
+router.patch("/messaging/pricing", requireAuth, setMessagingPricing);
 
 router.get("/companies", requireAuth, getCompanies);
 router.get("/users", requireAuth, getUsers);

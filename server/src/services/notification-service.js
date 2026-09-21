@@ -1,13 +1,12 @@
 import prisma from "../lib/prisma.js";
 import { MessagingService } from "./messaging-service.js";
-import { getMessagingConfig } from "../lib/messaging-config.js";
 import { Templates } from "./templates.js";
+import { MailService } from "./mail-service.js";
 
 
 const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
 
-export const emailIsConfigured = (smtpConfig) =>
-  !!(smtpConfig?.host && smtpConfig?.user && smtpConfig?.pass);
+const emailIsConfigured = () => MailService.hasPlatformSender();
 
 export async function companyAdmins(companyId) {
   if (!companyId) return [];
@@ -23,7 +22,7 @@ export async function writeNotifications(rows) {
   return rows;
 }
 
-export async function notifyTicketCreated(ticketId) {
+export async function notifyTicketCreated(ticketId, { sendEmail = true } = {}) {
   try {
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
@@ -43,8 +42,9 @@ export async function notifyTicketCreated(ticketId) {
 
     const admins = await companyAdmins(companyId);
 
-    const { smtpConfig } = await getMessagingConfig(companyId);
-    const emailReady = emailIsConfigured(smtpConfig);
+    const emailConfigured = emailIsConfigured();
+    const emailReady = sendEmail && emailConfigured;
+    const emailFallback = sendEmail && !emailConfigured;
 
     if (companyId && admins.length) {
       await writeNotifications(
@@ -58,12 +58,24 @@ export async function notifyTicketCreated(ticketId) {
           body: `${homeownerName} reported "${ticket.issueType}"${address ? ` at ${address}` : ""}.`,
           link,
           ticketId: ticket.id,
-          emailFallback: !emailReady,
+          emailFallback,
         })),
       );
     }
 
-    // Channel 2 — email, only if this workspace has SMTP credentials saved.
+    if (!sendEmail) {
+      console.info(
+        `[Ticket Notify] #${ticket.id}: in-portal only — email suppressed by the creator.`,
+      );
+      return {
+        ok: true,
+        notified: admins.length,
+        emailed: 0,
+        emailConfigured: null,
+        emailSkipped: true,
+      };
+    }
+
     if (!emailReady) {
       console.warn(
         `[Ticket Notify] #${ticket.id}: in-portal only — workspace has no email credentials configured.`,
@@ -77,6 +89,7 @@ export async function notifyTicketCreated(ticketId) {
       const result = await MessagingService.sendEmail({
         companyId,
         to: ticket.homeowner.email,
+        source: "ticket-created-homeowner",
         subject: `We have received your warranty request — ticket #${ticket.id}`,
         html: Templates.getTicketCreatedHomeownerEmail(
           homeownerName,
@@ -87,7 +100,6 @@ export async function notifyTicketCreated(ticketId) {
         ),
         fromName: companyName,
         fromEmail: company?.email || undefined,
-        smtpConfig,
       });
       if (result.success) emailed++;
       else
@@ -101,6 +113,7 @@ export async function notifyTicketCreated(ticketId) {
       const result = await MessagingService.sendEmail({
         companyId,
         to: admin.email,
+        source: "ticket-created-admin",
         subject: ticket.isEmergency
           ? `Emergency warranty ticket #${ticket.id} — ${ticket.issueType}`
           : `New warranty ticket #${ticket.id} — ${ticket.issueType}`,
@@ -116,7 +129,6 @@ export async function notifyTicketCreated(ticketId) {
         ),
         fromName: companyName,
         fromEmail: company?.email || undefined,
-        smtpConfig,
       });
       if (result.success) emailed++;
       else
@@ -141,8 +153,7 @@ export async function notifyTicketReminder(ticket, ageLabel) {
     const admins = await companyAdmins(companyId);
     if (!admins.length) return { ok: true, notified: 0, emailed: 0 };
 
-    const { smtpConfig } = await getMessagingConfig(companyId);
-    const emailReady = emailIsConfigured(smtpConfig);
+    const emailReady = emailIsConfigured();
 
     await writeNotifications(
       admins.map((a) => ({
@@ -168,6 +179,7 @@ export async function notifyTicketReminder(ticket, ageLabel) {
       const result = await MessagingService.sendEmail({
         companyId,
         to: admin.email,
+        source: "ticket-reminder",
         subject: `Reminder: ticket #${ticket.id} has been open for ${ageLabel}`,
         html: Templates.getTicketReminderEmail(
           ticket.id,
@@ -181,7 +193,6 @@ export async function notifyTicketReminder(ticket, ageLabel) {
         ),
         fromName: companyName,
         fromEmail: company?.email || undefined,
-        smtpConfig,
       });
       if (result.success) emailed++;
       else

@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { Templates } from "./templates.js";
+import { recordUsage } from "../lib/usage.js";
 
 export const MAIL_OUTCOME = {
   SENT: "sent",
@@ -44,49 +45,11 @@ export class MailService {
     return !!(this.SMTP_USER && this.SMTP_PASS);
   }
 
-  static transporters = new Map();
-
-
-  static getOrCreateTransporter(smtpConfig) {
-    if (!smtpConfig) {
-      throw new Error(
-        "getOrCreateTransporter called without an SMTP config — tenant mail must not fall back to the platform sender.",
-      );
-    }
-
-    const cacheKey = `${smtpConfig.host}:${smtpConfig.port}:${smtpConfig.user}`;
-    if (!this.transporters.has(cacheKey)) {
-      const newTransporter = nodemailer.createTransport({
-        host: smtpConfig.host,
-        port: smtpConfig.port,
-        secure: smtpConfig.port === 465,
-        auth: {
-          user: smtpConfig.user,
-          pass: smtpConfig.pass,
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000,
-        logger: false,
-        debug: false,
-      });
-      this.transporters.set(cacheKey, newTransporter);
-    }
-    return this.transporters.get(cacheKey);
-  }
-
-
-  static async sendEmail({ to, subject, html, fromName, fromEmail, smtpConfig, headers, allowPlatformSender = false }) {
-    if (!smtpConfig && !allowPlatformSender) {
-      console.warn(`[Mail Service] ⏭️ No SMTP config for this workspace — nothing sent to ${to}.`);
-      return {
-        success: false,
-        outcome: MAIL_OUTCOME.NOT_CONFIGURED,
-        error: "Email is not configured for this workspace.",
-      };
-    }
-
-    if (!smtpConfig && !this.hasPlatformSender()) {
+  // Every send goes out over the platform account. The tenant supplies only a
+  // display identity: their name on the From line and their address as Reply-To,
+  // so the mail stays aligned with the platform's SPF/DKIM records.
+  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null }) {
+    if (!this.hasPlatformSender()) {
       console.warn(`[Mail Service] ⏭️ Platform SMTP credentials are not set — nothing sent to ${to}.`);
       return {
         success: false,
@@ -95,19 +58,37 @@ export class MailService {
       };
     }
 
-    const senderName = smtpConfig?.senderName || fromName || this.SENDER_NAME;
-    const senderEmail = smtpConfig?.senderEmail || fromEmail || this.SENDER_EMAIL;
-    const fromString = `"${senderName}" <${senderEmail}>`;
+    const senderName = fromName || this.SENDER_NAME;
+    const fromString = `"${senderName}" <${this.SENDER_EMAIL}>`;
 
-    const activeTransporter = smtpConfig
-      ? this.getOrCreateTransporter(smtpConfig)
-      : this.getPlatformTransporter();
-    const host = smtpConfig?.host || this.SMTP_HOST;
-    const port = smtpConfig?.port || this.SMTP_PORT;
+    // Where a reply lands. With an inbound domain configured, it comes back to
+    // us at reply+<companyId>@domain so the sales agent sees it and the tenant
+    // is identified exactly. Without one, replies go straight to the tenant's
+    // own address and the agent never sees them.
+    // fromEmail is the tenant's own address; it cannot be the envelope sender
+    // without breaking domain alignment, so it is only ever a reply target.
+    const inboundDomain = String(process.env.INBOUND_EMAIL_DOMAIN || "").trim();
+    const replyToAddress =
+      replyTo ||
+      (inboundDomain && companyId ? `reply+${companyId}@${inboundDomain}` : null) ||
+      fromEmail ||
+      null;
+
+    const meter = (outcome) =>
+      recordUsage({
+        companyId,
+        channel: "EMAIL",
+        provider: "SMTP",
+        units: 1,
+        outcome,
+        source,
+        recipient: String(to || "").trim().toLowerCase(),
+      });
 
     try {
-      const info = await activeTransporter.sendMail({
+      const info = await this.getPlatformTransporter().sendMail({
         from: fromString,
+        ...(replyToAddress ? { replyTo: replyToAddress } : {}),
         to,
         subject,
         html,
@@ -116,6 +97,7 @@ export class MailService {
 
       if (Array.isArray(info.rejected) && info.rejected.length > 0) {
         console.error(`[Mail Service] ❌ SMTP rejected recipient(s) for ${to}`);
+        await meter("failed");
         return {
           success: false,
           outcome: MAIL_OUTCOME.FAILED,
@@ -127,6 +109,7 @@ export class MailService {
         };
       }
       console.log(`[Mail Service] ✅ Email sent successfully to ${to}`);
+      await meter("sent");
       return {
         success: true,
         outcome: MAIL_OUTCOME.SENT,
@@ -137,11 +120,12 @@ export class MailService {
       };
     } catch (error) {
       console.error(`[Mail Service] ❌ Failed to send email to ${to}`);
+      await meter("failed");
       return { success: false, outcome: MAIL_OUTCOME.FAILED, error: error?.message || "Internal error" };
     }
   }
 
-  static async sendTicketStatusUpdate(to, homeownerName, ticketId, status, company = null, smtpConfig = null, allowPlatformSender = false) {
+  static async sendTicketStatusUpdate(to, homeownerName, ticketId, status, company = null, companyId = null) {
     const statusLabel = status.replace("_", " ").toLowerCase();
     const subject = `Ticket Update: ${ticketId} is now ${statusLabel}`;
 
@@ -157,7 +141,15 @@ export class MailService {
       companyName
     );
 
-    return this.sendEmail({ to, subject, html, fromName: companyName, fromEmail: companyEmail, smtpConfig, allowPlatformSender });
+    return this.sendEmail({
+      to,
+      subject,
+      html,
+      fromName: companyName,
+      fromEmail: companyEmail,
+      companyId: companyId || company?.id || null,
+      source: "ticket-status",
+    });
   }
 
 

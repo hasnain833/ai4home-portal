@@ -147,7 +147,7 @@ export function NotificationBanner({ className = "" }: { className?: string }) {
                 {n.emailFallback && (
                   <span className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-600">
                     <MailWarning className="h-3 w-3 shrink-0" />
-                    No email sent — email is not configured for this workspace.
+                    No email sent — email delivery is temporarily unavailable.
                   </span>
                 )}
               </button>

@@ -41,6 +41,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import RichTextEditor from "@/components/sales/RichTextEditor";
+import { describeSmsCost } from "@/lib/sms-segments";
+import { useAuth } from "@/contexts/AuthContext";
 
 type Announcement = {
   id: string;
@@ -85,6 +87,8 @@ const statusStyles: Record<string, string> = {
 };
 
 export default function AnnouncementsPage() {
+  const { user } = useAuth();
+  const companyName = user?.companyName || null;
   const { emailConfigured, smsConfigured } = useMessagingCapabilities();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   // Segments come straight from the shared query cache — see below.
@@ -391,10 +395,10 @@ export default function AnnouncementsPage() {
               <span>
                 <strong>
                   {!emailConfigured && !smsConfigured
-                    ? "Email and SMS are not configured."
+                    ? "Email and SMS are temporarily unavailable."
                     : !smsConfigured
-                      ? "SMS is not configured."
-                      : "Email is not configured."}
+                      ? "SMS is temporarily unavailable."
+                      : "Email is temporarily unavailable."}
                 </strong>{" "}
                 Broadcasts on that channel cannot be sent. Set it up in{" "}
                 <a href="/sales/settings" className="font-semibold underline underline-offset-2">
@@ -552,10 +556,10 @@ export default function AnnouncementsPage() {
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="EMAIL" disabled={!emailConfigured}>
-                            {emailConfigured ? "Email only" : "Email only — not configured"}
+                            {emailConfigured ? "Email only" : "Email only — unavailable"}
                           </SelectItem>
                           <SelectItem value="SMS" disabled={!smsConfigured}>
-                            {smsConfigured ? "SMS only" : "SMS only — not configured"}
+                            {smsConfigured ? "SMS only" : "SMS only — unavailable"}
                           </SelectItem>
                           <SelectItem value="BOTH" disabled={!emailConfigured || !smsConfigured}>
                             {emailConfigured && smsConfigured
@@ -604,6 +608,34 @@ export default function AnnouncementsPage() {
                     <p className="text-[10px] text-muted-foreground">
                       Formatting is used for email. SMS recipients receive a plain-text version automatically.
                     </p>
+                    {(form.channel === "SMS" || form.channel === "BOTH") && (() => {
+                      // Carriers bill per segment, and the company-name prefix
+                      // and opt-out suffix are both added after this editor —
+                      // so the true cost is invisible here without this.
+                      const plain = form.body
+                        .replace(/<[^>]*>/g, "")
+                        .replace(/&nbsp;/gi, " ")
+                        .trim();
+                      if (!plain) return null;
+                      const cost = describeSmsCost(plain, companyName);
+                      return (
+                        <p
+                          className={`text-[11px] ${
+                            cost.segments > 1 ? "text-amber-600 font-medium" : "text-muted-foreground"
+                          }`}
+                        >
+                          SMS: {cost.characters} characters &rarr;{" "}
+                          <strong>
+                            {cost.segments} segment{cost.segments === 1 ? "" : "s"}
+                          </strong>
+                          {cost.segments > 1 && " — this costs " + cost.segments + "x a single message"}
+                          {cost.segments === 1 && ` · ${cost.remaining} left before a second segment`}
+                          {cost.overhead > 0 &&
+                            ` (includes ${cost.overhead} chars added automatically for your company name and the opt-out line)`}
+                          {cost.unicode && " · contains non-standard characters, which halves the per-segment limit"}
+                        </p>
+                      );
+                    })()}
                   </div>
 
                   <div className="space-y-1.5">

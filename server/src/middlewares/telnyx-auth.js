@@ -1,10 +1,8 @@
 import crypto from "crypto";
-import prisma from "../lib/prisma.js";
-import { decryptSafe } from "../lib/crypto.js";
 
 // Telnyx signs webhooks with Ed25519 over `${timestamp}|${rawBody}` and sends the
 // signature base64-encoded in `telnyx-signature-ed25519`. The verifying key is the
-// account's Public Key from the Telnyx portal (stored as the integration secret).
+// account's Public Key from the Telnyx portal (TELNYX_PUBLIC_KEY).
 const TOLERANCE_SECONDS = 5 * 60;
 
 function toEd25519PublicKey(base64Key) {
@@ -36,14 +34,7 @@ export async function verifyTelnyxSignature(req, res, next) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    let publicKey = process.env.TELNYX_PUBLIC_KEY;
-    const companyId = req.query.companyId || req.body?.companyId;
-    if (companyId) {
-      const integration = await prisma.integration.findFirst({
-        where: { companyId, platform: "TELNYX_SMS" },
-      });
-      if (integration?.secretKey) publicKey = decryptSafe(integration.secretKey);
-    }
+    const publicKey = process.env.TELNYX_PUBLIC_KEY;
 
     if (!publicKey) {
       console.warn("[Telnyx Auth] No Public Key available to validate signature.");

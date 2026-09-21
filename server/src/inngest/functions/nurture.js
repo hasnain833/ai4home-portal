@@ -4,7 +4,7 @@ import { MailService, MAIL_OUTCOME, mailShouldPark } from "../../services/mail-s
 import { sendSms, smsSent, smsShouldPark } from "../../services/sms.service.js";
 import { getLeadTimezone, getNextValidSendWindow } from "../../lib/timezone.js";
 import { ComplianceService } from "../../services/compliance-service.js";
-import { getMessagingConfig } from "../../lib/messaging-config.js";
+import { getSenderIdentity } from "../../lib/messaging-config.js";
 import { deadLetter } from "../../lib/dead-letter.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
@@ -204,7 +204,7 @@ export const runNurtureCampaign = inngest.createFunction(
       const sendResult = await step.run(`send-step-${currentStep.position}`, async () => {
         // Credentials are read here, not once per run: they stay out of the job
         // engine's persisted step state, and a mid-campaign rotation is picked up.
-        const { smtpConfig, smsConfig } = await getMessagingConfig(lead.companyId);
+        const { replyTo } = await getSenderIdentity(lead.companyId);
 
         if (lead.status === LEAD_STATUS.NEW) {
           // A cosmetic status write must never be what stops a campaign.
@@ -254,7 +254,9 @@ export const runNurtureCampaign = inngest.createFunction(
             subject,
             html: finalHtml,
             fromName: lead.company?.name || undefined,
-            smtpConfig,
+            replyTo,
+            companyId: lead.companyId,
+            source: "nurture",
             headers: { "X-Mailin-Tag": currentStep.id },
           });
           // Only a real failure is worth parking — a workspace with no SMTP
@@ -291,7 +293,7 @@ export const runNurtureCampaign = inngest.createFunction(
           const finalBody = ComplianceService.addSmsOptOutSuffix(rawBody);
 
           console.log(`[Nurture] Step ${currentStep.position}: Triggering sendSms to ${lead.phone}...`);
-          const smsResult = await sendSms({ to: lead.phone, body: finalBody, smsConfig, tag: currentStep.id });
+          const smsResult = await sendSms({ to: lead.phone, body: finalBody, tag: currentStep.id, companyId: lead.companyId, source: "nurture" });
 
           // SW-ANN-002: park the failed step SMS for inspection/replay.
           if (smsShouldPark(smsResult)) {

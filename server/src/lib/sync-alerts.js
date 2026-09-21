@@ -1,6 +1,5 @@
 import prisma from "./prisma.js";
 import { MailService } from "../services/mail-service.js";
-import { getMessagingConfig } from "./messaging-config.js";
 import { Templates } from "../services/templates.js";
 
 const ALERT_ACTION = "FAILURE_ALERT";
@@ -80,7 +79,6 @@ export async function maybeAlertOnSyncFailure(companyId, { action = "sync" } = {
       `[Sync Alert][SW-CRM-007] ${limit} consecutive ${action} failures for company ${companyId} — notifying ${recipients.join(", ")}.`,
     );
 
-    const { smtpConfig } = await getMessagingConfig(companyId);
 
     await MailService.sendEmail({
       to: recipients.join(","),
@@ -92,8 +90,8 @@ export async function maybeAlertOnSyncFailure(companyId, { action = "sync" } = {
         lastMessage: latest?.message,
         lastErrors,
       }),
-      smtpConfig,
-      allowPlatformSender: true,
+      companyId,
+      source: "sync-alert",
     });
 
     await prisma.syncLog.create({

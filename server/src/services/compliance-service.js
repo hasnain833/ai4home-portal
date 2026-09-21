@@ -59,7 +59,9 @@ export class ComplianceService {
     // 1. Check suppression list
     const suppressed = await prisma.suppressionList.findFirst({
       where: {
-        companyId: lead.companyId,
+        // A null companyId is a platform-wide opt-out, recorded when a STOP
+        // arrives on the shared sending number with no tenant attached.
+        OR: [{ companyId: lead.companyId }, { companyId: null }],
         value: {
           equals: normalizedValue,
           mode: "insensitive",
@@ -126,10 +128,11 @@ export class ComplianceService {
       ? senderContact.replace(/\D/g, "")
       : senderContact.trim().toLowerCase();
 
-    // Find the lead(s) for this company matching the contact info
+    // Without a companyId the STOP arrived on the shared number with no tenant
+    // attached, so it applies to every lead with this contact, everywhere.
     const leads = await prisma.lead.findMany({
       where: {
-        companyId,
+        ...(companyId ? { companyId } : {}),
         OR: [
           { email: normalizedContact },
           { phone: { contains: normalizedContact.slice(-10) } }, // match last 10 digits
@@ -137,7 +140,12 @@ export class ComplianceService {
       },
     });
 
-    if (leads.length === 0) {
+    // A STOP is honoured even when it matches no lead — recording it is what
+    // keeps us from messaging that number again. Only non-compliance traffic
+    // needs a lead to be worth handling.
+    const isComplianceKeyword =
+      stopKeywords.includes(text) || startKeywords.includes(text) || helpKeywords.includes(text);
+    if (leads.length === 0 && !isComplianceKeyword) {
       return { isComplianceAction: false };
     }
 
@@ -158,22 +166,22 @@ export class ComplianceService {
       }
 
       // Add to suppression list
-      await prisma.suppressionList.upsert({
-        where: {
-          companyId_value: {
-            companyId,
-            value: normalizedContact,
-          },
-        },
-        create: {
-          companyId,
-          value: normalizedContact,
-          reason: "UNSUBSCRIBE",
-        },
-        update: {
-          reason: "UNSUBSCRIBE",
-        },
-      });
+      if (companyId) {
+        await prisma.suppressionList.upsert({
+          where: { companyId_value: { companyId, value: normalizedContact } },
+          create: { companyId, value: normalizedContact, reason: "UNSUBSCRIBE" },
+          update: { reason: "UNSUBSCRIBE" },
+        });
+      } else {
+        const existing = await prisma.suppressionList.findFirst({
+          where: { companyId: null, value: normalizedContact },
+        });
+        if (!existing) {
+          await prisma.suppressionList.create({
+            data: { companyId: null, value: normalizedContact, reason: "UNSUBSCRIBE" },
+          });
+        }
+      }
 
       return {
         isComplianceAction: true,
@@ -195,17 +203,17 @@ export class ComplianceService {
         });
       }
 
-      try {
-        await prisma.suppressionList.delete({
+      // Clears the platform-wide row (the sender is re-consenting on this
+      // number) and this tenant's own row when we know which tenant it is.
+      // Other tenants' deliberate suppressions are left alone.
+      await prisma.suppressionList
+        .deleteMany({
           where: {
-            companyId_value: {
-              companyId,
-              value: normalizedContact,
-            },
+            value: normalizedContact,
+            OR: companyId ? [{ companyId }, { companyId: null }] : [{ companyId: null }],
           },
-        });
-      } catch {
-      }
+        })
+        .catch(() => {});
 
       return {
         isComplianceAction: true,
@@ -258,16 +266,17 @@ export class ComplianceService {
     const normalizedValue = this.normalizeContact(channel, value);
     if (!companyId || !normalizedValue) return { suppressed: false };
 
+    const scope = [{ companyId }, { companyId: null }];
     const match =
       channel === "EMAIL"
         ? await prisma.suppressionList.findFirst({
           where: {
-            companyId,
+            OR: scope,
             value: { equals: normalizedValue, mode: "insensitive" },
           },
         })
         : await prisma.suppressionList.findFirst({
-          where: { companyId, value: { contains: normalizedValue.slice(-10) } },
+          where: { OR: scope, value: { contains: normalizedValue.slice(-10) } },
         });
 
     return match
@@ -476,6 +485,7 @@ export class ComplianceService {
       const thresholdPct = (metrics.threshold * 100).toFixed(3);
 
       await MailService.sendEmail({
+        source: "opt-out-confirmation",
         to,
         subject: `[ALERT] High ${metrics.channel} complaint rate (${ratePct}%) — ${company?.name || companyId}`,
         html: Templates.getComplianceReportEmail(

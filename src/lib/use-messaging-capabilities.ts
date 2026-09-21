@@ -8,12 +8,13 @@ export interface MessagingCapabilities {
 }
 
 /**
- * Which channels this workspace can actually deliver on. Read it wherever a
- * channel can be chosen, so a tenant is told up front that a channel will not
- * send rather than discovering it from a report of zeros.
+ * Whether the platform can currently deliver on each channel. Since messaging
+ * moved to platform-owned accounts this is no longer a tenant setting — an
+ * unavailable channel means a platform outage or missing platform credentials,
+ * not something the tenant can fix.
  *
  * While loading, both channels are reported as available: a slow request must
- * not flash a "not configured" warning at a tenant who is set up correctly.
+ * not flash an "unavailable" warning when everything is fine.
  */
 export function useMessagingCapabilities() {
   const { data, loading, error, refresh } = useQuery<MessagingCapabilities>(
@@ -35,4 +36,4 @@ export function useMessagingCapabilities() {
 
 /** Label for a disabled channel option, e.g. in a dropdown. */
 export const NOT_CONFIGURED_HINT =
-  "Not configured — set this up in Settings > Messaging before using it.";
+  "Temporarily unavailable — this is a platform issue, please contact support.";
