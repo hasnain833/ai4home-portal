@@ -42,12 +42,15 @@ import {
   X,
   Loader2,
   Ticket as TicketIcon,
+  Send,
+  CalendarClock,
+  UserCheck,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Types
 type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
-type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
 
 interface Ticket {
   id: string;
@@ -65,6 +68,15 @@ interface Ticket {
   priority: TicketPriority;
   createdAt: string;
   warrantyYear: number;
+  assignedStaffId?: string | null;
+  assignedStaff?: {
+    id: string;
+    name: string | null;
+    email: string;
+  } | null;
+  // Present only once the homeowner has picked a time. Its absence on a
+  // dispatched ticket is what "awaiting booking" means.
+  nextVisitAt?: string | null;
 }
 
 interface HomeownerOption {
@@ -77,6 +89,12 @@ interface PropertyOption {
   id: string;
   address: string;
   homeownerId: string;
+}
+
+interface StaffOption {
+  id: string;
+  name: string | null;
+  email: string;
 }
 
 // Mirrors the categories the classifier assigns to AI-created tickets
@@ -96,6 +114,8 @@ const ISSUE_TYPES = [
   "Windows & Doors",
 ];
 
+// What a ticket can be filed as. HAPPY is not here on purpose — a claim only
+// reaches it by being resolved.
 const PRIORITY_OPTIONS: TicketPriority[] = ["LOW", "MEDIUM", "HIGH", "URGENT"];
 
 const EMPTY_TICKET_FORM = {
@@ -108,6 +128,13 @@ const EMPTY_TICKET_FORM = {
   priority: "MEDIUM" as TicketPriority,
   isEmergency: false,
   notifyHomeowner: true,
+};
+
+// No date here: dispatch assigns the staff member and emails the homeowner a
+// link to pick a time from that person's availability.
+const EMPTY_DISPATCH_FORM = {
+  staffId: "",
+  notes: "",
 };
 
 // Animation variants
@@ -177,6 +204,11 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
     text: "text-rose-700 dark:text-rose-400",
     border: "border-rose-200 dark:border-rose-900/50",
   },
+  HAPPY: {
+    bg: "bg-teal-50 dark:bg-teal-950/20",
+    text: "text-teal-700 dark:text-teal-400",
+    border: "border-teal-200 dark:border-teal-900/50",
+  },
 };
 
 export default function TicketsPage() {
@@ -188,7 +220,6 @@ export default function TicketsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
   const [priority, setPriority] = useState<string>("all");
-  const [year, setYear] = useState<string>("all");
   const [dateRange, setDateRange] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -205,9 +236,12 @@ export default function TicketsPage() {
   const [creating, setCreating] = useState(false);
   const [homeowners, setHomeowners] = useState<HomeownerOption[]>([]);
   const [allProperties, setAllProperties] = useState<PropertyOption[]>([]);
-
-  // Declared above fetchTickets, which calls it: referencing it later would
-  // capture a binding that is not initialised at definition time.
+  const [staff, setStaff] = useState<StaffOption[]>([]);
+  const [dispatchTarget, setDispatchTarget] = useState<Ticket | null>(null);
+  const [dispatchForm, setDispatchForm] = useState(EMPTY_DISPATCH_FORM);
+  const [dispatchError, setDispatchError] = useState("");
+  const [dispatching, setDispatching] = useState(false);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const showToast = (type: "success" | "error", text: string) => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 3000);
@@ -240,22 +274,24 @@ export default function TicketsPage() {
     fetchTickets();
   }, [fetchTickets]);
 
-  // Options for the create modal. /api/properties already returns every
-  // property in the company with its homeownerId, so the property list is
-  // narrowed per homeowner on the client rather than with a second round trip.
   useEffect(() => {
     if (!canManage) return;
     let cancelled = false;
 
     (async () => {
       try {
-        const [ownerRes, propertyRes] = await Promise.all([
+        const [ownerRes, propertyRes, staffRes] = await Promise.all([
           fetch("/api/users?role=homeowner"),
           fetch("/api/properties"),
+          fetch("/api/admin/staff"),
         ]);
         if (cancelled) return;
         if (ownerRes.ok) setHomeowners(await ownerRes.json());
         if (propertyRes.ok) setAllProperties(await propertyRes.json());
+        if (staffRes.ok) {
+          const payload = await staffRes.json();
+          setStaff(Array.isArray(payload) ? payload : payload.staff || []);
+        }
       } catch (error) {
         console.error("Error loading ticket form options:", error);
       }
@@ -266,14 +302,11 @@ export default function TicketsPage() {
     };
   }, [canManage]);
 
-  // The API rejects a property that is not the selected homeowner's, so the
-  // dropdown must never offer one.
   const homeownerProperties = useMemo(
     () => allProperties.filter((p) => p.homeownerId === createForm.homeownerId),
     [allProperties, createForm.homeownerId],
   );
 
-  // Filter tickets based on search and filters
   const filteredTickets = useMemo(() => {
     return tickets.filter((t) => {
       const homeownerName = t.homeowner?.name || "Unknown";
@@ -281,10 +314,10 @@ export default function TicketsPage() {
         search === "" ||
         t.id.toLowerCase().includes(search.toLowerCase()) ||
         homeownerName.toLowerCase().includes(search.toLowerCase()) ||
+        (t.property?.address ?? "").toLowerCase().includes(search.toLowerCase()) ||
         t.issueType.toLowerCase().includes(search.toLowerCase());
       const matchStatus = status === "all" || t.status === status;
       const matchPriority = priority === "all" || t.priority === priority;
-      const matchYear = year === "all" || t.warrantyYear.toString() === year || (year === "2" && t.warrantyYear >= 2);
 
       let matchDate = true;
       if (dateRange !== "all") {
@@ -297,9 +330,9 @@ export default function TicketsPage() {
         else if (dateRange === "90d") matchDate = diffDays <= 90;
       }
 
-      return matchSearch && matchStatus && matchPriority && matchYear && matchDate;
+      return matchSearch && matchStatus && matchPriority && matchDate;
     });
-  }, [tickets, search, status, priority, year, dateRange]);
+  }, [tickets, search, status, priority, dateRange]);
 
   const totalPages = Math.ceil(filteredTickets.length / itemsPerPage);
   const paginatedTickets = filteredTickets.slice(
@@ -310,13 +343,12 @@ export default function TicketsPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [search, status, priority, year, dateRange]);
+  }, [search, status, priority, dateRange]);
 
   const handleResetFilters = () => {
     setSearch("");
     setStatus("all");
     setPriority("all");
-    setYear("all");
     setDateRange("all");
     showToast("success", "Filters reset");
   };
@@ -361,8 +393,6 @@ export default function TicketsPage() {
           issueType: createForm.issueType,
           ticketType: createForm.ticketType.trim() || null,
           description: createForm.description.trim() || null,
-          // The server escalates emergencies to URGENT regardless; sending it
-          // outright keeps the request honest about what was asked for.
           priority: createForm.isEmergency ? "URGENT" : createForm.priority,
           isEmergency: createForm.isEmergency,
           notifyHomeowner: createForm.notifyHomeowner,
@@ -378,8 +408,6 @@ export default function TicketsPage() {
 
       closeCreateModal();
       await fetchTickets(true);
-      // `notice` carries the "email is not configured" warning when the server
-      // could not send what was asked for.
       showToast(data.notice ? "error" : "success", data.notice || "Ticket created");
     } catch (error) {
       console.error("Error creating ticket:", error);
@@ -387,6 +415,127 @@ export default function TicketsPage() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const openDispatch = (ticket: Ticket) => {
+    setDispatchTarget(ticket);
+    setDispatchForm(EMPTY_DISPATCH_FORM);
+    setDispatchError("");
+  };
+
+  const closeDispatch = () => {
+    setDispatchTarget(null);
+    setDispatchForm(EMPTY_DISPATCH_FORM);
+    setDispatchError("");
+  };
+
+  const handleDispatchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dispatchTarget) return;
+    setDispatchError("");
+
+    if (!dispatchForm.staffId) {
+      setDispatchError("Please choose a staff member.");
+      return;
+    }
+
+    setDispatching(true);
+    try {
+      const response = await fetch(`/api/tickets/${dispatchTarget.id}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          staffId: dispatchForm.staffId,
+          notes: dispatchForm.notes.trim() || null,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setDispatchError(data.message || "Failed to dispatch the ticket.");
+        return;
+      }
+
+      closeDispatch();
+      await fetchTickets(true);
+      showToast(
+        data.notice ? "error" : "success",
+        data.notice ||
+          "Ticket dispatched. The homeowner has been emailed a link to pick a time.",
+      );
+    } catch (error) {
+      console.error("Error dispatching ticket:", error);
+      setDispatchError("Error connecting to server.");
+    } finally {
+      setDispatching(false);
+    }
+  };
+
+  const handleResolve = async (ticket: Ticket) => {
+    setResolvingId(ticket.id);
+    try {
+      const response = await fetch(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "RESOLVED" }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        showToast("error", data.message || "Failed to resolve the ticket.");
+        return;
+      }
+
+      await fetchTickets(true);
+      showToast(data.notice ? "error" : "success", data.notice || "Ticket resolved");
+    } catch (error) {
+      console.error("Error resolving ticket:", error);
+      showToast("error", "Error connecting to server");
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
+  const renderRowActions = (ticket: Ticket) => {
+    if (!canManage) return null;
+
+    if (ticket.status === "OPEN") {
+      return (
+        <Button
+          size="sm"
+          onClick={() => openDispatch(ticket)}
+          className="h-8 px-3 text-xs bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-semibold rounded-lg gap-1.5"
+        >
+          <Send className="h-3.5 w-3.5" />
+          Dispatch
+        </Button>
+      );
+    }
+
+    if (ticket.status === "DISPATCHED") {
+      // "Awaiting booking" is shown in the Status column — this cell stays a
+      // single control so every row's action lines up.
+      return (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={resolvingId === ticket.id}
+          onClick={() => handleResolve(ticket)}
+          className="h-8 px-3 text-xs font-semibold rounded-lg gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 dark:border-emerald-900/60 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+        >
+          {resolvingId === ticket.id ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <CheckCircle2 className="h-3.5 w-3.5" />
+          )}
+          Resolved
+        </Button>
+      );
+    }
+
+    return <span className="text-[11px] text-muted-foreground/70 italic">Closed</span>;
   };
 
   const handleRefresh = async () => {
@@ -417,9 +566,9 @@ export default function TicketsPage() {
               <CardContent className="pt-6">
                 <div className="flex flex-wrap gap-4 mb-6">
                   <div className="h-10 flex-1 bg-muted rounded"></div>
-                  <div className="h-10 w-[140px] bg-muted rounded"></div>
-                  <div className="h-10 w-[140px] bg-muted rounded"></div>
-                  <div className="h-10 w-[140px] bg-muted rounded"></div>
+                  <div className="h-10 w-35 bg-muted rounded"></div>
+                  <div className="h-10 w-35 bg-muted rounded"></div>
+                  <div className="h-10 w-35 bg-muted rounded"></div>
                 </div>
                 <div className="space-y-3">
                   {[...Array(5)].map((_, i) => (
@@ -497,13 +646,13 @@ export default function TicketsPage() {
           <motion.div variants={cardVariants}>
             <Card className="border border-border/80 bg-linear-to-b from-card/85 to-card/50 backdrop-blur-md shadow-xs">
               <CardContent className="p-5 md:p-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 items-end">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 items-end">
                   <div className="sm:col-span-2 md:col-span-1 lg:col-span-1">
-                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Search</Label>
+                    <Label className="text-sm font-semibold text-foreground tracking-tight mb-1.5 block">Search</Label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground/80" />
                       <Input
-                        placeholder="ID, homeowner, issue..."
+                        placeholder="ID, homeowner, address, issue..."
                         className="pl-9 h-9 border-border/80 focus-visible:ring-1 focus-visible:ring-primary/45 rounded-lg text-sm bg-background/50"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
@@ -511,7 +660,7 @@ export default function TicketsPage() {
                     </div>
                   </div>
                   <div>
-                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Status</Label>
+                    <Label className="text-sm font-semibold text-foreground tracking-tight mb-1.5 block">Status</Label>
                     <Select value={status} onValueChange={setStatus}>
                       <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
                         <SelectValue placeholder="Status" />
@@ -525,7 +674,7 @@ export default function TicketsPage() {
                     </Select>
                   </div>
                   <div>
-                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Priority</Label>
+                    <Label className="text-sm font-semibold text-foreground tracking-tight mb-1.5 block">Priority</Label>
                     <Select value={priority} onValueChange={setPriority}>
                       <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
                         <SelectValue placeholder="Priority" />
@@ -536,24 +685,12 @@ export default function TicketsPage() {
                         <SelectItem value="MEDIUM">Medium</SelectItem>
                         <SelectItem value="HIGH">High</SelectItem>
                         <SelectItem value="URGENT">Urgent</SelectItem>
+                        <SelectItem value="HAPPY">Happy</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div>
-                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Warranty Year</Label>
-                    <Select value={year} onValueChange={setYear}>
-                      <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
-                        <SelectValue placeholder="Year" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Years</SelectItem>
-                        <SelectItem value="1">Year 1</SelectItem>
-                        <SelectItem value="2">Year 2+</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Date</Label>
+                    <Label className="text-sm font-semibold text-foreground tracking-tight mb-1.5 block">Date</Label>
                     <Select value={dateRange} onValueChange={setDateRange}>
                       <SelectTrigger className="h-9 border-border/80 focus:ring-1 focus:ring-primary/45 rounded-lg text-sm bg-background/50">
                         <SelectValue placeholder="All Time" />
@@ -601,7 +738,7 @@ export default function TicketsPage() {
                     <AlertCircle className="h-10 w-10 mx-auto mb-3 text-muted-foreground/60" />
                     <h3 className="font-semibold text-foreground text-sm">No tickets found</h3>
                     <p className="text-xs mt-1 text-muted-foreground/80 max-w-xs mx-auto">Try adjusting your search keywords or clearing the active filters.</p>
-                    {(search || status !== "all" || priority !== "all" || year !== "all" || dateRange !== "all") && (
+                    {(search || status !== "all" || priority !== "all" || dateRange !== "all") && (
                       <Button variant="outline" size="sm" onClick={handleResetFilters} className="mt-4 text-xs h-8 border-border/80">
                         Clear All Filters
                       </Button>
@@ -653,16 +790,22 @@ export default function TicketsPage() {
                               </Badge>
                               <span>Year {ticket.warrantyYear}</span>
                             </div>
-                            <span>{new Date(ticket.createdAt).toLocaleDateString()}</span>
+                            {ticket.assignedStaff && (
+                              <span className="flex items-center gap-1">
+                                <UserCheck className="h-3 w-3" />
+                                {ticket.assignedStaff.name || ticket.assignedStaff.email}
+                              </span>
+                            )}
                           </div>
 
-                          <div className="flex justify-end gap-2 pt-2 border-t border-border/30" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-between items-center gap-2 pt-2 border-t border-border/30" onClick={(e) => e.stopPropagation()}>
                             <Link href={`/warranty/tickets/${ticket.id}`} className="w-fit">
                               <Button variant="ghost" size="sm" className="h-7 text-xs">
                                 <Eye className="h-3.5 w-3.5 mr-1" />
                                 View
                               </Button>
                             </Link>
+                            {renderRowActions(ticket)}
                           </div>
                         </motion.div>
                       ))}
@@ -671,16 +814,19 @@ export default function TicketsPage() {
                 ) : (
                   // Desktop table view
                   <div className="overflow-x-auto">
-                    <Table className="min-w-[900px] border-collapse">
+                    <Table className="min-w-225 border-collapse table-fixed">
                       <TableHeader className="bg-muted/15 border-b border-border/50">
                         <TableRow>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 pl-6">Homeowner</TableHead>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Address</TableHead>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Issue</TableHead>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Year</TableHead>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Priority</TableHead>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3">Status</TableHead>
-                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 pr-6">Created</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 pl-6 w-1/6">Address</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 w-1/6">Homeowner</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 w-1/6">Issue</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 w-1/6">Priority</TableHead>
+                          <TableHead className="font-semibold text-xs text-muted-foreground py-3 w-1/6">Status</TableHead>
+                          {canManage && (
+                            <TableHead className="font-semibold text-xs text-muted-foreground py-3 pr-6 text-right w-1/6">
+                              Actions
+                            </TableHead>
+                          )}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -696,19 +842,14 @@ export default function TicketsPage() {
                               onClick={() => router.push(`/warranty/tickets/${ticket.id}`)}
                               className="border-b border-border/30 hover:bg-muted/15 transition-colors group cursor-pointer"
                             >
-                              <TableCell className="pl-6 py-3.5 font-medium text-foreground text-sm">
-                                {ticket.homeowner?.name || "Unknown"}
-                              </TableCell>
-                              <TableCell className="py-3.5 text-muted-foreground text-xs max-w-[200px] truncate" title={ticket.property?.address}>
+                              <TableCell className="pl-6 py-3.5 font-medium text-foreground text-sm truncate" title={ticket.property?.address}>
                                 {ticket.property?.address || <span className="text-muted-foreground/50 italic">No address linked</span>}
                               </TableCell>
-                              <TableCell className="py-3.5 text-foreground/90 font-medium text-xs max-w-[220px] truncate" title={ticket.issueType}>
-                                {ticket.issueType}
+                              <TableCell className="py-3.5 text-foreground/90 font-medium text-xs truncate" title={ticket.homeowner?.name || "Unknown"}>
+                                {ticket.homeowner?.name || "Unknown"}
                               </TableCell>
-                              <TableCell className="py-3.5 text-muted-foreground text-xs">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-[10px] font-semibold text-muted-foreground border border-border/50">
-                                  Year {ticket.warrantyYear}
-                                </span>
+                              <TableCell className="py-3.5 text-foreground/90 font-medium text-xs truncate" title={ticket.issueType}>
+                                {ticket.issueType}
                               </TableCell>
                               <TableCell className="py-3.5">
                                 <Badge variant="outline" className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-semibold border shadow-2xs", priorityStyles[ticket.priority].bg, priorityStyles[ticket.priority].text, priorityStyles[ticket.priority].border)}>
@@ -720,10 +861,28 @@ export default function TicketsPage() {
                                   <span className={cn("h-1.5 w-1.5 rounded-full", statusStyles[ticket.status].dot)} />
                                   {ticket.status.replace("_", " ")}
                                 </Badge>
+                                {ticket.status === "DISPATCHED" && !ticket.nextVisitAt && (
+                                  // A sub-state of dispatched, so it sits with the status
+                                  // rather than competing with the action button for width.
+                                  <span
+                                    className="mt-1 flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-500"
+                                    title="The homeowner has been emailed a booking link but has not picked a time yet."
+                                  >
+                                    <CalendarClock className="h-3 w-3 shrink-0" />
+                                    Awaiting booking
+                                  </span>
+                                )}
                               </TableCell>
-                              <TableCell className="py-3.5 text-muted-foreground text-xs pr-6">
-                                {new Date(ticket.createdAt).toLocaleDateString()}
-                              </TableCell>
+                              {canManage && (
+                                <TableCell
+                                  className="py-3.5 pr-6 text-right"
+                                  // The row itself opens the ticket, so a click
+                                  // on a button must not navigate as well.
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div className="flex justify-end">{renderRowActions(ticket)}</div>
+                                </TableCell>
+                              )}
                             </motion.tr>
                           ))}
                         </AnimatePresence>
@@ -765,6 +924,126 @@ export default function TicketsPage() {
               </CardContent>
             </Card>
           </motion.div>
+
+          {/* Dispatch Modal */}
+          <AnimatePresence>
+            {dispatchTarget && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-lg shadow-2xl relative border dark:border-gray-800 my-8"
+                >
+                  <button
+                    type="button"
+                    onClick={closeDispatch}
+                    className="absolute right-4 top-4 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-400 hover:text-gray-600 transition"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+
+                  <div className="flex items-center gap-3 mb-5 border-b dark:border-gray-800 pb-4">
+                    <div className="bg-[#0F3B3D] p-2.5 rounded-2xl text-white">
+                      <Send className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-[#0F3B3D] dark:text-[#E8B86B]">
+                        Dispatch Ticket
+                      </h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Assign a staff member and book the repair visit.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border dark:border-gray-800 bg-muted/20 p-3 mb-4 space-y-1">
+                    <p className="text-sm font-semibold text-foreground">
+                      {dispatchTarget.issueType}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {dispatchTarget.homeowner?.name || "Unknown homeowner"}
+                      {dispatchTarget.property?.address ? ` · ${dispatchTarget.property.address}` : ""}
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleDispatchSubmit} className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label className="font-semibold">Assign to</Label>
+                      <Select
+                        value={dispatchForm.staffId}
+                        onValueChange={(val) => setDispatchForm((f) => ({ ...f, staffId: val }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select staff member..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {staff.map((member) => (
+                            <SelectItem key={member.id} value={member.id}>
+                              {member.name || member.email} &mdash; {member.email}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {staff.length === 0 && (
+                        <p className="text-xs text-amber-600">
+                          No staff members yet. Add one on the Staff page first.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="dispatchNotes" className="font-semibold">Notes for the visit</Label>
+                      <Textarea
+                        id="dispatchNotes"
+                        rows={3}
+                        placeholder="Anything the staff member should know before turning up"
+                        value={dispatchForm.notes}
+                        onChange={(e) => setDispatchForm((f) => ({ ...f, notes: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="flex items-start gap-2.5 rounded-2xl border dark:border-gray-800 p-3">
+                      <CalendarClock className="h-4 w-4 mt-0.5 text-[#0F3B3D] dark:text-[#E8B86B] shrink-0" />
+                      <p className="text-xs text-gray-500 dark:text-slate-400 leading-snug">
+                        The homeowner picks the time. They&apos;re emailed a link showing when
+                        this staff member is free; the staff member gets the full ticket now
+                        and a confirmation once a slot is chosen.
+                      </p>
+                    </div>
+
+                    {dispatchError && (
+                      <div className="text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-xl text-sm font-semibold">
+                        {dispatchError}
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 justify-end pt-3 border-t dark:border-gray-800">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={closeDispatch}
+                        className="text-gray-600"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={dispatching}
+                        className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-semibold gap-2"
+                      >
+                        {dispatching ? (
+                          <><Loader2 className="h-4 w-4 animate-spin" /> Dispatching...</>
+                        ) : (
+                          <><Send className="h-4 w-4" /> Dispatch &amp; Send Link</>
+                        )}
+                      </Button>
+                    </div>
+                  </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
           {/* Create Ticket Modal */}
           <AnimatePresence>

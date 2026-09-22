@@ -321,7 +321,11 @@ export default function WarrantyChat({
             placeholder="Type your message..."
             className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent dark:text-white"
             style={{ "--tw-ring-color": themeColor } as React.CSSProperties}
-            disabled={!companyId || isLoading}
+            // Deliberately not disabled while a reply is in flight: disabling an
+            // input makes the browser drop focus, so the caret vanished after
+            // every message. sendMessage() already refuses to send twice, and
+            // being able to type the next question while waiting is no loss.
+            disabled={!companyId}
           />
           <button
             type="submit"

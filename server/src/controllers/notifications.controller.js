@@ -86,3 +86,46 @@ export const markAllRead = async (req, res) => {
     return res.status(500).json({ message: "Failed to update notifications" });
   }
 };
+
+export const deleteNotification = async (req, res) => {
+  try {
+    const session = req.user;
+    if (!session) return res.status(401).json({ message: "Unauthorized" });
+
+    // userId is in the filter, so somebody else's id deletes nothing rather
+    // than deleting their notification.
+    const { count } = await prisma.notification.deleteMany({
+      where: { id: req.params.id, userId: session.id },
+    });
+
+    if (count === 0) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    const unreadCount = await prisma.notification.count({
+      where: { userId: session.id, isRead: false },
+    });
+
+    return res.json({ success: true, unreadCount });
+  } catch (error) {
+    console.error("[Notifications] Failed to delete:", error);
+    return res.status(500).json({ message: "Failed to delete notification" });
+  }
+};
+
+/** Clears everything already read, leaving anything still unread in place. */
+export const deleteReadNotifications = async (req, res) => {
+  try {
+    const session = req.user;
+    if (!session) return res.status(401).json({ message: "Unauthorized" });
+
+    const { count } = await prisma.notification.deleteMany({
+      where: { userId: session.id, isRead: true },
+    });
+
+    return res.json({ success: true, deleted: count });
+  } catch (error) {
+    console.error("[Notifications] Failed to clear read:", error);
+    return res.status(500).json({ message: "Failed to clear notifications" });
+  }
+};

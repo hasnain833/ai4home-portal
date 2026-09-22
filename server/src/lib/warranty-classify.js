@@ -1,6 +1,13 @@
 import { toolCall } from "./llm.js";
 
+// What the classifier may choose, and what a ticket may be filed with.
 export const TICKET_PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+
+// HAPPY is never assigned by the agent or chosen at creation — a claim only
+// reaches it by being resolved. It is valid to store, so it belongs here and
+// not in the list above.
+export const RESOLVED_PRIORITY = "HAPPY";
+export const STORABLE_PRIORITIES = [...TICKET_PRIORITIES, RESOLVED_PRIORITY];
 
 const EMERGENCY_PATTERNS = [
   /\bgas\s*(leak|smell|odor|odour)\b/i,

@@ -160,34 +160,159 @@ export const Templates = {
     return wrapEmail(content, "Ticket Awaiting Action", companyName, isEmergency ? "#b91c1c" : COLORS.primary);
   },
 
-  /// Appointment confirmation. `role` is "homeowner" or "trade" — the two sides
-  /// need the same facts framed differently.
-  getTicketAppointmentEmail: (role, { ticketId, issueType, whenLabel, address, tradeName, homeownerName, notes }, portalUrl, companyName) => {
-    const forHomeowner = role === "homeowner";
-    const lead = forHomeowner
-      ? `Your repair visit for ticket <strong>#${ticketId}</strong> has been scheduled.`
-      : `A repair visit has been scheduled for ticket <strong>#${ticketId}</strong>.`;
+  /// Sent to the assigned staff member when a ticket is dispatched to them, and
+  /// again if the visit is moved. Staff get the whole picture — they are the one
+  /// turning up, so everything they might need is in the mail rather than behind
+  /// a login.
+  getTicketDispatchStaffEmail: (
+    { ticketId, issueType, ticketCategory, description, priority, warrantyYear, whenLabel,
+      durationMinutes, address, homeownerName, homeownerEmail, notes },
+    portalUrl,
+    companyName,
+    { rescheduled = false } = {},
+  ) => {
     const rows = [
-      ["When", whenLabel],
-      ["Issue", issueType],
+      ["When", `${whenLabel}${durationMinutes ? ` (${durationMinutes} min)` : ""}`],
       ["Property", address || "Not specified"],
-      forHomeowner ? ["Attending", tradeName || companyName] : ["Homeowner", homeownerName],
+      ["Homeowner", homeownerEmail ? `${homeownerName} &mdash; ${homeownerEmail}` : homeownerName],
+      ["Ticket", `#${ticketId}`],
+      ["Issue", issueType],
+      ...(ticketCategory ? [["Source", ticketCategory]] : []),
+      ["Priority", priority || "MEDIUM"],
+      ["Warranty year", `Year ${warrantyYear ?? 1}`],
     ];
     const content = `
-      <p style="margin-top: 0;">${lead}</p>
+      <p style="margin-top: 0;">${
+        rescheduled
+          ? `The visit for ticket <strong>#${ticketId}</strong> has been moved.`
+          : `You have been assigned to ticket <strong>#${ticketId}</strong>.`
+      }</p>
+      ${emailHighlightBox(whenLabel)}
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
+        ${rows.map(([k, v]) => `<tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 140px;">${k}</td><td style="padding: 12px 0;">${v}</td></tr>`).join("")}
+      </table>
+      ${description ? `<div style="background-color: ${COLORS.bgLight}; padding: 16px 20px; margin: 24px 0; border-radius: 6px;"><p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: ${COLORS.textMuted};">What the homeowner reported</p><p style="margin: 0; font-size: 15px; white-space: pre-line;">${description}</p></div>` : ""}
+      ${notes ? `<p style="font-size: 14px; color: ${COLORS.textMuted};"><strong>Dispatch notes:</strong> ${notes}</p>` : ""}
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "Open the ticket")}
+    `;
+    return wrapEmail(content, rescheduled ? "Visit Rescheduled" : "New Assignment", companyName, COLORS.primary);
+  },
+
+  /// The homeowner's half of the same event. Deliberately thin: when someone is
+  /// coming and who it is. Priority, warranty year and internal notes are the
+  /// builder's business, not theirs.
+  getTicketDispatchHomeownerEmail: (
+    { ticketId, issueType, whenLabel, address, staffName, homeownerName, manageUrl },
+    portalUrl,
+    companyName,
+    { rescheduled = false } = {},
+  ) => {
+    const rows = [
+      ["When", whenLabel],
+      ["Visiting", staffName || companyName],
+      ["Address", address || "Your property"],
+    ];
+    const content = `
+      <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
+      <p>${
+        rescheduled
+          ? `Your repair visit for <strong>${issueType}</strong> has been moved to a new time.`
+          : `We have booked a repair visit for your <strong>${issueType}</strong> claim.`
+      }</p>
       ${emailHighlightBox(whenLabel)}
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
         ${rows.map(([k, v]) => `<tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">${k}</td><td style="padding: 12px 0;">${v}</td></tr>`).join("")}
       </table>
-      ${notes ? `<p style="font-size: 14px; color: ${COLORS.textMuted};"><strong>Notes:</strong> ${notes}</p>` : ""}
-      <p>We'll send a reminder before the visit.</p>
-      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket")}
+      <p>Please make sure someone over 18 is home and the area is accessible. We'll send you a reminder before the visit.</p>
+      ${emailButton(manageUrl || `${portalUrl}/warranty/tickets/${ticketId}`, manageUrl ? "Change or cancel this visit" : "View your claim")}
     `;
-    return wrapEmail(content, "Appointment Scheduled", companyName, COLORS.primary);
+    return wrapEmail(content, rescheduled ? "Visit Rescheduled" : "Repair Visit Booked", companyName, COLORS.primary);
+  },
+
+  /// The homeowner's booking invitation. This is the only route to a scheduled
+  /// visit, so the link is the whole point of the mail — everything else is kept
+  /// out of the way of it.
+  getTicketBookingInviteEmail: (
+    { ticketId, issueType, address, staffName, homeownerName },
+    bookingUrl,
+    companyName,
+    { nudge = false } = {},
+  ) => {
+    const content = `
+      <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
+      <p>${
+        nudge
+          ? `You have not picked a time yet for your <strong>${issueType}</strong> repair visit. Choose one below and we'll lock it in.`
+          : `<strong>${staffName || "One of our team"}</strong> has been assigned to your <strong>${issueType}</strong> claim. Pick a time that suits you and they'll come to you.`
+      }</p>
+      ${emailButton(bookingUrl, "Choose your appointment time")}
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Visiting</td><td style="padding: 12px 0;">${staffName || companyName}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Address</td><td style="padding: 12px 0;">${address || "Your property"}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Claim</td><td style="padding: 12px 0;">#${ticketId}</td></tr>
+      </table>
+      <p style="font-size: 14px; color: ${COLORS.textMuted};">The times shown are the ones
+      ${staffName || "your assigned team member"} has free. If none of them work, reply to this
+      email and we'll sort something out.</p>
+    `;
+    return wrapEmail(
+      content,
+      nudge ? "Still Need to Book" : "Choose Your Appointment",
+      companyName,
+      COLORS.primary,
+    );
+  },
+
+  /// Tells the assigned staff member the job is theirs, before any time exists.
+  /// The homeowner is the one who picks, so this mail is a heads-up plus the
+  /// full ticket, not a calendar entry.
+  getTicketAssignmentEmail: (
+    { ticketId, issueType, ticketCategory, description, priority, warrantyYear, address,
+      homeownerName, homeownerEmail, notes },
+    portalUrl,
+    companyName,
+  ) => {
+    const rows = [
+      ["Property", address || "Not specified"],
+      ["Homeowner", homeownerEmail ? `${homeownerName} &mdash; ${homeownerEmail}` : homeownerName],
+      ["Ticket", `#${ticketId}`],
+      ["Issue", issueType],
+      ...(ticketCategory ? [["Source", ticketCategory]] : []),
+      ["Priority", priority || "MEDIUM"],
+      ["Warranty year", `Year ${warrantyYear ?? 1}`],
+    ];
+    const content = `
+      <p style="margin-top: 0;">You have been assigned to ticket <strong>#${ticketId}</strong>.</p>
+      ${emailHighlightBox("Awaiting the homeowner's chosen time")}
+      <p>The homeowner has been sent your available times. You'll get a confirmation
+      with the details as soon as they pick one.</p>
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
+        ${rows.map(([k, v]) => `<tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 140px;">${k}</td><td style="padding: 12px 0;">${v}</td></tr>`).join("")}
+      </table>
+      ${description ? `<div style="background-color: ${COLORS.bgLight}; padding: 16px 20px; margin: 24px 0; border-radius: 6px;"><p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: ${COLORS.textMuted};">What the homeowner reported</p><p style="margin: 0; font-size: 15px; white-space: pre-line;">${description}</p></div>` : ""}
+      ${notes ? `<p style="font-size: 14px; color: ${COLORS.textMuted};"><strong>Dispatch notes:</strong> ${notes}</p>` : ""}
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "Open the ticket")}
+    `;
+    return wrapEmail(content, "New Assignment", companyName, COLORS.primary);
+  },
+
+  /// Sent to the homeowner when the ticket is closed out.
+  getTicketResolvedEmail: ({ ticketId, issueType, homeownerName }, portalUrl, companyName) => {
+    const content = `
+      <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
+      <p>Your warranty claim for <strong>${issueType}</strong> (ticket <strong>#${ticketId}</strong>)
+      has been marked resolved.</p>
+      ${emailHighlightBox("Thank you")}
+      <p>Thank you for your patience while we took care of this, and for giving us the chance
+      to put it right. If the issue comes back or anything still isn't right, open a new claim
+      and we'll pick it straight back up.</p>
+      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View your claim")}
+    `;
+    return wrapEmail(content, "Claim Resolved", companyName, COLORS.primary);
   },
 
   /// 24-hour and 1-hour appointment reminders, for either side.
-  getTicketAppointmentReminderEmail: (role, { ticketId, issueType, whenLabel, address, tradeName, homeownerName }, windowLabel, portalUrl, companyName) => {
+  getTicketAppointmentReminderEmail: (role, { ticketId, issueType, whenLabel, address, tradeName, homeownerName, manageUrl }, windowLabel, portalUrl, companyName) => {
     const forHomeowner = role === "homeowner";
     const lead = forHomeowner
       ? `A reminder that your repair visit is ${windowLabel}.`
@@ -205,7 +330,11 @@ export const Templates = {
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
         ${rows.map(([k, v]) => `<tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">${k}</td><td style="padding: 12px 0;">${v}</td></tr>`).join("")}
       </table>
-      ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket")}
+      ${
+        forHomeowner && manageUrl
+          ? `${emailButton(manageUrl, "Change or cancel this visit")}<p style="font-size: 14px; color: ${COLORS.textMuted}; text-align: center;">Need a different time? You can move it yourself with the button above.</p>`
+          : emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket")
+      }
     `;
     return wrapEmail(content, "Appointment Reminder", companyName, COLORS.accent);
   },

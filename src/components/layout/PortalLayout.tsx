@@ -13,6 +13,7 @@ import {
   Bot,
   Database,
   Building2,
+  Briefcase,
   BarChart3,
   Menu,
   LogOut,
@@ -67,7 +68,7 @@ const warrantyNavItems: NavItem[] = [
   { name: "Homeowners", href: "/warranty/homeowners", icon: User, roles: ["admin", "staff"] },
   { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
   { name: "Knowledge Base", href: "/warranty/knowledge-base", icon: Database, roles: ["admin", "staff"] },
-  { name: "Company", href: "/warranty/company", icon: Building2, roles: ["admin", "staff"] },
+  { name: "Company", href: "/warranty/company", icon: Briefcase, roles: ["admin", "staff"] },
   { name: "Reports", href: "/warranty/reports", icon: BarChart3, roles: ["admin", "staff"] },
   { name: "Profile", href: "/warranty/profile", icon: User, roles: ["staff", "homeowner"] },
 ];

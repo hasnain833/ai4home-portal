@@ -29,6 +29,7 @@ export const getHomeowners = async (req, res) => {
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         hasSalesAccess: true,
         createdAt: true,
@@ -197,7 +198,7 @@ export const updateHomeowner = async (req, res) => {
     }
 
     const { id } = req.params;
-    const { name, email, password, hasSalesAccess } = req.body;
+    const { name, email, password, phone, hasSalesAccess } = req.body;
 
     const existingHomeowner = await prisma.user.findFirst({
       where: {
@@ -219,30 +220,37 @@ export const updateHomeowner = async (req, res) => {
       }
     }
 
-    // 1. Find corresponding Supabase Auth user
-    const supabaseAdmin = getSupabaseAdmin();
-    const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-    const supabaseUser = usersData.users.find(u => u.email === existingHomeowner.email);
+    // 1. Sign-in credentials live in Supabase; everything else is ours alone.
+    // Editing only a phone number or a display detail must not depend on
+    // Supabase being reachable, and must not pay for a full listUsers() scan.
+    const emailChanging = Boolean(email && email !== existingHomeowner.email);
+    const touchesAuth = emailChanging || Boolean(password) || Boolean(name);
 
-    if (supabaseUser) {
-      const updateData = {};
-      if (email) updateData.email = email;
-      if (name) updateData.user_metadata = { name };
-      if (password) {
-        if (password.length < 8) {
-          return res.status(400).json({ message: "Password must be at least 8 characters" });
+    if (touchesAuth) {
+      const supabaseAdmin = getSupabaseAdmin();
+      const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
+      const supabaseUser = usersData.users.find(u => u.email === existingHomeowner.email);
+
+      if (supabaseUser) {
+        const updateData = {};
+        if (email) updateData.email = email;
+        if (name) updateData.user_metadata = { name };
+        if (password) {
+          if (password.length < 8) {
+            return res.status(400).json({ message: "Password must be at least 8 characters" });
+          }
+          updateData.password = password;
         }
-        updateData.password = password;
-      }
 
-      if (Object.keys(updateData).length > 0) {
-        const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
-          supabaseUser.id,
-          updateData
-        );
-        if (authError) {
-          console.error("[Homeowner] Supabase auth update error:", authError);
-          return res.status(400).json({ message: authError.message || "Failed to update authentication account" });
+        if (Object.keys(updateData).length > 0) {
+          const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+            supabaseUser.id,
+            updateData
+          );
+          if (authError) {
+            console.error("[Homeowner] Supabase auth update error:", authError);
+            return res.status(400).json({ message: authError.message || "Failed to update authentication account" });
+          }
         }
       }
     }
@@ -252,6 +260,9 @@ export const updateHomeowner = async (req, res) => {
     if (name) dbUpdateData.name = name;
     if (email) dbUpdateData.email = email;
     if (password) dbUpdateData.password = await bcrypt.hash(password, 10);
+    // Phone lives only in our own table — Supabase auth is not involved, and an
+    // empty string is a deliberate "clear it" rather than "leave it alone".
+    if (phone !== undefined) dbUpdateData.phone = String(phone).trim().slice(0, 40) || null;
 
     // Sales workspace access for a homeowner (SRS 4.12). Only a builder admin
     // may grant it — staff can edit homeowner details but not widen access.
@@ -284,6 +295,7 @@ export const updateHomeowner = async (req, res) => {
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         hasSalesAccess: true,
         createdAt: true,

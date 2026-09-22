@@ -110,7 +110,10 @@ export default function KnowledgeBasePage() {
       }
 
       if (commsRes.ok) {
-        setCommunities(await commsRes.json());
+        // The endpoint now returns { communities, types, maxHomes }; older
+        // deployments returned a bare array.
+        const payload = await commsRes.json();
+        setCommunities(Array.isArray(payload) ? payload : (payload.communities ?? []));
       }
     } catch (error) {
       console.error("Failed to load data:", error);

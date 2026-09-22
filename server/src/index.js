@@ -42,6 +42,7 @@ import homeownersRouter from "./routes/homeowners.js";
 import usersRouter from "./routes/users.js";
 import notificationsRouter from "./routes/notifications.js";
 import ticketAppointmentsRouter from "./routes/ticket-appointments.js";
+import ticketSchedulingRouter from "./routes/ticket-scheduling.js";
 import deadLetterRouter from "./routes/dead-letter.js";
 import privacyRouter from "./routes/privacy.js";
 import salesAgentRouter from "./routes/sales-agent.js";
@@ -75,6 +76,7 @@ import { salesforceSyncCron } from "./inngest/functions/salesforce-cron.js";
 import { ticketReminders } from "./inngest/functions/ticket-reminders.js";
 import { warrantyConversationRetention } from "./inngest/functions/warranty-conversation-retention.js";
 import { ticketAppointmentReminders } from "./inngest/functions/appointment-reminders.js";
+import { bookingNudges } from "./inngest/functions/booking-nudges.js";
 
 assertEncryptionKeyOnBoot();
 assertWebhookSecretOnBoot();
@@ -177,6 +179,10 @@ app.use("/api/webhooks/warranty", warrantyWebhooksRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/notifications", ...warrantyGuard, notificationsRouter);
 app.use("/api/ticket-appointments", ...warrantyGuard, ticketAppointmentsRouter);
+// Homeowner self-service booking. Mounted WITHOUT warrantyGuard on purpose:
+// these are opened from an email link by someone who has no account, and the
+// token in the URL is what authorises them.
+app.use("/api/ticket-scheduling", ticketSchedulingRouter);
 app.use(
   "/api/inngest",
   serve({
@@ -199,6 +205,7 @@ app.use(
       salesforceSyncCron,
       ticketReminders,
       ticketAppointmentReminders,
+      bookingNudges,
       warrantyConversationRetention,
     ],
   }),

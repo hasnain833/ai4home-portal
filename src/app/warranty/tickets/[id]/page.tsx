@@ -11,12 +11,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   ArrowLeft,
   User,
   Calendar,
-  RefreshCcw,
+  UserCheck,
   Loader2,
   Sparkles,
   ThumbsUp,
@@ -24,6 +32,8 @@ import {
   FileText,
   Wrench,
   Mail,
+  Phone,
+  Pencil,
   MapPin,
   ShieldCheck,
   AlertTriangle,
@@ -33,7 +43,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { toast } from "sonner";
 
 type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
-type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
 
 /** One knowledge-base document the agent drew on, as buildKbReferences stores it. */
 type KbReference = {
@@ -45,6 +55,7 @@ type KbReference = {
 
 type TicketDetailData = {
   id: string;
+  homeownerId?: string | null;
   status: TicketStatus;
   priority: TicketPriority;
   createdAt: string;
@@ -58,9 +69,17 @@ type TicketDetailData = {
   extractedInfo?: string | null;
   kbReferences?: string | null;
   homeowner?: {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
+  assignedStaff?: {
+    id: string;
     name?: string | null;
     email?: string | null;
   } | null;
+  nextVisitAt?: string | null;
   property?: {
     address?: string | null;
     city?: string | null;
@@ -73,7 +92,6 @@ type TicketDetailData = {
 
 type DiagnosticInfo = Record<string, string>;
 
-const statusFlow: TicketStatus[] = ["OPEN", "DISPATCHED", "RESOLVED"];
 const statusLabels: Record<TicketStatus, string> = {
   OPEN: "Open",
   DISPATCHED: "Dispatched",
@@ -137,6 +155,11 @@ function isRedundantDiagnosticField(key: string, value: string, ticket: TicketDe
   if (["description", "details", "summary"].includes(normalizedKey)) {
     return ticket.description?.trim().toLowerCase() === normalizedValue;
   }
+  // How the classifier reached its answer ("model", "heuristic") is internal
+  // plumbing — it tells staff nothing they can act on.
+  if (["classifiedby", "classifier", "classificationsource"].includes(normalizedKey)) {
+    return true;
+  }
 
   return false;
 }
@@ -197,6 +220,11 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
     text: "text-rose-700 dark:text-rose-400",
     border: "border-rose-200 dark:border-rose-900/50",
   },
+  HAPPY: {
+    bg: "bg-teal-50 dark:bg-teal-950/20",
+    text: "text-teal-700 dark:text-teal-400",
+    border: "border-teal-200 dark:border-teal-900/50",
+  },
 };
 
 export default function TicketDetail() {
@@ -204,7 +232,10 @@ export default function TicketDetail() {
   const { user } = useAuth();
   const [ticket, setTicket] = useState<TicketDetailData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState(false);
+  const [savingField, setSavingField] = useState<"status" | "priority" | null>(null);
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [savingPhone, setSavingPhone] = useState(false);
   const [draftResponse, setDraftResponse] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
   const [isProcessingDraft, setIsProcessingDraft] = useState(false);
@@ -230,31 +261,64 @@ export default function TicketDetail() {
     fetchTicket();
   }, [id]);
 
-  const getNextStatus = (current: TicketStatus) => {
-    const index = statusFlow.indexOf(current);
-    return statusFlow[(index + 1) % statusFlow.length];
-  };
-
-  const handleAdvanceStatus = async () => {
+  // Manual overrides, for correcting a ticket that went the wrong way. Dispatch
+  // is still the normal route out of OPEN — the server refuses a manual move to
+  // DISPATCHED unless somebody is already assigned.
+  const handleFieldChange = async (field: "status" | "priority", value: string) => {
     if (!ticket) return;
-    const nextStatus = getNextStatus(ticket.status);
-    setUpdating(true);
+    const previous = ticket;
+    setSavingField(field);
+    // Optimistic: the select should not snap back while the request is in flight.
+    setTicket((prev) => (prev ? { ...prev, [field]: value } : prev));
     try {
-      await apiFetch(`/api/tickets/${id}`, {
+      const updated = await apiFetch<TicketDetailData>(`/api/tickets/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({ [field]: value }),
       });
-      setTicket((prev) => prev ? { ...prev, status: nextStatus } : prev);
+      // The server may change more than was asked — resolving stamps HAPPY,
+      // reopening drops the assignee — so take its version, not ours.
+      setTicket((prev) => (prev ? { ...prev, ...updated } : prev));
+      toast.success(
+        field === "status" ? `Moved to ${statusLabels[value as TicketStatus]}.` : "Priority updated.",
+      );
     } catch (error) {
-      console.error("Error updating ticket:", error);
+      setTicket(previous);
       toast.error(
-        error instanceof ApiError
-          ? error.message
-          : "Failed to update ticket status. Please try again.",
+        error instanceof ApiError ? error.message : `Could not update the ${field}.`,
       );
     } finally {
-      setUpdating(false);
+      setSavingField(null);
+    }
+  };
+
+  const startEditingPhone = () => {
+    setPhoneDraft(ticket?.homeowner?.phone || "");
+    setEditingPhone(true);
+  };
+
+  const savePhone = async () => {
+    if (!ticket?.homeownerId) return;
+    const next = phoneDraft.trim();
+    setSavingPhone(true);
+    try {
+      await apiFetch(`/api/homeowners/${ticket.homeownerId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        // An empty string clears it, which the server reads as "set to null".
+        body: JSON.stringify({ phone: next }),
+      });
+      setTicket((prev) =>
+        prev ? { ...prev, homeowner: { ...prev.homeowner, phone: next || null } } : prev,
+      );
+      setEditingPhone(false);
+      toast.success(next ? "Phone number saved." : "Phone number cleared.");
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError ? error.message : "Could not save the phone number.",
+      );
+    } finally {
+      setSavingPhone(false);
     }
   };
 
@@ -333,7 +397,7 @@ export default function TicketDetail() {
 
   const st = statusStyles[ticket.status as TicketStatus] || statusStyles.OPEN;
   const pr = priorityStyles[ticket.priority as TicketPriority] || priorityStyles.MEDIUM;
-  const nextStatus = getNextStatus(ticket.status);
+  const canManage = user?.role === "admin" || user?.role === "staff";
   const diagnosticInfo = parseDiagnosticInfo(ticket.extractedInfo);
   const duration = getDiagnosticValue(diagnosticInfo, ["duration", "timing", "timeframe", "time", "howLong"]);
   const additionalIssueDetails = diagnosticInfo
@@ -515,6 +579,7 @@ export default function TicketDetail() {
               <TicketAppointments
                 ticketId={String(id)}
                 canSchedule={user?.role === "admin" || user?.role === "staff"}
+                ticketClosed={ticket.status === "RESOLVED"}
               />
 
               {/* Warranty Agent Conversation Summary */}
@@ -627,6 +692,64 @@ export default function TicketDetail() {
                             <Mail className="h-3 w-3 shrink-0" /> N/A
                           </span>
                         )}
+
+                        {editingPhone ? (
+                          <div className="flex items-center gap-1.5 pt-1">
+                            <Input
+                              value={phoneDraft}
+                              onChange={(e) => setPhoneDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") void savePhone();
+                                if (e.key === "Escape") setEditingPhone(false);
+                              }}
+                              placeholder="e.g. (555) 010-4477"
+                              autoFocus
+                              className="h-7 text-xs"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={savePhone}
+                              disabled={savingPhone}
+                              className="h-7 px-2 text-xs"
+                            >
+                              {savingPhone ? "…" : "Save"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setEditingPhone(false)}
+                              className="h-7 px-2 text-xs"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            {ticket.homeowner?.phone ? (
+                              <a
+                                href={`tel:${ticket.homeowner.phone}`}
+                                className="text-xs text-[#b48c3c] hover:underline flex items-center gap-1 min-w-0"
+                              >
+                                <Phone className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{ticket.homeowner.phone}</span>
+                              </a>
+                            ) : (
+                              <span className="text-xs text-slate-400 flex items-center gap-1">
+                                <Phone className="h-3 w-3 shrink-0" /> No phone number
+                              </span>
+                            )}
+                            {canManage && (
+                              <button
+                                onClick={startEditingPhone}
+                                className="text-slate-400 hover:text-[#b48c3c] transition"
+                                aria-label={ticket.homeowner?.phone ? "Edit phone number" : "Add phone number"}
+                                title={ticket.homeowner?.phone ? "Edit" : "Add"}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -671,38 +794,113 @@ export default function TicketDetail() {
                 </CardContent>
               </Card>
 
-              {/* Action Control Center Card */}
+              {/* Assignment — read-only. Status moves and dispatching happen from
+                  the quick actions on the tickets list. */}
               <Card className="border-slate-200/60 dark:border-slate-800/60 shadow-xs bg-white/70 dark:bg-slate-900/60 backdrop-blur-md overflow-hidden">
                 <CardHeader className="border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 py-4 px-6 flex flex-row items-center gap-3">
                   <div className="p-2 bg-[#0F3B3D]/10 dark:bg-[#0f3b3d]/30 text-[#0F3B3D] dark:text-[#a0c5c7] rounded-lg">
-                    <RefreshCcw className="h-5 w-5" />
+                    <UserCheck className="h-5 w-5" />
                   </div>
                   <div>
-                    <CardTitle className="text-base font-bold">Update Status</CardTitle>
-                    <CardDescription className="text-[11px]">Advance ticket lifecycle</CardDescription>
+                    <CardTitle className="text-base font-bold">Assignment</CardTitle>
+                    <CardDescription className="text-[11px]">Who is handling this ticket</CardDescription>
                   </div>
                 </CardHeader>
                 <CardContent className="p-6 space-y-4">
+                  {canManage ? (
+                    <div className="grid grid-cols-1 gap-3">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                          Status
+                        </label>
+                        <Select
+                          value={ticket.status}
+                          onValueChange={(v) => handleFieldChange("status", v)}
+                          disabled={savingField !== null}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(["OPEN", "DISPATCHED", "RESOLVED"] as TicketStatus[]).map((v) => (
+                              <SelectItem key={v} value={v}>
+                                {statusLabels[v]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                          Priority
+                        </label>
+                        <Select
+                          value={ticket.priority}
+                          onValueChange={(v) => handleFieldChange("priority", v)}
+                          disabled={savingField !== null}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(["LOW", "MEDIUM", "HIGH", "URGENT", "HAPPY"] as TicketPriority[]).map(
+                              (v) => (
+                                <SelectItem key={v} value={v}>
+                                  {v.charAt(0) + v.slice(1).toLowerCase()}
+                                </SelectItem>
+                              ),
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/30 p-4">
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Current Status</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-200">{statusLabels[ticket.status]}</p>
+                    </div>
+                  )}
+
                   <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/30 p-4">
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Current Status</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-200">{statusLabels[ticket.status]}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Assigned Staff</p>
+                    {ticket.assignedStaff ? (
+                      <div className="mt-2 flex items-start gap-3">
+                        <div className="h-9 w-9 bg-[#0F3B3D] text-white rounded-full flex items-center justify-center font-extrabold text-xs shrink-0">
+                          {(ticket.assignedStaff.name || ticket.assignedStaff.email || "S").slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">
+                            {ticket.assignedStaff.name || "Staff member"}
+                          </p>
+                          {ticket.assignedStaff.email && (
+                            <a
+                              href={`mailto:${ticket.assignedStaff.email}`}
+                              className="text-xs text-[#b48c3c] hover:underline flex items-center gap-1 min-w-0"
+                            >
+                              <Mail className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{ticket.assignedStaff.email}</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                        Not assigned yet.
+                      </p>
+                    )}
                   </div>
 
-                  <Button
-                    onClick={handleAdvanceStatus}
-                    disabled={updating}
-                    className="w-full bg-[#0F3B3D] hover:bg-[#0F3B3D]/95 text-white font-semibold shadow-xs py-2 rounded-xl transition duration-150"
-                  >
-                    {updating ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCcw className="mr-2 h-4 w-4" />
-                    )}
-                    Move to {statusLabels[nextStatus]}
-                  </Button>
-
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Priority stays {ticket.priority.toLowerCase()}.
+                    {canManage && ticket.status === "OPEN" && !ticket.assignedStaff
+                      ? "Moving straight to Dispatched needs an assignee — use Dispatch on the tickets list to pick one and send the booking link."
+                      : ticket.status === "OPEN"
+                      ? "Dispatch this ticket from the tickets list to assign a staff member and send the homeowner a booking link."
+                      : ticket.status === "DISPATCHED"
+                        ? ticket.nextVisitAt
+                          ? "Mark it resolved from the tickets list once the work is done."
+                          : "Waiting on the homeowner to pick a time from their booking link."
+                        : "This ticket is closed."}
                   </p>
                 </CardContent>
               </Card>

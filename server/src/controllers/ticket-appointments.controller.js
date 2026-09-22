@@ -115,9 +115,18 @@ export const updateAppointment = async (req, res) => {
 
     const existing = await prisma.ticketAppointment.findUnique({
       where: { id: req.params.id },
+      include: { ticket: { select: { status: true } } },
     });
     if (!existing || existing.companyId !== session.companyId) {
       return res.status(404).json({ message: "Appointment not found" });
+    }
+
+    // A resolved claim is closed for good, and so is its schedule. The card
+    // hides these controls, but the rule belongs here too.
+    if (existing.ticket?.status === "RESOLVED") {
+      return res.status(400).json({
+        message: "This claim is resolved — its visits can no longer be changed.",
+      });
     }
 
     const { scheduledAt, durationMinutes, status, tradeName, tradeEmail, location, notes } =
@@ -134,8 +143,7 @@ export const updateAppointment = async (req, res) => {
       }
       data.scheduledAt = when;
       // A new time deserves a fresh set of reminders.
-      data.reminder24Sent = false;
-      data.reminder1Sent = false;
+      data.remindersSent = [];
     }
 
     if (status !== undefined) {
@@ -160,7 +168,7 @@ export const updateAppointment = async (req, res) => {
     const rescheduled = data.scheduledAt && appointment.status === "SCHEDULED";
 
     if (nowCancelled) result = await notifyAppointmentCancelled(appointment.id);
-    else if (rescheduled) result = await notifyAppointmentScheduled(appointment.id);
+    else if (rescheduled) result = await notifyAppointmentScheduled(appointment.id, { rescheduled: true });
 
     const notice = result.emailConfigured === false ? NOT_CONFIGURED_NOTICE : null;
     return res.json(notice ? { ...appointment, notice } : appointment);

@@ -38,6 +38,11 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  CommunitiesPanel,
+  COMMUNITY_TYPE_LABELS,
+  type CommunityInfo,
+} from "@/components/warranty/CommunitiesPanel";
 
 interface HomeownerInfo {
   name: string | null;
@@ -50,12 +55,18 @@ interface Property {
   city: string | null;
   state: string | null;
   zipCode: string | null;
-  areaOfHome: string | null;
   units: number | null;
   coeDate: string | null;
   coverageTerm: string | null;
   homeownerId: string;
   homeowner?: HomeownerInfo;
+  communityId: string | null;
+  community?: {
+    id: string;
+    name: string;
+    type: CommunityInfo["type"];
+    color: string;
+  } | null;
   createdAt: string;
 }
 
@@ -64,6 +75,8 @@ interface HomeownerSelect {
   name: string | null;
   email: string;
 }
+
+
 
 const staggerContainer = {
   hidden: { opacity: 0 },
@@ -84,10 +97,10 @@ const EMPTY_FORM = {
   city: "",
   stateVal: "",
   zipCode: "",
-  areaOfHome: "",
   units: "",
   coeDate: "",
   homeownerId: "",
+  communityId: "",
 };
 
 export default function PropertiesPage() {
@@ -97,6 +110,9 @@ export default function PropertiesPage() {
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [homeowners, setHomeowners] = useState<HomeownerSelect[]>([]);
+  const [communities, setCommunities] = useState<CommunityInfo[]>([]);
+  const [maxHomes, setMaxHomes] = useState(50);
+  const [communityFilter, setCommunityFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -131,6 +147,18 @@ export default function PropertiesPage() {
     }
   };
 
+  const fetchCommunities = async () => {
+    try {
+      const res = await fetch("/api/communities");
+      if (!res.ok) return;
+      const payload = await res.json();
+      setCommunities(payload.communities ?? []);
+      if (payload.maxHomes) setMaxHomes(payload.maxHomes);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const fetchHomeowners = async () => {
     try {
       const res = await fetch("/api/users?role=homeowner");
@@ -140,9 +168,19 @@ export default function PropertiesPage() {
     }
   };
 
+  // Kicked off inside the effect and guarded, so the effect body never sets
+  // state synchronously and a slow response cannot land after unmount.
   useEffect(() => {
-    fetchProperties();
-    if (canManage) fetchHomeowners();
+    let cancelled = false;
+    const run = async () => {
+      await fetchProperties();
+      if (cancelled || !canManage) return;
+      await Promise.all([fetchHomeowners(), fetchCommunities()]);
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [canManage]);
 
   const openAddModal = () => {
@@ -159,10 +197,10 @@ export default function PropertiesPage() {
       city: p.city || "",
       stateVal: p.state || "",
       zipCode: p.zipCode || "",
-      areaOfHome: p.areaOfHome || "",
       units: p.units != null ? String(p.units) : "",
       coeDate: p.coeDate ? new Date(p.coeDate).toISOString().split("T")[0] : "",
       homeownerId: p.homeownerId,
+      communityId: p.communityId || "",
     });
     setFormError("");
     setIsModalOpen(true);
@@ -192,15 +230,21 @@ export default function PropertiesPage() {
       return;
     }
 
+    if (!form.communityId) {
+      setFormError("Please choose a community — every home belongs to one.");
+      setSubmitting(false);
+      return;
+    }
+
     const body = {
       address: form.address,
       city: form.city || null,
       state: form.stateVal || null,
       zipCode: form.zipCode || null,
-      areaOfHome: form.areaOfHome || null,
       units: form.units || null,
       coeDate: form.coeDate || null,
       homeownerId: form.homeownerId || undefined,
+      communityId: form.communityId,
     };
 
     try {
@@ -229,6 +273,8 @@ export default function PropertiesPage() {
           showToast("Property registered successfully!");
         }
         closeModal();
+        // A home moving in or out changes the n/50 counts.
+        void fetchCommunities();
       } else {
         const err = await res.json();
         setFormError(err.message || "Failed to save property.");
@@ -249,6 +295,7 @@ export default function PropertiesPage() {
         setProperties((prev) => prev.filter((p) => p.id !== deleteTarget.id));
         showToast("Property deleted.");
         setDeleteTarget(null);
+        void fetchCommunities();
       }
     } catch (e) {
       console.error(e);
@@ -270,13 +317,19 @@ export default function PropertiesPage() {
     };
   };
 
+  // One home per homeowner, so anyone who already has one is not offered again.
+  const takenHomeownerIds = new Set(properties.map((p) => p.homeownerId));
+  const homeownersWithoutHome = homeowners.filter((h) => !takenHomeownerIds.has(h.id));
+
   const filteredProperties = properties.filter((p) => {
     const q = searchQuery.toLowerCase();
-    return (
+    const matchesSearch =
       p.address.toLowerCase().includes(q) ||
       (p.city && p.city.toLowerCase().includes(q)) ||
-      (p.homeowner?.name && p.homeowner.name.toLowerCase().includes(q))
-    );
+      (p.community?.name && p.community.name.toLowerCase().includes(q)) ||
+      (p.homeowner?.name && p.homeowner.name.toLowerCase().includes(q));
+    const matchesCommunity = communityFilter === "all" || p.communityId === communityFilter;
+    return matchesSearch && matchesCommunity;
   });
 
   return (
@@ -398,14 +451,40 @@ export default function PropertiesPage() {
           ) : (
             // ADMIN / STAFF TABLE WITH CRUD
             <motion.div variants={fadeInUp} className="space-y-4">
-              <div className="relative">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="Search properties by address, homeowner name, or city..."
-                  className="pl-10"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
+              <CommunitiesPanel
+                communities={communities}
+                maxHomes={maxHomes}
+                onChanged={fetchCommunities}
+                onImported={() => {
+                  void fetchProperties();
+                  void fetchCommunities();
+                }}
+                showToast={showToast}
+              />
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    placeholder="Search by address, community, homeowner name, or city..."
+                    className="pl-10"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+                <Select value={communityFilter} onValueChange={setCommunityFilter}>
+                  <SelectTrigger className="sm:w-64">
+                    <SelectValue placeholder="All communities" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All communities</SelectItem>
+                    {communities.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} ({c.homeCount}/{maxHomes})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <Card className="overflow-hidden">
@@ -415,8 +494,8 @@ export default function PropertiesPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Property Address</TableHead>
+                          <TableHead>Community</TableHead>
                           <TableHead>City &amp; Zip</TableHead>
-                          <TableHead>Area</TableHead>
                           <TableHead>Units</TableHead>
                           <TableHead>Homeowner</TableHead>
                           <TableHead>Coverage Term</TableHead>
@@ -434,11 +513,26 @@ export default function PropertiesPage() {
                                   {p.address}
                                 </div>
                               </TableCell>
+                              <TableCell>
+                                {p.community ? (
+                                  <div className="flex flex-col">
+                                    <span className="flex items-center gap-1.5 font-medium text-gray-700 dark:text-slate-200">
+                                      <span
+                                        className="h-2 w-2 rounded-full shrink-0"
+                                        style={{ backgroundColor: p.community.color }}
+                                      />
+                                      {p.community.name}
+                                    </span>
+                                    <span className="text-xs text-gray-400 dark:text-slate-400">
+                                      {COMMUNITY_TYPE_LABELS[p.community.type]}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-amber-600">Unassigned</span>
+                                )}
+                              </TableCell>
                               <TableCell className="text-gray-500 dark:text-slate-400">
                                 {p.city || "N/A"}{p.zipCode ? `, ${p.zipCode}` : ""}
-                              </TableCell>
-                              <TableCell className="text-gray-500 dark:text-slate-400 whitespace-nowrap">
-                                {p.areaOfHome ? `${p.areaOfHome} sq ft` : "N/A"}
                               </TableCell>
                               <TableCell className="text-gray-500 dark:text-slate-400">
                                 {p.units ?? "N/A"}
@@ -536,15 +630,50 @@ export default function PropertiesPage() {
                             <SelectValue placeholder="Select homeowner..." />
                           </SelectTrigger>
                           <SelectContent>
-                            {homeowners.map((h) => (
+                            {(editingProperty ? homeowners : homeownersWithoutHome).map((h) => (
                               <SelectItem key={h.id} value={h.id}>
                                 {h.name || h.email} — {h.email}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
+                        {!editingProperty && homeownersWithoutHome.length === 0 && (
+                          <p className="text-xs text-amber-600">
+                            Every homeowner already has a home. A homeowner can only have one.
+                          </p>
+                        )}
                       </div>
                     )}
+
+                    <div className="space-y-1.5">
+                      <Label className="font-semibold">Community</Label>
+                      <Select
+                        value={form.communityId}
+                        onValueChange={(val) => setForm((f) => ({ ...f, communityId: val }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select community..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {communities.map((c) => {
+                            // A full community stays visible but unselectable,
+                            // unless this home is already in it.
+                            const full = c.isFull && editingProperty?.communityId !== c.id;
+                            return (
+                              <SelectItem key={c.id} value={c.id} disabled={full}>
+                                {c.name} — {COMMUNITY_TYPE_LABELS[c.type]} ({c.homeCount}/{maxHomes}
+                                {full ? ", full" : ""})
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {communities.length === 0 && (
+                        <p className="text-xs text-amber-600">
+                          No communities yet — add one under Communities above.
+                        </p>
+                      )}
+                    </div>
 
                     <div className="space-y-1.5">
                       <Label htmlFor="address" className="font-semibold">Street Address</Label>
@@ -589,18 +718,6 @@ export default function PropertiesPage() {
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="areaOfHome" className="font-semibold">Area of Home</Label>
-                        <Input
-                          id="areaOfHome"
-                          placeholder="e.g. 2,500 sq ft"
-                          value={form.areaOfHome}
-                          onChange={(e) => setForm((f) => ({ ...f, areaOfHome: e.target.value }))}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
                         <Label htmlFor="units" className="font-semibold">No. of Units</Label>
                         <Input
                           id="units"
@@ -612,6 +729,9 @@ export default function PropertiesPage() {
                           onChange={(e) => setForm((f) => ({ ...f, units: e.target.value }))}
                         />
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label htmlFor="coeDate" className="font-semibold">COE Date (Warranty Activation)</Label>
                         <div className="relative">

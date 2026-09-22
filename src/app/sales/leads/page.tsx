@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -51,7 +52,7 @@ import {
   Save,
   AlertTriangle,
   Filter,
-  X
+  X,
 } from "lucide-react";
 
 type SegmentFilter = {
@@ -93,6 +94,7 @@ interface Lead {
 const ITEMS_PER_PAGE = 25;
 
 export default function LeadsPage() {
+  const router = useRouter();
   const { user } = useAuth();
   // The Leads page itself is open to any staff member; importing is not.
   const canImportCsv = hasSalesPermission(user, SALES_PERMISSION.csvUpload);
@@ -852,7 +854,11 @@ export default function LeadsPage() {
                     <TableBody>
                       {/* `leads` is already exactly one page from the server. */}
                       {leads.map((lead) => (
-                        <TableRow key={lead.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition border-b border-border/30">
+                        <TableRow
+                          key={lead.id}
+                          onClick={() => router.push(`/sales/leads/${lead.id}`)}
+                          className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition border-b border-border/30 cursor-pointer"
+                        >
                           <TableCell className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200 align-middle">
                             <div>
                               <p className="text-sm font-semibold">{lead.firstName} {lead.lastName}</p>
@@ -883,7 +889,11 @@ export default function LeadsPage() {
                             </div>
                           </TableCell>
                           <TableCell className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300 font-medium align-middle">{lead.owner?.name || "Unassigned"}</TableCell>
-                          <TableCell className="py-3 px-4 text-right pr-6 space-x-1 align-middle">
+                          <TableCell
+                            className="py-3 px-4 text-right pr-6 space-x-1 align-middle"
+                            // The row navigates, so the delete button must not.
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <Button variant="ghost" size="sm" onClick={() => setLeadToDelete(lead.id)} className="text-red-500 hover:bg-red-500/10 text-xs px-2">
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>

@@ -103,6 +103,69 @@ export const getLeads = async (req, res) => {
   }
 };
 
+/**
+ * One lead, with everything the detail page shows: who owns it, the visits
+ * booked against it, and which campaigns it is enrolled in.
+ */
+export const getLead = async (req, res) => {
+  try {
+    const companyId = req.user.companyId;
+
+    const lead = await prisma.lead.findFirst({
+      // companyId in the filter, so an id from another tenant is a 404 rather
+      // than a leak.
+      where: { id: req.params.id, companyId },
+      include: {
+        owner: { select: { id: true, name: true, email: true } },
+        appointments: {
+          orderBy: { time: "asc" },
+          select: {
+            id: true,
+            title: true,
+            time: true,
+            endTime: true,
+            durationMinutes: true,
+            status: true,
+            locationType: true,
+            meetingLink: true,
+            notes: true,
+          },
+        },
+        campaignEnrollments: {
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            campaign: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Homeowners with sales access only ever see their own leads.
+    if (req.user.role.toUpperCase() === "HOMEOWNER" && lead.ownerId !== req.user.id) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const agents = await prisma.user.findMany({
+      where: { companyId, role: { in: ["ADMIN", "STAFF"] } },
+      select: { id: true, name: true, email: true },
+      orderBy: { name: "asc" },
+    });
+
+    return res.json({ lead, agents, statuses: DEFAULT_LEAD_STATUSES });
+  } catch (error) {
+    console.error("Fetch lead error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const createLead = async (req, res) => {
   try {
     const {
@@ -401,6 +464,7 @@ export const updateLead = async (req, res) => {
       state,
       zipCode,
       status,
+      ownerId,
       tags,
       emailOptIn,
       smsOptIn,
@@ -416,6 +480,21 @@ export const updateLead = async (req, res) => {
       return res.status(400).json({ message: "Invalid lead status." });
     }
 
+    // Reassignment is a staff decision, and the new owner has to be someone in
+    // this company who can actually work the lead.
+    if (ownerId !== undefined && ownerId !== null) {
+      if (req.user.role.toUpperCase() === "HOMEOWNER") {
+        return res.status(403).json({ message: "You cannot reassign a lead." });
+      }
+      const agent = await prisma.user.findFirst({
+        where: { id: ownerId, companyId: req.user.companyId, role: { in: ["ADMIN", "STAFF"] } },
+        select: { id: true },
+      });
+      if (!agent) {
+        return res.status(400).json({ message: "That agent is not part of this company." });
+      }
+    }
+
     const updateData = {};
     if (firstName !== undefined) updateData.firstName = firstName;
     if (lastName !== undefined) updateData.lastName = lastName;
@@ -426,6 +505,7 @@ export const updateLead = async (req, res) => {
     if (state !== undefined) updateData.state = state || null;
     if (zipCode !== undefined) updateData.zipCode = zipCode || null;
     if (status !== undefined) updateData.status = status;
+    if (ownerId !== undefined) updateData.ownerId = ownerId || null;
     if (tags !== undefined) updateData.tags = tags;
     if (emailOptIn !== undefined) updateData.emailOptIn = !!emailOptIn;
     if (smsOptIn !== undefined) updateData.smsOptIn = !!smsOptIn;
@@ -453,17 +533,36 @@ export const updateLead = async (req, res) => {
     });
 
     if (status !== undefined && status !== lead.status) {
-      const { inngest } = await import("../lib/inngest.js");
-      await inngest.send({
-        name: "campaign.exit",
-        data: { leadId: id, reason: "STATUS_CHANGE", newStatus: status },
-      });
-      await triggerAutomation({
-        companyId: req.user.companyId,
-        leadId: id,
-        event: "STATUS_CHANGE",
-        context: { newStatus: status, previousStatus: lead.status },
-      });
+      // The lead is already saved. Campaign exit and automations are fan-out
+      // from that fact, so a broker outage must not turn a change that landed
+      // into an error the user sees — same treatment as the Salesforce
+      // write-back below.
+      try {
+        const { inngest } = await import("../lib/inngest.js");
+        await inngest.send({
+          name: "campaign.exit",
+          data: { leadId: id, reason: "STATUS_CHANGE", newStatus: status },
+        });
+      } catch (e) {
+        console.error(
+          `[Lead Update] campaign.exit not queued for ${id}:`,
+          e?.message || e,
+        );
+      }
+
+      try {
+        await triggerAutomation({
+          companyId: req.user.companyId,
+          leadId: id,
+          event: "STATUS_CHANGE",
+          context: { newStatus: status, previousStatus: lead.status },
+        });
+      } catch (e) {
+        console.error(
+          `[Lead Update] STATUS_CHANGE automation not triggered for ${id}:`,
+          e?.message || e,
+        );
+      }
     }
     const writeBack = {};
     if (status !== undefined && status !== lead.status)

@@ -24,6 +24,7 @@ enum TicketPriority {
   MEDIUM
   HIGH
   URGENT
+  HAPPY
 }
 
 model User {
@@ -31,6 +32,7 @@ model User {
   email                 String                 @unique
   password              String
   name                  String?
+  phone                 String?
   avatar                String? 
   role                  Role                   @default(HOMEOWNER)
   companyId             String?
@@ -56,6 +58,8 @@ model User {
   notifications         Notification[]         @relation("UserNotifications")
   homeownerAppointments TicketAppointment[]    @relation("HomeownerTicketAppointments")
   bookedAppointments    TicketAppointment[]    @relation("BookedTicketAppointments")
+  assignedTickets       Ticket[]               @relation("AssignedTickets")
+  staffAvailability     StaffAvailability?     @relation("StaffAvailability")
 }
 
 model Company {
@@ -107,6 +111,7 @@ model Company {
   salesKB                 SalesKB[]
   announcements           Announcement[]
   availabilitySetting     AvailabilitySetting?
+  staffAvailability       StaffAvailability[]
   calendarConnections     CalendarConnection[]
   scrapedNews             ScrapedNews[]
   blogPosts               BlogPost[]
@@ -194,19 +199,22 @@ model Property {
   units                 Int?
   coeDate               DateTime?
   coverageTerm          DateTime?
-  homeownerId           String
+  // One home per homeowner, enforced by the database rather than by hope.
+  homeownerId           String                 @unique
   homeowner             User                   @relation(fields: [homeownerId], references: [id])
   companyId             String?
   company               Company?               @relation(fields: [companyId], references: [id])
-  communityId           String?
-  community             Community?             @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  // Every home belongs to a community. Restrict, not SetNull: a community with
+  // homes in it cannot be deleted out from under them.
+  communityId           String
+  community             Community              @relation(fields: [communityId], references: [id], onDelete: Restrict)
   tickets               Ticket[]
   warrantyConversations WarrantyConversation[]
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 
-  @@index([homeownerId])
   @@index([companyId])
+  @@index([communityId])
 }
 
 model Ticket {
@@ -230,6 +238,10 @@ model Ticket {
   property       Property?      @relation(fields: [propertyId], references: [id])
   companyId      String?
   company        Company?       @relation(fields: [companyId], references: [id])
+  assignedStaffId String?
+  assignedStaff   User?         @relation("AssignedTickets", fields: [assignedStaffId], references: [id])
+  bookingToken    String?       @unique
+  dispatchNotes   String?       @db.Text
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -237,6 +249,7 @@ model Ticket {
   @@index([propertyId])
   @@index([companyId, status])
   @@index([status])
+  @@index([assignedStaffId])
   reminderCount  Int            @default(0)
   lastReminderAt DateTime?
   notifications  Notification[]
@@ -248,6 +261,10 @@ model Community {
   companyId   String
   company     Company                 @relation(fields: [companyId], references: [id])
   name        String
+  // A label only — it does not change how a community behaves. Kept as a
+  // String rather than a Postgres enum so it can be extended without a
+  // hand-written ALTER TYPE. Validated against COMMUNITY_TYPES in code.
+  type        String                  @default("UNIT_HOMES")
   color       String                  @default("#0F3B3D")
   documents   KnowledgeBaseDocument[]
   warrantyKBs WarrantyKB[]
@@ -704,6 +721,25 @@ model AvailabilitySetting {
   updatedAt        DateTime @updatedAt
 }
 
+model StaffAvailability {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation("StaffAvailability", fields: [userId], references: [id], onDelete: Cascade)
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dayStart      String   @default("09:00")
+  dayEnd        String   @default("17:00")
+  bufferMinutes Int      @default(15)
+  slotDuration  Int      @default(60)
+  workingDays   String   @default("Mon,Tue,Wed,Thu,Fri")
+  timezone      String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([companyId])
+}
+
 model CalendarConnection {
   id             String           @id @default(cuid())
   companyId      String
@@ -907,9 +943,6 @@ model WarrantyKB {
   chunkCount  Int               @default(0)
   version     Int               @default(1)
   isActive    Boolean           @default(true)
-  /// Uploaded from the Prompt Lab to test community-scoped retrieval.
-  /// Production retrieval excludes these; only the lab opts in. Defaults to
-  /// false so anything created anywhere else is a real document.
   isSandbox   Boolean           @default(false)
   createdAt   DateTime          @default(now())
   chunks      WarrantyKBChunk[]
@@ -1012,8 +1045,9 @@ model TicketAppointment {
   notes           String?           @db.Text
   createdById     String
   createdBy       User              @relation("BookedTicketAppointments", fields: [createdById], references: [id])
-  reminder24Sent  Boolean           @default(false)
-  reminder1Sent   Boolean           @default(false)
+ rescheduleToken String            @unique @default(uuid())
+  cancelToken     String            @unique @default(uuid())
+   remindersSent   String[]          @default([])
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
