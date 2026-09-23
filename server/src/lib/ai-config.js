@@ -5,6 +5,26 @@ export const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 export const FAST_MODEL = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
 
 
+const EFFORT_UNSUPPORTED = ["haiku", "sonnet-4-5", "opus-4-5", "sonnet-3", "opus-3"];
+
+export function supportsEffort(model) {
+  const id = String(model || "").toLowerCase();
+  if (!id) return false;
+  return !EFFORT_UNSUPPORTED.some((fragment) => id.includes(fragment));
+}
+
+
+export const PHASE_EFFORT = {
+  INTAKE: "low",
+  IDENTIFY: "low",
+  DIAGNOSE: "medium",
+  RESOLVE: "medium",
+};
+
+export function effortForPhase(phase) {
+  return PHASE_EFFORT[phase] || "medium";
+}
+
 export function toFastTier(cfg) {
   if (!cfg?.provider) return cfg;
   if (!FAST_MODEL || FAST_MODEL === cfg.model) return cfg;

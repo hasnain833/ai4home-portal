@@ -3,7 +3,10 @@ import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
 import prisma from "../lib/prisma.js";
-import { createSuperadminSessionToken } from "../lib/superadmin-session.js";
+import {
+  createSuperadminSessionToken,
+  SESSION_COOKIE_OPTIONS,
+} from "../lib/superadmin-session.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
 import { sendSms, smsSent } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
@@ -85,8 +88,6 @@ export const getMe = async (req, res) => {
       ? "VERIFIED"
       : dbUser.company?.verificationStatus || "VERIFIED";
 
-    // The row carries the bcrypt hash and the email-change token hash; neither
-    // may reach the client. pendingEmail/expiry do go out — the UI shows them.
     const {
       password: _password,
       emailChangeTokenHash: _emailChangeTokenHash,
@@ -95,9 +96,6 @@ export const getMe = async (req, res) => {
 
     return res.json({
       ...safeUser,
-      // Resolved server-side so the client never has to work out what a role
-      // implies: an admin gets every permission, staff get exactly what was
-      // granted to them.
       salesPermissions: effectiveSalesPermissions({
         role: isSuperAdmin ? "ADMIN" : dbUser.role,
         isSuperAdmin,
@@ -106,7 +104,6 @@ export const getMe = async (req, res) => {
       hasWarrantyAccess,
       hasSalesAccess,
       verificationStatus,
-      // NFR-S-006: stored as a private storage reference — sign it for display.
       verificationDocUrl: await resolveDownloadUrl(
         dbUser.company?.verificationDocUrl,
       ),
@@ -141,8 +138,6 @@ export const updateProfile = async (req, res) => {
     if (lastActiveWorkspace)
       updateData.lastActiveWorkspace = lastActiveWorkspace;
 
-    // A sign-in email change is not applied inline any more: it has to be
-    // confirmed from the new address first. See requestEmailChange.
     if (email && email.toLowerCase() !== String(req.user.email || "").toLowerCase()) {
       return res.status(400).json({
         message: "Use POST /api/auth/email-change to change your sign-in email — it must be confirmed from the new address.",
@@ -182,8 +177,6 @@ const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 const hashToken = (raw) => crypto.createHash("sha256").update(String(raw)).digest("hex");
 
-// Supabase's admin API has no lookup-by-email, so page through until the address
-// turns up rather than trusting listUsers()' first page to hold every user.
 const findSupabaseUserByEmail = async (supabaseAdmin, email) => {
   const target = String(email).toLowerCase();
   for (let page = 1; page <= 20; page++) {
@@ -197,9 +190,6 @@ const findSupabaseUserByEmail = async (supabaseAdmin, email) => {
   return null;
 };
 
-/// Step 1 of a sign-in email change: park the requested address and mail a
-/// confirmation link to it. Nothing about the account changes here — the current
-/// address keeps working until the new one is confirmed.
 export const requestEmailChange = async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ message: "Unauthorized" });
@@ -228,8 +218,6 @@ export const requestEmailChange = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User profile not found" });
 
     if (!MailService.hasPlatformSender()) {
-      // Refuse rather than parking a change whose confirmation link will never
-      // arrive — the user would be left waiting on an email that cannot be sent.
       return res.status(503).json({
         message:
           "Email is not configured on this deployment, so the confirmation link cannot be sent. " +
@@ -266,7 +254,6 @@ export const requestEmailChange = async (req, res) => {
     });
 
     if (!verify?.success) {
-      // Do not leave a pending change hanging on an email that never went out.
       await prisma.user.update({
         where: { id: user.id },
         data: { pendingEmail: null, emailChangeTokenHash: null, emailChangeExpiresAt: null },
@@ -277,8 +264,6 @@ export const requestEmailChange = async (req, res) => {
         .json({ message: "Could not send the confirmation email. Please try again." });
     }
 
-    // Best-effort heads-up to the address being replaced; its failure must not
-    // undo a change request whose confirmation link already landed.
     try {
       await MailService.sendEmail({
         to: currentEmail,
@@ -307,9 +292,6 @@ export const requestEmailChange = async (req, res) => {
   }
 };
 
-/// Step 2: the link from the new address. Applies the change to Supabase Auth
-/// (the actual sign-in identity) and to the local user row, then bounces the
-/// browser to the login page.
 export const confirmEmailChange = async (req, res) => {
   const redirect = (params) =>
     res.redirect(`${process.env.NEXT_PUBLIC_URL}/login?${new URLSearchParams(params).toString()}`);
@@ -337,16 +319,12 @@ export const confirmEmailChange = async (req, res) => {
 
     const newEmail = user.pendingEmail.toLowerCase();
 
-    // Re-check: the address may have been claimed by someone else since the
-    // change was requested.
     const taken = await prisma.user.findUnique({ where: { email: newEmail } });
     if (taken && taken.id !== user.id) {
       await clearPending();
       return redirect({ emailChange: "taken" });
     }
 
-    // Sign-in lives in Supabase Auth, so that record has to move first — if it
-    // fails, the local row must stay put or the account is locked out.
     const supabaseAdmin = getSupabaseAdmin();
     const supabaseUser = await findSupabaseUserByEmail(supabaseAdmin, user.email);
     if (!supabaseUser) {
@@ -425,14 +403,7 @@ export const superadminLogin = async (req, res) => {
         companyId: null,
       });
 
-      const secureCookie = process.env.NODE_ENV === "production";
-      res.cookie("superadmin_session", token, {
-        httpOnly: true,
-        secure: secureCookie,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 1000,
-      });
+      res.cookie("superadmin_session", token, SESSION_COOKIE_OPTIONS);
 
       return res.json({ message: "Authenticated", isSuperAdmin: true });
     }
@@ -458,14 +429,7 @@ export const superadminLogin = async (req, res) => {
       companyId: dbUser.companyId || null,
     });
 
-    const secureCookie = process.env.NODE_ENV === "production";
-    res.cookie("superadmin_session", token, {
-      httpOnly: true,
-      secure: secureCookie,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 1000,
-    });
+    res.cookie("superadmin_session", token, SESSION_COOKIE_OPTIONS);
 
     return res.json({ message: "Authenticated", isSuperAdmin: true });
   } catch (error) {

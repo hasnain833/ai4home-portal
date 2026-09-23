@@ -1,3 +1,5 @@
+import { priorityLabel } from "../lib/warranty-classify.js";
+
 const COLORS = {
   primary: "#0F3B3D",
   accent: "#b48c3c",
@@ -131,7 +133,7 @@ export const Templates = {
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Ticket</td><td style="padding: 12px 0;">#${ticketId}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Issue</td><td style="padding: 12px 0;">${issueType}</td></tr>
-        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Priority</td><td style="padding: 12px 0;">${priority}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Priority</td><td style="padding: 12px 0;">${priorityLabel(priority)}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Homeowner</td><td style="padding: 12px 0;">${homeownerName}</td></tr>
         <tr><td style="padding: 12px 12px 12px 0; font-weight: 600;">Property</td><td style="padding: 12px 0;">${propertyAddress || "Not specified"}</td></tr>
       </table>
@@ -151,7 +153,7 @@ export const Templates = {
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Ticket</td><td style="padding: 12px 0;">#${ticketId}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Issue</td><td style="padding: 12px 0;">${issueType}</td></tr>
-        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Priority</td><td style="padding: 12px 0;">${priority}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Priority</td><td style="padding: 12px 0;">${priorityLabel(priority)}</td></tr>
         <tr><td style="padding: 12px 12px 12px 0; font-weight: 600;">Homeowner</td><td style="padding: 12px 0;">${homeownerName}</td></tr>
       </table>
       <p>Moving it out of <strong>Open</strong> stops these reminders.</p>
@@ -178,7 +180,7 @@ export const Templates = {
       ["Ticket", `#${ticketId}`],
       ["Issue", issueType],
       ...(ticketCategory ? [["Source", ticketCategory]] : []),
-      ["Priority", priority || "MEDIUM"],
+      ["Priority", priorityLabel(priority || "MEDIUM")],
       ["Warranty year", `Year ${warrantyYear ?? 1}`],
     ];
     const content = `
@@ -278,7 +280,7 @@ export const Templates = {
       ["Ticket", `#${ticketId}`],
       ["Issue", issueType],
       ...(ticketCategory ? [["Source", ticketCategory]] : []),
-      ["Priority", priority || "MEDIUM"],
+      ["Priority", priorityLabel(priority || "MEDIUM")],
       ["Warranty year", `Year ${warrantyYear ?? 1}`],
     ];
     const content = `

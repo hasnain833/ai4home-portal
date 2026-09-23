@@ -93,10 +93,39 @@ export const getProperties = async (req, res) => {
         include: {
           homeowner: { select: { name: true, email: true } },
           community: COMMUNITY_SELECT,
+          // Outstanding means not yet resolved: a dispatched ticket still needs
+          // watching, so it counts the same as an untouched one.
+          _count: {
+            select: { tickets: { where: { status: { not: "RESOLVED" } } } },
+          },
         },
         orderBy: { createdAt: "desc" },
       });
-      return res.json(properties);
+
+      // Tickets the warranty agent never tied to a home sit against the owner
+      // with propertyId null. The per-home ticket list counts them in, so the
+      // badge has to as well or the two disagree.
+      const orphans = await prisma.ticket.groupBy({
+        by: ["homeownerId"],
+        where: {
+          propertyId: null,
+          status: { not: "RESOLVED" },
+          homeowner: { companyId: session.companyId || undefined },
+        },
+        _count: { _all: true },
+      });
+      const orphansByHomeowner = new Map(
+        orphans.map((o) => [o.homeownerId, o._count._all]),
+      );
+
+      return res.json(
+        properties.map(({ _count, ...property }) => ({
+          ...property,
+          openTicketCount:
+            (_count?.tickets ?? 0) +
+            (orphansByHomeowner.get(property.homeownerId) ?? 0),
+        })),
+      );
     }
   } catch (error) {
     console.error("Fetch properties error:", error);

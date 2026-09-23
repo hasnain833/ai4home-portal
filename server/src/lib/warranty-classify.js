@@ -1,13 +1,22 @@
 import { toolCall } from "./llm.js";
 
-// What the classifier may choose, and what a ticket may be filed with.
-export const TICKET_PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+export const TICKET_PRIORITIES = ["NORMAL", "MEDIUM", "HIGH", "URGENT"];
 
-// HAPPY is never assigned by the agent or chosen at creation — a claim only
-// reaches it by being resolved. It is valid to store, so it belongs here and
-// not in the list above.
 export const RESOLVED_PRIORITY = "HAPPY";
 export const STORABLE_PRIORITIES = [...TICKET_PRIORITIES, RESOLVED_PRIORITY];
+
+const PRIORITY_LABELS = {
+  NORMAL: "Normal",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  URGENT: "Urgent",
+  HAPPY: "Happy",
+};
+
+export function priorityLabel(priority) {
+  if (!priority) return "";
+  return PRIORITY_LABELS[priority] || priority;
+}
 
 const EMERGENCY_PATTERNS = [
   /\bgas\s*(leak|smell|odor|odour)\b/i,
@@ -73,8 +82,8 @@ const CLASSIFY_TOOL = {
           "HIGH when something the household depends on daily is unusable: no heat, no cooling, " +
           "no hot water, the only bathroom, power to a main room. " +
           "MEDIUM for a real defect the home can work around while it waits a few days. " +
-          "LOW for cosmetic and minor finish issues: paint, caulk, grout, a squeak, a sticking " +
-          "door, nail pops. Most claims are MEDIUM or LOW — reserve HIGH for a genuine loss of function.",
+          "NORMAL for cosmetic and minor finish issues: paint, caulk, grout, a squeak, a sticking " +
+          "door, nail pops. Most claims are MEDIUM or NORMAL — reserve HIGH for a genuine loss of function.",
       },
       symptom: {
         type: "string",

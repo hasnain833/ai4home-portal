@@ -151,6 +151,10 @@ export default function PortalLayout({
     name.split(" ").map((n) => n[0]).join("").toUpperCase();
   const companyName = user?.companyName || "Aiforhomebuilder";
   const sidebarCompanyName = companyName.trim().split(/\s+/)[0] || companyName;
+  // Notifications are warranty-only: the bell reports on tickets and homeowner
+  // activity, none of which exists in Sales.
+  const showNotifications =
+    workspace === "warranty" && !!user && user.role === "admin";
   const workspaceLabel = workspace === "warranty" ? "Warranty Care" : "Sales Hub";
   const WorkspaceIcon = workspace === "warranty" ? Bot : Layers;
 
@@ -276,7 +280,7 @@ export default function PortalLayout({
 
           {/* Bottom section: notifications + theme toggle + profile */}
           <div className="border-t border-white/10 p-4 space-y-3">
-            {user && user.role === "admin" && (
+            {showNotifications && (
               <NotificationBell
                 expanded={sidebarExpanded}
                 className="text-white/80 hover:bg-white/10 hover:text-white"
@@ -378,7 +382,7 @@ export default function PortalLayout({
             <span className="truncate font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {user && user.role === "admin" && <NotificationBell />}
+            {showNotifications && <NotificationBell />}
             <Button variant="ghost" size="icon" className="shrink-0" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,6 +37,7 @@ import {
   Pencil,
   Trash2,
   AlertTriangle,
+  Ticket as TicketIcon,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -67,6 +69,9 @@ interface Property {
     type: CommunityInfo["type"];
     color: string;
   } | null;
+  // Tickets not yet resolved for this home, dispatched ones included. Absent on
+  // the homeowner's own view of the endpoint.
+  openTicketCount?: number;
   createdAt: string;
 }
 
@@ -91,6 +96,11 @@ const fadeInUp = {
 // Coverage is always one year; the server derives the real end date from the
 // COE date, so this is display only.
 const COVERAGE_TERM_YEARS = 1;
+
+// Scoped ticket view for one home. The address rides along so the chip there can
+// name the home even when it has no tickets to read an address from.
+const ticketsHref = (p: { id: string; address: string }) =>
+  `/warranty/tickets?propertyId=${encodeURIComponent(p.id)}&address=${encodeURIComponent(p.address)}`;
 
 const EMPTY_FORM = {
   address: "",
@@ -499,6 +509,7 @@ export default function PropertiesPage() {
                           <TableHead>Units</TableHead>
                           <TableHead>Homeowner</TableHead>
                           <TableHead>Coverage Term</TableHead>
+                          <TableHead>Tickets</TableHead>
                           <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -548,8 +559,35 @@ export default function PropertiesPage() {
                                   {coverage.endsOn ?? "N/A"}
                                 </Badge>
                               </TableCell>
+                              <TableCell>
+                                {p.openTicketCount ? (
+                                  <Link
+                                    href={ticketsHref(p)}
+                                    title={`View ${p.openTicketCount} open ticket${p.openTicketCount === 1 ? "" : "s"} for ${p.address}`}
+                                    className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-500/25 dark:text-amber-400"
+                                  >
+                                    <TicketIcon className="h-3.5 w-3.5" />
+                                    {p.openTicketCount} open
+                                  </Link>
+                                ) : (
+                                  <span className="text-xs text-gray-400 dark:text-slate-500">
+                                    None open
+                                  </span>
+                                )}
+                              </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex items-center justify-end gap-1">
+                                  <Button
+                                    asChild
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-gray-500 hover:text-[#0F3B3D] hover:bg-[#0F3B3D]/10 dark:text-slate-400 dark:hover:text-[#a0c5c7] dark:hover:bg-[#0F3B3D]/20"
+                                    title="View tickets for this property"
+                                  >
+                                    <Link href={ticketsHref(p)}>
+                                      <TicketIcon className="h-4 w-4" />
+                                    </Link>
+                                  </Button>
                                   <Button
                                     variant="ghost"
                                     size="icon"

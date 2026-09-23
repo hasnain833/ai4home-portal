@@ -1,6 +1,11 @@
 import { supabase } from "../lib/supabase.js";
 import prisma from "../lib/prisma.js";
-import { verifySuperadminSessionToken } from "../lib/superadmin-session.js";
+import {
+  verifySuperadminSessionToken,
+  createSuperadminSessionToken,
+  shouldRenewSuperadminSession,
+  SESSION_COOKIE_OPTIONS,
+} from "../lib/superadmin-session.js";
 import { hasSalesPermission, SALES_PERMISSIONS } from "../lib/permissions.js";
 import { withDbRetry } from "../lib/utils.js";
 
@@ -28,6 +33,19 @@ export async function requireAuth(req, res, next) {
         return res
           .status(401)
           .json({ message: "Unauthorized: Invalid superadmin session" });
+      }
+
+      if (shouldRenewSuperadminSession(payload)) {
+        try {
+          const { exp, ...claims } = payload;
+          res.cookie(
+            "superadmin_session",
+            createSuperadminSessionToken(claims),
+            SESSION_COOKIE_OPTIONS,
+          );
+        } catch (e) {
+          console.error("[Auth Middleware] Session renewal failed:", e.message);
+        }
       }
 
       req.user = {

@@ -1,4 +1,9 @@
-import { resolveAiConfig, recordAiUsage, toFastTier } from "./ai-config.js";
+import {
+  resolveAiConfig,
+  recordAiUsage,
+  toFastTier,
+  supportsEffort,
+} from "./ai-config.js";
 
 export { hasAi as hasLLM, aiUnavailableMessage } from "./ai-config.js";
 
@@ -46,7 +51,10 @@ export async function chat({ companyId, system, user, maxTokens = 700, json = fa
   }
 }
 
-async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature }) {
+async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature, effort }) {
+  const outputConfig =
+    effort && supportsEffort(cfg.model) ? { output_config: { effort } } : {};
+
   const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
     headers: anthropicHeaders(cfg),
@@ -57,6 +65,7 @@ async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTo
       tools: [tool],
       tool_choice: { type: "tool", name: tool.name },
       messages,
+      ...outputConfig,
     }),
   });
   if (!response.ok) {
@@ -83,6 +92,7 @@ export async function toolCall({
   forcePlatformKey = false,
   fast = false,
   temperature,
+  effort,
 }) {
   let cfg = resolveAiConfig();
   if (!cfg.provider) {
@@ -91,7 +101,7 @@ export async function toolCall({
   }
   if (fast) cfg = toFastTier(cfg);
   try {
-    return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature });
+    return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature, effort });
   } catch (err) {
     console.error("[LLM] Anthropic tool exception:", err.message);
     return null;

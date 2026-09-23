@@ -67,11 +67,35 @@ export const getTickets = async (req, res) => {
     } else {
       // Staff and Admin see company-wide tickets
       const homeownerId = req.query.homeownerId;
+      const propertyId = req.query.propertyId;
+
+      // Scoping to one home is not just propertyId: a ticket the warranty agent
+      // could not tie to a home is stored with propertyId null against its
+      // homeowner, and those belong in the home's list too. Property.homeownerId
+      // is unique — one home per owner — so that fallback is exact, never a
+      // ticket from some other house.
+      let propertyScope = {};
+      if (propertyId) {
+        const property = await prisma.property.findFirst({
+          where: { id: propertyId, homeowner: { companyId: session.companyId } },
+          select: { homeownerId: true },
+        });
+        // Unknown id, or one belonging to another company: no tickets, and no
+        // signal about whether the property exists.
+        if (!property) return res.json([]);
+        propertyScope = {
+          OR: [
+            { propertyId },
+            { propertyId: null, homeownerId: property.homeownerId },
+          ],
+        };
+      }
 
       tickets = await prisma.ticket.findMany({
         where: {
           homeowner: { companyId: session.companyId },
           ...(homeownerId ? { homeownerId } : {}),
+          ...propertyScope,
         },
         include: {
           homeowner: {

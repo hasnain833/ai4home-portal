@@ -16,7 +16,14 @@ const publicRoutes = [
   "/blog",
 ];
 
-export async function middleware(request: NextRequest) {
+const EXPECTED_AUTH_ERRORS = new Set([
+  "refresh_token_not_found",
+  "refresh_token_already_used",
+  "session_not_found",
+  "session_missing",
+]);
+
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (
@@ -56,8 +63,13 @@ export async function middleware(request: NextRequest) {
     },
   );
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error && !EXPECTED_AUTH_ERRORS.has(error.code ?? "")) {
+    console.error("[proxy] Unexpected auth error:", error.code, error.message);
+  }
 
   const isPublic =
     publicRoutes.some(
@@ -71,7 +83,7 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse;
   }
 
-  if (!session) {
+  if (!user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", pathname);
     return NextResponse.redirect(loginUrl);

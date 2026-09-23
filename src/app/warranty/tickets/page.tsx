@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -42,6 +42,7 @@ import {
   X,
   Loader2,
   Ticket as TicketIcon,
+  Home,
   Send,
   CalendarClock,
   UserCheck,
@@ -50,7 +51,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 // Types
 type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
-type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
+type TicketPriority = "NORMAL" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
 
 interface Ticket {
   id: string;
@@ -116,7 +117,7 @@ const ISSUE_TYPES = [
 
 // What a ticket can be filed as. HAPPY is not here on purpose — a claim only
 // reaches it by being resolved.
-const PRIORITY_OPTIONS: TicketPriority[] = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+const PRIORITY_OPTIONS: TicketPriority[] = ["NORMAL", "MEDIUM", "HIGH", "URGENT"];
 
 const EMPTY_TICKET_FORM = {
   homeownerId: "",
@@ -184,7 +185,7 @@ const statusStyles: Record<TicketStatus, { bg: string, text: string, border: str
 };
 
 const priorityStyles: Record<TicketPriority, { bg: string, text: string, border: string }> = {
-  LOW: {
+  NORMAL: {
     bg: "bg-slate-50 dark:bg-slate-900/20",
     text: "text-slate-600 dark:text-slate-400",
     border: "border-slate-200 dark:border-slate-800/50",
@@ -211,9 +212,13 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
   },
 };
 
-export default function TicketsPage() {
+function TicketsPageInner() {
   const { user } = useAuth();
   const router = useRouter();
+  // Set when arriving from a Properties row: scopes the list to that one home.
+  // The filter lives in the URL so the view is linkable and survives a reload.
+  const searchParams = useSearchParams();
+  const propertyFilter = searchParams.get("propertyId") || "";
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -253,6 +258,8 @@ export default function TicketsPage() {
       let url = "/api/tickets";
       if (isHomeowner && user?.id) {
         url += `?homeownerId=${user.id}`;
+      } else if (propertyFilter) {
+        url += `?propertyId=${encodeURIComponent(propertyFilter)}`;
       }
       const response = await fetch(url);
       if (response.ok) {
@@ -267,7 +274,7 @@ export default function TicketsPage() {
     } finally {
       setLoading(false);
     }
-  }, [isHomeowner, user?.id]);
+  }, [isHomeowner, user?.id, propertyFilter]);
 
   // Load tickets
   useEffect(() => {
@@ -306,6 +313,14 @@ export default function TicketsPage() {
     () => allProperties.filter((p) => p.homeownerId === createForm.homeownerId),
     [allProperties, createForm.homeownerId],
   );
+
+  // The Properties link carries the address so the chip can name the home even
+  // when it has no tickets to read one from; the ticket data is the fallback if
+  // someone hand-writes the URL with just an id.
+  const scopedPropertyLabel =
+    searchParams.get("address") ||
+    tickets.find((t) => t.property?.address)?.property?.address ||
+    "Selected property";
 
   const filteredTickets = useMemo(() => {
     return tickets.filter((t) => {
@@ -642,6 +657,25 @@ export default function TicketsPage() {
             </div>
           </motion.div>
 
+          {/* Scoped to one home, arrived at from the Properties list. Clearing
+              it drops the query param, which re-fetches the full list. */}
+          {propertyFilter && (
+            <motion.div variants={fadeInUp} className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-muted/60 px-3 py-1.5 text-sm">
+                <Home className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="font-medium">{scopedPropertyLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => router.push("/warranty/tickets")}
+                  aria-label="Show tickets for all properties"
+                  className="rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            </motion.div>
+          )}
+
           {/* Filters Card */}
           <motion.div variants={cardVariants}>
             <Card className="border border-border/80 bg-linear-to-b from-card/85 to-card/50 backdrop-blur-md shadow-xs">
@@ -681,7 +715,7 @@ export default function TicketsPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Priorities</SelectItem>
-                        <SelectItem value="LOW">Low</SelectItem>
+                        <SelectItem value="NORMAL">Normal</SelectItem>
                         <SelectItem value="MEDIUM">Medium</SelectItem>
                         <SelectItem value="HIGH">High</SelectItem>
                         <SelectItem value="URGENT">Urgent</SelectItem>
@@ -1275,5 +1309,21 @@ export default function TicketsPage() {
         </motion.div>
       </PortalLayout>
     </ProtectedRoute>
+  );
+}
+
+// useSearchParams needs a Suspense boundary above it or the page cannot be
+// prerendered at build time — same wrapper the login and sales settings pages use.
+export default function TicketsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <TicketsPageInner />
+    </Suspense>
   );
 }

@@ -38,18 +38,12 @@ export interface User {
   lastSeen?: Date;
   hasWarrantyAccess: boolean;
   hasSalesAccess: boolean;
-  // Resolved by the server: admins hold every permission, staff hold only what
-  // was granted. Absent until /api/auth/me has answered.
   salesPermissions?: string[];
   lastActiveWorkspace?: string;
-  // A sign-in email change that has been requested but not yet confirmed from
-  // the new address. Null once confirmed or cancelled.
   pendingEmail?: string | null;
   emailChangeExpiresAt?: string | null;
-  // Tenant onboarding gate: PENDING | SUBMITTED | VERIFIED
   verificationStatus?: string;
   verificationDocUrl?: string | null;
-  // Signed Platform Services Agreement, reviewed alongside the document above.
   agreementDocUrl?: string | null;
   agreementVersion?: string | null;
 }
@@ -82,16 +76,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
-
   useEffect(() => {
     const originalFetch = window.fetch;
+    let verifying = false;
+
+    const confirmSessionGone = async () => {
+      if (verifying) return;
+      verifying = true;
+      try {
+        const check = await originalFetch("/api/auth/me");
+        if (check.status === 401) setSessionExpired(true);
+      } catch {
+      } finally {
+        verifying = false;
+      }
+    };
+
     window.fetch = async (...args: Parameters<typeof fetch>) => {
       const response = await originalFetch(...args);
       try {
         const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url || "";
         const isApiCall = url.includes("/api/") && !url.includes("/api/auth/me");
         if (response.status === 401 && isApiCall && userRef.current) {
-          setSessionExpired(true);
+          void confirmSessionGone();
         }
       } catch {
       }
@@ -315,6 +322,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return null;
   };
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && userRef.current) {
+        void refreshUser();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   const setOnlineStatus = (status: boolean) => {
     if (user) {

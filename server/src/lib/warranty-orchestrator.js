@@ -1,4 +1,5 @@
 import { toolCall } from "./llm.js";
+import { effortForPhase } from "./ai-config.js";
 import prisma from "./prisma.js";
 import { queryDetailed as kbQueryDetailed } from "../services/warranty-vector.service.js";
 import { getCoverageStatus, COVERAGE } from "./coverage.js";
@@ -515,6 +516,10 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     tool,
     maxTokens: 900,
     temperature: 0.2,
+    // Without this the model deliberates at its "high" default on every single
+    // homeowner message, and they wait through it. Intake and identification are
+    // straightforward; coverage calls keep more room. See PHASE_EFFORT.
+    effort: effortForPhase(currentPhase),
   });
 
   if (!input) {

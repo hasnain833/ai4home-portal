@@ -51,7 +51,7 @@ interface KPIs {
 }
 
 type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
-type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
+type TicketPriority = "NORMAL" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
 
 interface Ticket {
   id: string;
@@ -105,7 +105,7 @@ const priorityStyles: Record<
   TicketPriority,
   { bg: string; text: string; border: string }
 > = {
-  LOW: {
+  NORMAL: {
     bg: "bg-slate-50 dark:bg-slate-900/20",
     text: "text-slate-600 dark:text-slate-400",
     border: "border-slate-200 dark:border-slate-800/50",

@@ -2,7 +2,24 @@ import crypto from "crypto";
 const SECRET = process.env.SESSION_SECRET || "";
 const SECRET_CONFIGURED = SECRET.length >= 16;
 const ALGORITHM = "sha256";
-const DEFAULT_MAX_AGE = 60 * 60 * 24; // 1 day
+const MAX_AGE_DAYS = Number(process.env.SESSION_MAX_AGE_DAYS || 90);
+const DEFAULT_MAX_AGE = 60 * 60 * 24 * MAX_AGE_DAYS;
+const RENEW_AFTER_RATIO = 0.5;
+
+export const SESSION_MAX_AGE_SECONDS = DEFAULT_MAX_AGE;
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  path: "/",
+  maxAge: DEFAULT_MAX_AGE * 1000,
+};
+
+export function shouldRenewSuperadminSession(payload) {
+  if (!payload || typeof payload.exp !== "number") return false;
+  const remaining = payload.exp - Math.floor(Date.now() / 1000);
+  return remaining < DEFAULT_MAX_AGE * RENEW_AFTER_RATIO;
+}
 
 if (!SECRET_CONFIGURED) {
   console.error(

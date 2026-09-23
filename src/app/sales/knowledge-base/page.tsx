@@ -333,7 +333,7 @@ export default function SalesKnowledgeBasePage() {
                   <>
                     <UploadCloud className="h-7 w-7 text-[#b48c3c]" />
                     <p className="text-sm font-medium">Drag & drop files here, or click to browse</p>
-                    <p className="text-[11px] text-muted-foreground">PDF · DOCX · TXT · MD</p>
+                    <p className="text-[11px] text-muted-foreground">PDF · DOCX · XLSX · CSV · TXT · MD</p>
                   </>
                 )}
                 <input

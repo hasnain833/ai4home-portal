@@ -238,7 +238,7 @@ export default function LeadDetailPage() {
   if (loading) {
     return (
       <ProtectedRoute allowedRoles={["admin", "staff"]}>
-        <PortalLayout>
+        <PortalLayout workspace="sales">
           <div className="max-w-7xl mx-auto p-4 md:p-6 space-y-4">
             <div className="h-8 w-56 bg-muted rounded animate-pulse" />
             <div className="h-64 bg-muted rounded-xl animate-pulse" />
@@ -251,7 +251,7 @@ export default function LeadDetailPage() {
   if (notFound || !data) {
     return (
       <ProtectedRoute allowedRoles={["admin", "staff"]}>
-        <PortalLayout>
+        <PortalLayout workspace="sales">
           <div className="max-w-2xl mx-auto p-12 text-center">
             <h2 className="text-lg font-bold">Lead not found</h2>
             <p className="text-sm text-muted-foreground mt-2">
@@ -283,7 +283,7 @@ export default function LeadDetailPage() {
 
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
-      <PortalLayout>
+      <PortalLayout workspace="sales">
         <div className="max-w-7xl mx-auto space-y-6 pb-12 p-4 md:p-6">
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/60 pb-6">

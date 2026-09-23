@@ -43,7 +43,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { toast } from "sonner";
 
 type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
-type TicketPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
+type TicketPriority = "NORMAL" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
 
 /** One knowledge-base document the agent drew on, as buildKbReferences stores it. */
 type KbReference = {
@@ -200,7 +200,7 @@ const statusStyles: Record<TicketStatus, { bg: string, text: string, border: str
 };
 
 const priorityStyles: Record<TicketPriority, { bg: string, text: string, border: string }> = {
-  LOW: {
+  NORMAL: {
     bg: "bg-slate-50 dark:bg-slate-900/20",
     text: "text-slate-600 dark:text-slate-400",
     border: "border-slate-200 dark:border-slate-800/50",
@@ -844,7 +844,7 @@ export default function TicketDetail() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {(["LOW", "MEDIUM", "HIGH", "URGENT", "HAPPY"] as TicketPriority[]).map(
+                            {(["NORMAL", "MEDIUM", "HIGH", "URGENT", "HAPPY"] as TicketPriority[]).map(
                               (v) => (
                                 <SelectItem key={v} value={v}>
                                   {v.charAt(0) + v.slice(1).toLowerCase()}

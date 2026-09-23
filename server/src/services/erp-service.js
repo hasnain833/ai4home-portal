@@ -1,6 +1,13 @@
 import prisma from "../lib/prisma.js";
 import { decryptSafe } from "../lib/crypto.js";
 
+// The lowest band was renamed LOW -> NORMAL internally. Builders' ERPs were
+// integrated against "LOW" and may key or report on it, so the outbound payload
+// keeps the old word: the rename is ours, not theirs. Drop this mapping only
+// once every connected ERP has confirmed it accepts NORMAL.
+const ERP_PRIORITY_ALIASES = { NORMAL: "LOW" };
+const toErpPriority = (priority) => ERP_PRIORITY_ALIASES[priority] || priority;
+
 
 export async function getERPConfig(companyId, platform) {
   const record = await prisma.integration.findFirst({
@@ -48,7 +55,7 @@ class BuiltopiaClient {
           externalId: ticket.id,
           issueType: ticket.issueType,
           status: ticket.status,
-          priority: ticket.priority,
+          priority: toErpPriority(ticket.priority),
           homeownerEmail: ticket.homeowner?.email,
           createdAt: ticket.createdAt,
         }),
@@ -99,7 +106,7 @@ class BuildertrendClient {
         body: JSON.stringify({
           externalRef: ticket.id,
           type: ticket.issueType,
-          urgency: ticket.priority,
+          urgency: toErpPriority(ticket.priority),
           homeowner: ticket.homeowner?.email,
         }),
       });
