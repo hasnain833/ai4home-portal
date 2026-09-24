@@ -1,9 +1,10 @@
 import prisma from "./prisma.js";
 import { calculateWarrantyYear } from "./utils.js";
-import { normalizePriority } from "./warranty-classify.js";
+import { normalizePriority, RESOLVED_PRIORITY } from "./warranty-classify.js";
 import { syncTicketToERP } from "../services/erp-service.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
+import { attachConversationPhotos } from "../services/warranty-photos.service.js";
 
 const MAX_SUMMARY_TURNS = 14;
 const MAX_SUMMARY_CHARS = 4000;
@@ -77,6 +78,10 @@ export async function createWarrantyTicket({
   kbRefs = null,
   coverage = null,
   ticketType = "AI Chat",
+  conversationId = null,
+  // "RESOLVED" records an issue the homeowner fixed during the chat: it is on
+  // file and counted, but nobody needs to act on it.
+  status = "OPEN",
 }) {
   let homeowner = null;
   if (homeownerId) {
@@ -113,6 +118,7 @@ export async function createWarrantyTicket({
       (await prisma.property.findUnique({ where: { id: selectedPropertyId } }).catch(() => null));
   }
 
+  const resolvedInChat = status === "RESOLVED";
   const warrantyYear = property?.coeDate ? calculateWarrantyYear(property.coeDate) : 1;
   const isEmergency = !!classification?.isEmergency;
   const priority = normalizePriority(classification?.priority, {
@@ -134,25 +140,38 @@ export async function createWarrantyTicket({
       homeownerId: homeowner.id,
       companyId: homeowner.companyId ?? companyId ?? null,
       isEmergency,
-      priority,
+      // Same as a ticket staff mark resolved: HAPPY, not the urgency it had.
+      priority: resolvedInChat ? RESOLVED_PRIORITY : priority,
       warrantyYear,
-      status: "OPEN",
-      erpSyncStatus: "PENDING",
+      status: resolvedInChat ? "RESOLVED" : "OPEN",
+      // A fixed issue must not open a work order in the builder's ERP.
+      erpSyncStatus: resolvedInChat ? "SKIPPED" : "PENDING",
     },
   });
 
-  try {
-    await syncTicketToERP(ticket.id, { reason: isEmergency ? "escalation" : "creation" });
-  } catch (err) {
-    console.error(`[Warranty Ticket] ERP sync failed for #${ticket.id}:`, err.message);
+  if (!resolvedInChat) {
+    try {
+      await syncTicketToERP(ticket.id, { reason: isEmergency ? "escalation" : "creation" });
+    } catch (err) {
+      console.error(`[Warranty Ticket] ERP sync failed for #${ticket.id}:`, err.message);
+    }
   }
 
-  // Agent-filed tickets notify exactly like portal-filed ones.
-  await notifyTicketCreated(ticket.id);
+  // Photos taken in the chat move onto the ticket before anyone is told about
+  // it, so the notification and the ticket page both have them.
+  const photos = await attachConversationPhotos(conversationId, ticket.id).catch((err) => {
+    console.error(`[Warranty Ticket] Could not attach photos to #${ticket.id}:`, err.message);
+    return 0;
+  });
+
+  // Agent-filed tickets notify exactly like portal-filed ones — except one the
+  // homeowner already fixed, which would only be a "new ticket" alert with
+  // nothing to do.
+  if (!resolvedInChat) await notifyTicketCreated(ticket.id);
 
   console.log(
     `[Warranty Ticket] #${ticket.id} filed for ${homeowner.email} ` +
-    `(${issueType}, ${priority}${isEmergency ? ", EMERGENCY" : ""}).`,
+    `(${issueType}, ${priority}${isEmergency ? ", EMERGENCY" : ""}${photos ? `, ${photos} photo(s)` : ""}).`,
   );
 
   return { ticket, ticketUrl: ticketUrlFor(ticket.id) };

@@ -32,6 +32,7 @@ import {
   CalendarDays,
   CalendarClock,
   Settings,
+  Home,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import VerificationGate from "@/components/layout/VerificationGate";
@@ -75,7 +76,9 @@ const warrantyNavItems: NavItem[] = [
 
 const salesNavItems: NavItem[] = [
   { name: "Dashboard", href: "/sales/dashboard", icon: LayoutDashboard, roles: ["admin", "staff", "homeowner"] },
+  { name: "AI Assistant", href: "/sales/chat", icon: Bot, roles: ["admin", "staff", "homeowner"] },
   { name: "Leads", href: "/sales/leads", icon: Users, roles: ["admin", "staff", "homeowner"] },
+  { name: "Homes", href: "/sales/homes", icon: Home, roles: ["admin", "staff"] },
   { name: "Campaigns", href: "/sales/campaigns", icon: Layers, roles: ["admin", "staff"], permission: SALES_PERMISSION.campaignsManage },
   { name: "Content Calendar", href: "/sales/calendar", icon: CalendarDays, roles: ["admin", "staff", "homeowner"] },
   { name: "Appointments", href: "/sales/scheduling", icon: CalendarClock, roles: ["admin", "staff"] },
@@ -151,10 +154,9 @@ export default function PortalLayout({
     name.split(" ").map((n) => n[0]).join("").toUpperCase();
   const companyName = user?.companyName || "Aiforhomebuilder";
   const sidebarCompanyName = companyName.trim().split(/\s+/)[0] || companyName;
-  // Notifications are warranty-only: the bell reports on tickets and homeowner
-  // activity, none of which exists in Sales.
-  const showNotifications =
-    workspace === "warranty" && !!user && user.role === "admin";
+  // Each workspace has its own bell: tickets in Warranty, appointments in Sales.
+  const showNotifications = !!user && user.role === "admin";
+  const notificationsApi = workspace === "warranty" ? "/api/notifications" : "/api/sales/notifications";
   const workspaceLabel = workspace === "warranty" ? "Warranty Care" : "Sales Hub";
   const WorkspaceIcon = workspace === "warranty" ? Bot : Layers;
 
@@ -282,6 +284,8 @@ export default function PortalLayout({
           <div className="border-t border-white/10 p-4 space-y-3">
             {showNotifications && (
               <NotificationBell
+                key={notificationsApi}
+                apiBase={notificationsApi}
                 expanded={sidebarExpanded}
                 className="text-white/80 hover:bg-white/10 hover:text-white"
               />
@@ -382,7 +386,7 @@ export default function PortalLayout({
             <span className="truncate font-bold">{user?.companyName || "Aiforhomebuilder"}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {showNotifications && <NotificationBell />}
+            {showNotifications && <NotificationBell key={notificationsApi} apiBase={notificationsApi} />}
             <Button variant="ghost" size="icon" className="shrink-0" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>

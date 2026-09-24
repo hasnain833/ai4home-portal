@@ -3,11 +3,14 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Bot, User, Loader2, Plus } from "lucide-react";
 import PromptSuggestions from "./PromptSuggestions";
+import PhotoRequestCard from "./PhotoRequestCard";
 
 interface Message {
   id: string;
   role: "user" | "agent";
   content: string;
+  /** Set on the turn the agent asks for photos before filing. */
+  photoRequest?: { max: number } | null;
 }
 
 interface WarrantyChatProps {
@@ -117,7 +120,7 @@ export default function WarrantyChat({
    * Sends one turn. Takes the text explicitly so a suggestion chip can send
    * without first round-tripping through the input box.
    */
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, { photoStepDone = false }: { photoStepDone?: boolean } = {}) => {
     const trimmed = text.trim();
     if (!trimmed || isLoading) return;
     if (!companyId) {
@@ -148,6 +151,7 @@ export default function WarrantyChat({
           conversationId,
           message: userMessage.content,
           homeownerId,
+          photoStepDone,
         }),
       });
 
@@ -169,6 +173,7 @@ export default function WarrantyChat({
           id: Date.now().toString(),
           role: "agent",
           content: data.reply,
+          photoRequest: data.photoRequest || null,
         },
       ]);
     } catch (error) {
@@ -248,8 +253,8 @@ export default function WarrantyChat({
           </div>
 
           {messages.map((msg) => (
+            <div key={msg.id} className="flex flex-col gap-2">
             <div
-              key={msg.id}
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div className={`flex max-w-[85%] ${msg.role === "user" ? "flex-row-reverse" : "flex-row"} items-end gap-2`}>
@@ -270,6 +275,26 @@ export default function WarrantyChat({
                   {msg.content}
                 </div>
               </div>
+            </div>
+            {/* Only while it is the latest turn: once the homeowner answers,
+                the agent has moved on and the card would be stale. */}
+            {msg.photoRequest && msg.id === messages[messages.length - 1]?.id && (
+              <PhotoRequestCard
+                companyId={companyId}
+                conversationId={conversationId}
+                max={msg.photoRequest.max}
+                themeColor={themeColor}
+                disabled={isLoading}
+                onFinish={(count) =>
+                  sendMessage(
+                    count
+                      ? `I've added ${count} photo${count === 1 ? "" : "s"}.`
+                      : "I can't take photos right now.",
+                    { photoStepDone: true },
+                  )
+                }
+              />
+            )}
             </div>
           ))}
           {isLoading && (

@@ -34,7 +34,15 @@ async function callAnthropic({ cfg, companyId, system, user, maxTokens }) {
   }
   const data = await response.json();
   recordAiUsage(companyId, cfg, data?.usage);
-  return data?.content?.[0]?.text || null;
+  // The first text block, not simply the first block: a reply can open with a
+  // non-text block, and reading [0] alone returned null for a good answer.
+  const text = data?.content?.find((b) => b.type === "text" && b.text)?.text || null;
+  if (!text) {
+    console.warn(
+      `[LLM] Anthropic reply had no text (stop_reason=${data?.stop_reason}, blocks=${(data?.content || []).map((b) => b.type).join(",") || "none"}).`,
+    );
+  }
+  return text;
 }
 
 export async function chat({ companyId, system, user, maxTokens = 700, json = false }) {

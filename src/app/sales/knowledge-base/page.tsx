@@ -8,7 +8,6 @@ import { SALES_PERMISSION } from "@/lib/sales-permissions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -24,7 +23,6 @@ import {
   Trash2,
   Loader2,
   RefreshCw,
-  Search,
   CheckCircle2,
   AlertTriangle,
   Clock,
@@ -44,7 +42,6 @@ type KbDoc = {
   hasFile?: boolean;
 };
 
-type Match = { documentId: string; name: string; category: string; text: string; score: number };
 
 const CATEGORIES = [
   { value: "General", label: "General" },
@@ -100,30 +97,6 @@ export default function SalesKnowledgeBasePage() {
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Retrieval test (SW-KB-005)
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [matches, setMatches] = useState<Match[] | null>(null);
-  const [searchMethod, setSearchMethod] = useState<string | null>(null);
-
-  // Always-on retrieval health. The Test Retrieval badge only appears after a
-  // search that returned rows, so a broken semantic index could look fine.
-  const [retrieval, setRetrieval] = useState<{
-    status: string;
-    totalChunks: number;
-    embeddedChunks: number;
-    coverage: number;
-  } | null>(null);
-
-  const loadRetrievalStatus = useCallback(async () => {
-    try {
-      const res = await fetch("/api/sales/kb/retrieval-status");
-      if (res.ok) setRetrieval(await res.json());
-    } catch {
-      /* non-critical */
-    }
-  }, []);
-
   const loadDocs = useCallback(async () => {
     try {
       const res = await fetch("/api/sales/kb");
@@ -137,8 +110,7 @@ export default function SalesKnowledgeBasePage() {
 
   useEffect(() => {
     loadDocs();
-    loadRetrievalStatus();
-  }, [loadDocs, loadRetrievalStatus]);
+  }, [loadDocs]);
 
   // Auto-refresh while any document is still indexing so status flips to Indexed live.
   useEffect(() => {
@@ -236,33 +208,6 @@ export default function SalesKnowledgeBasePage() {
       }
     } catch {
       toast.error("Network error.");
-    }
-  };
-
-  const runSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim() || searching) return;
-    setSearching(true);
-    setMatches(null);
-    setSearchMethod(null);
-    try {
-      const res = await fetch("/api/sales/kb/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q: searchQuery, k: 5 }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMatches(data.matches || []);
-        setSearchMethod(data.method || null);
-        if ((data.matches || []).length === 0) toast.info("No matching passages found.");
-      } else {
-        toast.error(data.message || "Search unavailable (KB indexing keys may not be configured).");
-      }
-    } catch {
-      toast.error("Network error while searching.");
-    } finally {
-      setSearching(false);
     }
   };
 
@@ -420,89 +365,6 @@ export default function SalesKnowledgeBasePage() {
             </CardContent>
           </Card>
 
-          {/* Retrieval test (SW-KB-005) */}
-          <Card className="border border-border/80 shadow-xs">
-            <CardHeader className="border-b">
-              <CardTitle className="text-sm font-bold flex items-center gap-2"><Search className="h-4 w-4 text-[#b48c3c]" /> Test Retrieval</CardTitle>
-              <CardDescription className="text-xs">Ask a question to see which indexed passages the AI would retrieve and cite.</CardDescription>
-
-              {/* Always-on health — every AI feature grounded in this KB (blog
-                  drafts, the scheduling agent, calendar topics) degrades to
-                  keyword search when this isn't green. */}
-              {retrieval && retrieval.status !== "EMPTY" && (
-                <div
-                  className={`mt-3 flex items-start gap-2 rounded-lg border p-2.5 text-[11px] ${
-                    retrieval.status === "SEMANTIC"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-400"
-                      : "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-400"
-                  }`}
-                >
-                  <span className="shrink-0">{retrieval.status === "SEMANTIC" ? "🧠" : "⚠️"}</span>
-                  <span>
-                    {retrieval.status === "SEMANTIC" && (
-                      <>Semantic search active — all {retrieval.totalChunks} passages are indexed with embeddings.</>
-                    )}
-                    {retrieval.status === "PARTIAL" && (
-                      <>
-                        Only {retrieval.embeddedChunks} of {retrieval.totalChunks} passages ({retrieval.coverage}%)
-                        have embeddings. The rest fall back to keyword search — run <strong>Reindex</strong> to finish.
-                      </>
-                    )}
-                    {retrieval.status === "UNAVAILABLE" && (
-                      <>
-                        <strong>Semantic search is not working.</strong> Every AI feature grounded in this
-                        knowledge base is silently using keyword search instead. Run the pgvector setup SQL,
-                        then <strong>Reindex</strong>.
-                      </>
-                    )}
-                  </span>
-                </div>
-              )}
-            </CardHeader>
-            <CardContent className="p-6 space-y-4">
-              <form onSubmit={runSearch} className="flex gap-2">
-                <Input
-                  placeholder="e.g. What financing options are available?"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-                <Button type="submit" disabled={searching} className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 shrink-0">
-                  {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}
-                </Button>
-              </form>
-
-              {matches && matches.length > 0 && searchMethod && (
-                <div className="mb-3">
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] gap-1 ${searchMethod === "semantic" ? "border-emerald-300 text-emerald-700 dark:text-emerald-400" : "border-amber-300 text-amber-700 dark:text-amber-400"}`}
-                    title={searchMethod === "semantic"
-                      ? "pgvector semantic (embedding) search"
-                      : "Postgres full-text (keyword) search — run pgvector-setup.sql + /reindex to enable semantic"}
-                  >
-                    {searchMethod === "semantic" ? "🧠 Semantic (pgvector)" : "🔤 Keyword (FTS fallback)"}
-                  </Badge>
-                </div>
-              )}
-
-              {matches && matches.length > 0 && (
-                <div className="space-y-3">
-                  {matches.map((m, i) => (
-                    <div key={i} className="rounded-lg border p-3 bg-slate-50/40 dark:bg-slate-900/20">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-[11px] font-semibold flex items-center gap-1.5">
-                          <FileText className="h-3 w-3 text-[#b48c3c]" /> {m.name || "Document"}
-                          <Badge variant="outline" className="text-[9px]">{labelFor(m.category)}</Badge>
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">score {m.score?.toFixed(3)}</span>
-                      </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3">{m.text}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
         </div>
       </PortalLayout>
     </ProtectedRoute>

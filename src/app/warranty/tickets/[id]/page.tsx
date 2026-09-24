@@ -66,6 +66,8 @@ type TicketDetailData = {
   description?: string | null;
   draftResponse?: string | null;
   chatSummary?: string | null;
+  /** Photos from the warranty chat, each with a short-lived signed link. */
+  photos?: { id: string; url: string | null; fileName: string }[];
   extractedInfo?: string | null;
   kbReferences?: string | null;
   homeowner?: {
@@ -562,6 +564,29 @@ export default function TicketDetail() {
                       {ticket.description || "No description provided."}
                     </p>
                   </div>
+                  {!!ticket.photos?.length && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        Photos ({ticket.photos.length})
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {ticket.photos.map((photo) =>
+                          photo.url ? (
+                            <a
+                              key={photo.id}
+                              href={photo.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={`Open ${photo.fileName} full size`}
+                              className="block aspect-4/3 overflow-hidden rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 hover:opacity-90 transition"
+                            >
+                              <img src={photo.url} alt={photo.fileName} className="h-full w-full object-cover" />
+                            </a>
+                          ) : null,
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {additionalIssueDetails.length > 0 && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {additionalIssueDetails.map(([key, value]) => (

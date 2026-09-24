@@ -11,6 +11,7 @@ import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "./salesforce-writeback.js";
 import { appointmentTokenData } from "../lib/public-tokens.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
+import { notifySalesAppointment } from "./notification-service.js";
 
 const DEFAULTS = {
   dayStart: "09:00",
@@ -181,6 +182,8 @@ export async function bookSlot({
     console.error("[Scheduling] Salesforce write-back failed:", e?.message || e),
   );
 
+  await notifySalesAppointment("BOOKED", { ...appointment, lead });
+
   return { success: true, appointment };
 }
 
@@ -259,6 +262,7 @@ export async function rescheduleAppointment({ appointmentId, rescheduleToken, ne
   }
 
   await sendConfirmations(appt.lead, updated, tz).catch(() => { });
+  await notifySalesAppointment("RESCHEDULED", { ...updated, lead: appt.lead }, { previousTime: appt.time });
   return { success: true, appointment: updated };
 }
 
@@ -310,6 +314,9 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
   } catch (e) {
     console.error("[Scheduling] cancel notification failed:", e.message);
   }
+
+  // `appt` was read before the delete, so it still carries everything to report.
+  await notifySalesAppointment("CANCELLED", appt);
 
   return { success: true };
 }

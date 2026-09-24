@@ -20,7 +20,16 @@ import {
 
 type Notification = {
   id: string;
-  type: "TICKET_CREATED" | "TICKET_REMINDER" | "TICKET_STATUS_CHANGED";
+  type:
+    | "TICKET_CREATED"
+    | "TICKET_REMINDER"
+    | "TICKET_STATUS_CHANGED"
+    | "APPOINTMENT_SCHEDULED"
+    | "APPOINTMENT_REMINDER"
+    | "APPOINTMENT_CANCELLED"
+    | "SALES_APPOINTMENT_BOOKED"
+    | "SALES_APPOINTMENT_RESCHEDULED"
+    | "SALES_APPOINTMENT_CANCELLED";
   title: string;
   body: string;
   link: string | null;
@@ -35,10 +44,13 @@ const POLL_MS = 60_000;
 export function NotificationBell({
   expanded = false,
   className = "",
+  apiBase = "/api/notifications",
 }: {
   /** Sidebar is expanded — show the "Notifications" label next to the icon. */
   expanded?: boolean;
   className?: string;
+  /** Each workspace has its own feed: warranty's here, Sales' under /api/sales. */
+  apiBase?: string;
 }) {
   const router = useRouter();
   // The dropdown carries only what still needs attention; everything ever
@@ -54,7 +66,7 @@ export function NotificationBell({
 
   const loadCount = useCallback(async () => {
     try {
-      const res = await fetch("/api/notifications/unread-count", {
+      const res = await fetch(`${apiBase}/unread-count`, {
         credentials: "include",
       });
       if (!res.ok) return;
@@ -63,12 +75,12 @@ export function NotificationBell({
     } catch {
       // A failed poll is not worth surfacing — the next one will catch up.
     }
-  }, []);
+  }, [apiBase]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/notifications?limit=20&unreadOnly=true", {
+      const res = await fetch(`${apiBase}?limit=20&unreadOnly=true`, {
         credentials: "include",
       });
       if (!res.ok) return;
@@ -80,12 +92,12 @@ export function NotificationBell({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiBase]);
 
   const loadArchive = useCallback(async () => {
     setArchiveLoading(true);
     try {
-      const res = await fetch("/api/notifications?limit=100", {
+      const res = await fetch(`${apiBase}?limit=100`, {
         credentials: "include",
       });
       if (!res.ok) return;
@@ -97,7 +109,7 @@ export function NotificationBell({
     } finally {
       setArchiveLoading(false);
     }
-  }, []);
+  }, [apiBase]);
 
   // Poll for the badge only. The list is fetched when the panel opens, so a
   // closed bell costs one small request a minute. The fetch is kicked off
@@ -106,7 +118,7 @@ export function NotificationBell({
     let cancelled = false;
     const tick = async () => {
       try {
-        const res = await fetch("/api/notifications/unread-count", {
+        const res = await fetch(`${apiBase}/unread-count`, {
           credentials: "include",
         });
         if (!res.ok || cancelled) return;
@@ -122,7 +134,7 @@ export function NotificationBell({
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
+  }, [apiBase]);
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
@@ -141,7 +153,7 @@ export function NotificationBell({
     setArchive((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
     setUnread((c) => Math.max(0, c - 1));
     try {
-      await fetch(`/api/notifications/${id}/read`, {
+      await fetch(`${apiBase}/${id}/read`, {
         method: "PATCH",
         credentials: "include",
       });
@@ -155,7 +167,7 @@ export function NotificationBell({
     setArchive((prev) => prev.map((n) => ({ ...n, isRead: true })));
     setUnread(0);
     try {
-      await fetch("/api/notifications/read-all", {
+      await fetch(`${apiBase}/read-all`, {
         method: "PATCH",
         credentials: "include",
       });
@@ -171,7 +183,7 @@ export function NotificationBell({
     setItems((prev) => prev.filter((n) => n.id !== id));
     if (wasUnread) setUnread((c) => Math.max(0, c - 1));
     try {
-      const res = await fetch(`/api/notifications/${id}`, {
+      const res = await fetch(`${apiBase}/${id}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -191,7 +203,7 @@ export function NotificationBell({
     if (readOnes.length === 0) return;
     setArchive((prev) => prev.filter((n) => !n.isRead));
     try {
-      const res = await fetch("/api/notifications/read", {
+      const res = await fetch(`${apiBase}/read`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -212,8 +224,8 @@ export function NotificationBell({
     <>
       <p className="text-xs text-muted-foreground">{n.body}</p>
       {n.emailFallback && (
-        // The homeowner was not emailed. Say so, so nobody assumes the
-        // notification and the email went out together.
+        // No email went out. Say so, so nobody assumes the notification and
+        // the email went out together.
         <p className="flex items-center gap-1 text-[11px] text-amber-600">
           <MailWarning className="h-3 w-3 shrink-0" />
           No email sent — email delivery is temporarily unavailable.
@@ -244,7 +256,7 @@ export function NotificationBell({
           </Button>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="end" sideOffset={8} className="w-[22rem] p-0">
+        <DropdownMenuContent align="end" sideOffset={8} className="w-88 p-0">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-sm font-semibold">Notifications</span>
             {unread > 0 && (

@@ -1,4 +1,5 @@
 import { toolCall } from "./llm.js";
+import { countConversationPhotos, MAX_PHOTOS_PER_CLAIM } from "../services/warranty-photos.service.js";
 import { effortForPhase } from "./ai-config.js";
 import prisma from "./prisma.js";
 import { queryDetailed as kbQueryDetailed } from "../services/warranty-vector.service.js";
@@ -196,6 +197,10 @@ async function fileClaim({
   description,
   forceEmergency = false,
   sandboxMode = false,
+  resolved = false,
+  // Use the classifier's summary as the ticket description — for filing from
+  // the photo card, where the only description is what the homeowner typed.
+  describeWithSummary = false,
 }) {
   const classification = await classifyClaim({
     companyId: company.id,
@@ -234,10 +239,12 @@ async function fileClaim({
     homeownerId,
     propertyId,
     classification,
-    description,
+    description: describeWithSummary ? classification.summary || description : description,
     transcript,
     kbRefs: issueState.kbRefs,
     coverage: issueState.coverage,
+    conversationId: convo.id,
+    ...(resolved ? { status: "RESOLVED", ticketType: "AI Chat — Resolved in chat" } : {}),
   });
 
   if (!filed) return { filed: null, classification };
@@ -252,16 +259,29 @@ async function fileClaim({
     },
   });
 
-  return { filed, classification, line: claimLine(ticket.isEmergency), ticketId: ticket.id };
+  return {
+    filed,
+    classification,
+    line: resolved ? RESOLVED_LINE : claimLine(ticket.isEmergency),
+    ticketId: ticket.id,
+  };
 }
 
 const NEEDS_IDENTITY =
   "I have everything I need about the issue. Before I can log it, could you share the email address on your warranty file so I can attach it to the right property?";
 
+// Asked once, just before a non-emergency ticket is filed. Server-driven rather
+// than a prompt instruction, so every live prompt version gets it.
+const PHOTO_REQUEST =
+  `Before I file this, could you add a few photos of the issue? A close-up and a wider shot of the area help our warranty team a lot. You can add up to ${MAX_PHOTOS_PER_CLAIM} below — or skip if you can't take any right now.`;
+
+const RESOLVED_LINE =
+  "I've noted this on your home's file as resolved, so if it happens again our warranty team will have the history.";
+
 const EMERGENCY_NO_IDENTITY =
   "If anyone is in immediate danger, call 911 now. I have flagged this conversation as an emergency for our warranty team — please reply with your email address so I can file the ticket against your property.";
 
-export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode = false, draftPrompts = null, sandboxCommunityId = null }) {
+export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode = false, draftPrompts = null, sandboxCommunityId = null, photoStepDone = false }) {
   const transcript = [...(convo.transcript || []), { role: "user", content: newMsg, at: new Date().toISOString() }];
   const messages = toAnthropicMessages(transcript);
 
@@ -274,6 +294,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   let property = null;
   let kbHits = [];
   let turnOptions = [];
+  let photoRequest = null;
 
   const kbCompanyId = sandboxMode ? (sandboxCommunityId ? company.id : null) : company.id;
   if (sandboxMode && sandboxCommunityId) {
@@ -346,7 +367,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
         },
       });
     }
-    return { reply: replyText, phase: nextPhase, issueState, kbHits, options: turnOptions };
+    return { reply: replyText, phase: nextPhase, issueState, kbHits, options: turnOptions, photoRequest };
   };
 
   if (!propertyId && homeownerId) {
@@ -414,6 +435,41 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     }
   }
 
+  // A signed-in homeowner's property is found before the model is even called.
+  // Once it is known and the problem has been described, identification is
+  // done: go straight to diagnosis, which is where the KB is read. Leaving it
+  // to the IDENTIFY tool stalled here, because that tool cannot move on.
+  if (propertyId && issueState.issueSummary && (currentPhase === "INTAKE" || currentPhase === "IDENTIFY")) {
+    currentPhase = "DIAGNOSE";
+  }
+
+  // The homeowner finished the photo step (Done or Skip): file the ticket the
+  // agent had already decided on. No model call — the decision was made.
+  if (photoStepDone && issueState.photoStep === "REQUESTED" && !ticketId && !sandboxMode) {
+    issueState.photoStep = "DONE";
+    const photos = await countConversationPhotos(convo.id);
+    const fromChat = !issueState.pendingSummary;
+    const result = await fileClaim({
+      company,
+      convo,
+      transcript,
+      issueState,
+      homeownerId,
+      propertyId,
+      sandboxMode,
+      // No agent-written summary when the hand-over came from diagnosis:
+      // classify everything the homeowner said and describe it with that.
+      description: issueState.pendingSummary || said || newMsg.trim(),
+      describeWithSummary: fromChat,
+    });
+    delete issueState.pendingSummary;
+    if (result.filed) {
+      const thanks = photos ? `Thanks — I've attached your ${photos} photo${photos === 1 ? "" : "s"}. ` : "";
+      return finish(`${thanks}${result.line}`, "RESOLVE");
+    }
+    return finish(NEEDS_IDENTITY, "IDENTIFY");
+  }
+
   let systemPromptTemplate = "";
   let tool = ORCHESTRATOR_TOOLS.RESPOND;
   let kbContext = "";
@@ -452,10 +508,15 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       input_schema: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["respond", "escalate_emergency"] },
+          action: {
+            type: "string",
+            enum: ["respond", "escalate_emergency", "mark_resolved"],
+            description: "mark_resolved ONLY when the homeowner confirms the problem is fixed after a step you gave them (e.g. they reset the breaker and the lights are back). It records the issue on file as resolved. Never use it on a guess that it might be fixed.",
+          },
           message: { type: "string", description: "Message to send." },
           transition_phase: { type: "string", enum: ["STAY", "RESOLVE"] },
-          emergency_reason: { type: "string", description: "Reason for escalation." }
+          emergency_reason: { type: "string", description: "Reason for escalation." },
+          resolution_summary: { type: "string", description: "With mark_resolved: what the problem was and what fixed it, for the file." }
         },
         required: ["action", "message"]
       }
@@ -476,9 +537,14 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       input_schema: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["respond", "create_ticket"] },
+          action: {
+            type: "string",
+            enum: ["respond", "create_ticket", "mark_resolved"],
+            description: "mark_resolved instead of create_ticket when the homeowner confirms the problem is already fixed — it records the issue as resolved.",
+          },
           message: { type: "string", description: "Message to send." },
-          issue_summary: { type: "string", description: "Summary for ticket." }
+          issue_summary: { type: "string", description: "Summary for ticket." },
+          resolution_summary: { type: "string", description: "With mark_resolved: what the problem was and what fixed it." }
         },
         required: ["action"]
       }
@@ -534,10 +600,11 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   let nextPhase = currentPhase;
 
   if (currentPhase === "INTAKE") {
-    if (input.transition_phase === "IDENTIFY") {
-      nextPhase = "IDENTIFY";
+    const past = propertyId ? "DIAGNOSE" : "IDENTIFY";
+    if (input.transition_phase === "IDENTIFY" || input.transition_phase === "DIAGNOSE") {
+      nextPhase = past;
     } else if (input.transition_phase !== "STAY" && issueState.issueSummary) {
-      nextPhase = "IDENTIFY";
+      nextPhase = past;
     }
   } else if (currentPhase === "IDENTIFY") {
     if (input.action === "lookup_property" && !String(input.query || "").trim()) {
@@ -573,6 +640,33 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       }
     } else if (input.transition_phase === "DIAGNOSE") {
       nextPhase = "DIAGNOSE";
+    }
+  } else if (
+    (currentPhase === "DIAGNOSE" || currentPhase === "RESOLVE") &&
+    input.action === "mark_resolved"
+  ) {
+    // Fixed in the chat. Recorded as a RESOLVED ticket so it is on the home's
+    // history and in the totals, without alerting anyone or asking for photos.
+    const glad = input.message || "Glad that's sorted!";
+    replyText = glad;
+    nextPhase = "RESOLVE";
+    if (!ticketId && !sandboxMode && propertyId) {
+      const summary = String(input.resolution_summary || "").trim();
+      const result = await fileClaim({
+        company,
+        convo,
+        transcript,
+        issueState,
+        homeownerId,
+        propertyId,
+        sandboxMode,
+        resolved: true,
+        description: `[Resolved in chat] ${summary || issueState.issueSummary || newMsg.trim()}`,
+      });
+      if (result.filed) {
+        ticketId = result.ticketId;
+        replyText = `${glad}\n\n${result.line}`;
+      }
     }
   } else if (currentPhase === "DIAGNOSE") {
     if (input.action === "escalate_emergency") {
@@ -612,6 +706,16 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       }
     } else if (input.transition_phase === "RESOLVE") {
       nextPhase = "RESOLVE";
+      // Diagnosis is done and the claim is ready. The diagnose tool cannot
+      // file, so the agent's reply here used to announce a submission that had
+      // not happened — and a homeowner who left then had no ticket. Go straight
+      // to the filing step instead: the photo card, whose Done/Skip files it.
+      if (!ticketId && !sandboxMode && propertyId && !issueState.photoStep) {
+        issueState.photoStep = "REQUESTED";
+        delete issueState.pendingSummary;
+        photoRequest = { max: MAX_PHOTOS_PER_CLAIM };
+        return finish(PHOTO_REQUEST, "RESOLVE");
+      }
     }
   } else if (currentPhase === "RESOLVE") {
     if (input.action === "create_ticket" && ticketId) {
@@ -626,6 +730,16 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
           String(input.issue_summary || "").trim() ||
           issueState.issueSummary ||
           newMsg.trim();
+
+        if (!issueState.photoStep && propertyId) {
+          // First time the agent is ready to file: ask for photos instead.
+          // Done or Skip on the card files it; a typed reply that brings the
+          // agent back here files it too, because the step is then "REQUESTED".
+          issueState.photoStep = "REQUESTED";
+          issueState.pendingSummary = description;
+          photoRequest = { max: MAX_PHOTOS_PER_CLAIM };
+          return finish(PHOTO_REQUEST, "RESOLVE");
+        }
 
         const result = await fileClaim({
           company,

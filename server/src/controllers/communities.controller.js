@@ -18,9 +18,7 @@ export const getCommunities = async (req, res) => {
 
     const communities = await prisma.community.findMany({
       where: { companyId: session.companyId || "demo-company" },
-      // The home count is what the properties page needs to show "8 / 50" and
-      // to grey out a community that is full.
-      include: { _count: { select: { properties: true } } },
+      include: { _count: { select: { properties: true, salesHomes: true } } },
       orderBy: { name: "asc" },
     });
 
@@ -28,6 +26,7 @@ export const getCommunities = async (req, res) => {
       communities: communities.map(({ _count, ...c }) => ({
         ...c,
         homeCount: _count.properties,
+        salesHomeCount: _count.salesHomes,
         isFull: _count.properties >= MAX_HOMES_PER_COMMUNITY,
       })),
       types: COMMUNITY_TYPES,
@@ -76,7 +75,7 @@ export const createCommunity = async (req, res) => {
       },
     });
 
-    return res.json({ ...community, homeCount: 0, isFull: false });
+    return res.json({ ...community, homeCount: 0, salesHomeCount: 0, isFull: false });
   } catch (error) {
     console.error("Error creating community:", error);
     return res.status(500).json({ message: "Error creating community" });
@@ -132,13 +131,14 @@ export const updateCommunity = async (req, res) => {
     const community = await prisma.community.update({
       where: { id },
       data,
-      include: { _count: { select: { properties: true } } },
+      include: { _count: { select: { properties: true, salesHomes: true } } },
     });
 
     const { _count, ...rest } = community;
     return res.json({
       ...rest,
       homeCount: _count.properties,
+      salesHomeCount: _count.salesHomes,
       isFull: _count.properties >= MAX_HOMES_PER_COMMUNITY,
     });
   } catch (error) {
@@ -154,26 +154,30 @@ export const deleteCommunity = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    // Accepts the id on the path or, for the older caller, the query string.
     const id = req.params.id || req.query.id;
     if (!id) return res.status(400).json({ message: "ID required" });
 
     const community = await prisma.community.findFirst({
       where: { id, companyId: session.companyId || "demo-company" },
-      include: { _count: { select: { properties: true } } },
+      include: { _count: { select: { properties: true, salesHomes: true } } },
     });
 
     if (!community) {
       return res.status(404).json({ message: "Community not found" });
     }
-
-    // Every home must belong to a community, so emptying one is a deliberate
-    // act — move the homes first rather than having them deleted with it.
     if (community._count.properties > 0) {
       return res.status(400).json({
         message:
           `${community.name} still has ${community._count.properties} home` +
           `${community._count.properties === 1 ? "" : "s"}. Move them to another community first.`,
+      });
+    }
+
+    if (community._count.salesHomes > 0) {
+      return res.status(400).json({
+        message:
+          `${community.name} still has ${community._count.salesHomes} home` +
+          `${community._count.salesHomes === 1 ? "" : "s"} for sale. Remove or move them first.`,
       });
     }
 

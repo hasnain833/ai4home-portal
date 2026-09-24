@@ -2,6 +2,16 @@ import prisma from "../lib/prisma.js";
 
 const MAX_LIMIT = 100;
 
+export const scopeNotifications = (workspace) => (req, res, next) => {
+  req.notificationWorkspace = workspace;
+  next();
+};
+
+const mine = (req) => ({
+  userId: req.user.id,
+  workspace: req.notificationWorkspace || "WARRANTY",
+});
+
 export const listNotifications = async (req, res) => {
   try {
     const session = req.user;
@@ -11,13 +21,13 @@ export const listNotifications = async (req, res) => {
     const unreadOnly = req.query.unreadOnly === "true";
 
     const notifications = await prisma.notification.findMany({
-      where: { userId: session.id, ...(unreadOnly ? { isRead: false } : {}) },
+      where: { ...mine(req), ...(unreadOnly ? { isRead: false } : {}) },
       orderBy: { createdAt: "desc" },
       take: limit,
     });
 
     const unreadCount = await prisma.notification.count({
-      where: { userId: session.id, isRead: false },
+      where: { ...mine(req), isRead: false },
     });
 
     return res.json({ notifications, unreadCount });
@@ -33,7 +43,7 @@ export const getUnreadCount = async (req, res) => {
     if (!session) return res.status(401).json({ message: "Unauthorized" });
 
     const unreadCount = await prisma.notification.count({
-      where: { userId: session.id, isRead: false },
+      where: { ...mine(req), isRead: false },
     });
 
     return res.json({ unreadCount });
@@ -48,16 +58,14 @@ export const markRead = async (req, res) => {
     const session = req.user;
     if (!session) return res.status(401).json({ message: "Unauthorized" });
 
-    // updateMany with userId in the filter, so a mismatched id is a no-op
-    // rather than an update to somebody else's row.
     const { count } = await prisma.notification.updateMany({
-      where: { id: req.params.id, userId: session.id, isRead: false },
+      where: { id: req.params.id, ...mine(req), isRead: false },
       data: { isRead: true, readAt: new Date() },
     });
 
     if (count === 0) {
       const exists = await prisma.notification.findFirst({
-        where: { id: req.params.id, userId: session.id },
+        where: { id: req.params.id, ...mine(req) },
         select: { id: true },
       });
       if (!exists) return res.status(404).json({ message: "Notification not found" });
@@ -76,7 +84,7 @@ export const markAllRead = async (req, res) => {
     if (!session) return res.status(401).json({ message: "Unauthorized" });
 
     const { count } = await prisma.notification.updateMany({
-      where: { userId: session.id, isRead: false },
+      where: { ...mine(req), isRead: false },
       data: { isRead: true, readAt: new Date() },
     });
 
@@ -92,10 +100,8 @@ export const deleteNotification = async (req, res) => {
     const session = req.user;
     if (!session) return res.status(401).json({ message: "Unauthorized" });
 
-    // userId is in the filter, so somebody else's id deletes nothing rather
-    // than deleting their notification.
     const { count } = await prisma.notification.deleteMany({
-      where: { id: req.params.id, userId: session.id },
+      where: { id: req.params.id, ...mine(req) },
     });
 
     if (count === 0) {
@@ -103,7 +109,7 @@ export const deleteNotification = async (req, res) => {
     }
 
     const unreadCount = await prisma.notification.count({
-      where: { userId: session.id, isRead: false },
+      where: { ...mine(req), isRead: false },
     });
 
     return res.json({ success: true, unreadCount });
@@ -113,14 +119,13 @@ export const deleteNotification = async (req, res) => {
   }
 };
 
-/** Clears everything already read, leaving anything still unread in place. */
 export const deleteReadNotifications = async (req, res) => {
   try {
     const session = req.user;
     if (!session) return res.status(401).json({ message: "Unauthorized" });
 
     const { count } = await prisma.notification.deleteMany({
-      where: { userId: session.id, isRead: true },
+      where: { ...mine(req), isRead: true },
     });
 
     return res.json({ success: true, deleted: count });

@@ -3,6 +3,7 @@ import prisma from "../../lib/prisma.js";
 import mammoth from "mammoth";
 import { createRequire } from "module";
 import { upsertChunks } from "../../services/vector-store.service.js";
+import { invalidateSalesSuggestions } from "../../services/sales-suggestions.service.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { resolveDownloadUrl } from "../../lib/storage.js";
 import { chunkText, chunkTable, chunkSheets } from "../../lib/kb-chunking.js";
@@ -106,6 +107,7 @@ export async function runKbIngestion(documentId, companyId) {
       where: { id: documentId },
       data: { status: "READY", chunkCount: count, error: null },
     });
+    invalidateSalesSuggestions(doc.scope === "PLATFORM" ? null : companyId);
 
     return { status: "ready", chunks: count };
   } catch (err) {

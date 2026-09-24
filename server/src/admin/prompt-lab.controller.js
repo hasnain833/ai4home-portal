@@ -6,6 +6,7 @@ import {
 } from "../inngest/functions/appointment.js";
 import { queryDetailed as kbQueryDetailed } from "../services/vector-store.service.js";
 import { KB_SCOPES } from "../lib/sales-ai.js";
+import { withInventory } from "../lib/sales-homes.js";
 import { getAvailableSlots, getAvailabilitySetting } from "../services/scheduling-service.js";
 import { hasPlatformAi } from "../lib/ai-config.js";
 import {
@@ -59,9 +60,7 @@ export const getPromptLab = async (req, res) => {
       placeholders: PROMPT_PLACEHOLDERS,
       agents: listAgents(),
       versions,
-      // The draft to reopen the editor with — not a prompt that is running anywhere.
       currentDraft: versions.find((v) => v.isActive) || null,
-      // What real leads are actually talking to right now.
       live: {
         source: live.meta.source,
         versionId: liveRow?.id || null,
@@ -265,8 +264,6 @@ export const deletePromptVersion = async (req, res) => {
     const existing = await prisma.salesAgentPromptVersion.findUnique({ where: { id: versionId } });
     if (!existing) return res.status(404).json({ message: "Version not found" });
 
-    // Deleting the live version would silently drop the agent back to the code
-    // defaults with no record of the change. Make it a deliberate revert instead.
     if (existing.isLive) {
       return res.status(409).json({
         message:
@@ -309,6 +306,8 @@ async function resolveTestContext({ question }) {
       console.warn("[Prompt Lab] KB retrieval failed:", e.message);
     }
   }
+
+  kbChunks = await withInventory(company.id, kbChunks);
 
   const setting = await getAvailabilitySetting(company.id).catch(() => null);
   const timezone = setting?.timezone || "America/Los_Angeles";

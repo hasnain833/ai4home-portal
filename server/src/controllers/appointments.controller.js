@@ -3,6 +3,7 @@ import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 import { appointmentTokenData, getOrCreateLeadBookingToken } from "../lib/public-tokens.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
+import { notifySalesAppointment } from "../services/notification-service.js";
 
 export const getAppointments = async (req, res) => {
   try {
@@ -133,6 +134,8 @@ export const bookAppointment = async (req, res) => {
         ),
       );
     }
+
+    await notifySalesAppointment("BOOKED", { ...appointment, bookedVia: "STAFF" });
 
     return res.status(201).json(appointment);
   } catch (error) {

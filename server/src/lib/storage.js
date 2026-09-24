@@ -6,6 +6,9 @@ export const BUCKETS = {
   verificationDocs: "verification_docs",
   agreementDocs: "agreement_docs",
   companyLogos: "company_logos",
+  salesHomePhotos: "sales_home_photos",
+  // Private: photos of the inside of homeowners' homes, signed on read.
+  warrantyPhotos: "warranty_photos",
 };
 
 const STORAGE_SCHEME = "storage://";

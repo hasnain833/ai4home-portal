@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { listTicketPhotos } from "../services/warranty-photos.service.js";
 import { calculateWarrantyYear } from "../lib/utils.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { MAIL_OUTCOME } from "../services/mail-service.js";
@@ -244,7 +245,13 @@ export const getTicket = async (req, res) => {
       }
     }
 
-    return res.json(withNextVisit(ticket));
+    // Photos are private; each comes back with a short-lived signed link.
+    const photos = await listTicketPhotos(ticket.id).catch((err) => {
+      console.error(`[Tickets] Could not load photos for #${ticket.id}:`, err.message);
+      return [];
+    });
+
+    return res.json({ ...withNextVisit(ticket), photos });
   } catch (error) {
     console.error("Error fetching ticket:", error);
     return res.status(500).json({ message: "Error fetching ticket" });

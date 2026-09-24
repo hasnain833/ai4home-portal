@@ -59,11 +59,6 @@ function emailDashBox(content) {
 }
 
 export const Templates = {
-
-  // --- Account email change ---
-
-  /// Sent to the NEW address. Clicking the link is what proves the person
-  /// asking for the change can actually receive mail there.
   getEmailChangeVerifyEmail: (name, oldEmail, newEmail, confirmUrl, hoursValid) => {
     const content = `
       <p>Hi ${name || "there"},</p>
@@ -78,8 +73,6 @@ export const Templates = {
     return wrapEmail(content, "Confirm your new email");
   },
 
-  /// Sent to the OLD address at the same time, so a change made from a hijacked
-  /// session cannot go unnoticed by whoever actually owns the account.
   getEmailChangeNoticeEmail: (name, oldEmail, newEmail, hoursValid) => {
     const content = `
       <p>Hi ${name || "there"},</p>
@@ -94,8 +87,6 @@ export const Templates = {
     return wrapEmail(content, "Sign-in email change requested");
   },
 
-  // --- Mail Service (ticket updates) ---
-
   getTicketUpdateEmail: (homeownerName, ticketId, statusLabel, portalUrl, companyName) => {
     const content = `
       <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
@@ -108,8 +99,6 @@ export const Templates = {
   },
 
 
-  /// Sent to the homeowner the moment their ticket is filed, from either the
-  /// portal form or the warranty agent.
   getTicketCreatedHomeownerEmail: (homeownerName, ticketId, issueType, portalUrl, companyName) => {
     const content = `
       <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
@@ -121,8 +110,6 @@ export const Templates = {
     return wrapEmail(content, "Warranty Ticket Received", companyName, COLORS.accent);
   },
 
-  /// Sent to company admins when a ticket is filed. Leads with priority so an
-  /// emergency is obvious in the inbox preview.
   getTicketCreatedAdminEmail: (ticketId, issueType, priority, isEmergency, homeownerName, propertyAddress, portalUrl, companyName) => {
     const urgencyNote = isEmergency
       ? `<p style="color: #b91c1c; font-weight: 600; margin-top: 0;">This ticket was flagged as an emergency and needs immediate attention.</p>`
@@ -142,8 +129,41 @@ export const Templates = {
     return wrapEmail(content, "New Warranty Ticket", companyName, COLORS.primary);
   },
 
-  /// Stale-ticket nag. `ageLabel` is pre-formatted by the caller so the copy
-  /// reads naturally for both the 4h emergency cycle and the 48h standard one.
+  getSalesAppointmentAdminEmail: (kind, details, portalUrl, companyName) => {
+    const esc = (v) =>
+      String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const heading = {
+      BOOKED: "New Sales Appointment",
+      RESCHEDULED: "Sales Appointment Rescheduled",
+      CANCELLED: "Sales Appointment Cancelled",
+    }[kind] || "Sales Appointment Update";
+    const intro = {
+      BOOKED: "A new sales appointment has been booked.",
+      RESCHEDULED: "A sales appointment has been moved to a new time.",
+      CANCELLED: "A sales appointment has been cancelled.",
+    }[kind] || "A sales appointment has changed.";
+    const row = (label, value, last = false) =>
+      value
+        ? `<tr${last ? "" : ` style="border-bottom: 1px solid ${COLORS.border};"`}><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 130px;">${label}</td><td style="padding: 12px 0;">${value}</td></tr>`
+        : "";
+    const rows = [
+      row("Lead", esc(details.leadName)),
+      row("Contact", esc(details.contact)),
+      row("Appointment", esc(details.title)),
+      row(kind === "CANCELLED" ? "Was" : "When", esc(details.when)),
+      row("Previously", kind === "RESCHEDULED" ? esc(details.previousWhen) : ""),
+      row("Type", details.locationType === "ONSITE" ? "On site" : "Virtual"),
+      row("Video link", details.meetingLink ? `<a href="${esc(details.meetingLink)}">${esc(details.meetingLink)}</a>` : ""),
+      row("Booked via", esc(details.bookedVia), true),
+    ].join("");
+    const content = `
+      <p style="margin-top: 0;">${intro}</p>
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">${rows}</table>
+      ${emailButton(`${portalUrl}/sales/scheduling`, "Open Appointments")}
+    `;
+    return wrapEmail(content, heading, companyName, COLORS.primary);
+  },
+
   getTicketReminderEmail: (ticketId, issueType, priority, isEmergency, homeownerName, ageLabel, portalUrl, companyName) => {
     const lead = isEmergency
       ? `This <strong>emergency</strong> ticket has been open for ${ageLabel} and has not been actioned yet.`
@@ -162,10 +182,6 @@ export const Templates = {
     return wrapEmail(content, "Ticket Awaiting Action", companyName, isEmergency ? "#b91c1c" : COLORS.primary);
   },
 
-  /// Sent to the assigned staff member when a ticket is dispatched to them, and
-  /// again if the visit is moved. Staff get the whole picture — they are the one
-  /// turning up, so everything they might need is in the mail rather than behind
-  /// a login.
   getTicketDispatchStaffEmail: (
     { ticketId, issueType, ticketCategory, description, priority, warrantyYear, whenLabel,
       durationMinutes, address, homeownerName, homeownerEmail, notes },
@@ -200,9 +216,6 @@ export const Templates = {
     return wrapEmail(content, rescheduled ? "Visit Rescheduled" : "New Assignment", companyName, COLORS.primary);
   },
 
-  /// The homeowner's half of the same event. Deliberately thin: when someone is
-  /// coming and who it is. Priority, warranty year and internal notes are the
-  /// builder's business, not theirs.
   getTicketDispatchHomeownerEmail: (
     { ticketId, issueType, whenLabel, address, staffName, homeownerName, manageUrl },
     portalUrl,
@@ -231,9 +244,6 @@ export const Templates = {
     return wrapEmail(content, rescheduled ? "Visit Rescheduled" : "Repair Visit Booked", companyName, COLORS.primary);
   },
 
-  /// The homeowner's booking invitation. This is the only route to a scheduled
-  /// visit, so the link is the whole point of the mail — everything else is kept
-  /// out of the way of it.
   getTicketBookingInviteEmail: (
     { ticketId, issueType, address, staffName, homeownerName },
     bookingUrl,
@@ -265,9 +275,6 @@ export const Templates = {
     );
   },
 
-  /// Tells the assigned staff member the job is theirs, before any time exists.
-  /// The homeowner is the one who picks, so this mail is a heads-up plus the
-  /// full ticket, not a calendar entry.
   getTicketAssignmentEmail: (
     { ticketId, issueType, ticketCategory, description, priority, warrantyYear, address,
       homeownerName, homeownerEmail, notes },
@@ -298,7 +305,6 @@ export const Templates = {
     return wrapEmail(content, "New Assignment", companyName, COLORS.primary);
   },
 
-  /// Sent to the homeowner when the ticket is closed out.
   getTicketResolvedEmail: ({ ticketId, issueType, homeownerName }, portalUrl, companyName) => {
     const content = `
       <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
@@ -313,7 +319,6 @@ export const Templates = {
     return wrapEmail(content, "Claim Resolved", companyName, COLORS.primary);
   },
 
-  /// 24-hour and 1-hour appointment reminders, for either side.
   getTicketAppointmentReminderEmail: (role, { ticketId, issueType, whenLabel, address, tradeName, homeownerName, manageUrl }, windowLabel, portalUrl, companyName) => {
     const forHomeowner = role === "homeowner";
     const lead = forHomeowner
@@ -341,7 +346,6 @@ export const Templates = {
     return wrapEmail(content, "Appointment Reminder", companyName, COLORS.accent);
   },
 
-  /// Sent to both sides when a scheduled visit is called off.
   getTicketAppointmentCancelledEmail: (role, { ticketId, issueType, whenLabel }, portalUrl, companyName) => {
     const who = role === "homeowner" ? "Your" : "The";
     const content = `
@@ -387,7 +391,6 @@ export const Templates = {
     return wrapEmail(content, "Password Reset Request");
   },
 
-  // --- Superadmin / Company Controllers ---
 
   getWorkspaceActiveEmail: (companyName, portalUrl) => {
     const content = `
@@ -407,14 +410,10 @@ export const Templates = {
     return wrapEmail(content, "Verification Document Submitted");
   },
 
-  // --- Campaign / Inngest Functions ---
-
-  // Nurture campaign wrapper (wraps user-generated content)
   getNurtureEmail: (userHtml, companyName) => {
     return wrapEmail(userHtml, "A message from " + companyName, companyName);
   },
 
-  // Announcement wrapper (wraps user-generated content + optional CTA link)
   getAnnouncementEmail: (bodyHtml, companyName, ctaHref) => {
     let content = bodyHtml;
     if (ctaHref) {
@@ -489,7 +488,7 @@ export const Templates = {
       ${actionLink ? emailButton(actionLink, "Open Portal") : ""}
     `;
 
-    return wrapEmail(content, title, companyName, "#7f1d1d"); // red header for cancellation
+    return wrapEmail(content, title, companyName, "#7f1d1d"); 
   },
 
   getSyncAlertEmail: (companyName, streak, action, lastMessage, errorListHtml, cooldownHrs) => {
@@ -514,8 +513,6 @@ export const Templates = {
     `;
     return wrapEmail(content, "Salesforce Sync Is Failing", "Aiforhomebuilder", "#7f1d1d");
   },
-
-  // --- Automation / Appointment Agent ---
 
   getNotifyOwnerEmail: (leadName, contactInfo, message, companyName) => {
     const content = `
@@ -550,9 +547,6 @@ export const Templates = {
   }
 };
 
-// ---------------------------------------------------------------------------
-// SPECIFIC SMS TEMPLATES
-// ---------------------------------------------------------------------------
 
 export const SmsTemplates = {
   getAdminNewTenantSms: (companyName, companyEmail, companyPhone) =>

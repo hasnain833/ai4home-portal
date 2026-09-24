@@ -1,5 +1,14 @@
 import { Router } from "express";
+import multer from "multer";
 import prisma from "../lib/prisma.js";
+import { handleUploadErrors } from "../middlewares/upload.js";
+import { UploadRejected } from "../lib/file-security.js";
+import {
+  addConversationPhotos,
+  removeConversationPhoto,
+  listConversationPhotos,
+  MAX_PHOTOS_PER_CLAIM,
+} from "../services/warranty-photos.service.js";
 import { processWarrantyTurn } from "../lib/warranty-orchestrator.js";
 import { getWarrantySuggestions } from "../services/warranty-suggestions.service.js";
 
@@ -33,6 +42,8 @@ function resolveActor(req) {
 async function postMessage(req, res) {
   try {
     const { conversationId, message } = req.body;
+    // Sent by the photo card's Done / Skip, never typed.
+    const photoStepDone = req.body?.photoStepDone === true;
     const actor = resolveActor(req);
     const companyId = actor.companyId;
     let homeownerId = actor.homeownerId;
@@ -88,7 +99,7 @@ async function postMessage(req, res) {
       });
     }
 
-    const result = await processWarrantyTurn({ company, convo, newMsg: message });
+    const result = await processWarrantyTurn({ company, convo, newMsg: message, photoStepDone });
 
     return res.json({
       conversationId: convo.id,
@@ -97,6 +108,8 @@ async function postMessage(req, res) {
       // Choices for this turn, for the client to render as buttons. Empty on
       // turns that ask an open question.
       options: Array.isArray(result.options) ? result.options : [],
+      // Present on the turn the agent asks for photos; the client shows the card.
+      photoRequest: result.photoRequest || null,
     });
   } catch (err) {
     console.error("Error in warranty chat:", err);
@@ -116,7 +129,62 @@ async function getSuggestions(req, res) {
   }
 }
 
+/**
+ * The conversation a photo belongs to. The widget is anonymous, so the
+ * unguessable conversation id is the credential — scoped to its company, still
+ * open, and not yet turned into a ticket.
+ */
+async function photoConversation(req) {
+  const conversationId = req.body?.conversationId || req.query?.conversationId || null;
+  const companyId = resolveActor(req).companyId || req.query?.companyId || null;
+  if (!conversationId || !companyId) return null;
+  const convo = await prisma.warrantyConversation.findUnique({ where: { id: String(conversationId) } });
+  if (!convo || convo.companyId !== companyId || convo.ticketId || isStale(convo)) return null;
+  return convo;
+}
+
+async function uploadPhotos(req, res) {
+  try {
+    const convo = await photoConversation(req);
+    if (!convo) return res.status(404).json({ error: "This conversation can no longer take photos." });
+    const files = req.files || [];
+    if (!files.length) return res.status(400).json({ error: "No photos provided" });
+    const photos = await addConversationPhotos(convo, files);
+    return res.status(201).json({ photos, max: MAX_PHOTOS_PER_CLAIM });
+  } catch (err) {
+    if (err instanceof UploadRejected || err?.status) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+    console.error("[Warranty chat] Photo upload failed:", err);
+    return res.status(500).json({ error: "Could not upload the photos" });
+  }
+}
+
+async function deletePhoto(req, res) {
+  try {
+    const convo = await photoConversation(req);
+    if (!convo) return res.status(404).json({ error: "This conversation can no longer change photos." });
+    const removed = await removeConversationPhoto(convo, req.params.photoId);
+    if (!removed) return res.status(404).json({ error: "Photo not found" });
+    return res.json({ photos: await listConversationPhotos(convo.id) });
+  } catch (err) {
+    console.error("[Warranty chat] Photo delete failed:", err);
+    return res.status(500).json({ error: "Could not remove the photo" });
+  }
+}
+
+// Phone photos are resized in the browser first; 8 MB leaves room for one that
+// could not be (e.g. an unconverted HEIC), which the image check then rejects
+// with a clear message rather than a size error.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: MAX_PHOTOS_PER_CLAIM },
+});
+const photoFiles = handleUploadErrors(upload.array("photos", MAX_PHOTOS_PER_CLAIM));
+
 export const publicWarrantyChatRouter = Router();
+publicWarrantyChatRouter.post("/photos", photoFiles, uploadPhotos);
+publicWarrantyChatRouter.delete("/photos/:photoId", deletePhoto);
 publicWarrantyChatRouter.get("/suggestions", getSuggestions);
 publicWarrantyChatRouter.post("/", postMessage);
 
@@ -124,5 +192,7 @@ const router = Router();
 
 router.get("/suggestions", getSuggestions);
 router.post("/", postMessage);
+router.post("/photos", photoFiles, uploadPhotos);
+router.delete("/photos/:photoId", deletePhoto);
 
 export default router;

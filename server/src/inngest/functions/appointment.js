@@ -15,6 +15,7 @@ import {
 } from "../../services/scheduling-service.js";
 import { queryDetailed as kbQueryDetailed } from "../../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext } from "../../lib/sales-ai.js";
+import { withInventory } from "../../lib/sales-homes.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { redactPII, minimalLeadContext } from "../../lib/utils.js";
 import { getOrCreateLeadBookingToken } from "../../lib/public-tokens.js";
@@ -145,6 +146,11 @@ const RESPOND_TOOL = {
       location_type: { type: "string", enum: ["VIRTUAL", "ONSITE"], description: "Visit type when booking. Default VIRTUAL." },
       used_kb: { type: "boolean", description: "True if your answer drew on the Company Knowledge Base context." },
       handoff_reason: { type: "string", description: "Required when action is 'escalate': a short internal note for the human team explaining what the lead needs and what you already know about them. The lead never sees this." },
+      home_ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "Ids of homes from the live inventory (the value after 'home:') to show the buyer as cards with photos — when they ask to see a home or for pictures, or when you recommend specific homes. Omit when no specific home is involved.",
+      },
       optout_request: { type: "boolean", description: "True if the lead asked, in any wording, not to be contacted again — 'remove me', 'don't message me again', 'take me off your list', 'stop emailing me'. Setting this removes them from ALL future messaging for this company, so set it only on a clear request to stop, never on mere disinterest in buying right now." },
     },
     required: ["action", "message"],
@@ -335,7 +341,9 @@ export const appointmentSchedulingAgent = inngest.createFunction(
             `Semantic search needs the pgvector setup SQL + POST /api/sales/kb/reindex.`,
           );
         }
-        return { chunks: results, method };
+        // The builder's homes for sale ride along with every turn, so "which
+        // addresses are available?" is answered from inventory, not guessed.
+        return { chunks: await withInventory(lead.companyId, results), method };
       } catch (e) {
         console.error("[Appointment Agent] KB retrieval failed:", e.message);
         return { chunks: [], method: null };

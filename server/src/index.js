@@ -41,6 +41,9 @@ import communitiesRouter from "./routes/communities.js";
 import homeownersRouter from "./routes/homeowners.js";
 import usersRouter from "./routes/users.js";
 import notificationsRouter from "./routes/notifications.js";
+import { scopeNotifications } from "./controllers/notifications.controller.js";
+import salesHomesRouter from "./routes/sales-homes.js";
+import salesChatRouter from "./routes/sales-chat.js";
 import ticketAppointmentsRouter from "./routes/ticket-appointments.js";
 import ticketSchedulingRouter from "./routes/ticket-scheduling.js";
 import deadLetterRouter from "./routes/dead-letter.js";
@@ -144,6 +147,15 @@ app.use("/api/sales/dead-letters", ...salesGuard, deadLetterRouter);
 app.use("/api/sales/automations", ...salesGuard, automationsRouter);
 app.use("/api/sales/blog", ...salesGuard, blogRouter);
 app.use("/api/sales/privacy", ...salesGuard, privacyRouter);
+app.use("/api/sales/homes", ...salesGuard, salesHomesRouter);
+app.use("/api/sales/chat", ...salesGuard, salesChatRouter);
+app.use("/api/sales/communities", ...salesGuard, communitiesRouter);
+app.use(
+  "/api/sales/notifications",
+  ...salesGuard,
+  scopeNotifications("SALES"),
+  notificationsRouter,
+);
 app.use("/api/public/blog", publicBlogRouter);
 app.use("/api/public/sales-agent", salesAgentRouter);
 
@@ -177,11 +189,13 @@ app.use("/api/homeowners", ...warrantyGuard, homeownersRouter);
 app.use("/api/warranty/chat", ...warrantyGuard, warrantyChatRouter);
 app.use("/api/webhooks/warranty", warrantyWebhooksRouter);
 app.use("/api/users", usersRouter);
-app.use("/api/notifications", ...warrantyGuard, notificationsRouter);
+app.use(
+  "/api/notifications",
+  ...warrantyGuard,
+  scopeNotifications("WARRANTY"),
+  notificationsRouter,
+);
 app.use("/api/ticket-appointments", ...warrantyGuard, ticketAppointmentsRouter);
-// Homeowner self-service booking. Mounted WITHOUT warrantyGuard on purpose:
-// these are opened from an email link by someone who has no account, and the
-// token in the URL is what authorises them.
 app.use("/api/ticket-scheduling", ticketSchedulingRouter);
 app.use(
   "/api/inngest",
