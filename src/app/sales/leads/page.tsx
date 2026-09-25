@@ -53,7 +53,9 @@ import {
   AlertTriangle,
   Filter,
   X,
+  Code2,
 } from "lucide-react";
+import LeadFormEmbedDialog from "@/components/sales/LeadFormEmbedDialog";
 
 type SegmentFilter = {
   field: string;
@@ -194,6 +196,7 @@ export default function LeadsPage() {
 
   // Manual Lead Modal state
   const [manualModalOpen, setManualModalOpen] = useState(false);
+  const [embedOpen, setEmbedOpen] = useState(false);
   const [submittingManual, setSubmittingManual] = useState(false);
   const [manualForm, setManualForm] = useState({
     firstName: "",
@@ -634,7 +637,7 @@ export default function LeadsPage() {
                 View detailed profiles of builder prospects and import lists.
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button onClick={() => setManualModalOpen(true)} className="bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90 gap-2 h-9">
                 <Plus className="h-4 w-4" /> Add Lead
               </Button>
@@ -643,11 +646,19 @@ export default function LeadsPage() {
                   <Upload className="h-4 w-4" /> Import CSV
                 </Button>
               )}
+              {!isHomeowner && user?.companyId && (
+                <Button variant="outline" onClick={() => setEmbedOpen(true)} className="gap-2 h-9">
+                  <Code2 className="h-4 w-4" />
+                </Button>
+              )}
               <Button variant="outline" onClick={fetchLeads} className="h-9">
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
           </div>
+          {user?.companyId && (
+            <LeadFormEmbedDialog open={embedOpen} onOpenChange={setEmbedOpen} companyId={user.companyId} />
+          )}
 
           {/* Filtering bar */}
           <Card className="border border-border/60 shadow-xs bg-white/70 dark:bg-slate-900/60 backdrop-blur-md">

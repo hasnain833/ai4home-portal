@@ -37,7 +37,11 @@ interface Metrics {
   avgResolutionTime: number;
   issueBreakdown: { category: string; percentage: number }[];
   agentPerformance: { label: string; value: number }[];
-  surveyReadiness: number;
+  autoResolutionRate: number;
+  tradeResolutionRate: number;
+  dispatchedTickets: number;
+  homeownerEngagement: number;
+  engagementTarget: number;
   erpSyncSuccessRate: number;
   erpSyncedCount: number;
   erpFailedCount: number;
@@ -124,7 +128,11 @@ export default function ReportsPage() {
     avgResolutionTime: 0,
     issueBreakdown: [],
     agentPerformance: [],
-    surveyReadiness: 0,
+    autoResolutionRate: 0,
+    tradeResolutionRate: 0,
+    dispatchedTickets: 0,
+    homeownerEngagement: 0,
+    engagementTarget: 98,
     erpSyncSuccessRate: 100,
     erpSyncedCount: 0,
     erpFailedCount: 0,
@@ -142,7 +150,7 @@ export default function ReportsPage() {
   const animatedEscalationRate = useCountUp(metrics.escalationRate, 600);
   const animatedAvgResponse =
     useCountUp(Math.floor((metrics.avgResponseTime || 0) * 10), 600) / 10;
-  const animatedReadiness = useCountUp(metrics.surveyReadiness || 0, 600);
+  const animatedEngagement = useCountUp(metrics.homeownerEngagement || 0, 600);
 
   const formatMinutes = (minutes: number) => {
     if (!minutes) return "0 min";
@@ -180,7 +188,11 @@ export default function ReportsPage() {
           avgResolutionTime: data.avgResolutionTime ?? 0,
           issueBreakdown: data.issueBreakdown ?? [],
           agentPerformance: data.agentPerformance ?? [],
-          surveyReadiness: data.surveyReadiness ?? 0,
+          autoResolutionRate: data.autoResolutionRate ?? 0,
+          tradeResolutionRate: data.tradeResolutionRate ?? 0,
+          dispatchedTickets: data.dispatchedTickets ?? 0,
+          homeownerEngagement: data.homeownerEngagement ?? 0,
+          engagementTarget: data.engagementTarget ?? 98,
           erpSyncSuccessRate: data.erpSyncSuccessRate ?? 100,
           erpSyncedCount: data.erpSyncedCount ?? 0,
           erpFailedCount: data.erpFailedCount ?? 0,
@@ -218,11 +230,13 @@ export default function ReportsPage() {
       [`Total Tickets (${period})`, metrics.totalTickets.toString()],
       [`Resolved Tickets (${period})`, metrics.resolvedTickets.toString()],
       [`Open Tickets (${period})`, metrics.openTickets.toString()],
-      [`Escalated / Emergency Tickets (${period})`, metrics.escalatedTickets.toString()],
+      [`Emergency Tickets (${period})`, metrics.escalatedTickets.toString()],
       [`Resolution Rate (${period})`, `${metrics.resolutionRate}%`],
-      [`Escalation Rate (${period})`, `${metrics.escalationRate}%`],
+      [`Emergency Rate (${period})`, `${metrics.escalationRate}%`],
       [`Avg Resolution Time (${period})`, `${metrics.avgResponseTime} min`],
-      [`Homeowner Survey Readiness (${period})`, `${metrics.surveyReadiness}%`],
+      [`Auto-resolution Rate (${period})`, `${metrics.autoResolutionRate}%`],
+      [`Trade Resolution Rate (${period})`, `${metrics.tradeResolutionRate}%`],
+      [`Homeowner Engagement (${period})`, `${metrics.homeownerEngagement}% (target ${metrics.engagementTarget}%)`],
       [`ERP Sync Success Rate (${period})`, `${metrics.erpSyncSuccessRate}%`],
       [],
       ["Issue Type", "Percentage"],
@@ -300,7 +314,7 @@ export default function ReportsPage() {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <Select value={period} onValueChange={handlePeriodChange}>
-                <SelectTrigger className="w-[140px] h-9 border-border/80 focus-visible:ring-1 focus-visible:ring-primary/45 rounded-lg bg-background/50">
+                <SelectTrigger className="w-35 h-9 border-border/80 focus-visible:ring-1 focus-visible:ring-primary/45 rounded-lg bg-background/50">
                   <SelectValue placeholder="Period" />
                 </SelectTrigger>
                 <SelectContent>
@@ -337,7 +351,7 @@ export default function ReportsPage() {
               >
                 <Card className="border border-border/80 bg-linear-to-b from-card/85 to-card/50 backdrop-blur-md">
                   <CardContent className="p-4 flex flex-wrap gap-4 items-end">
-                    <div className="flex-1 min-w-[200px]">
+                    <div className="flex-1 min-w-50">
                       <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">Start Date</label>
                       <input
                         type="date"
@@ -346,7 +360,7 @@ export default function ReportsPage() {
                         className="w-full h-9 px-3 rounded-lg border border-border/80 bg-background/50 text-sm focus:outline-hidden focus:ring-1 focus:ring-primary/45 text-foreground"
                       />
                     </div>
-                    <div className="flex-1 min-w-[200px]">
+                    <div className="flex-1 min-w-50">
                       <label className="text-xs font-semibold text-muted-foreground mb-1.5 block">End Date</label>
                       <input
                         type="date"
@@ -428,12 +442,12 @@ export default function ReportsPage() {
                 </Card>
               </motion.div>
 
-              {/* Escalation Rate */}
+              {/* Emergency Rate */}
               <motion.div variants={metricCardVariants} whileHover={{ y: -2 }}>
                 <Card className="shadow-sm hover:shadow-md transition-shadow">
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">
-                      Escalation Rate
+                      Emergency Rate
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -441,7 +455,7 @@ export default function ReportsPage() {
                       {animatedEscalationRate}%
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {metrics.escalatedTickets} escalated or emergency
+                      {metrics.escalatedTickets} emergency claims
                     </p>
                   </CardContent>
                 </Card>
@@ -521,12 +535,12 @@ export default function ReportsPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <TrendingUp className="h-5 w-5 text-primary" />
-                    Ticket Outcomes
+                    Agent Performance
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {metrics.totalTickets === 0 ? (
-                    <p className="text-sm text-muted-foreground">No ticket outcomes in this period.</p>
+                    <p className="text-sm text-muted-foreground">No claims in this period.</p>
                   ) : (
                     <AnimatePresence mode="popLayout">
                       {metrics.agentPerformance.map((item, idx) => (
@@ -555,6 +569,10 @@ export default function ReportsPage() {
                       ))}
                     </AnimatePresence>
                   )}
+                  <p className="text-xs text-muted-foreground leading-relaxed pt-2 border-t border-border/40">
+                    <span className="font-medium text-foreground">Auto-resolution:</span> claims the AI agent resolved in chat with DIY guidance, no team or trade needed.{" "}
+                    <span className="font-medium text-foreground">Escalated:</span> claims handed to your team.
+                  </p>
                 </CardContent>
               </Card>
             </motion.div>
@@ -565,46 +583,52 @@ export default function ReportsPage() {
             variants={containerVariants}
             className="grid md:grid-cols-2 gap-6"
           >
-            {/* Survey-Readiness Scoring Card */}
+            {/* Homeowner Engagement Card */}
             <motion.div variants={cardVariants} whileHover="hover">
               <Card className="shadow-sm border-l-4 border-l-primary h-full">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    Homeowner Survey Readiness
+                    Homeowner Engagement
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center gap-4">
                     <div className="relative inline-flex items-center justify-center h-20 w-20 rounded-full bg-primary/10 border border-primary/20 shrink-0">
-                      <span className="text-2xl font-bold text-primary">{animatedReadiness}%</span>
+                      <span className="text-2xl font-bold text-primary">{animatedEngagement}%</span>
                     </div>
-                    <div>
-                      <h4 className="font-semibold text-sm">Follow-up Eligibility</h4>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-sm">Target {metrics.engagementTarget}%</h4>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {metrics.totalTickets === 0
-                          ? "No tickets in this period yet."
-                          : animatedReadiness >= 80
-                            ? "Ready for homeowner follow-up based on resolved tickets and low escalation."
-                            : "Resolve open or escalated tickets before sending homeowner follow-ups."}
+                        {metrics.dispatchedTickets === 0
+                          ? "No claims sent to a trade in this period yet."
+                          : "Of claims sent to a trade, the share where the homeowner booked their visit."}
                       </p>
+                      <div className="relative w-full bg-muted rounded-full h-2 mt-2">
+                        <div className="bg-primary h-full rounded-full" style={{ width: `${Math.min(animatedEngagement, 100)}%` }} />
+                        <div
+                          className="absolute -top-1 h-4 w-0.5 bg-foreground/60"
+                          style={{ left: `${metrics.engagementTarget}%` }}
+                          aria-label={`Target ${metrics.engagementTarget}%`}
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  <div className="space-y-2 pt-2 border-t border-border/40 text-xs">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground">Resolution Rate</span>
-                      <Badge variant="secondary" className="bg-green-500/10 text-green-600 dark:text-green-400 font-bold border-none">{metrics.resolutionRate}%</Badge>
+                  <div className="space-y-3 pt-2 border-t border-border/40 text-xs">
+                    <div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Trade Resolution Rate</span>
+                        <Badge variant="secondary" className="bg-green-500/10 text-green-600 dark:text-green-400 font-bold border-none">{metrics.tradeResolutionRate}%</Badge>
+                      </div>
+                      <p className="text-muted-foreground/80 mt-0.5">Claims sent to a trade that were completed and closed.</p>
                     </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground">Escalation / Emergency Rate</span>
-                      <Badge variant="secondary" className={metrics.escalationRate > 25 ? "bg-red-500/10 text-red-600 font-bold border-none" : "bg-emerald-500/10 text-emerald-600 font-bold border-none"}>
-                        {metrics.escalationRate}%
-                      </Badge>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-muted-foreground">Avg Resolution Time</span>
-                      <Badge variant="secondary" className="bg-[#b48c3c]/10 text-[#b48c3c] font-bold border-none">{formatMinutes(metrics.avgResponseTime)}</Badge>
+                    <div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Auto-resolution Rate</span>
+                        <Badge variant="secondary" className="bg-[#b48c3c]/10 text-[#b48c3c] font-bold border-none">{metrics.autoResolutionRate}%</Badge>
+                      </div>
+                      <p className="text-muted-foreground/80 mt-0.5">Claims the AI agent resolved without your team or a trade.</p>
                     </div>
                   </div>
                 </CardContent>

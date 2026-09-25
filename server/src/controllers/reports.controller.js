@@ -1,5 +1,8 @@
 import prisma from "../lib/prisma.js";
 
+const AUTO_RESOLVED_TYPE = "AI Chat — Resolved in chat";
+const ENGAGEMENT_TARGET = 98;
+
 export const getAnalytics = async (req, res) => {
   try {
     const session = req.user;
@@ -42,8 +45,10 @@ export const getAnalytics = async (req, res) => {
         isEmergency: true,
         createdAt: true,
         updatedAt: true,
-        kbReferences: true,
-        erpSyncStatus: true
+        erpSyncStatus: true,
+        ticketType: true,
+        assignedStaffId: true,
+        appointments: { where: { status: { not: "CANCELLED" } }, select: { id: true } }
       }
     });
 
@@ -105,23 +110,26 @@ export const getAnalytics = async (req, res) => {
       }))
       .sort((a, b) => b.percentage - a.percentage);
 
-    const diyGuidanceTickets = tickets.filter(t => t.kbReferences).length;
-    const diyGuidanceRate = totalTickets > 0 ? Math.round((diyGuidanceTickets / totalTickets) * 100) : 0;
+    // Auto-resolved: the AI closed it in chat (both chat paths stamp this ticketType).
+    // Escalated: everything else, i.e. it needed the builder's team. The two sum to 100.
+    const autoResolved = tickets.filter(t => t.ticketType === AUTO_RESOLVED_TYPE).length;
+    const autoResolutionRate = totalTickets > 0 ? Math.round((autoResolved / totalTickets) * 100) : 0;
+    const escalatedToTeamRate = totalTickets > 0 ? 100 - autoResolutionRate : 0;
 
     const agentPerformance = [
-      { label: "Resolved", value: resolutionRate },
-      { label: "Escalated / emergency", value: escalationRate },
-      { label: "DIY guidance", value: diyGuidanceRate }
+      { label: "Auto-resolution", value: autoResolutionRate },
+      { label: "Escalated", value: escalatedToTeamRate }
     ];
 
-    const resolutionScore = resolutionRate * 0.7;
-    const escalationScore = Math.max(0, 100 - escalationRate) * 0.2;
-    const speedScore = resolvedTickets.length === 0
-      ? 0
-      : Math.max(0, 100 - Math.min(avgResolutionTime, 10) * 10) * 0.1;
-    const surveyReadiness = totalTickets > 0
-      ? Math.round(resolutionScore + escalationScore + speedScore)
-      : 0;
+    // Dispatch is the only thing that sets assignedStaffId, and only a reopen
+    // clears it, so it marks every claim that went out to a trade.
+    const dispatched = tickets.filter(t => t.assignedStaffId);
+    const tradeResolved = dispatched.filter(t => t.status === "RESOLVED").length;
+    const tradeResolutionRate = dispatched.length > 0 ? Math.round((tradeResolved / dispatched.length) * 100) : 0;
+
+    // Engagement: of claims sent to a trade, how many homeowners got a visit booked.
+    const engaged = dispatched.filter(t => t.appointments.length > 0).length;
+    const homeownerEngagement = dispatched.length > 0 ? Math.round((engaged / dispatched.length) * 100) : 0;
 
     return res.json({
       totalTickets,
@@ -134,7 +142,11 @@ export const getAnalytics = async (req, res) => {
       avgResponseTime: parseFloat((avgResolutionTime * 24 * 60).toFixed(0)) || 0,
       issueBreakdown,
       agentPerformance,
-      surveyReadiness,
+      autoResolutionRate,
+      tradeResolutionRate,
+      dispatchedTickets: dispatched.length,
+      homeownerEngagement,
+      engagementTarget: ENGAGEMENT_TARGET,
       erpSyncSuccessRate,
       erpSyncedCount,
       erpFailedCount,

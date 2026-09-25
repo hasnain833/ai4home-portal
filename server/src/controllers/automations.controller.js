@@ -6,6 +6,7 @@ const TRIGGER_DESCRIPTIONS = {
   CRM_INGEST: "Lead is synchronized from Salesforce / imported",
   STATUS_CHANGE: "Lead status changes",
   MANUAL_CREATION: "A contact is added manually",
+  WEB_FORM: "A lead submits the website form",
   APPOINTMENT_BOOKED: "An appointment is booked",
   DATE_BASED: "A date-based condition is met (evaluated daily)",
 };

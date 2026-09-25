@@ -8,6 +8,7 @@ import { deadLetterJob } from "../../lib/dead-letter.js";
 import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
 import { Templates } from "../../services/templates.js";
 import { DEFAULT_LEAD_STATUSES, LEAD_STATUS } from "../../lib/lead-statuses.js";
+import { ensureAutoCampaign, isNewLeadEvent } from "../../services/auto-nurture.service.js";
 
 
 export function mergeFields(template, lead, html = false) {
@@ -330,7 +331,18 @@ export const runAutomationRules = inngest.createFunction(
       deadLetterJob({ functionId: "run-automation-rules", event, error }),
   },
   async ({ event, step }) => {
-    const { companyId, leadId, event: triggerEvent } = event.data;
+    const { companyId, leadId, event: triggerEvent, context } = event.data;
+
+    if (leadId && isNewLeadEvent(triggerEvent, context)) {
+      await step.run("auto-nurture-enroll", async () => {
+        const campaign = await ensureAutoCampaign(companyId);
+        if (campaign.status !== "Active") return { skipped: "180-day nurture is switched off" };
+        const lead = await prisma.lead.findUnique({ where: { id: leadId } });
+        if (!lead) return { skipped: "lead not found" };
+        return executeAction({ type: "ENROLL_CAMPAIGN", params: { campaignId: campaign.id } }, lead);
+      });
+    }
+
     return await step.run("evaluate-rules", async () =>
       evaluateRulesForTrigger({ companyId, leadId, triggerEvent })
     );

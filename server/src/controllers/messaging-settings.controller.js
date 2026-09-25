@@ -2,9 +2,6 @@ import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
 import { getMessagingCapabilities } from "../lib/messaging-config.js";
 
-// Tenants no longer hold delivery credentials — the platform sends everything.
-// All this surface reports is how a tenant is presented to recipients, plus what
-// they have sent this month.
 export const getMessagingSettings = async (req, res) => {
   try {
     const session = req.user;
@@ -29,11 +26,11 @@ export const getMessagingSettings = async (req, res) => {
 
     return res.json({
       companyId,
-      // What the recipient sees. The address is the platform's so the mail stays
-      // aligned with its SPF/DKIM records; replies go to the tenant.
       sender: {
         name: company?.name || null,
-        replyTo: company?.email || null,
+        replyTo: process.env.INBOUND_EMAIL_DOMAIN
+          ? `reply+${companyId}@${process.env.INBOUND_EMAIL_DOMAIN.trim()}`
+          : company?.email || null,
         sendingAddress: MailService.SENDER_EMAIL,
       },
       usageThisMonth: usage.map((row) => ({

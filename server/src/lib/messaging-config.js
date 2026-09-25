@@ -9,7 +9,8 @@ export async function getSenderIdentity(companyId) {
     .findUnique({ where: { id: companyId }, select: { name: true, email: true } })
     .catch(() => null);
 
-  return { senderName: company?.name || null, replyTo: company?.email || null };
+  const inbound = String(process.env.INBOUND_EMAIL_DOMAIN || "").trim();
+  return { senderName: company?.name || null, replyTo: inbound ? null : company?.email || null };
 }
 
 export async function getMessagingCapabilities() {

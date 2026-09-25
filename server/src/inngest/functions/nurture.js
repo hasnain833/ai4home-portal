@@ -71,6 +71,7 @@ const ENROLLMENT_SELECT = {
           sendWindowEnd: true,
           subject: true,
           body: true,
+          enabled: true,
         },
       },
     },
@@ -154,6 +155,17 @@ export const runNurtureCampaign = inngest.createFunction(
         continue;
       }
 
+      if (currentStep.enabled === false) {
+        await step.run(`skip-disabled-${currentStep.position}`, async () =>
+          prisma.campaignEnrollment.update({
+            where: { id: enrollment.id },
+            data: { currentStepPosition: nextPosition },
+          }),
+        );
+        currentPosition = nextPosition;
+        continue;
+      }
+
       if (currentStep.sendWindowDays && currentStep.sendWindowStart && currentStep.sendWindowEnd) {
         const windowTarget = await step.run(`calc-window-${currentStep.position}`, async () => {
           const tz = getLeadTimezone(lead.state);
@@ -199,6 +211,20 @@ export const runNurtureCampaign = inngest.createFunction(
         });
         currentPosition = nextPosition;
         continue;
+      }
+
+      // The run can sleep for days between steps; a reply, a booking or a paused
+      // campaign in the meantime must stop it before anything else goes out.
+      const stillActive = await step.run(`still-active-${currentStep.position}`, async () => {
+        const row = await prisma.campaignEnrollment.findUnique({
+          where: { id: enrollment.id },
+          select: { status: true, campaign: { select: { status: true } } },
+        });
+        return row?.status === "ACTIVE" && row.campaign.status === "Active";
+      });
+      if (!stillActive) {
+        console.log(`[Nurture] Stopping before step ${currentStep.position}: enrollment exited or campaign paused.`);
+        return { status: "stopped", reason: "Enrollment no longer active or campaign paused" };
       }
 
       const sendResult = await step.run(`send-step-${currentStep.position}`, async () => {
@@ -367,7 +393,7 @@ export const runNurtureCampaign = inngest.createFunction(
         where: { campaignId, status: { in: ["ACTIVE", "PAUSED"] } }
       });
       if (activeCount === 0) {
-        await prisma.campaign.updateMany({ where: { id: campaignId, status: "Active" }, data: { status: "Completed" } });
+        await prisma.campaign.updateMany({ where: { id: campaignId, status: "Active", kind: "MANUAL" }, data: { status: "Completed" } });
       }
     });
 
@@ -454,26 +480,11 @@ export const handleCampaignExit = inngest.createFunction(
           data: { status: "EXITED", exitedReason: reason },
         });
 
-        // currentStepPosition points at the step to run next, so the message the
-        // lead actually replied to is the one before it.
-        const repliedToPosition = (enrollment.currentStepPosition || 0) - 1;
-        if (reason === "REPLY" && repliedToPosition > 0) {
-          const stepRow = await prisma.campaignStep.findFirst({
-            where: { campaignId: enrollment.campaignId, position: repliedToPosition },
-          });
-          if (stepRow) {
-            await prisma.campaignStep.update({
-              where: { id: stepRow.id },
-              data: { repliedCount: { increment: 1 } },
-            });
-          }
-        }
-
         const activeCount = await prisma.campaignEnrollment.count({
           where: { campaignId: enrollment.campaignId, status: { in: ["ACTIVE", "PAUSED"] } }
         });
         if (activeCount === 0) {
-          await prisma.campaign.updateMany({ where: { id: enrollment.campaignId, status: "Active" }, data: { status: "Completed" } });
+          await prisma.campaign.updateMany({ where: { id: enrollment.campaignId, status: "Active", kind: "MANUAL" }, data: { status: "Completed" } });
         }
         exited += 1;
       }

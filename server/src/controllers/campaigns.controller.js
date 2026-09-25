@@ -39,7 +39,8 @@ export const getCampaigns = async (req, res) => {
   try {
     const companyId = req.user.companyId;
     const campaigns = await prisma.campaign.findMany({
-      where: { companyId },
+      // The built-in 180-day workflow has its own tab.
+      where: { companyId, kind: "MANUAL" },
       include: {
         _count: {
           select: {
@@ -189,7 +190,7 @@ export const updateCampaign = async (req, res) => {
     } = req.body;
 
     const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId },
+      where: { id, companyId: req.user.companyId, kind: "MANUAL" },
       include: { steps: { select: { type: true } } },
     });
 
@@ -278,7 +279,7 @@ export const updateCampaignSteps = async (req, res) => {
     }
 
     const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId },
+      where: { id, companyId: req.user.companyId, kind: "MANUAL" },
     });
 
     if (!campaign) {
@@ -431,7 +432,7 @@ export const enrollCampaign = async (req, res) => {
     }
 
     const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId },
+      where: { id, companyId: req.user.companyId, kind: "MANUAL" },
       // Step types drive the "this channel will not be delivered" warning below.
       include: { steps: { select: { type: true } } },
     });
@@ -600,7 +601,7 @@ export const unenrollCampaign = async (req, res) => {
     const activeCount = await prisma.campaignEnrollment.count({
       where: { campaignId: id, status: { in: ["ACTIVE", "PAUSED"] } },
     });
-    if (activeCount === 0 && campaign.status === "Active") {
+    if (activeCount === 0 && campaign.status === "Active" && campaign.kind === "MANUAL") {
       await prisma.campaign.update({
         where: { id },
         data: { status: "Completed" },
@@ -619,7 +620,7 @@ export const deleteCampaign = async (req, res) => {
     const { id } = req.params;
 
     const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId },
+      where: { id, companyId: req.user.companyId, kind: "MANUAL" },
     });
 
     if (!campaign) {

@@ -510,6 +510,7 @@ model Campaign {
   agentMaxTurns   Int?
   exitConditions  Json?
   versionPolicy   String               @default("FINISH_OLD")
+  kind            String               @default("MANUAL")
   steps           CampaignStep[]
   enrollments     CampaignEnrollment[]
   createdAt       DateTime             @default(now())
@@ -533,6 +534,8 @@ model CampaignStep {
   body            String?
   templateId      String?
   template        EmailTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  enabled         Boolean        @default(true)
+  playbookKey     String?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 

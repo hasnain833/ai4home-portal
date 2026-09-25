@@ -85,6 +85,7 @@ const standardTriggers = [
   { value: "LEAD_REPLIED", label: "A lead replies to you", desc: "Someone answers one of your emails or texts." },
   { value: "CRM_INGEST", label: "A lead arrives from Salesforce", desc: "A record syncs in from your CRM." },
   { value: "STATUS_CHANGE", label: "A lead's status changes", desc: "Someone moves to a different stage." },
+  { value: "WEB_FORM", label: "A lead fills in your website form", desc: "Someone submits the lead form embedded on your website." },
   { value: "MANUAL_CREATION", label: "Someone adds a lead by hand", desc: "A teammate creates a contact in the portal." },
   { value: "APPOINTMENT_BOOKED", label: "A lead books an appointment", desc: "Someone confirms a visit." },
   { value: "DATE_BASED", label: "A daily check on lead dates", desc: "Runs once a day — use it for things like \"added more than 7 days ago\"." }

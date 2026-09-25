@@ -4,6 +4,7 @@ import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
 import { normalizePhone } from "../services/sms.service.js";
+import { MailService } from "../services/mail-service.js";
 
 async function markLeadEngaged(leadId) {
   await prisma.lead.updateMany({
@@ -451,9 +452,6 @@ export const unsubscribeWebhook = async (req, res) => {
 };
 
 
-
-// Replies come back to reply+<companyId>@<inbound domain> when an inbound
-// domain is configured, which makes attribution exact rather than inferred.
 function companyIdFromReplyAddress(to) {
   const addresses = Array.isArray(to) ? to : to ? [to] : [];
   for (const entry of addresses) {
@@ -462,6 +460,27 @@ function companyIdFromReplyAddress(to) {
     if (match) return match[1];
   }
   return null;
+}
+
+async function copyReplyToTenant(companyId, lead, from, subject, body) {
+  try {
+    const company = await prisma.company.findUnique({ where: { id: companyId }, select: { name: true, email: true } });
+    if (!company?.email) return;
+    const name = `${lead.firstName || ""} ${lead.lastName || ""}`.trim() || from;
+    await MailService.sendEmail({
+      to: company.email,
+      subject: `Lead reply from ${name}${subject ? `: ${subject}` : ""}`,
+      html:
+        `<p><strong>${escapeXml(name)}</strong> (${escapeXml(from)}) replied. Your AI agent is handling it.</p>` +
+        `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeXml(body || "")}</blockquote>`,
+      fromName: company.name || undefined,
+      replyTo: from,
+      companyId,
+      source: "inbound-copy",
+    });
+  } catch (e) {
+    console.error("[Brevo Webhook] Tenant copy failed:", e.message);
+  }
 }
 
 export const processBrevoInboundEmail = async (req, res) => {
@@ -485,9 +504,6 @@ export const processBrevoInboundEmail = async (req, res) => {
 
       const normalizedEmail = fromEmail.trim().toLowerCase();
 
-      // Attribution, best source first: the tenant id encoded in the address
-      // they replied to, then an explicit query parameter, then what we know we
-      // last sent them. Ambiguity is left unrouted rather than guessed at.
       let companyId =
         companyIdFromReplyAddress(item.To) ||
         req.query.companyId ||
@@ -517,6 +533,8 @@ export const processBrevoInboundEmail = async (req, res) => {
       if (leads.length === 0) {
         console.warn(`[Brevo Webhook] \u26a0 No lead with email ${normalizedEmail} in company ${companyId}.`);
       }
+
+      if (leads.length) await copyReplyToTenant(companyId, leads[0], normalizedEmail, item.Subject, textBody || htmlBody);
 
       for (const lead of leads) {
         const replyContent = textBody || htmlBody || "No body content";
@@ -557,19 +575,9 @@ function twiml(message) {
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`;
 }
 
-// Provider-agnostic handling of one inbound SMS: opt-out/opt-in keywords first,
-// then reply-detection (exit sequences + wake the AI agent) for matching leads.
-// Returns { complianceReply } when a keyword was handled, else {}.
-// How far back an outbound message still counts as "the conversation they are
-// replying to", and the window inside which two tenants messaging the same
-// number makes the reply genuinely ambiguous.
 const CONVERSATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const CONTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-// A shared sending number carries no tenant identity, so an inbound reply has
-// to be attributed from what we know we sent. Ambiguity fails closed: routing a
-// lead's reply to the wrong builder exposes one customer's message to another,
-// which is worse than not routing it at all.
 function normalizeContactFor(channel, value) {
   return channel === "SMS"
     ? normalizePhone(value)
@@ -587,8 +595,6 @@ async function resolveInboundCompany(sender, channel = "SMS") {
         channel,
         recipient,
         companyId: { not: null },
-        // A rejected send never reached them, so it is not a conversation they
-        // could be replying to — and counting it would invent contention.
         outcome: "sent",
         createdAt: { gte: since },
       },
@@ -604,8 +610,6 @@ async function resolveInboundCompany(sender, channel = "SMS") {
       return { companyId: distinct[0], reason: "last-conversation" };
     }
 
-    // Several tenants have messaged this number. Only the most recent one is a
-    // safe guess, and only if nobody else was also talking to them just now.
     const contentionSince = Date.now() - CONTENTION_WINDOW_MS;
     const recent = outbound.filter((r) => r.createdAt.getTime() >= contentionSince);
     const recentDistinct = [...new Set(recent.map((r) => r.companyId))];
@@ -615,8 +619,6 @@ async function resolveInboundCompany(sender, channel = "SMS") {
     return { companyId: null, reason: "ambiguous-conversation", candidates: distinct };
   }
 
-  // Nothing sent from here — fall back to the number being a lead for exactly
-  // one tenant.
   const leads = await prisma.lead
     .findMany({
       where:
@@ -653,10 +655,6 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
     return { complianceReply: result.replyText };
   }
 
-  // The keyword handler above deliberately ran with the companyId as it
-  // arrived: on a shared number a STOP is carrier-scoped to the number, so it
-  // has to suppress platform-wide rather than for one tenant. Agent routing is
-  // the opposite — it needs to know exactly whose lead this is.
   let resolvedCompanyId = companyId;
   if (!resolvedCompanyId) {
     const resolution = await resolveInboundCompany(sender, "SMS");
@@ -707,9 +705,6 @@ export const processTwilioInboundSms = async (req, res) => {
   const sendTwiml = (message) => res.status(200).type("text/xml").send(twiml(message));
 
   try {
-    // No companyId means this arrived on the shared number's static webhook
-    // rather than in reply to a send of ours. It is still handled — a dropped
-    // STOP is a compliance failure, not a routing inconvenience.
     const companyId = req.query.companyId || req.body?.companyId || null;
 
     const { complianceReply } = await routeInboundSms({
@@ -733,18 +728,12 @@ export const processTelnyxInboundSms = async (req, res) => {
 
     const event = req.body?.data;
     const eventType = event?.event_type;
-
-    // The messaging profile posts delivery events (message.sent/message.finalized)
-    // to the same URL — acknowledge and ignore anything that isn't an inbound message.
     if (eventType !== "message.received") {
       console.log(`[SMS IN] Telnyx event "${eventType || "unknown"}" ignored.`);
       return res.status(200).json({ received: true });
     }
 
     const payload = event.payload || {};
-
-    // Telnyx has no TwiML equivalent, and it auto-responds to STOP/HELP at the
-    // carrier level, so a compliance reply is recorded but not sent from here.
     const { complianceReply } = await routeInboundSms({
       companyId,
       sender: payload.from?.phone_number,

@@ -550,7 +550,7 @@ async function escalate(lead, channel, convoId, transcript, reason, leadMessage)
   });
 
   try {
-    const { replyTo } = await getSenderIdentity(lead.companyId);
+    const replyTo = lead.email || (await getSenderIdentity(lead.companyId)).replyTo;
     const agentId = await resolveAgentId(lead);
     const agent = agentId ? await prisma.user.findUnique({ where: { id: agentId }, select: { email: true } }) : null;
     const to = agent?.email || lead.company?.email;

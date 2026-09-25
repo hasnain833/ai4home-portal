@@ -11,6 +11,7 @@ const publicRoutes = [
   "/bp-config",
   "/book",
   "/unsubscribe",
+  "/lead-form",
   "/terms",
   "/privacy",
   "/blog",

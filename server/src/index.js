@@ -29,6 +29,7 @@ import announcementsRouter from "./routes/announcements.js";
 import automationsRouter from "./routes/automations.js";
 import blogRouter from "./routes/blog.js";
 import publicBlogRouter from "./routes/public-blog.js";
+import leadFormRouter from "./routes/lead-form.js";
 import dashboardRouter from "./routes/dashboard.js";
 import reportsRouter from "./routes/reports.js";
 import ticketsRouter from "./routes/tickets.js";
@@ -157,6 +158,7 @@ app.use(
   notificationsRouter,
 );
 app.use("/api/public/blog", publicBlogRouter);
+app.use("/api/public/lead-form", leadFormRouter);
 app.use("/api/public/sales-agent", salesAgentRouter);
 
 const warrantyChatLimiter = createRateLimiter({

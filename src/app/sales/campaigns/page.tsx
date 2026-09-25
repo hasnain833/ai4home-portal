@@ -43,7 +43,9 @@ import {
   Sparkles,
   RefreshCw,
   AlertTriangle,
+  Zap,
 } from "lucide-react";
+import AutoNurtureWorkflow from "@/components/sales/AutoNurtureWorkflow";
 import { toast } from "sonner";
 import { describeSmsCost } from "@/lib/sms-segments";
 import { useAuth } from "@/contexts/AuthContext";
@@ -88,6 +90,7 @@ export default function CampaignsPage() {
   const companyName = user?.companyName || null;
   const { emailConfigured, smsConfigured } = useMessagingCapabilities();
 
+  const [mode, setMode] = useState<"auto" | "manual">("auto");
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [activeSeq, setActiveSeq] = useState<any>(null);
   const [activeSeqDetail, setActiveSeqDetail] = useState<any>(null);
@@ -472,6 +475,31 @@ export default function CampaignsPage() {
     <ProtectedRoute allowedRoles={["admin", "staff"]} requiredPermission={SALES_PERMISSION.campaignsManage}>
       <PortalLayout workspace="sales">
         <div className="space-y-6 max-w-7xl mx-auto">
+          {/* Automatic (built-in 180-day workflow) vs Manual (hand-built campaigns) */}
+          <div className="flex justify-center">
+            <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+              {([
+                { id: "auto", label: "Automatic", icon: Zap },
+                { id: "manual", label: "Manual", icon: Layers },
+              ] as const).map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setMode(id)}
+                  className={`flex items-center gap-1.5 rounded px-4 py-1.5 text-xs font-medium transition-colors ${
+                    mode === id ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {mode === "auto" ? (
+            <AutoNurtureWorkflow />
+          ) : (
+          <>
           {/* Header */}
           <div className="flex justify-between items-center">
             <div>
@@ -681,6 +709,8 @@ export default function CampaignsPage() {
               ) : null}
             </div>
           </div>
+          </>
+          )}
         </div>
 
         {/* Create Campaign Dialog */}

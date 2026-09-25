@@ -12,6 +12,11 @@ import {
   generateCampaignCopy,
   createCampaignFromNews
 } from "../controllers/campaigns.controller.js";
+import {
+  getAutoNurture,
+  setAutoNurtureActive,
+  updateAutoNurtureStep,
+} from "../controllers/auto-nurture.controller.js";
 
 const router = Router();
 
@@ -21,6 +26,10 @@ const router = Router();
 const canManage = requirePermission("campaigns.manage");
 
 router.get("/", requireAuth, getCampaigns);
+// The built-in 180-day workflow; registered before "/:id" so "auto" is not an id.
+router.get("/auto", requireAuth, getAutoNurture);
+router.put("/auto", requireAuth, canManage, setAutoNurtureActive);
+router.patch("/auto/steps/:stepId", requireAuth, canManage, updateAutoNurtureStep);
 router.get("/:id", requireAuth, getCampaignDetail);
 
 router.post("/generate-copy", requireAuth, canManage, generateCampaignCopy);
