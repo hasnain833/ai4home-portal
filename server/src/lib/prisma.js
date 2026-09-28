@@ -11,7 +11,17 @@ export function runtimeDatabaseUrl(rawUrl, serverless = Boolean(process.env.VERC
     const isSupabasePooler = url.hostname.endsWith(".pooler.supabase.com");
     if (isSupabasePooler && (url.port === "5432" || !url.port)) {
       url.port = "6543";
+    }
+    if (isSupabasePooler && url.port === "6543") {
       url.searchParams.set("pgbouncer", "true");
+      if (!url.searchParams.has("sslmode")) {
+        url.searchParams.set("sslmode", "require");
+      }
+      if (url.searchParams.get("sslmode") === "require") {
+        // node-postgres otherwise treats `require` like certificate verification.
+        // libpq compatibility keeps TLS mandatory without requiring a CA file.
+        url.searchParams.set("uselibpqcompat", "true");
+      }
       return url.toString();
     }
   } catch {
