@@ -7,10 +7,20 @@ export const scopeNotifications = (workspace) => (req, res, next) => {
   next();
 };
 
-const mine = (req) => ({
-  userId: req.user.id,
-  workspace: req.notificationWorkspace || "WARRANTY",
-});
+export const notificationScopeFor = (req) => {
+  const workspace = req.notificationWorkspace || "WARRANTY";
+  const isWarrantyAdmin =
+    workspace === "WARRANTY" &&
+    String(req.user.role || "").toUpperCase() === "ADMIN";
+
+  return {
+    userId: req.user.id,
+    workspace,
+    ...(isWarrantyAdmin ? { type: "TICKET_CREATED" } : {}),
+  };
+};
+
+const mine = notificationScopeFor;
 
 export const listNotifications = async (req, res) => {
   try {

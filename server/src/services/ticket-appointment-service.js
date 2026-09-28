@@ -2,7 +2,7 @@ import prisma from "../lib/prisma.js";
 import { MessagingService } from "./messaging-service.js";
 import { MailService } from "./mail-service.js";
 import { Templates } from "./templates.js";
-import { companyAdmins, writeNotifications } from "./notification-service.js";
+import { writeNotifications } from "./notification-service.js";
 
 const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
 
@@ -73,6 +73,7 @@ export function appointmentWithContext(id) {
           description: true,
           priority: true,
           warrantyYear: true,
+          assignedStaff: { select: { id: true, name: true, email: true } },
           property: { select: { address: true } },
         },
       },
@@ -90,7 +91,7 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
 
   const emailReady = MailService.hasPlatformSender();
 
-  const admins = await companyAdmins(companyId);
+  const assignedStaff = appointment.ticket?.assignedStaff || null;
 
   const notificationCopy = {
     scheduled: {
@@ -110,19 +111,21 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
     },
   }[kind];
 
-  // In-portal, for the trade side. Always written.
-  if (companyId && admins.length) {
+  // Warranty admins only receive ticket-created alerts. Appointment activity
+  // belongs to the assigned staff member and the homeowner.
+  if (companyId && assignedStaff?.id) {
     await writeNotifications(
-      admins.map((a) => ({
+      [{
         companyId,
-        userId: a.id,
+        userId: assignedStaff.id,
+        workspace: "WARRANTY",
         type: notificationCopy.type,
         title: notificationCopy.title,
         body: notificationCopy.body,
         link: `/warranty/tickets/${appointment.ticketId}`,
         ticketId: appointment.ticketId,
         emailFallback: !emailReady,
-      })),
+      }],
     );
   }
 
@@ -130,7 +133,7 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
     console.warn(
       `[Appointment Notify] ${appointment.id} (${kind}): in-portal only — no email credentials for this workspace.`,
     );
-    return { ok: true, notified: admins.length, emailed: 0, emailConfigured: false };
+    return { ok: true, notified: assignedStaff ? 1 : 0, emailed: 0, emailConfigured: false };
   }
 
   // "scheduled" covers both the initial dispatch and a later reschedule. The two
@@ -192,11 +195,8 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
       );
   }
 
-  // The assigned staff member is the one who needs the mail. Admins already have
-  // the in-portal notification written above, so they are only mailed as a
-  // fallback for legacy appointments that were booked without an assignee.
   const staffRecipients = new Set(
-    appointment.tradeEmail ? [appointment.tradeEmail] : admins.map((a) => a.email).filter(Boolean),
+    [appointment.tradeEmail, assignedStaff?.email].filter(Boolean),
   );
 
   for (const to of staffRecipients) {
@@ -212,7 +212,7 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
   const ok = attempted === 0 || emailed > 0;
   return {
     ok,
-    notified: admins.length,
+    notified: assignedStaff ? 1 : 0,
     emailed,
     attempted,
     homeownerDelivered,

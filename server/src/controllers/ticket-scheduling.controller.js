@@ -10,11 +10,8 @@ const NOT_CONFIGURED_NOTICE =
   "Your appointment is booked, but the confirmation email could not be sent. " +
   "It is safely recorded — please contact us if you need the details.";
 
-/**
- * These endpoints are reached from an email link, with no session. The token IS
- * the authorisation, so each lookup is by token alone and every response says
- * only what the holder of that link already knows.
- */
+class BookingConflictError extends Error {}
+
 
 function publicTicketView(ticket) {
   return {
@@ -101,38 +98,48 @@ export const publicBook = async (req, res) => {
       return res.status(409).json({ message: "This claim has no one assigned yet." });
     }
 
-    // Re-checked here rather than trusted from the page: someone else may have
-    // taken the slot while this page was open.
-    const check = await isSlotBookable({
-      staffId: ticket.assignedStaff.id,
-      staffEmail: ticket.assignedStaff.email,
-      companyId: ticket.companyId,
-      startTime,
-    });
-    if (!check.ok) return res.status(409).json({ message: check.reason });
+    const appointment = await prisma.$transaction(
+      async (tx) => {
+        const check = await isSlotBookable({
+          staffId: ticket.assignedStaff.id,
+          staffEmail: ticket.assignedStaff.email,
+          companyId: ticket.companyId,
+          startTime,
+          db: tx,
+        });
+        if (!check.ok) throw new BookingConflictError(check.reason);
 
-    const appointment = await prisma.ticketAppointment.create({
-      data: {
-        ticketId: ticket.id,
-        companyId: ticket.companyId,
-        homeownerId: ticket.homeownerId,
-        scheduledAt: new Date(startTime),
-        durationMinutes: check.slotDuration || 60,
-        tradeName: ticket.assignedStaff.name || ticket.assignedStaff.email,
-        tradeEmail: ticket.assignedStaff.email,
-        location: ticket.property?.address || null,
-        notes: ticket.dispatchNotes || null,
-        // Self-booked, so the assignee is the closest thing to a booker.
-        createdById: ticket.assignedStaff.id,
+        const claimed = await tx.ticket.updateMany({
+          where: {
+            id: ticket.id,
+            bookingToken: token,
+            status: { not: "RESOLVED" },
+            appointments: { none: { status: "SCHEDULED" } },
+          },
+          data: { bookingToken: null },
+        });
+        if (claimed.count !== 1) {
+          throw new BookingConflictError("This booking link has already been used.");
+        }
+
+        return tx.ticketAppointment.create({
+          data: {
+            ticketId: ticket.id,
+            companyId: ticket.companyId,
+            homeownerId: ticket.homeownerId,
+            scheduledAt: new Date(startTime),
+            durationMinutes: check.slotDuration || 60,
+            tradeName: ticket.assignedStaff.name || ticket.assignedStaff.email,
+            tradeEmail: ticket.assignedStaff.email,
+            location: ticket.property?.address || null,
+            notes: ticket.dispatchNotes || null,
+            // Self-booked, so the assignee is the closest thing to a booker.
+            createdById: ticket.assignedStaff.id,
+          },
+        });
       },
-    });
-
-    // The link has done its job. Clearing it means a forwarded email cannot be
-    // used to book a second visit.
-    await prisma.ticket.update({
-      where: { id: ticket.id },
-      data: { bookingToken: null },
-    });
+      { isolationLevel: "Serializable" },
+    );
 
     const result = await notifyAppointmentScheduled(appointment.id);
 
@@ -143,6 +150,14 @@ export const publicBook = async (req, res) => {
       ...(result.emailConfigured === false ? { notice: NOT_CONFIGURED_NOTICE } : {}),
     });
   } catch (error) {
+    if (error instanceof BookingConflictError || error?.code === "P2034") {
+      return res.status(409).json({
+        message:
+          error instanceof BookingConflictError
+            ? error.message
+            : "That slot has just been taken. Please pick another.",
+      });
+    }
     console.error("[Ticket Scheduling] Failed to book:", error);
     return res.status(500).json({ message: "Could not book that time. Please try again." });
   }

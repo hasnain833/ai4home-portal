@@ -67,7 +67,10 @@ export const ticketReminders = inngest.createFunction(
             },
           ],
         },
-        include: { homeowner: { include: { company: true } } },
+        include: {
+          homeowner: { include: { company: true } },
+          assignedStaff: { select: { id: true, name: true, email: true } },
+        },
         orderBy: { createdAt: "asc" },
         take: BATCH_SIZE,
       });

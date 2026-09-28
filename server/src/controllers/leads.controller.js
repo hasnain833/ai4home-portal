@@ -103,10 +103,6 @@ export const getLeads = async (req, res) => {
   }
 };
 
-/**
- * One lead, with everything the detail page shows: who owns it, the visits
- * booked against it, and which campaigns it is enrolled in.
- */
 export const getLead = async (req, res) => {
   try {
     const companyId = req.user.companyId;
@@ -141,6 +137,20 @@ export const getLead = async (req, res) => {
             campaign: { select: { id: true, name: true } },
           },
         },
+        schedulingConversations: {
+          orderBy: { updatedAt: "desc" },
+          take: 20,
+          select: {
+            id: true,
+            channel: true,
+            mode: true,
+            status: true,
+            turnCount: true,
+            transcript: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
       },
     });
 
@@ -148,7 +158,6 @@ export const getLead = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    // Homeowners with sales access only ever see their own leads.
     if (req.user.role.toUpperCase() === "HOMEOWNER" && lead.ownerId !== req.user.id) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -480,8 +489,6 @@ export const updateLead = async (req, res) => {
       return res.status(400).json({ message: "Invalid lead status." });
     }
 
-    // Reassignment is a staff decision, and the new owner has to be someone in
-    // this company who can actually work the lead.
     if (ownerId !== undefined && ownerId !== null) {
       if (req.user.role.toUpperCase() === "HOMEOWNER") {
         return res.status(403).json({ message: "You cannot reassign a lead." });
@@ -533,10 +540,6 @@ export const updateLead = async (req, res) => {
     });
 
     if (status !== undefined && status !== lead.status) {
-      // The lead is already saved. Campaign exit and automations are fan-out
-      // from that fact, so a broker outage must not turn a change that landed
-      // into an error the user sees — same treatment as the Salesforce
-      // write-back below.
       try {
         const { inngest } = await import("../lib/inngest.js");
         await inngest.send({

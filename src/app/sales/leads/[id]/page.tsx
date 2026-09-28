@@ -46,6 +46,23 @@ type Appointment = {
   notes: string | null;
 };
 
+type ConversationMessage = {
+  role: string;
+  content: string;
+  at: string | null;
+};
+
+type SchedulingConversation = {
+  id: string;
+  channel: string;
+  mode: string;
+  status: string;
+  turnCount: number;
+  transcript: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type Lead = {
   id: string;
   externalId: string | null;
@@ -65,6 +82,7 @@ type Lead = {
   owner: Agent | null;
   customFields: Record<string, unknown> | null;
   appointments: Appointment[];
+  schedulingConversations: SchedulingConversation[];
   campaignEnrollments: {
     id: string;
     status: string;
@@ -167,6 +185,34 @@ const formatWhen = (iso: string) =>
     hour: "numeric",
     minute: "2-digit",
   });
+
+const conversationMessages = (transcript: unknown): ConversationMessage[] => {
+  if (!Array.isArray(transcript)) return [];
+  return transcript.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const value = entry as Record<string, unknown>;
+    const content = typeof value.content === "string" ? value.content.trim() : "";
+    if (!content) return [];
+    return [{
+      role: typeof value.role === "string" ? value.role.toLowerCase() : "unknown",
+      content,
+      at: typeof value.at === "string" ? value.at : null,
+    }];
+  });
+};
+
+const conversationStatusColor = (status: string) => {
+  switch (status.toUpperCase()) {
+    case "ACTIVE":
+      return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300";
+    case "BOOKED":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300";
+    case "ESCALATED":
+      return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300";
+    default:
+      return "border-border bg-muted text-muted-foreground";
+  }
+};
 
 export default function LeadDetailPage() {
   const { id } = useParams();
@@ -359,6 +405,101 @@ export default function LeadDetailPage() {
                   </CardContent>
                 </Card>
               )}
+
+              <Card className="overflow-hidden">
+                <CardHeader className="border-b bg-muted/20 py-4 px-6 flex flex-row items-center gap-3">
+                  <div className="p-2 bg-primary/10 text-primary rounded-lg">
+                    <MessageSquare className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-bold">AI conversations</CardTitle>
+                    <CardDescription className="text-[11px]">
+                      Email and SMS conversations handled by the scheduling assistant
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {lead.schedulingConversations.length === 0 ? (
+                    <div className="px-6 py-10 text-center">
+                      <MessageSquare className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm font-medium">No AI conversations yet</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Conversations will appear after this lead replies to the scheduling assistant.
+                      </p>
+                    </div>
+                  ) : (
+                    lead.schedulingConversations.map((conversation, conversationIndex) => {
+                      const messages = conversationMessages(conversation.transcript);
+                      return (
+                        <section
+                          key={conversation.id}
+                          className={cn(
+                            "px-4 py-5 sm:px-6 space-y-4",
+                            conversationIndex > 0 && "border-t border-border/70",
+                          )}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold capitalize">
+                                {conversation.channel.toLowerCase()} conversation
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Updated {formatWhen(conversation.updatedAt)} · {conversation.mode.toLowerCase()} mode
+                              </p>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "w-fit text-[10px] capitalize",
+                                conversationStatusColor(conversation.status),
+                              )}
+                            >
+                              {conversation.status.toLowerCase()}
+                            </Badge>
+                          </div>
+
+                          {messages.length === 0 ? (
+                            <p className="text-xs text-muted-foreground py-2">
+                              This conversation has no recorded messages.
+                            </p>
+                          ) : (
+                            <div className="space-y-3" aria-label={`${conversation.channel} conversation transcript`}>
+                              {messages.map((message, messageIndex) => {
+                                const isAgent = message.role === "agent" || message.role === "assistant";
+                                return (
+                                  <div
+                                    key={`${conversation.id}-${messageIndex}`}
+                                    className={cn("flex", isAgent ? "justify-start" : "justify-end")}
+                                  >
+                                    <div className={cn("max-w-[88%] sm:max-w-[78%] space-y-1", !isAgent && "text-right")}>
+                                      <div className="flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
+                                        <span className="font-semibold">
+                                          {isAgent ? "AI assistant" : lead.firstName}
+                                        </span>
+                                        {message.at && <span>{formatWhen(message.at)}</span>}
+                                      </div>
+                                      <p
+                                        className={cn(
+                                          "rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-left",
+                                          isAgent
+                                            ? "bg-muted text-foreground"
+                                            : "bg-primary text-primary-foreground",
+                                        )}
+                                      >
+                                        {message.content}
+                                      </p>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })
+                  )}
+                </CardContent>
+              </Card>
 
               {FIELD_GROUPS.map((group) => {
                 const rows = group.keys

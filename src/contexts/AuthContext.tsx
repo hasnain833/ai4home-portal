@@ -111,8 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!sessionExpired) return;
-    supabaseRef.current.auth.signOut().catch(() => {});
-    setUser(null);
+    void supabaseRef.current.auth.signOut().finally(() => setUser(null));
   }, [sessionExpired]);
 
   const handleSessionExpiredRedirect = () => {
@@ -222,8 +221,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
       } else if (response.status !== 401) {
-        throw new Error(
-          "The server is temporarily unavailable. Please try again in a few moments.",
+        // This endpoint is only a superadmin probe. A database/configuration
+        // failure here must not prevent ordinary users from using Supabase auth.
+        console.warn(
+          `[auth] Superadmin check returned ${response.status}; continuing with normal sign-in.`,
         );
       }
 

@@ -231,14 +231,21 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", timestamp: new Date() });
 });
 
+let httpServer = null;
+
 if (process.env.VERCEL || process.env.NODE_ENV === "test") {
   console.log(
     "[Server] Running in Vercel/Test environment. Bypassing app.listen().",
   );
 } else {
-  app.listen(port, () => {
+  httpServer = app.listen(port, () => {
     console.log(`[Server] Standalone backend running on port ${port}`);
+  });
+
+  httpServer.on("error", (error) => {
+    console.error(`[Server] Failed to listen on port ${port}:`, error);
   });
 }
 
+export { httpServer };
 export default app;

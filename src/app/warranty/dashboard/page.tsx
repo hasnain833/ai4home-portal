@@ -157,10 +157,12 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [systemHealth, setSystemHealth] = useState({
-    agentStatus: "Operational",
-    erpSync: "Connected to Builtopia",
-    kbDocs: "Active Documents Scoped",
-    lastEscalation: "2 hours ago · resolved by staff",
+    agentStatus: "Checking...",
+    agentHealthy: false,
+    erpSync: "Checking...",
+    erpHealthy: false,
+    kbDocs: "Checking...",
+    lastEscalation: "Checking...",
   });
 
   // Fetch Stats (Admin/Staff only)
@@ -754,15 +756,15 @@ export default function DashboardPage() {
                       <p className="text-sm text-muted-foreground">
                         Agent Status
                       </p>
-                      <p className="font-medium text-green-600">
-                        ✓ {systemHealth.agentStatus}
+                      <p className={`font-medium ${systemHealth.agentHealthy ? "text-green-600" : "text-red-500"}`}>
+                        {systemHealth.agentHealthy ? "OK " : "X "}{systemHealth.agentStatus}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">ERP Sync</p>
                       <p
-                        className={`font-medium ${systemHealth.erpSync !== "Not Connected" ? "text-green-600" : "text-red-500"}`}>
-                        {systemHealth.erpSync !== "Not Connected" ? "✓ " : "✗ "}
+                        className={`font-medium ${systemHealth.erpHealthy ? "text-green-600" : "text-red-500"}`}>
+                        {systemHealth.erpHealthy ? "OK " : "X "}
                         {systemHealth.erpSync}
                       </p>
                     </div>

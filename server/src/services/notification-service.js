@@ -51,6 +51,7 @@ export async function notifyTicketCreated(ticketId, { sendEmail = true } = {}) {
         admins.map((a) => ({
           companyId,
           userId: a.id,
+          workspace: "WARRANTY",
           type: "TICKET_CREATED",
           title: ticket.isEmergency
             ? `Emergency ticket #${ticket.id}`
@@ -150,35 +151,42 @@ export async function notifyTicketReminder(ticket, ageLabel) {
     const company = ticket.homeowner?.company || null;
     const companyName = company?.name || "Aiforhomebuilder";
     const homeownerName = ticket.homeowner?.name || "Homeowner";
-    const admins = await companyAdmins(companyId);
-    if (!admins.length) return { ok: true, notified: 0, emailed: 0 };
+    const assignedStaff = ticket.assignedStaff || (ticket.assignedStaffId
+      ? await prisma.user.findFirst({
+          where: { id: ticket.assignedStaffId, companyId, role: "STAFF" },
+          select: { id: true, email: true, name: true },
+        })
+      : null);
+    if (!assignedStaff) {
+      return { ok: true, notified: 0, emailed: 0, attempted: 0 };
+    }
 
     const emailReady = emailIsConfigured();
 
     await writeNotifications(
-      admins.map((a) => ({
+      [{
         companyId,
-        userId: a.id,
+        userId: assignedStaff.id,
+        workspace: "WARRANTY",
         type: "TICKET_REMINDER",
         title: `Ticket #${ticket.id} still open`,
         body: `Open for ${ageLabel} with no action. ${homeownerName} reported "${ticket.issueType}".`,
         link: `/warranty/tickets/${ticket.id}`,
         ticketId: ticket.id,
         emailFallback: !emailReady,
-      })),
+      }],
     );
 
     if (!emailReady) {
-      return { ok: true, notified: admins.length, emailed: 0, emailConfigured: false };
+      return { ok: true, notified: 1, emailed: 0, attempted: 0, emailConfigured: false };
     }
 
     let emailed = 0;
     let attempted = 0;
-    for (const admin of admins) {
-      if (!admin.email) continue;
+    if (assignedStaff.email) {
       const result = await MessagingService.sendEmail({
         companyId,
-        to: admin.email,
+        to: assignedStaff.email,
         source: "ticket-reminder",
         subject: `Reminder: ticket #${ticket.id} has been open for ${ageLabel}`,
         html: Templates.getTicketReminderEmail(
@@ -197,12 +205,12 @@ export async function notifyTicketReminder(ticket, ageLabel) {
       if (result.success) emailed++;
       else
         console.warn(
-          `[Ticket Notify] #${ticket.id}: reminder email to ${admin.email} not delivered — ${result.error || result.reason}`,
+          `[Ticket Notify] #${ticket.id}: reminder email to ${assignedStaff.email} not delivered - ${result.error || result.reason}`,
         );
       attempted++;
     }
 
-    return { ok: true, notified: admins.length, emailed, attempted, emailConfigured: true };
+    return { ok: true, notified: 1, emailed, attempted, emailConfigured: true };
   } catch (err) {
     console.error(`[Ticket Notify] notifyTicketReminder failed for #${ticket?.id}:`, err.message);
     return { ok: false, error: err.message };

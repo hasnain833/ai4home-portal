@@ -1,4 +1,11 @@
 import prisma from "../lib/prisma.js";
+import { hasPlatformAi } from "../lib/ai-config.js";
+
+const ERP_LABELS = {
+  BUILTOPIA: "Builtopia",
+  BUILDERTREND: "Buildertrend",
+  HYPHEN: "Hyphen",
+};
 
 export const getDashboardStats = async (req, res) => {
   try {
@@ -29,7 +36,8 @@ export const getDashboardStats = async (req, res) => {
       recentTickets,
       activeIntegration,
       kbDocsCount,
-      lastEscalationTicket
+      lastEscalationTicket,
+      lastErpSync,
     ] = await prisma.$transaction([
       prisma.ticket.count({ where: periodScope }),
       prisma.ticket.count({ where: { status: "OPEN", ...periodScope } }),
@@ -59,17 +67,29 @@ export const getDashboardStats = async (req, res) => {
       prisma.integration.findFirst({
         where: { companyId: session.companyId || "demo-company", isActive: true }
       }),
-      prisma.knowledgeBaseDocument.count({
-        where: { companyId: session.companyId || "demo-company" }
+      prisma.warrantyKB.count({
+        where: {
+          scope: "COMPANY",
+          companyId: session.companyId || "demo-company",
+          isActive: true,
+          status: "READY",
+        },
       }),
       prisma.ticket.findFirst({
         where: {
-          OR: [{ isEmergency: true }, { status: "RESOLVED" }],
+          isEmergency: true,
           homeowner: { companyId: session.companyId || "demo-company" },
-          updatedAt: { gte: sinceDate }
         },
-        orderBy: { updatedAt: "desc" }
-      })
+        orderBy: { updatedAt: "desc" },
+      }),
+      prisma.syncLog.findFirst({
+        where: {
+          companyId: session.companyId || "demo-company",
+          action: { startsWith: "ERP_SYNC:" },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { status: true, createdAt: true },
+      }),
     ]);
 
     // Calculate avg resolution time dynamically based on duration
@@ -107,6 +127,19 @@ export const getDashboardStats = async (req, res) => {
       return `${days}d ago`;
     };
 
+    const erpName = activeIntegration
+      ? ERP_LABELS[activeIntegration.platform] || activeIntegration.platform
+      : null;
+    const erpHealthy = lastErpSync?.status === "SUCCESS";
+    const erpSync = !activeIntegration
+      ? "Not Connected"
+      : !lastErpSync
+        ? `${erpName} configured; no sync yet`
+        : erpHealthy
+          ? `${erpName} synced ${timeAgo(lastErpSync.createdAt)}`
+          : `${erpName} sync failed ${timeAgo(lastErpSync.createdAt)}`;
+    const agentHealthy = hasPlatformAi();
+
     const stats = {
       totalTickets,
       openTickets,
@@ -127,14 +160,14 @@ export const getDashboardStats = async (req, res) => {
         createdAt: t.createdAt
       })),
       systemHealth: {
-        agentStatus: kbDocsCount > 0 ? "Operational" : "Inactive",
-        erpSync: activeIntegration
-          ? `Connected to ${activeIntegration.platform === "BUILTOPIA" ? "Builtopia" : activeIntegration.platform === "BUILDERTREND" ? "Buildertrend" : "Hyphen"}`
-          : "Not Connected",
-        kbDocs: kbDocsCount > 0 ? `${kbDocsCount} Active Document${kbDocsCount > 1 ? "s" : ""} Scoped` : "No Documents Scoped",
+        agentStatus: agentHealthy ? "Operational" : "Not Configured",
+        agentHealthy,
+        erpSync,
+        erpHealthy,
+        kbDocs: kbDocsCount > 0 ? `${kbDocsCount} Ready Document${kbDocsCount > 1 ? "s" : ""} Scoped` : "No Ready Documents",
         lastEscalation: lastEscalationTicket
-          ? `${timeAgo(lastEscalationTicket.updatedAt)} · ${lastEscalationTicket.status !== "RESOLVED" && lastEscalationTicket.isEmergency ? "escalated to staff" : "resolved by staff"}`
-          : "No recent activity"
+          ? `${timeAgo(lastEscalationTicket.updatedAt)} - ${lastEscalationTicket.status === "RESOLVED" ? "resolved by staff" : "escalated to staff"}`
+          : "No escalations yet"
       }
     };
 
