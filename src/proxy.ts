@@ -25,6 +25,14 @@ const EXPECTED_AUTH_ERRORS = new Set([
   "session_missing",
 ]);
 
+function isExpectedAuthError(error: { code?: string; name?: string; message?: string }) {
+  if (EXPECTED_AUTH_ERRORS.has(error.code ?? "")) return true;
+  if (error.name === "AuthSessionMissingError") return true;
+
+  const message = String(error.message || "").toLowerCase();
+  return message.includes("auth session missing") || message.includes("session missing");
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -40,6 +48,13 @@ export async function proxy(request: NextRequest) {
       widgetUrl.searchParams.delete("company");
       return NextResponse.redirect(widgetUrl);
     }
+  }
+
+  // API authentication is enforced by the backend routes themselves. Running a
+  // second Supabase lookup here adds latency to webhooks and logs signed-out API
+  // requests as proxy errors even though the proxy allows every API route.
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.next({ request });
   }
 
   let supabaseResponse = NextResponse.next({ request });
@@ -69,14 +84,14 @@ export async function proxy(request: NextRequest) {
     error,
   } = await supabase.auth.getUser();
 
-  if (error && !EXPECTED_AUTH_ERRORS.has(error.code ?? "")) {
+  if (error && !isExpectedAuthError(error)) {
     console.error("[proxy] Unexpected auth error:", error.code, error.message);
   }
 
   const isPublic =
     publicRoutes.some(
       (route) => pathname === route || pathname.startsWith(route + "/"),
-    ) || pathname.startsWith("/api/");
+    );
 
   if (isPublic) {
     return supabaseResponse;
