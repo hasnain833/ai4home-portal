@@ -2,14 +2,43 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
-const connectionString = process.env.DATABASE_URL;
+export function runtimeDatabaseUrl(rawUrl, serverless = Boolean(process.env.VERCEL)) {
+  if (!rawUrl) throw new Error("DATABASE_URL is required");
+  if (!serverless) return rawUrl;
+
+  try {
+    const url = new URL(rawUrl);
+    const isSupabasePooler = url.hostname.endsWith(".pooler.supabase.com");
+    if (isSupabasePooler && (url.port === "5432" || !url.port)) {
+      url.port = "6543";
+      url.searchParams.set("pgbouncer", "true");
+      return url.toString();
+    }
+  } catch {
+    // Let pg report malformed connection strings with its standard diagnostics.
+  }
+
+  return rawUrl;
+}
+
+export function databasePoolMax(value, serverless = Boolean(process.env.VERCEL)) {
+  const configured = Number.parseInt(String(value || ""), 10);
+  return Number.isInteger(configured) && configured > 0
+    ? configured
+    : serverless
+      ? 1
+      : 6;
+}
+
+const serverless = Boolean(process.env.VERCEL);
+const connectionString = runtimeDatabaseUrl(process.env.DATABASE_URL, serverless);
 const pool = new Pool({
   connectionString,
-  max: 6,
+  max: databasePoolMax(process.env.DATABASE_POOL_MAX, serverless),
   connectionTimeoutMillis: 30000,
-  idleTimeoutMillis: 30000,
+  idleTimeoutMillis: serverless ? 10000 : 30000,
   keepAlive: true,
-  allowExitOnIdle: false,
+  allowExitOnIdle: serverless,
 });
 
 pool.on("error", (err) => {

@@ -82,7 +82,7 @@ export const runNurtureCampaign = inngest.createFunction(
   {
     id: "run-nurture-campaign-v4",
     concurrency: [
-      { key: "event.data.campaignId", limit: 2 },
+      { limit: 3 },
       { key: "event.data.enrollmentId", limit: 1 },
     ],
     triggers: [{ event: "campaign.enrollment.started" }],
