@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { CalendarDays, Clock, Video, CheckCircle2 } from "lucide-react";
+import { CalendarDays, Clock, CheckCircle2 } from "lucide-react";
 
 type Slot = { iso: string; label: string };
 type BookingData = {
@@ -26,7 +26,7 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
   const [notFound, setNotFound] = useState(false);
   const [selected, setSelected] = useState<string>("");
   const [booking, setBooking] = useState(false);
-  const [confirmed, setConfirmed] = useState<{ label: string; meetingLink?: string | null; manageToken: string } | null>(
+  const [confirmed, setConfirmed] = useState<{ label: string; manageToken: string } | null>(
     null
   );
   const [error, setError] = useState("");
@@ -56,7 +56,7 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
       const res = await fetch("/api/sales/scheduling/public/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bookingToken, startTime: selected, locationType: "VIRTUAL", title: "Model Home Visit" }),
+        body: JSON.stringify({ bookingToken, startTime: selected, locationType: "ONSITE", title: "Model Home Visit" }),
       });
       const result = await res.json();
       if (!res.ok) {
@@ -74,7 +74,6 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
       const slot = data?.slots.find((s) => s.iso === selected);
       setConfirmed({
         label: slot?.label || new Date(selected).toLocaleString(),
-        meetingLink: result.appointment?.meetingLink,
         manageToken: result.appointment?.manageToken,
       });
     } catch {
@@ -104,16 +103,6 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
           <CheckCircle2 className="h-14 w-14 text-green-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-[#0F3B3D]">You&apos;re booked!</h2>
           <p className="text-slate-600 mt-2">{confirmed.label}</p>
-          {confirmed.meetingLink && (
-            <a
-              href={confirmed.meetingLink}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 mt-5 bg-[#b48c3c] text-white px-5 py-2.5 rounded-lg font-semibold text-sm"
-            >
-              <Video className="h-4 w-4" /> Join Google Meet
-            </a>
-          )}
           <p className="text-xs text-slate-400 mt-6">
             A confirmation has been sent to you. Need to change it?{" "}
             <a href={`/book/manage/${confirmed.manageToken}`} className="text-[#b48c3c] underline">

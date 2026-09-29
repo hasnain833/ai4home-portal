@@ -10,8 +10,6 @@ export const DEFAULT_PRICING = {
   // up: divide your monthly plan cost by the emails it includes. 1250 is the
   // Starter plan ($25 / 20,000 emails); higher tiers work out cheaper.
   EMAIL: 1250,
-  // Twilio US outbound long-code, list price $0.0079 per segment.
-  TWILIO_SMS: 7900,
   // Telnyx US outbound long-code, list price $0.004 per segment.
   TELNYX_SMS: 4000,
   // A send the provider rejected never reached a carrier, so it costs nothing.

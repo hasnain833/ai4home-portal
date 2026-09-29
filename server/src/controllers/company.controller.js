@@ -37,16 +37,6 @@ export const updateCompany = async (req, res) => {
     }
 
     const companyId = session.companyId || "demo-company";
-    const PROFILE_FIELDS = [
-      "name",
-      "logo",
-      "email",
-      "phone",
-      "address",
-      "warrantyPolicy",
-      "botColor",
-    ];
-
     const SETTINGS_FIELDS = [
       "defaultLeadOwner",
       "voiceProfile",

@@ -129,7 +129,7 @@ export const postMessage = async (req, res) => {
         pendingBooking = {
           slotIso: offered.iso,
           label: offered.label,
-          locationType: decision.location_type === "ONSITE" ? "ONSITE" : "VIRTUAL",
+          locationType: decision.location_type === "VIRTUAL" ? "VIRTUAL" : "ONSITE",
         };
         reply = `Great — ${offered.label} it is. Just add your details below so I can lock it in and send you a confirmation.`;
       } else {
@@ -229,7 +229,7 @@ export const bookVisit = async (req, res) => {
       leadId: lead.id,
       startTime: slot.iso,
       title: "Model Home Visit",
-      locationType: b.locationType === "ONSITE" ? "ONSITE" : "VIRTUAL",
+      locationType: b.locationType === "VIRTUAL" ? "VIRTUAL" : "ONSITE",
       bookedVia: "AI_CHAT",
       notes,
     });
@@ -238,15 +238,11 @@ export const bookVisit = async (req, res) => {
       return res.status(result.conflict ? 409 : 400).json({ message: result.reason || "Could not book that time" });
     }
 
-    const link = result.appointment.meetingLink;
     return res.status(201).json({
-      reply:
-        `You're booked, ${firstName} — ${slot.label}. A confirmation is on its way to ${email}.` +
-        (link ? `\n\nVideo link: ${link}` : ""),
+      reply: `You're booked, ${firstName} — ${slot.label}. A confirmation is on its way to ${email}.`,
       booked: {
         when: slot.label,
         locationType: result.appointment.locationType,
-        meetingLink: link || null,
         leadId: lead.id,
         leadName: `${lead.firstName} ${lead.lastName === "-" ? "" : lead.lastName}`.trim(),
       },

@@ -143,7 +143,7 @@ const RESPOND_TOOL = {
       action: { type: "string", enum: ["reply", "book", "escalate"] },
       message: { type: "string", description: "The exact message text to send to the lead. On 'escalate' this is what the lead reads, so acknowledge their concern warmly and tell them a team member will reach out." },
       slot_iso: { type: "string", description: "Required when action is 'book': the chosen slot's ISO start time, copied verbatim from the available slots." },
-      location_type: { type: "string", enum: ["VIRTUAL", "ONSITE"], description: "Visit type when booking. Default VIRTUAL." },
+      location_type: { type: "string", enum: ["ONSITE", "VIRTUAL"], description: "Visit type when booking. Default ONSITE." },
       used_kb: { type: "boolean", description: "True if your answer drew on the Company Knowledge Base context." },
       handoff_reason: { type: "string", description: "Required when action is 'escalate': a short internal note for the human team explaining what the lead needs and what you already know about them. The lead never sees this." },
       home_ids: {
@@ -422,7 +422,7 @@ export const appointmentSchedulingAgent = inngest.createFunction(
             leadId: lead.id,
             startTime: decision.slot_iso,
             title: "Model Home Visit",
-            locationType: decision.location_type || "VIRTUAL",
+            locationType: decision.location_type || "ONSITE",
             agentId: slots.agentId,
             bookedVia: "AI_AGENT",
           })
@@ -431,8 +431,7 @@ export const appointmentSchedulingAgent = inngest.createFunction(
 
       await step.run("respond-booking", async () => {
         if (booking.success) {
-          const link = booking.appointment.meetingLink;
-          const confirm = `${decision.message}${link ? `\n\nVideo link: ${link}` : ""}`;
+          const confirm = decision.message;
           await sendLeadMessage(lead, channel, confirm, "Your visit is confirmed");
           const finalTranscript = [...transcript, { role: "agent", content: confirm, at: new Date().toISOString() }];
           await prisma.schedulingConversation.update({
@@ -514,8 +513,7 @@ export const appointmentReminders = inngest.createFunction(
         if (!window) continue;
 
         const when = formatSlotLabel(appt.time, tz);
-        const meet = appt.meetingLink ? ` Join: ${appt.meetingLink}` : "";
-        const text = `Reminder: your ${appt.title} is ${window === "1h" ? "in about an hour" : "tomorrow"} — ${when}.${meet}`;
+        const text = `Reminder: your ${appt.title} is ${window === "1h" ? "in about an hour" : "tomorrow"} — ${when}.`;
 
         try {
           await sendLeadMessage(appt.lead, appt.lead.phone ? "SMS" : "EMAIL", text, `Reminder: ${appt.title}`);

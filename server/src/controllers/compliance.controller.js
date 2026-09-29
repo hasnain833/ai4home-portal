@@ -561,20 +561,6 @@ export const processBrevoInboundEmail = async (req, res) => {
   }
 };
 
-function escapeXml(str = "") {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-function twiml(message) {
-  const inner = message ? `<Message>${escapeXml(message)}</Message>` : "";
-  return `<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`;
-}
-
 const CONVERSATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const CONTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -700,27 +686,6 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
 
   return {};
 }
-
-export const processTwilioInboundSms = async (req, res) => {
-  const sendTwiml = (message) => res.status(200).type("text/xml").send(twiml(message));
-
-  try {
-    const companyId = req.query.companyId || req.body?.companyId || null;
-
-    const { complianceReply } = await routeInboundSms({
-      companyId,
-      sender: req.body.From || req.body.from || req.body.sender,
-      body: req.body.Body || req.body.body || req.body.text || "",
-      toNumber: req.body.To || req.body.to || "",
-      provider: "TWILIO_SMS",
-    });
-
-    return sendTwiml(complianceReply);
-  } catch (error) {
-    console.error("[Twilio SMS Webhook] Error processing inbound SMS:", error);
-    return res.status(200).type("text/xml").send(twiml());
-  }
-};
 
 export const processTelnyxInboundSms = async (req, res) => {
   try {

@@ -1,5 +1,4 @@
 import prisma from "../lib/prisma.js";
-import * as GoogleCalendar from "../services/google-calendar.service.js";
 import {
   getAvailabilitySetting,
   getAvailableSlots,
@@ -45,24 +44,11 @@ export const getSettings = async (req, res) => {
       });
     }
 
-    const googleConn = await prisma.calendarConnection.findUnique({
-      where: { companyId_provider: { companyId, provider: "GOOGLE" } },
-      select: { isActive: true, accountEmail: true },
-    });
-
     return res.json({
       setting,
       appointmentMode: company?.appointmentMode || "AI",
       agentMaxTurns: company?.agentMaxTurns ?? 4,
       canEditAvailability: true,
-      googleConfigured: GoogleCalendar.isGoogleConfigured(),
-      integrations: {
-        google: {
-          connected: !!googleConn?.isActive,
-          accountEmail: googleConn?.accountEmail || null,
-        },
-        microsoft: { connected: false, accountEmail: null }, // stub — not yet implemented
-      },
     });
   } catch (error) {
     console.error("[Scheduling getSettings] Error:", error);
@@ -230,54 +216,6 @@ export const staffCancel = async (req, res) => {
   }
 };
 
-export const googleConnect = async (req, res) => {
-  try {
-    if (!req.user?.companyId)
-      return res.status(403).json({ message: "No company associated" });
-    if (!GoogleCalendar.isGoogleConfigured()) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Google Calendar is not configured on the server (missing GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI).",
-        });
-    }
-    const url = GoogleCalendar.getAuthUrl(req.user.companyId);
-    return res.json({ url });
-  } catch (error) {
-    console.error("[Scheduling googleConnect] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-export const googleCallback = async (req, res) => {
-  const portal = process.env.NEXT_PUBLIC_URL || "";
-  const back = (status) =>
-    res.redirect(`${portal}/sales/scheduling?tab=settings&google=${status}`);
-  try {
-    const { code, state, error } = req.query;
-    if (error) return back("denied");
-    if (!code || !state) return back("error");
-    await GoogleCalendar.exchangeCodeAndStore(state, code);
-    return back("connected");
-  } catch (e) {
-    console.error("[Scheduling googleCallback] Error:", e);
-    return back("error");
-  }
-};
-
-export const googleDisconnect = async (req, res) => {
-  try {
-    if (!req.user?.companyId)
-      return res.status(403).json({ message: "No company associated" });
-    await GoogleCalendar.disconnect(req.user.companyId);
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("[Scheduling googleDisconnect] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-};
-
 export const publicGetBooking = async (req, res) => {
   try {
     const { token } = req.params;
@@ -327,7 +265,7 @@ export const publicBook = async (req, res) => {
       leadId: lead.id,
       startTime,
       title: title || "Model Home Visit",
-      locationType: locationType || "VIRTUAL",
+      locationType: locationType || "ONSITE",
       bookedVia: "SELF",
     });
     if (!result.success)
@@ -338,7 +276,6 @@ export const publicBook = async (req, res) => {
         id: result.appointment.id,
         time: result.appointment.time,
         title: result.appointment.title,
-        meetingLink: result.appointment.meetingLink,
         manageToken: result.appointment.rescheduleToken,
       },
     });
@@ -373,7 +310,6 @@ export const publicGetManage = async (req, res) => {
         id: appt.id,
         title: appt.title,
         time: appt.time,
-        meetingLink: appt.meetingLink,
         cancelToken: appt.cancelToken,
         status: appt.status,
       },
@@ -401,7 +337,6 @@ export const publicReschedule = async (req, res) => {
     return res.json({
       success: true,
       time: result.appointment.time,
-      meetingLink: result.appointment.meetingLink,
     });
   } catch (error) {
     console.error("[Scheduling publicReschedule] Error:", error);

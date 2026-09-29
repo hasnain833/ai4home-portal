@@ -46,7 +46,6 @@ interface PendingBooking {
 interface Booked {
   when: string;
   locationType: string;
-  meetingLink: string | null;
   leadName?: string;
 }
 

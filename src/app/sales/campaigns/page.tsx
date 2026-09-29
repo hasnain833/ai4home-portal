@@ -256,7 +256,7 @@ export default function CampaignsPage() {
         }
         fetchCampaigns();
         toast.success(editingStepIndex !== null ? "Step updated successfully." : "Step added successfully.");
-        // Saving is never blocked — a tenant can draft SMS steps before Twilio
+        // Saving is never blocked — a tenant can draft SMS steps before SMS
         // exists — but they are told the step will not be delivered.
         for (const w of saved.warnings || []) toast.warning(w, { duration: 8000 });
       } else {

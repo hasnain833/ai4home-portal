@@ -242,7 +242,7 @@ export function NotificationBell({
             variant="ghost"
             size={expanded ? "sm" : "icon"}
             aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
-            className={`relative ${expanded ? "w-full justify-start" : ""} ${className}`}
+            className={`relative w-full ${expanded ? "justify-start" : "justify-center px-0"} ${className}`}
           >
             <span className="relative inline-flex">
               <Bell className={`h-4 w-4 ${expanded ? "mr-2" : ""}`} />

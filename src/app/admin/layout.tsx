@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,8 +14,6 @@ import {
   LogOut,
   Sun,
   Moon,
-  ChevronLeft,
-  ChevronRight,
   Menu,
   X,
   Loader2,
@@ -49,26 +47,27 @@ const adminNavItems = [
   { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical },
 ];
 
+const subscribeToHydration = () => () => {};
+
 export default function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("sidebar-expanded") !== "false";
+  });
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(
+    subscribeToHydration,
+    () => true,
+    () => false,
+  );
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout, isLoading } = useAuth();
   const { theme, setTheme } = useTheme();
-
-  useEffect(() => {
-    const stored = localStorage.getItem("sidebar-expanded");
-    if (stored !== null) {
-      setSidebarExpanded(stored === "true");
-    }
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (!isLoading && mounted) {

@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { embedText, embedBatch, EMBEDDING_DIM } from "./embedding.service.js";
+import { embedText, embedBatch } from "./embedding.service.js";
 
 const FTS_LANG = "english";
 const MAX_CHUNK_CHARS = 8000;

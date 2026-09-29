@@ -1,11 +1,10 @@
 import prisma from "../lib/prisma.js";
 import { computeAvailableSlots, formatSlotLabel } from "../lib/scheduling.js";
 import { getLeadTimezone } from "../lib/timezone.js";
-import * as GoogleCalendar from "./google-calendar.service.js";
 import { MailService } from "./mail-service.js";
 import { sendSms, smsSent } from "./sms.service.js";
 import { ComplianceService } from "./compliance-service.js";
-import { Templates, SmsTemplates } from "./templates.js";
+import { Templates } from "./templates.js";
 import { getSenderIdentity } from "../lib/messaging-config.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "./salesforce-writeback.js";
@@ -68,13 +67,6 @@ export async function getAvailableSlots({ companyId, agentId, from, days = 14, l
     }
   }
 
-  try {
-    const gbusy = await GoogleCalendar.getBusyIntervals(companyId, start, horizonEnd);
-    busy.push(...gbusy);
-  } catch {
-    /* ignore */
-  }
-
   const slots = computeAvailableSlots({ setting, from: start, days, busy, limit });
   const tz = displayTz || setting.timezone;
   return slots.map((s) => ({ start: s, iso: s.toISOString(), label: formatSlotLabel(s, tz) }));
@@ -85,7 +77,7 @@ export async function bookSlot({
   startTime,
   durationMinutes,
   title,
-  locationType = "VIRTUAL",
+  locationType = "ONSITE",
   agentId,
   bookedVia = "STAFF",
   notes = null,
@@ -134,28 +126,6 @@ export async function bookSlot({
     return { success: false, reason: "Could not reserve the slot" };
   }
 
-  let meetingLink = null;
-  let googleEventId = null;
-  if (locationType === "VIRTUAL") {
-    const agent = await prisma.user.findUnique({ where: { id: resolvedAgentId }, select: { email: true, name: true } });
-    const ev = await GoogleCalendar.createEventWithMeet(lead.companyId, {
-      summary: `${apptTitle} — ${lead.firstName} ${lead.lastName}`,
-      description: `Sales appointment with ${lead.firstName} ${lead.lastName}.${notes ? `\n\nNotes: ${notes}` : ""}`,
-      start,
-      end,
-      timezone: tz,
-      attendees: [lead.email, agent?.email],
-    });
-    if (ev) {
-      meetingLink = ev.meetLink;
-      googleEventId = ev.eventId;
-      appointment = await prisma.salesAppointment.update({
-        where: { id: appointment.id },
-        data: { meetingLink, googleEventId },
-      });
-    }
-  }
-
   await prisma.lead.update({ where: { id: leadId }, data: { status: LEAD_STATUS.APPOINTMENT_SET } });
 
   try {
@@ -189,7 +159,6 @@ export async function bookSlot({
 
 async function sendConfirmations(lead, appointment, tz) {
   const when = formatSlotLabel(appointment.time, tz);
-  const meet = appointment.meetingLink;
   const portal = process.env.NEXT_PUBLIC_URL || "";
   const rescheduleUrl = `${portal}/book/manage/${appointment.rescheduleToken}`;
   const { replyTo } = await getSenderIdentity(lead.companyId);
@@ -214,7 +183,7 @@ async function sendConfirmations(lead, appointment, tz) {
 
   if (lead.phone) {
     const body = ComplianceService.addSmsOptOutSuffix(
-      `Your ${appointment.title} is confirmed for ${when}.${meet ? ` Join: ${meet}` : ""} Manage: ${rescheduleUrl}`
+      `Your ${appointment.title} is confirmed for ${when}. Manage: ${rescheduleUrl}`
     );
     const result = await sendSms({ to: lead.phone, body, companyId: lead.companyId, source: "scheduling" });
     if (!smsSent(result)) {
@@ -257,10 +226,6 @@ export async function rescheduleAppointment({ appointmentId, rescheduleToken, ne
   }
 
   const tz = appt.leadTimezone || (await getAvailabilitySetting(appt.lead.companyId)).timezone;
-  if (appt.googleEventId) {
-    await GoogleCalendar.updateEventTime(appt.lead.companyId, appt.googleEventId, { start, end, timezone: tz });
-  }
-
   await sendConfirmations(appt.lead, updated, tz).catch(() => { });
   await notifySalesAppointment("RESCHEDULED", { ...updated, lead: appt.lead }, { previousTime: appt.time });
   return { success: true, appointment: updated };
@@ -273,10 +238,6 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
   if (!appt) return { success: false, reason: "Appointment not found" };
 
   const tz = appt.leadTimezone || (await getAvailabilitySetting(appt.lead.companyId)).timezone;
-  if (appt.googleEventId) {
-    await GoogleCalendar.deleteEvent(appt.lead.companyId, appt.googleEventId);
-  }
-
   await prisma.salesAppointment.delete({ where: { id: appt.id } });
 
   try {

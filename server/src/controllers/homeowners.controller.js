@@ -1,7 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
-import crypto from "crypto";
 
 // Initialize Supabase Admin client
 const getSupabaseAdmin = () => {
@@ -38,7 +37,7 @@ export const getHomeowners = async (req, res) => {
     });
 
     return res.json(homeowners);
-  } catch (error) {
+  } catch {
     return res.status(500).json({ message: "Internal server error" });
   }
 };

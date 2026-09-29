@@ -42,7 +42,6 @@ type Appointment = {
   durationMinutes: number;
   status: string;
   locationType: string;
-  meetingLink: string | null;
   notes: string | null;
 };
 

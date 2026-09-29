@@ -10,9 +10,6 @@ import {
   getSlots,
   staffReschedule,
   staffCancel,
-  googleConnect,
-  googleCallback,
-  googleDisconnect,
   publicGetBooking,
   publicBook,
   publicGetManage,
@@ -27,22 +24,6 @@ router.post("/public/book", publicBook);
 router.get("/public/manage/:token", publicGetManage);
 router.post("/public/reschedule", publicReschedule);
 router.post("/public/cancel", publicCancel);
-
-router.get("/google/callback", googleCallback);
-router.get(
-  "/google/connect",
-  requireAuth,
-  requireWorkspace("sales"),
-  requireRoles(["ADMIN", "STAFF"]),
-  googleConnect,
-);
-router.post(
-  "/google/disconnect",
-  requireAuth,
-  requireWorkspace("sales"),
-  requireRoles(["ADMIN", "STAFF"]),
-  googleDisconnect,
-);
 
 const OWN_AVAILABILITY = ["ADMIN", "STAFF", "HOMEOWNER"];
 

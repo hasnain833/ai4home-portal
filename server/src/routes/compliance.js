@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { requireAuth, requireRoles } from "../middlewares/auth.js";
-import { verifyTwilioSignature } from "../middlewares/twilio-auth.js";
 import { verifyTelnyxSignature } from "../middlewares/telnyx-auth.js";
 import { requireWebhookSecret } from "../middlewares/webhook-auth.js";
 import { createRateLimiter } from "../middlewares/rate-limit.js";
@@ -12,7 +11,6 @@ import {
   unsubscribeWebhook,
   unsubscribeByLead,
   processBrevoInboundEmail,
-  processTwilioInboundSms,
   processTelnyxInboundSms,
 } from "../controllers/compliance.controller.js";
 
@@ -30,7 +28,6 @@ router.post(
   createRateLimiter({ max: 10, windowMs: 60_000, label: "Unsubscribe link" }),
   unsubscribeByLead,
 );
-router.post("/inbound/sms", verifyTwilioSignature, processTwilioInboundSms);
 router.post("/inbound/sms/telnyx", verifyTelnyxSignature, processTelnyxInboundSms);
 
 export default router;

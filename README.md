@@ -36,7 +36,7 @@ A multi-tenant SaaS portal for home-builder / warranty companies. It hosts **two
 
 ## Tech Stack
 
-Next.js 16 · React 19 · TypeScript 5 · Tailwind CSS 4 · Radix UI / shadcn · Express 5 · Prisma 7 · PostgreSQL (Supabase) · Supabase Auth · Inngest · Salesforce & Google Calendar integrations · Twilio (SMS) · Brevo/SMTP (email) · local `@xenova/transformers` embeddings + pgvector (Sales and Warranty KBs).
+Next.js 16 · React 19 · TypeScript 5 · Tailwind CSS 4 · Radix UI / shadcn · Express 5 · Prisma 7 · PostgreSQL (Supabase) · Supabase Auth · Inngest · Salesforce integration · Telnyx (SMS) · Brevo/SMTP (email) · local `@xenova/transformers` embeddings + pgvector (Sales and Warranty KBs).
 
 ---
 
@@ -54,7 +54,7 @@ server/                   Express backend
   src/controllers/        Request handlers
   src/services/           Integrations (Salesforce, ERP, mail, SMS, calendar, vector store)
   src/inngest/functions/  Background jobs
-  src/middlewares/        auth, webhook-auth, twilio-auth
+  src/middlewares/        auth and webhook authentication
   src/lib/                Shared server utils (prisma, crypto, llm, timezone, ...)
 api/index.js              Vercel serverless wrapper around the Express app
 prisma/
@@ -66,7 +66,7 @@ prisma/
 
 ## Setup
 
-**Prerequisites:** Node.js 20+, PostgreSQL database (Supabase recommended), Supabase Auth project. Optional integrations: Anthropic/OpenAI/Groq API key, Salesforce app, Google OAuth, Twilio, Brevo, Inngest.
+**Prerequisites:** Node.js 20+, PostgreSQL database (Supabase recommended), Supabase Auth project. Optional integrations: Anthropic/OpenAI/Groq API key, Salesforce app, Telnyx, Brevo, Inngest.
 
 ```bash
 # 1. Install frontend deps (repo root)
@@ -134,16 +134,9 @@ The following represents the complete list of environment variables used across 
 | `SMTP_USER` | Backend | Platform SMTP user |
 | `SMTP_PASS` | Backend | Platform SMTP password |
 | `INBOUND_EMAIL_DOMAIN` | Backend | Optional. Routes replies to `reply+<companyId>@` so the sales agent sees them |
-| `SMS_PROVIDER` | Backend | Starting SMS provider. A superadmin overrides this at `/admin/messaging` |
-| `TWILIO_ACCOUNT_SID` | Backend | Platform Twilio credentials |
-| `TWILIO_AUTH_TOKEN` | Backend | Platform Twilio credentials (also verifies inbound webhooks) |
-| `TWILIO_FROM_NUMBER` | Backend | Shared platform sending number |
 | `TELNYX_API_KEY` | Backend | Platform Telnyx credentials |
 | `TELNYX_PUBLIC_KEY` | Backend | Verifies inbound Telnyx webhooks |
 | `TELNYX_FROM_NUMBER` | Backend | Shared platform sending number |
-| `GOOGLE_CLIENT_ID` | Backend | Google Cloud OAuth for Calendar/Meet |
-| `GOOGLE_CLIENT_SECRET` | Backend | Google Cloud OAuth for Calendar/Meet |
-| `GOOGLE_REDIRECT_URI` | Backend | Google Cloud OAuth for Calendar/Meet |
 | `SUPERADMIN_EMAIL` | Backend | Default super admin login email |
 | `SUPERADMIN_PASSWORD` | Backend | Default super admin login password |
 | `ADMIN_NOTIFY_EMAIL` | Backend | Target email for new tenant registration alerts |

@@ -1,6 +1,6 @@
 import prisma from "./prisma.js";
 import { MailService } from "../services/mail-service.js";
-import { resolveSystemConfig, getActiveSmsProvider } from "../services/sms.service.js";
+import { resolveSystemConfig } from "../services/sms.service.js";
 
 export async function getSenderIdentity(companyId) {
   if (!companyId) return { senderName: null, replyTo: null };
@@ -14,7 +14,7 @@ export async function getSenderIdentity(companyId) {
 }
 
 export async function getMessagingCapabilities() {
-  const smsConfig = resolveSystemConfig(await getActiveSmsProvider());
+  const smsConfig = resolveSystemConfig();
 
   return {
     email: {

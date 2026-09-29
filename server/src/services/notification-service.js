@@ -221,6 +221,7 @@ export async function notifyTicketReminder(ticket, ageLabel) {
 
 const SALES_NOTIFY = {
   BOOKED: { type: "SALES_APPOINTMENT_BOOKED", verb: "booked", subject: "New appointment" },
+  ASSIGNED: { type: "SALES_APPOINTMENT_BOOKED", verb: "assigned", subject: "Appointment assigned" },
   RESCHEDULED: { type: "SALES_APPOINTMENT_RESCHEDULED", verb: "rescheduled", subject: "Appointment rescheduled" },
   CANCELLED: { type: "SALES_APPOINTMENT_CANCELLED", verb: "cancelled", subject: "Appointment cancelled" },
 };
@@ -233,7 +234,7 @@ const BOOKED_VIA_LABELS = {
   CTA: "Staff",
 };
 
-export async function notifySalesAppointment(kind, appointment, { previousTime = null } = {}) {
+export async function notifySalesAppointment(kind, appointment, { previousTime = null, assignedOnly = false } = {}) {
   const meta = SALES_NOTIFY[kind];
   try {
     if (!meta || !appointment) return { ok: false, reason: "nothing to notify" };
@@ -266,14 +267,25 @@ export async function notifySalesAppointment(kind, appointment, { previousTime =
         ? `${leadName} — ${title} moved from ${previousWhen} to ${when}.`
         : `${leadName} — ${title}, ${when}.`;
 
-    const admins = await companyAdmins(companyId);
+    const [admins, assignedAgent] = await Promise.all([
+      companyAdmins(companyId),
+      appointment.agentId
+        ? prisma.user.findFirst({
+            where: { id: appointment.agentId, companyId },
+            select: { id: true, email: true, name: true },
+          })
+        : null,
+    ]);
+    const recipients = [...new Map(
+      [...(assignedOnly ? [] : admins), assignedAgent].filter(Boolean).map((user) => [user.id, user]),
+    ).values()];
     const emailReady = emailIsConfigured();
 
-    if (admins.length) {
+    if (recipients.length) {
       await writeNotifications(
-        admins.map((a) => ({
+        recipients.map((recipient) => ({
           companyId,
-          userId: a.id,
+          userId: recipient.id,
           workspace: "SALES",
           type: meta.type,
           title: `Appointment ${meta.verb}: ${leadName}`,
@@ -287,7 +299,7 @@ export async function notifySalesAppointment(kind, appointment, { previousTime =
 
     if (!emailReady) {
       console.warn(`[Sales Notify] ${kind} for lead=${lead.id}: in-portal only — no email sender configured.`);
-      return { ok: true, notified: admins.length, emailed: 0, emailConfigured: false };
+      return { ok: true, notified: recipients.length, emailed: 0, emailConfigured: false };
     }
 
     const html = Templates.getSalesAppointmentAdminEmail(
@@ -299,7 +311,6 @@ export async function notifySalesAppointment(kind, appointment, { previousTime =
         when,
         previousWhen,
         locationType: appointment.locationType,
-        meetingLink: kind === "CANCELLED" ? null : appointment.meetingLink,
         bookedVia: BOOKED_VIA_LABELS[appointment.bookedVia] || appointment.bookedVia || null,
       },
       portalUrl(),
@@ -307,12 +318,12 @@ export async function notifySalesAppointment(kind, appointment, { previousTime =
     );
 
     let emailed = 0;
-    for (const admin of admins) {
-      if (!admin.email) continue;
+    for (const recipient of recipients) {
+      if (!recipient.email) continue;
       const result = await MessagingService.sendEmail({
         companyId,
-        to: admin.email,
-        source: "sales-appointment-admin",
+        to: recipient.email,
+        source: "sales-appointment",
         subject: `${meta.subject}: ${leadName} — ${when}`,
         html,
         fromName: companyName,
@@ -321,11 +332,11 @@ export async function notifySalesAppointment(kind, appointment, { previousTime =
       if (result.success) emailed++;
       else
         console.warn(
-          `[Sales Notify] ${kind} email to ${admin.email} not delivered — ${result.error || result.reason}`,
+          `[Sales Notify] ${kind} email to ${recipient.email} not delivered — ${result.error || result.reason}`,
         );
     }
 
-    return { ok: true, notified: admins.length, emailed, emailConfigured: true };
+    return { ok: true, notified: recipients.length, emailed, emailConfigured: true };
   } catch (err) {
     console.error(`[Sales Notify] notifySalesAppointment(${kind}) failed:`, err.message);
     return { ok: false, error: err.message };

@@ -110,7 +110,6 @@ export function generateDaySlots(dayAnchor, setting) {
 }
 
 export function computeAvailableSlots({ setting, from, days = 14, busy = [], limit = 100 }) {
-  const tz = setting.timezone || "America/New_York";
   const duration = (setting.slotDuration || 30) * 60000;
   const out = [];
   const fromMs = from.getTime();

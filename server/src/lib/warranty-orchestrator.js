@@ -5,7 +5,7 @@ import prisma from "./prisma.js";
 import { queryDetailed as kbQueryDetailed } from "../services/warranty-vector.service.js";
 import { getCoverageStatus, COVERAGE } from "./coverage.js";
 import { classifyClaim } from "./warranty-classify.js";
-import { createWarrantyTicket, escalateWarrantyTicket, ticketUrlFor } from "./warranty-ticket.js";
+import { createWarrantyTicket, escalateWarrantyTicket } from "./warranty-ticket.js";
 import {
   SEVERITY,
   detectHazard,

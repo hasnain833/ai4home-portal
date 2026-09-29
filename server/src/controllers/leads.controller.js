@@ -46,6 +46,7 @@ export const getLeads = async (req, res) => {
 
     const companyId = req.user.companyId;
     const where = { companyId };
+    const now = new Date();
     if (!includeArchived) {
       where.archived = false;
     }
@@ -80,6 +81,20 @@ export const getLeads = async (req, res) => {
           owner: {
             select: { name: true, email: true },
           },
+          appointments: {
+            where: { status: { not: "CANCELLED" }, time: { gte: now } },
+            orderBy: { time: "asc" },
+            take: 1,
+            select: {
+              id: true,
+              title: true,
+              time: true,
+              endTime: true,
+              durationMinutes: true,
+              status: true,
+              agent: { select: { id: true, name: true, email: true, role: true } },
+            },
+          },
         },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
@@ -90,7 +105,10 @@ export const getLeads = async (req, res) => {
     ]);
 
     return res.json({
-      leads,
+      leads: leads.map(({ appointments, ...lead }) => ({
+        ...lead,
+        upcomingAppointment: appointments[0] || null,
+      })),
       total,
       page,
       pageSize,
@@ -123,7 +141,6 @@ export const getLead = async (req, res) => {
             durationMinutes: true,
             status: true,
             locationType: true,
-            meetingLink: true,
             notes: true,
           },
         },

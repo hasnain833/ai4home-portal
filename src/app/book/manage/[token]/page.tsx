@@ -2,11 +2,11 @@
 
 import { useEffect, useState, use } from "react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { CalendarDays, Video, CheckCircle2, XCircle } from "lucide-react";
+import { CalendarDays, CheckCircle2, XCircle } from "lucide-react";
 
 type Slot = { iso: string; label: string };
 type ManageData = {
-  appointment: { id: string; title: string; time: string; meetingLink?: string | null; cancelToken: string; status: string };
+  appointment: { id: string; title: string; time: string; cancelToken: string; status: string };
   company: { name: string };
   timezone: string;
   slots: Slot[];
@@ -155,17 +155,6 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
       <p className="text-sm text-slate-500 mt-1">
         Currently scheduled for <strong>{fmt}</strong>
       </p>
-      {data.appointment.meetingLink && (
-        <a
-          href={data.appointment.meetingLink}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1.5 text-xs text-[#b48c3c] mt-2"
-        >
-          <Video className="h-3.5 w-3.5" /> Join Google Meet
-        </a>
-      )}
-
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 my-4">{error}</p>}
 
       {mode === "view" ? (

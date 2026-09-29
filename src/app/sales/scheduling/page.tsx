@@ -27,9 +27,6 @@ import {
   Clock,
   Save,
   RefreshCw,
-  CheckCircle2,
-  Link2,
-  XCircle,
   Video,
   CalendarCheck,
 } from "lucide-react";
@@ -66,7 +63,6 @@ type Appointment = {
   time: string;
   status: string;
   locationType?: string;
-  meetingLink?: string | null;
   lead?: { firstName?: string; lastName?: string; email?: string };
   agent?: { name?: string; email?: string };
 };
@@ -121,11 +117,6 @@ export default function AppointmentsPage() {
     workingDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
     timezone: "America/New_York",
     appointmentMode: "AI",
-  });
-  const [google, setGoogle] = useState({
-    connected: false,
-    accountEmail: "",
-    configured: false,
   });
   // SRS §4.12: a homeowner gets "own availability" — the window is read-only for
   // them because AvailabilitySetting is a single shared row per company. The API
@@ -183,11 +174,6 @@ export default function AppointmentsPage() {
         appointmentMode: data.appointmentMode || "AI",
       });
       setCanEdit(data.canEditAvailability !== false);
-      setGoogle({
-        connected: !!data.integrations?.google?.connected,
-        accountEmail: data.integrations?.google?.accountEmail || "",
-        configured: !!data.googleConfigured,
-      });
     } catch {
       /* ignore */
     }
@@ -209,14 +195,9 @@ export default function AppointmentsPage() {
     loadSettings();
     loadAppointments();
     fetchSlotPreview();
-    // Surface the Google OAuth round-trip result and land on the settings tab.
+    // Allow direct links to open the settings tab.
     const params = new URLSearchParams(window.location.search);
     if (params.get("tab") === "settings") setActiveTab("settings");
-    const g = params.get("google");
-    if (g === "connected") toast.success("Google Calendar connected");
-    else if (g === "denied") toast.error("Google connection was cancelled");
-    else if (g === "error") toast.error("Could not connect Google Calendar");
-    if (g) window.history.replaceState({}, "", window.location.pathname);
   }, [loadSettings, loadAppointments]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -256,31 +237,6 @@ export default function AppointmentsPage() {
       toast.error(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSavingSettings(false);
-    }
-  };
-
-  const connectGoogle = async () => {
-    try {
-      const res = await fetch("/api/sales/scheduling/google/connect");
-      const data = await res.json();
-      if (!res.ok)
-        throw new Error(data.message || "Could not start Google connection");
-      window.location.href = data.url;
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Google connect failed");
-    }
-  };
-
-  const disconnectGoogle = async () => {
-    try {
-      const res = await fetch("/api/sales/scheduling/google/disconnect", {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error("Disconnect failed");
-      setGoogle((g) => ({ ...g, connected: false, accountEmail: "" }));
-      toast.success("Google Calendar disconnected");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Disconnect failed");
     }
   };
 
@@ -459,15 +415,6 @@ export default function AppointmentsPage() {
                               )}
                               {appt.title}
                             </div>
-                            {appt.meetingLink && (
-                              <a
-                                href={appt.meetingLink}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[10px] text-[#b48c3c] hover:underline">
-                                Join link
-                              </a>
-                            )}
                           </td>
                           <td className="py-3.5 px-4 text-xs">
                             <span className="flex items-center gap-1">
@@ -710,55 +657,6 @@ export default function AppointmentsPage() {
                         </p>
                       )}
 
-                      <div className="p-4 bg-slate-50 dark:bg-slate-900 border rounded-xl space-y-3">
-                        <h4 className="font-bold text-xs">
-                          Calendar Integrations
-                        </h4>
-                        <div className="flex items-center justify-between border-t dark:border-slate-800 pt-3 text-xs">
-                          <div>
-                            <span className="text-muted-foreground">
-                              Google Calendar
-                            </span>
-                            {google.connected && google.accountEmail && (
-                              <span className="ml-2 text-[10px] text-green-600">
-                                {google.accountEmail}
-                              </span>
-                            )}
-                          </div>
-                          {google.connected ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={disconnectGoogle}
-                              className="h-7 text-[10px] gap-1 text-red-500">
-                              <XCircle className="h-3 w-3" /> Disconnect
-                            </Button>
-                          ) : (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={connectGoogle}
-                              disabled={!google.configured}
-                              title={
-                                google.configured
-                                  ? ""
-                                  : "Google OAuth not configured on the server"
-                              }
-                              className="h-7 text-[10px] gap-1">
-                              <Link2 className="h-3 w-3" /> Connect
-                            </Button>
-                          )}
-                        </div>
-                        {google.connected && (
-                          <p className="flex items-center gap-1 text-[10px] text-green-600">
-                            <CheckCircle2 className="h-3 w-3" /> Two-way
-                            busy/free sync + Google Meet links active
-                          </p>
-                        )}
-                      </div>
-
                       <Button
                         type="submit"
                         disabled={savingSettings}
@@ -782,8 +680,7 @@ export default function AppointmentsPage() {
                         Available Slots
                       </CardTitle>
                       <CardDescription className="text-xs">
-                        Next 14 days, with booked and Google Calendar time
-                        already removed.
+                        Next 14 days, with existing appointments already removed.
                       </CardDescription>
                     </div>
                     <Button

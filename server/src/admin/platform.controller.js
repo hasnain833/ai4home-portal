@@ -6,14 +6,6 @@ import {
   normalizeNewsSources,
 } from "../lib/news-sources.js";
 import { decryptDetailed, encryptionKeyStatus, isEncrypted } from "../lib/crypto.js";
-import {
-  SMS_PROVIDERS,
-  SMS_PROVIDER_SETTING_KEY,
-  resolveSystemConfig,
-  getActiveSmsProvider,
-  invalidateSmsProviderCache,
-  verifyProviderCredentials,
-} from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import {
   DEFAULT_PRICING,
@@ -346,7 +338,6 @@ const SECRET_COLUMNS = [
     label: "Salesforce OAuth",
     fields: ["accessToken", "refreshToken", "clientSecret"],
   },
-  { model: "calendarConnection", label: "Google Calendar OAuth", fields: ["accessToken", "refreshToken"] },
 ];
 
 export const getSecurityPosture = async (req, res) => {
@@ -407,7 +398,7 @@ export const getSecurityPosture = async (req, res) => {
 
 // ─── Platform messaging spend ────────────────────────────────────────────────
 // All messaging is billed to the platform now, so this is our own cost view:
-// what each tenant is spending, on which channel, and which providers are live.
+// what each tenant is spending, on which channel, and where delivery is failing.
 
 const MONTHS_BACK = 6;
 
@@ -424,7 +415,7 @@ export const getMessagingSpend = async (req, res) => {
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
 
-    const [byCompany, byChannel, recent, companies, activeProvider, pricing] = await Promise.all([
+    const [byCompany, byChannel, recent, failures, companies, pricing] = await Promise.all([
       prisma.messageUsage.groupBy({
         by: ["companyId", "channel"],
         where: { createdAt: { gte: monthStart } },
@@ -433,6 +424,7 @@ export const getMessagingSpend = async (req, res) => {
       prisma.messageUsage.groupBy({
         by: ["channel", "outcome"],
         where: { createdAt: { gte: since } },
+        _count: { _all: true },
         _sum: { units: true, costMicros: true },
       }),
       prisma.messageUsage.findMany({
@@ -441,8 +433,27 @@ export const getMessagingSpend = async (req, res) => {
         orderBy: { createdAt: "desc" },
         take: 5000,
       }),
+      prisma.messageUsage.findMany({
+        where: {
+          createdAt: { gte: since },
+          outcome: { not: "sent" },
+        },
+        select: {
+          id: true,
+          companyId: true,
+          channel: true,
+          provider: true,
+          units: true,
+          costMicros: true,
+          outcome: true,
+          source: true,
+          recipient: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }),
       prisma.company.findMany({ select: { id: true, name: true } }),
-      getActiveSmsProvider(),
       getPricing(),
     ]);
 
@@ -475,7 +486,16 @@ export const getMessagingSpend = async (req, res) => {
       monthly.set(key, (monthly.get(key) || 0) + (row.costMicros || 0));
     }
 
-    const smsConfig = resolveSystemConfig(activeProvider);
+    const maskRecipient = (value) => {
+      const recipient = String(value || "").trim();
+      if (!recipient) return null;
+      if (recipient.includes("@")) {
+        const [local, domain] = recipient.split("@");
+        return `${local.slice(0, 2)}***@${domain}`;
+      }
+      const digits = recipient.replace(/\D/g, "");
+      return digits ? `***${digits.slice(-4)}` : "Hidden";
+    };
 
     return res.json({
       monthToDate: {
@@ -490,61 +510,31 @@ export const getMessagingSpend = async (req, res) => {
       })),
       monthly: [...monthly.entries()].sort().map(([month, costMicros]) => ({ month, costMicros })),
       pricing,
-      providers: {
-        sms: {
-          active: smsConfig?.provider || null,
-          // Credentials live in env; this only reports whether they are present.
-          available: SMS_PROVIDERS.filter((name) => !!resolveSystemConfig(name)),
-          all: SMS_PROVIDERS,
-        },
-        email: {
-          configured: MailService.hasPlatformSender(),
-          sendingAddress: MailService.SENDER_EMAIL,
-        },
+      emailSender: {
+        configured: MailService.hasPlatformSender(),
+        sendingAddress: MailService.SENDER_EMAIL,
+      },
+      failures: {
+        categories: byChannel
+          .filter((row) => row.outcome !== "sent")
+          .map((row) => ({
+            key: `${row.channel}:${row.outcome}`,
+            channel: row.channel,
+            outcome: row.outcome,
+            attempts: row._count._all,
+            units: row._sum.units || 0,
+            costMicros: row._sum.costMicros || 0,
+          }))
+          .sort((a, b) => b.attempts - a.attempts),
+        recent: failures.map((row) => ({
+          ...row,
+          companyName: nameOf.get(row.companyId) || "Unattributed",
+          recipient: maskRecipient(row.recipient),
+        })),
       },
     });
   } catch (error) {
     console.error("[Platform getMessagingSpend] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-export const setSmsProvider = async (req, res) => {
-  try {
-    if (denyUnlessSuperAdmin(req, res)) return;
-
-    const { provider } = req.body;
-    if (!SMS_PROVIDERS.includes(provider)) {
-      return res
-        .status(400)
-        .json({ message: `provider must be one of: ${SMS_PROVIDERS.join(", ")}` });
-    }
-
-    // Switching to a provider that cannot actually send would stop all SMS
-    // silently, so the credentials are checked live before committing.
-    const check = await verifyProviderCredentials(provider);
-    if (!check.ok) {
-      return res.status(400).json({ message: `${provider} is not usable: ${check.reason}` });
-    }
-
-    await prisma.platformSetting.upsert({
-      where: { key: SMS_PROVIDER_SETTING_KEY },
-      create: { key: SMS_PROVIDER_SETTING_KEY, value: { provider } },
-      update: { value: { provider } },
-    });
-    invalidateSmsProviderCache();
-
-    await writeAuditLog({
-      req,
-      action: "PLATFORM_SMS_PROVIDER_CHANGED",
-      targetType: "PlatformSetting",
-      targetId: SMS_PROVIDER_SETTING_KEY,
-      metadata: { provider },
-    });
-
-    return res.json({ provider });
-  } catch (error) {
-    console.error("[Platform setSmsProvider] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

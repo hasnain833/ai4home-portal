@@ -8,7 +8,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,7 +18,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, RefreshCw, Mail, MessageSquare, Sparkles, AlertCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Loader2,
+  Mail,
+  MessageSquare,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface ChannelUsage {
@@ -41,6 +47,28 @@ interface ChannelRow {
   costMicros: number;
 }
 
+interface FailureCategory {
+  key: string;
+  channel: string;
+  outcome: string;
+  attempts: number;
+  units: number;
+  costMicros: number;
+}
+
+interface FailureEntry {
+  id: string;
+  channel: string;
+  provider: string | null;
+  outcome: string;
+  source: string | null;
+  recipient: string | null;
+  units: number;
+  costMicros: number;
+  createdAt: string;
+  companyName: string;
+}
+
 type Pricing = Record<string, number>;
 
 // Where each number comes from. None of these providers expose a per-unit price
@@ -50,11 +78,6 @@ const PRICING_FIELDS: { key: string; label: string; help: string }[] = [
     key: "EMAIL",
     label: "Email (per email)",
     help: "Brevo bills per plan, not per email — divide your monthly cost by the emails it includes.",
-  },
-  {
-    key: "TWILIO_SMS",
-    label: "Twilio (per segment)",
-    help: "Twilio US long-code list price is $0.0079. Check your own rate on the Twilio pricing page.",
   },
   {
     key: "TELNYX_SMS",
@@ -73,9 +96,10 @@ interface SpendData {
   byChannel: ChannelRow[];
   monthly: { month: string; costMicros: number }[];
   pricing: Pricing;
-  providers: {
-    sms: { active: string | null; available: string[]; all: string[] };
-    email: { configured: boolean; sendingAddress: string };
+  emailSender: { configured: boolean; sendingAddress: string };
+  failures: {
+    categories: FailureCategory[];
+    recent: FailureEntry[];
   };
 }
 
@@ -101,7 +125,6 @@ const UNIT_LABEL: Record<string, string> = {
 export default function AdminMessagingPage() {
   const [data, setData] = useState<SpendData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [switching, setSwitching] = useState(false);
   const [rates, setRates] = useState<Pricing | null>(null);
   const [savingRates, setSavingRates] = useState(false);
 
@@ -127,28 +150,6 @@ export default function AdminMessagingPage() {
       await load();
     })();
   }, [load]);
-
-  const switchProvider = async (provider: string) => {
-    setSwitching(true);
-    try {
-      const res = await fetch("/api/admin/messaging/sms-provider", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(body.message || "Could not switch provider");
-        return;
-      }
-      toast.success(`SMS now sending via ${provider.replace("_SMS", "")}`);
-      await load();
-    } catch {
-      toast.error("Could not reach the server");
-    } finally {
-      setSwitching(false);
-    }
-  };
 
   const saveRates = async () => {
     if (!rates) return;
@@ -192,8 +193,6 @@ export default function AdminMessagingPage() {
     return acc;
   }, {});
 
-  const failed = data.byChannel.filter((r) => r.outcome === "failed" && r.units > 0);
-
   return (
     <div className="space-y-6 p-4 md:p-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -232,66 +231,18 @@ export default function AdminMessagingPage() {
         })}
       </div>
 
-      {failed.length > 0 && (
-        <Card className="border-amber-300 dark:border-amber-900/60">
-          <CardContent className="pt-6 flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="font-semibold">Failed sends are still billed by some providers.</p>
-              <p className="text-muted-foreground mt-0.5">
-                {failed
-                  .map((r) => `${r.units.toLocaleString()} ${UNIT_LABEL[r.channel]} (${CHANNEL_META[r.channel]?.label || r.channel})`)
-                  .join(", ")}{" "}
-                failed in the last 6 months, costing {money(failed.reduce((s, r) => s + r.costMicros, 0))}.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Providers */}
+      {/* Sending identity */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Providers</CardTitle>
+          <CardTitle className="text-base">Email sender</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent>
           <div>
-            <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">SMS</p>
-            <div className="flex flex-wrap gap-2">
-              {data.providers.sms.all.map((provider) => {
-                const isActive = data.providers.sms.active === provider;
-                const isAvailable = data.providers.sms.available.includes(provider);
-                return (
-                  <Button
-                    key={provider}
-                    variant={isActive ? "default" : "outline"}
-                    size="sm"
-                    disabled={switching || isActive || !isAvailable}
-                    onClick={() => switchProvider(provider)}
-                    className="gap-2"
-                  >
-                    {switching && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    {provider.replace("_SMS", "")}
-                    {isActive && <Badge variant="secondary" className="ml-1">Active</Badge>}
-                    {!isAvailable && (
-                      <span className="text-xs opacity-70">no credentials</span>
-                    )}
-                  </Button>
-                );
-              })}
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              Credentials are read from the environment. This only chooses which of
-              them is used, and takes effect within 30 seconds.
-            </p>
-          </div>
-
-          <div>
-            <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Email</p>
-            {data.providers.email.configured ? (
-              <p className="text-sm">
+            {data.emailSender.configured ? (
+              <p className="flex items-center gap-2 text-sm">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                 Sending as{" "}
-                <span className="font-mono">{data.providers.email.sendingAddress}</span>
+                <span className="font-mono">{data.emailSender.sendingAddress}</span>
               </p>
             ) : (
               <p className="text-sm text-amber-600">
@@ -299,6 +250,77 @@ export default function AdminMessagingPage() {
               </p>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Delivery failures */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Delivery failures</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Failed and unconfigured messaging attempts recorded in the last 6 months.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {data.failures.categories.length === 0 ? (
+            <div className="flex items-center gap-2 py-3 text-sm text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" />
+              No delivery failures recorded.
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {data.failures.categories.map((category) => (
+                  <div key={category.key} className="rounded-md border bg-muted/20 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold">
+                        {CHANNEL_META[category.channel]?.label || category.channel}
+                      </p>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                        {category.outcome.replaceAll("_", " ")}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-2xl font-bold">{category.attempts.toLocaleString()}</p>
+                    <p className="text-xs text-muted-foreground">
+                      attempts · {category.units.toLocaleString()} {UNIT_LABEL[category.channel] || "units"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="overflow-x-auto rounded-md border">
+                <div className="border-b bg-muted/20 px-4 py-2 text-xs font-medium text-muted-foreground">
+                  Latest 5 failures
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Tenant</TableHead>
+                      <TableHead>Recipient</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead className="text-right">When</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.failures.recent.map((failure) => (
+                      <TableRow key={failure.id}>
+                        <TableCell className="font-medium">
+                          {CHANNEL_META[failure.channel]?.label || failure.channel} · {failure.outcome.replaceAll("_", " ")}
+                        </TableCell>
+                        <TableCell>{failure.companyName}</TableCell>
+                        <TableCell className="font-mono text-xs">{failure.recipient || "Not recorded"}</TableCell>
+                        <TableCell className="text-muted-foreground">{failure.source || failure.provider || "Unknown"}</TableCell>
+                        <TableCell className="whitespace-nowrap text-right text-muted-foreground">
+                          {new Date(failure.createdAt).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 

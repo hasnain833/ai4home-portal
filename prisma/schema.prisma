@@ -112,7 +112,6 @@ model Company {
   announcements           Announcement[]
   availabilitySetting     AvailabilitySetting?
   staffAvailability       StaffAvailability[]
-  calendarConnections     CalendarConnection[]
   scrapedNews             ScrapedNews[]
   blogPosts               BlogPost[]
   csvMappingTemplates     CsvMappingTemplate[]
@@ -360,9 +359,7 @@ model SalesAppointment {
   endTime         DateTime?
   durationMinutes Int       @default(30)
   status          String    @default("CONFIRMED")
-  locationType    String    @default("VIRTUAL")
-  meetingLink     String?
-  googleEventId   String?
+  locationType    String    @default("ONSITE")
   notes           String?   @db.Text
   leadTimezone    String?
   bookedVia       String    @default("STAFF")
@@ -702,10 +699,6 @@ model Announcement {
   @@index([companyId])
 }
 
-enum CalendarProvider {
-  GOOGLE
-}
-
 model AvailabilitySetting {
   id               String   @id @default(cuid())
   companyId        String   @unique
@@ -739,24 +732,6 @@ model StaffAvailability {
   updatedAt     DateTime @updatedAt
 
   @@index([companyId])
-}
-
-model CalendarConnection {
-  id             String           @id @default(cuid())
-  companyId      String
-  company        Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  provider       CalendarProvider
-  accessToken    String           @db.Text
-  refreshToken   String?          @db.Text
-  tokenExpiresAt DateTime?
-  scope          String?          @db.Text
-  accountEmail   String?
-  calendarId     String           @default("primary")
-  isActive       Boolean          @default(true)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-
-  @@unique([companyId, provider])
 }
 
 model SchedulingConversation {

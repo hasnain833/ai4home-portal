@@ -54,6 +54,9 @@ import {
   Filter,
   X,
   Code2,
+  CalendarClock,
+  Loader2,
+  UserRoundPlus,
 } from "lucide-react";
 import LeadFormEmbedDialog from "@/components/sales/LeadFormEmbedDialog";
 
@@ -90,6 +93,22 @@ interface Lead {
   consentTimestamp?: string | null;
   createdAt: string;
   owner?: { name: string; email: string } | null;
+  upcomingAppointment?: {
+    id: string;
+    title: string;
+    time: string;
+    endTime?: string | null;
+    durationMinutes: number;
+    status: string;
+    agent: { id: string; name: string | null; email: string; role: string };
+  } | null;
+}
+
+interface AvailableStaff {
+  id: string;
+  name: string | null;
+  email: string;
+  avatar?: string | null;
 }
 
 // NFR-P-002: page size for the server-side lead pager.
@@ -234,6 +253,12 @@ export default function LeadsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [serverTags, setServerTags] = useState<string[]>([]);
   const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
+  const [assignmentTarget, setAssignmentTarget] = useState<Lead | null>(null);
+  const [availableStaff, setAvailableStaff] = useState<AvailableStaff[]>([]);
+  const [selectedStaffId, setSelectedStaffId] = useState("");
+  const [loadingStaff, setLoadingStaff] = useState(false);
+  const [assigningStaff, setAssigningStaff] = useState(false);
+  const [assignmentError, setAssignmentError] = useState("");
 
   const showToast = (msg: string) => {
     if (msg.toLowerCase().includes("error") || msg.toLowerCase().includes("fail")) {
@@ -315,6 +340,56 @@ export default function LeadsPage() {
       showToast("Error deleting lead.");
     } finally {
       setLeadToDelete(null);
+    }
+  };
+
+  const closeAssignment = () => {
+    setAssignmentTarget(null);
+    setAvailableStaff([]);
+    setSelectedStaffId("");
+    setAssignmentError("");
+  };
+
+  const openAssignment = async (lead: Lead) => {
+    const appointment = lead.upcomingAppointment;
+    if (!appointment) return;
+    setAssignmentTarget(lead);
+    setAvailableStaff([]);
+    setAssignmentError("");
+    setSelectedStaffId(appointment.agent?.role === "STAFF" ? appointment.agent.id : "");
+    setLoadingStaff(true);
+    try {
+      const response = await fetch(`/api/sales/appointments/${appointment.id}/available-staff`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Could not load available staff.");
+      setAvailableStaff(Array.isArray(data.staff) ? data.staff : []);
+    } catch (error) {
+      setAssignmentError(error instanceof Error ? error.message : "Could not load available staff.");
+    } finally {
+      setLoadingStaff(false);
+    }
+  };
+
+  const assignAppointment = async () => {
+    const appointment = assignmentTarget?.upcomingAppointment;
+    if (!appointment || !selectedStaffId) return;
+    setAssigningStaff(true);
+    setAssignmentError("");
+    try {
+      const response = await fetch(`/api/sales/appointments/${appointment.id}/assign`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ staffId: selectedStaffId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Could not assign staff.");
+      closeAssignment();
+      await fetchLeads();
+      toast.success(`Appointment assigned to ${data.agent?.name || data.agent?.email || "staff"}.`);
+    } catch (error) {
+      setAssignmentError(error instanceof Error ? error.message : "Could not assign staff.");
+    } finally {
+      setAssigningStaff(false);
     }
   };
 
@@ -899,7 +974,42 @@ export default function LeadsPage() {
                               {lead.smsOptIn ? <span className="text-green-600 block">✓ SMS Opt-in</span> : <span className="text-slate-400 block">✗ SMS Opt-out</span>}
                             </div>
                           </TableCell>
-                          <TableCell className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300 font-medium align-middle">{lead.owner?.name || "Unassigned"}</TableCell>
+                          <TableCell className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300 font-medium align-middle">
+                            {lead.upcomingAppointment ? (
+                              lead.upcomingAppointment.agent?.role === "STAFF" ? (
+                                <div>
+                                  <p className="font-semibold text-foreground">
+                                    {lead.upcomingAppointment.agent.name || lead.upcomingAppointment.agent.email}
+                                  </p>
+                                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                                    {new Date(lead.upcomingAppointment.time).toLocaleString([], {
+                                      month: "short",
+                                      day: "numeric",
+                                      hour: "numeric",
+                                      minute: "2-digit",
+                                    })}
+                                  </p>
+                                </div>
+                              ) : !isHomeowner ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openAssignment(lead);
+                                  }}
+                                  className="h-8 gap-1.5 px-2.5 text-xs"
+                                >
+                                  <UserRoundPlus className="h-3.5 w-3.5" />
+                                  Assign
+                                </Button>
+                              ) : (
+                                "Unassigned"
+                              )
+                            ) : (
+                              lead.owner?.name || "Unassigned"
+                            )}
+                          </TableCell>
                           <TableCell
                             className="py-3 px-4 text-right pr-6 space-x-1 align-middle"
                             // The row navigates, so the delete button must not.
@@ -1411,6 +1521,91 @@ export default function LeadsPage() {
                 })()}
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Sales appointment staff assignment */}
+        <Dialog open={!!assignmentTarget} onOpenChange={(open) => !open && closeAssignment()}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Assign appointment staff</DialogTitle>
+              <DialogDescription>
+                Only staff who are working and free for the full appointment window are shown.
+              </DialogDescription>
+            </DialogHeader>
+
+            {assignmentTarget?.upcomingAppointment && (
+              <div className="flex items-start gap-3 border-y py-4">
+                <CalendarClock className="mt-0.5 h-5 w-5 shrink-0 text-[#b48c3c]" />
+                <div className="min-w-0">
+                  <p className="font-semibold text-foreground">
+                    {assignmentTarget.upcomingAppointment.title}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {assignmentTarget.firstName} {assignmentTarget.lastName} ·{" "}
+                    {new Date(assignmentTarget.upcomingAppointment.time).toLocaleString([], {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="min-h-32 py-1">
+              {loadingStaff ? (
+                <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Checking staff availability...
+                </div>
+              ) : availableStaff.length ? (
+                <div className="max-h-72 divide-y overflow-y-auto border">
+                  {availableStaff.map((member) => {
+                    const selected = selectedStaffId === member.id;
+                    return (
+                      <button
+                        key={member.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setSelectedStaffId(member.id)}
+                        className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors ${
+                          selected ? "bg-[#0F3B3D] text-white" : "hover:bg-muted/60"
+                        }`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold">{member.name || member.email}</span>
+                          {member.name && (
+                            <span className={`block truncate text-xs ${selected ? "text-white/75" : "text-muted-foreground"}`}>
+                              {member.email}
+                            </span>
+                          )}
+                        </span>
+                        {selected && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex h-32 items-center justify-center border border-dashed px-6 text-center text-sm text-muted-foreground">
+                  No staff members are available for this appointment time.
+                </div>
+              )}
+              {assignmentError && <p className="mt-3 text-sm font-medium text-red-600">{assignmentError}</p>}
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={closeAssignment} disabled={assigningStaff}>Cancel</Button>
+              <Button
+                onClick={assignAppointment}
+                disabled={!selectedStaffId || loadingStaff || assigningStaff}
+                className="gap-2 bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90"
+              >
+                {assigningStaff ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRoundPlus className="h-4 w-4" />}
+                {assigningStaff ? "Assigning..." : "Assign staff"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 

@@ -50,14 +50,6 @@ function emailHighlightBox(content) {
   `;
 }
 
-function emailDashBox(content) {
-  return `
-    <div style="background-color: ${COLORS.bgLight}; border: 2px dashed ${COLORS.accent}; padding: 20px; margin: 24px auto; max-width: 250px; font-size: 32px; font-weight: bold; letter-spacing: 5px; color: ${COLORS.primary}; text-align: center; border-radius: 8px;">
-      ${content}
-    </div>
-  `;
-}
-
 export const Templates = {
   getEmailChangeVerifyEmail: (name, oldEmail, newEmail, confirmUrl, hoursValid) => {
     const content = `
@@ -134,11 +126,13 @@ export const Templates = {
       String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
     const heading = {
       BOOKED: "New Sales Appointment",
+      ASSIGNED: "Sales Appointment Assigned",
       RESCHEDULED: "Sales Appointment Rescheduled",
       CANCELLED: "Sales Appointment Cancelled",
     }[kind] || "Sales Appointment Update";
     const intro = {
       BOOKED: "A new sales appointment has been booked.",
+      ASSIGNED: "A sales appointment has been assigned to you.",
       RESCHEDULED: "A sales appointment has been moved to a new time.",
       CANCELLED: "A sales appointment has been cancelled.",
     }[kind] || "A sales appointment has changed.";
@@ -153,7 +147,6 @@ export const Templates = {
       row(kind === "CANCELLED" ? "Was" : "When", esc(details.when)),
       row("Previously", kind === "RESCHEDULED" ? esc(details.previousWhen) : ""),
       row("Type", details.locationType === "ONSITE" ? "On site" : "Virtual"),
-      row("Video link", details.meetingLink ? `<a href="${esc(details.meetingLink)}">${esc(details.meetingLink)}</a>` : ""),
       row("Booked via", esc(details.bookedVia), true),
     ].join("");
     const content = `
@@ -426,13 +419,14 @@ export const Templates = {
     const isHomeowner = role === "homeowner";
     const title = isHomeowner ? "Your Appointment is Confirmed" : "New Appointment Scheduled";
     const companyName = isHomeowner ? (appointment.company?.name || "Aiforhomebuilder") : "Aiforhomebuilder";
+    const appointmentType = appointment.title || appointment.locationType || "Appointment";
 
     let detailsHtml = "";
     if (isHomeowner) {
       detailsHtml = `
         <p>Your appointment has been successfully scheduled.</p>
         <div style="background-color: ${COLORS.bgLight}; border-radius: 8px; padding: 20px; margin: 24px 0;">
-          <p style="margin: 0 0 10px 0;"><strong>Type:</strong> ${appointment.type}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Type:</strong> ${appointmentType}</p>
           <p style="margin: 0 0 10px 0;"><strong>Date:</strong> ${formattedDate}</p>
           ${appointment.notes ? `<p style="margin: 0;"><strong>Notes:</strong> ${appointment.notes}</p>` : ""}
         </div>
@@ -442,7 +436,7 @@ export const Templates = {
         <p>A new appointment has been scheduled by a homeowner.</p>
         <div style="background-color: ${COLORS.bgLight}; border-radius: 8px; padding: 20px; margin: 24px 0;">
           <p style="margin: 0 0 10px 0;"><strong>Homeowner:</strong> ${appointment.homeowner?.user?.name || "Unknown"} (${appointment.homeowner?.user?.email || "No email"})</p>
-          <p style="margin: 0 0 10px 0;"><strong>Type:</strong> ${appointment.type}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Type:</strong> ${appointmentType}</p>
           <p style="margin: 0 0 10px 0;"><strong>Date:</strong> ${formattedDate}</p>
           ${appointment.notes ? `<p style="margin: 0;"><strong>Notes:</strong> ${appointment.notes}</p>` : ""}
         </div>
@@ -461,13 +455,14 @@ export const Templates = {
     const isHomeowner = role === "homeowner";
     const title = "Appointment Cancelled";
     const companyName = isHomeowner ? (appointment.company?.name || "Aiforhomebuilder") : "Aiforhomebuilder";
+    const appointmentType = appointment.title || appointment.locationType || "Appointment";
 
     let detailsHtml = "";
     if (isHomeowner) {
       detailsHtml = `
         <p>Your appointment has been cancelled.</p>
         <div style="background-color: ${COLORS.bgLight}; border-radius: 8px; padding: 20px; margin: 24px 0;">
-          <p style="margin: 0 0 10px 0;"><strong>Type:</strong> ${appointment.type}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Type:</strong> ${appointmentType}</p>
           <p style="margin: 0 0 10px 0;"><strong>Date:</strong> ${formattedDate}</p>
         </div>
         <p>If you need to reschedule, please visit the portal.</p>
@@ -477,7 +472,7 @@ export const Templates = {
         <p>An appointment has been cancelled.</p>
         <div style="background-color: ${COLORS.bgLight}; border-radius: 8px; padding: 20px; margin: 24px 0;">
           <p style="margin: 0 0 10px 0;"><strong>Homeowner:</strong> ${appointment.homeowner?.user?.name || "Unknown"}</p>
-          <p style="margin: 0 0 10px 0;"><strong>Type:</strong> ${appointment.type}</p>
+          <p style="margin: 0 0 10px 0;"><strong>Type:</strong> ${appointmentType}</p>
           <p style="margin: 0 0 10px 0;"><strong>Date:</strong> ${formattedDate}</p>
         </div>
       `;

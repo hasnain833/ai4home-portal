@@ -346,7 +346,7 @@ async function eraseLead(companyId, leadId, mode) {
   await prisma.schedulingConversation.deleteMany({ where: { leadId } });
   await prisma.salesAppointment.updateMany({
     where: { leadId },
-    data: { notes: null, meetingLink: null },
+    data: { notes: null },
   });
 
   await prisma.lead.update({

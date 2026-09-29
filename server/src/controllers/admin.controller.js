@@ -70,13 +70,12 @@ export const createStaff = async (req, res) => {
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-    const { data: authData, error: authError } =
-      await supabaseAdmin.auth.admin.createUser({
+    const { error: authError } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
         user_metadata: { name },
-      });
+    });
 
     if (authError) {
       console.error("Supabase auth creation error:", authError);
