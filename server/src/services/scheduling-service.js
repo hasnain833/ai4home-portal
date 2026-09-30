@@ -183,7 +183,7 @@ async function sendConfirmations(lead, appointment, tz) {
 
   if (lead.phone) {
     const body = ComplianceService.addSmsOptOutSuffix(
-      `Your ${appointment.title} is confirmed for ${when}. Manage: ${rescheduleUrl}`
+      `${lead.firstName ? `Hi ${lead.firstName}, your` : "Your"} ${appointment.title} is confirmed for ${when}. Manage: ${rescheduleUrl}`
     );
     const result = await sendSms({ to: lead.phone, body, companyId: lead.companyId, source: "scheduling" });
     if (!smsSent(result)) {

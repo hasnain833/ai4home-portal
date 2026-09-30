@@ -147,6 +147,7 @@ export const Templates = {
       row(kind === "CANCELLED" ? "Was" : "When", esc(details.when)),
       row("Previously", kind === "RESCHEDULED" ? esc(details.previousWhen) : ""),
       row("Type", details.locationType === "ONSITE" ? "On site" : "Virtual"),
+      row("Notes", esc(details.notes).replace(/\n/g, "<br>")),
       row("Booked via", esc(details.bookedVia), true),
     ].join("");
     const content = `

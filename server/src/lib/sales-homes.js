@@ -82,7 +82,7 @@ export function inventoryChunk(homes) {
   if (!homes?.length) return null;
   const text = [
     "Homes currently for sale, from the builder's own inventory. This is the authoritative list of addresses, prices and availability — quote it exactly, and never invent a home, address or price that is not on it.",
-    "When the buyer asks to see a home, asks for pictures, or you recommend specific homes, put those homes' ids (the value after 'home:') in home_ids so the chat can show them. Only include homes that have photos when pictures were asked for.",
+    "When the buyer asks to see a home, asks for pictures, or you recommend specific homes for the first time, put those homes' ids (the value after 'home:') in home_ids so the chat can show them. Only include homes that have photos when pictures were asked for. A home marked '[Shown as cards: …]' earlier in the conversation is already on screen — do not include it again unless the buyer asks to see it again, and do not say 'here's a look' without attaching a card.",
     "",
     ...homes.map(homeLine),
   ].join("\n");

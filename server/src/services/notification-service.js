@@ -311,6 +311,7 @@ export async function notifySalesAppointment(kind, appointment, { previousTime =
         when,
         previousWhen,
         locationType: appointment.locationType,
+        notes: appointment.notes || null,
         bookedVia: BOOKED_VIA_LABELS[appointment.bookedVia] || appointment.bookedVia || null,
       },
       portalUrl(),

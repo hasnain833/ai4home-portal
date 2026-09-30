@@ -32,16 +32,33 @@ const SLOT_LIMIT = 8;
 function readTranscript(body) {
   const list = Array.isArray(body?.messages) ? body.messages.slice(-MAX_TURNS) : [];
   const transcript = [];
+  const shownHomeIds = new Set();
   for (const m of list) {
-    const content = typeof m?.content === "string" ? m.content.trim() : "";
+    let content = typeof m?.content === "string" ? m.content.trim() : "";
     if (!content) continue;
     if (content.length > MAX_MESSAGE_CHARS) return { error: `Messages must be under ${MAX_MESSAGE_CHARS} characters` };
-    transcript.push({ role: m.role === "agent" ? "agent" : "lead", content });
+    const role = m.role === "agent" ? "agent" : "lead";
+    // The agent only sees text, so note which home cards a turn already showed —
+    // otherwise it re-attaches the same home to every later reply about it.
+    const homeIds = role === "agent" && Array.isArray(m.homeIds) ? m.homeIds.map(String).filter(Boolean).slice(0, 6) : [];
+    if (homeIds.length) {
+      homeIds.forEach((id) => shownHomeIds.add(id));
+      content += `\n[Shown as cards: ${homeIds.map((id) => `home:${id}`).join(", ")}]`;
+    }
+    transcript.push({ role, content });
   }
   if (!transcript.length || transcript[transcript.length - 1].role !== "lead") {
     return { error: "Send a message to reply to" };
   }
-  return { transcript };
+  return { transcript, shownHomeIds };
+}
+
+// A buyer asking for pictures again is the one reason to repeat a card.
+const ASKS_FOR_PICTURES = /\b(photos?|pictures?|pics?|images?|show me)\b/i;
+
+function newHomeIds(ids, shownHomeIds, question) {
+  const list = Array.isArray(ids) ? ids.map(String) : [];
+  return ASKS_FOR_PICTURES.test(question) ? list : list.filter((id) => !shownHomeIds.has(id));
 }
 
 const isHomeowner = (user) => String(user?.role || "").toUpperCase() === "HOMEOWNER";
@@ -73,7 +90,7 @@ export const getSuggestions = async (req, res) => {
 
 export const postMessage = async (req, res) => {
   try {
-    const { transcript, error } = readTranscript(req.body);
+    const { transcript, shownHomeIds, error } = readTranscript(req.body);
     if (error) return res.status(400).json({ message: error });
 
     if (!(await hasPlatformAi())) {
@@ -144,7 +161,7 @@ export const postMessage = async (req, res) => {
     return res.json({
       reply,
       action: decision.action || "reply",
-      homes: await homeCards(companyId, decision.home_ids),
+      homes: await homeCards(companyId, newHomeIds(decision.home_ids, shownHomeIds, question)),
       pendingBooking,
       // Prefill only for someone booking for themselves.
       contactPrefill: isHomeowner(req.user)

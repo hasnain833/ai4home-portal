@@ -405,7 +405,14 @@ export default function SalesChat({
   // Only the newest agent turn can hold an open booking form.
   const lastAgentId = [...messages].reverse().find((m) => m.role === "agent")?.id;
   // Homes shown in this conversation, newest first — recorded on the booking.
-  const homesDiscussed = [...new Set(messages.flatMap((m) => m.homes || []).reverse().map((h) => h.address))];
+  const homesDiscussed = [
+    ...new Set(
+      messages
+        .flatMap((m) => m.homes || [])
+        .reverse()
+        .map((h) => [h.address, [h.city, h.state].filter(Boolean).join(", ")].filter(Boolean).join(", ")),
+    ),
+  ];
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -429,7 +436,11 @@ export default function SalesChat({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: history.map((m) => ({ role: m.role, content: m.content })),
+          messages: history.map((m) => ({
+            role: m.role,
+            content: m.content,
+            homeIds: (m.homes || []).map((h) => h.id),
+          })),
         }),
       });
       const data = await response.json().catch(() => ({}));

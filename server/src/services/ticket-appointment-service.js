@@ -2,7 +2,7 @@ import prisma from "../lib/prisma.js";
 import { MessagingService } from "./messaging-service.js";
 import { MailService } from "./mail-service.js";
 import { Templates } from "./templates.js";
-import { writeNotifications } from "./notification-service.js";
+import { companyAdmins, writeNotifications } from "./notification-service.js";
 
 const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
 
@@ -111,8 +111,6 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
     },
   }[kind];
 
-  // Warranty admins only receive ticket-created alerts. Appointment activity
-  // belongs to the assigned staff member and the homeowner.
   if (companyId && assignedStaff?.id) {
     await writeNotifications(
       [{
@@ -136,8 +134,6 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
     return { ok: true, notified: assignedStaff ? 1 : 0, emailed: 0, emailConfigured: false };
   }
 
-  // "scheduled" covers both the initial dispatch and a later reschedule. The two
-  // sides get different mail: staff the full ticket, the homeowner just the visit.
   const htmlFor = (role) => {
     if (kind === "scheduled")
       return role === "homeowner"
@@ -251,13 +247,6 @@ export async function notifyAppointmentReminder(appointment, windowLabel) {
   }
 }
 
-/**
- * Dispatch: the homeowner gets a booking link, the staff member gets the job.
- * No visit exists yet, so this deliberately does not go through the appointment
- * notifier — there is nothing to confirm until a time is picked.
- *
- * `nudge` re-sends the same invitation to a homeowner who never booked.
- */
 export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
   try {
     const ticket = await prisma.ticket.findUnique({

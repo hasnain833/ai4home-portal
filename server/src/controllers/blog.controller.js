@@ -1,7 +1,7 @@
 import prisma from "../lib/prisma.js";
-import { chat, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
+import { chat, toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
-import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
+import { KB_SCOPES, buildBrandContext, dedupeKbCitations } from "../lib/sales-ai.js";
 import { renderTemplate, BLOG_WRITER_TEMPLATE } from "../prompts/index.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -188,6 +188,24 @@ export const deleteBlogPost = async (req, res) => {
 };
 
 
+const BLOG_DRAFT_TOOL = {
+  name: "write_blog_post",
+  description: "Return the finished blog post.",
+  input_schema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      excerpt: { type: "string", description: "1-2 sentence summary" },
+      metaTitle: { type: "string", description: "<= 60 chars, SEO" },
+      metaDescription: { type: "string", description: "<= 160 chars, SEO" },
+      headings: { type: "array", items: { type: "string" }, description: "H2 section headings, in order" },
+      tags: { type: "array", items: { type: "string" }, description: "3-6 lowercase tags" },
+      content: { type: "string", description: "Full post body in Markdown using ## headings" },
+    },
+    required: ["title", "excerpt", "metaTitle", "metaDescription", "headings", "tags", "content"],
+  },
+};
+
 export const generateBlogDraft = async (req, res) => {
   try {
     const { companyId, id: userId } = req.user;
@@ -226,13 +244,18 @@ Target audience: ${targetAudience || "prospective homebuyers"}
 Target length: ${targetLength || "800-1000 words"}
 Keywords to work in naturally: ${keywordStr || "(none specified)"}`;
 
-    const raw = await chat({ companyId, system, user, maxTokens: 2000, json: true });
-    if (!raw) return res.status(502).json({ message: "The AI provider returned nothing. Please try again." });
-
-    const parsed = parseLlmJson(raw);
-    if (!parsed) {
-      console.error("[Blog] draft JSON parse failed");
-      return res.status(502).json({ message: "The AI draft could not be parsed. Please try again." });
+    // A tool call, not free-text JSON: a full post in Markdown inside a JSON
+    // string broke parsing whenever an escape slipped or 2000 tokens cut it off.
+    const parsed = await toolCall({
+      companyId,
+      system,
+      messages: [{ role: "user", content: user }],
+      tool: BLOG_DRAFT_TOOL,
+      maxTokens: 8000,
+    });
+    if (!parsed?.content) {
+      console.error("[Blog] draft generation returned no post");
+      return res.status(502).json({ message: "The AI draft could not be generated. Please try again." });
     }
 
     const post = await prisma.blogPost.create({

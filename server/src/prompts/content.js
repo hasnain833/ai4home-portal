@@ -9,16 +9,7 @@ Knowledge Base:
 Source News (cite these where you draw on them):
 {{newsContext}}
 
-Return ONLY a raw JSON object (no markdown fences) with this exact shape:
-{
-  "title": "string",
-  "excerpt": "string (1-2 sentence summary)",
-  "metaTitle": "string (<= 60 chars, SEO)",
-  "metaDescription": "string (<= 160 chars, SEO)",
-  "headings": ["H2 section headings, in order"],
-  "tags": ["3-6 lowercase tags"],
-  "content": "full post body in Markdown using ## headings"
-}`;
+Return the post with the write_blog_post tool: title, a 1-2 sentence excerpt, an SEO metaTitle (<= 60 chars) and metaDescription (<= 160 chars), the H2 headings in order, 3-6 lowercase tags, and the full body in Markdown using ## headings.`;
 
 export const BLOG_SAMPLE_TEMPLATE = `You are a content marketing writer for {{companyName}}. Write a short SAMPLE section reflecting this brand voice. Ground factual claims in the Knowledge Base; never invent facts.
 

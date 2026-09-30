@@ -149,7 +149,7 @@ const RESPOND_TOOL = {
       home_ids: {
         type: "array",
         items: { type: "string" },
-        description: "Ids of homes from the live inventory (the value after 'home:') to show the buyer as cards with photos — when they ask to see a home or for pictures, or when you recommend specific homes. Omit when no specific home is involved.",
+        description: "Ids of homes from the live inventory (the value after 'home:') to show the buyer as cards with photos — when they ask to see a home or for pictures, or when you first recommend specific homes. Omit homes already shown as cards earlier in the conversation, and omit when a reply merely mentions a home (e.g. booking a visit to it).",
       },
       optout_request: { type: "boolean", description: "True if the lead asked, in any wording, not to be contacted again — 'remove me', 'don't message me again', 'take me off your list', 'stop emailing me'. Setting this removes them from ALL future messaging for this company, so set it only on a clear request to stop, never on mere disinterest in buying right now." },
     },
