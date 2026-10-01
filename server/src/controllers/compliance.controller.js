@@ -5,6 +5,7 @@ import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
 import { normalizePhone } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
+import { escapeHtml } from "../lib/utils.js";
 
 async function markLeadEngaged(leadId) {
   await prisma.lead.updateMany({
@@ -471,8 +472,8 @@ async function copyReplyToTenant(companyId, lead, from, subject, body) {
       to: company.email,
       subject: `Lead reply from ${name}${subject ? `: ${subject}` : ""}`,
       html:
-        `<p><strong>${escapeXml(name)}</strong> (${escapeXml(from)}) replied. Your AI agent is handling it.</p>` +
-        `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeXml(body || "")}</blockquote>`,
+        `<p><strong>${escapeHtml(name)}</strong> (${escapeHtml(from)}) replied. Your AI agent is handling it.</p>` +
+        `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeHtml(body || "")}</blockquote>`,
       fromName: company.name || undefined,
       replyTo: from,
       companyId,

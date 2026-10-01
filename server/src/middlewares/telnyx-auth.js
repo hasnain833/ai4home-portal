@@ -54,7 +54,7 @@ export async function verifyTelnyxSignature(req, res, next) {
     const valid = crypto.verify(null, signedPayload, key, Buffer.from(signature, "base64"));
 
     if (!valid) {
-      console.warn("[Telnyx Auth] Signature mismatch — rejecting webhook.");
+      console.warn(`[Telnyx Auth] Signature mismatch — rejecting webhook (rawBody ${req.rawBody ? "present" : "MISSING, verified re-serialized JSON"}).`);
       return res.status(403).json({ message: "Forbidden" });
     }
 
