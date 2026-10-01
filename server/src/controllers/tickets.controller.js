@@ -8,6 +8,7 @@ import { notifyTicketDispatched } from "../services/ticket-appointment-service.j
 import { randomUUID } from "node:crypto";
 import { syncTicketToERP } from "../services/erp-service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
+import { nextTicketNumber, ticketRef } from "../lib/ticket-number.js";
 import {
   normalizePriority,
   TICKET_PRIORITIES,
@@ -168,15 +169,17 @@ export const createTicket = async (req, res) => {
 
     const warrantyYear = calculateWarrantyYear(property.coeDate);
 
-    const ticket = await prisma.ticket.create({
+    const companyId = property.homeowner?.companyId ?? null;
+    const ticket = await prisma.$transaction(async (tx) => tx.ticket.create({
       data: {
         // id omitted — Supabase/Prisma auto-assigns a cuid
+        number: await nextTicketNumber(tx, companyId),
         issueType,
         ticketType,
         description: String(description || "").trim().slice(0, 5000) || null,
         propertyId,
         homeownerId,
-        companyId: property.homeowner?.companyId ?? null,
+        companyId,
         priority: normalizePriority(priority, {
           isEmergency: !!isEmergency,
           text: `${issueType || ""} ${ticketType || ""}`,
@@ -185,7 +188,7 @@ export const createTicket = async (req, res) => {
         warrantyYear,
         status: "OPEN",
       },
-    });
+    }));
 
     try {
       await syncTicketToERP(ticket.id, { reason: isEmergency ? "escalation" : "creation" });
@@ -392,10 +395,11 @@ export const updateTicket = async (req, res) => {
             const mailResult = await MessagingService.sendEmail({
               companyId: oldTicket.homeowner.companyId,
               to: oldTicket.homeowner.email,
-              subject: `Your warranty claim #${ticket.id} is resolved`,
+              subject: `Your warranty claim ${ticketRef(ticket)} is resolved`,
               html: Templates.getTicketResolvedEmail(
                 {
                   ticketId: ticket.id,
+                  ticketRef: ticketRef(ticket),
                   issueType: ticket.issueType,
                   homeownerName: oldTicket.homeowner.name || "Homeowner",
                 },

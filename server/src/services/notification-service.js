@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { ticketRef } from "../lib/ticket-number.js";
 import { MessagingService } from "./messaging-service.js";
 import { Templates } from "./templates.js";
 import { MailService } from "./mail-service.js";
@@ -54,8 +55,8 @@ export async function notifyTicketCreated(ticketId, { sendEmail = true } = {}) {
           workspace: "WARRANTY",
           type: "TICKET_CREATED",
           title: ticket.isEmergency
-            ? `Emergency ticket #${ticket.id}`
-            : `New ticket #${ticket.id}`,
+            ? `Emergency ticket ${ticketRef(ticket)}`
+            : `New ticket ${ticketRef(ticket)}`,
           body: `${homeownerName} reported "${ticket.issueType}"${address ? ` at ${address}` : ""}.`,
           link,
           ticketId: ticket.id,
@@ -91,10 +92,10 @@ export async function notifyTicketCreated(ticketId, { sendEmail = true } = {}) {
         companyId,
         to: ticket.homeowner.email,
         source: "ticket-created-homeowner",
-        subject: `We have received your warranty request — ticket #${ticket.id}`,
+        subject: `We have received your warranty request — ticket ${ticketRef(ticket)}`,
         html: Templates.getTicketCreatedHomeownerEmail(
           homeownerName,
-          ticket.id,
+          ticket,
           ticket.issueType,
           portalUrl(),
           companyName,
@@ -116,10 +117,10 @@ export async function notifyTicketCreated(ticketId, { sendEmail = true } = {}) {
         to: admin.email,
         source: "ticket-created-admin",
         subject: ticket.isEmergency
-          ? `Emergency warranty ticket #${ticket.id} — ${ticket.issueType}`
-          : `New warranty ticket #${ticket.id} — ${ticket.issueType}`,
+          ? `Emergency warranty ticket ${ticketRef(ticket)} — ${ticket.issueType}`
+          : `New warranty ticket ${ticketRef(ticket)} — ${ticket.issueType}`,
         html: Templates.getTicketCreatedAdminEmail(
-          ticket.id,
+          ticket,
           ticket.issueType,
           ticket.priority,
           ticket.isEmergency,
@@ -169,7 +170,7 @@ export async function notifyTicketReminder(ticket, ageLabel) {
         userId: assignedStaff.id,
         workspace: "WARRANTY",
         type: "TICKET_REMINDER",
-        title: `Ticket #${ticket.id} still open`,
+        title: `Ticket ${ticketRef(ticket)} still open`,
         body: `Open for ${ageLabel} with no action. ${homeownerName} reported "${ticket.issueType}".`,
         link: `/warranty/tickets/${ticket.id}`,
         ticketId: ticket.id,
@@ -188,9 +189,9 @@ export async function notifyTicketReminder(ticket, ageLabel) {
         companyId,
         to: assignedStaff.email,
         source: "ticket-reminder",
-        subject: `Reminder: ticket #${ticket.id} has been open for ${ageLabel}`,
+        subject: `Reminder: ticket ${ticketRef(ticket)} has been open for ${ageLabel}`,
         html: Templates.getTicketReminderEmail(
-          ticket.id,
+          ticket,
           ticket.issueType,
           ticket.priority,
           ticket.isEmergency,

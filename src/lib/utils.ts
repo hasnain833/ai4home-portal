@@ -17,3 +17,8 @@ export function calculateWarrantyYear(coeDate: Date | string | null): number {
   if (diffYears <= 2) return 2;
   return 10; // Structural
 }
+
+// Mirrors server/src/lib/ticket-number.js — the readable per-company number.
+export function ticketRef(ticket: { id: string; number?: number | null }) {
+  return ticket.number ? `WC-${ticket.number}` : `#${ticket.id.slice(-6).toUpperCase()}`;
+}

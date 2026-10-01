@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { ticketRef } from "../lib/ticket-number.js";
 import { Templates } from "./templates.js";
 import { recordUsage } from "../lib/usage.js";
 
@@ -125,9 +126,9 @@ export class MailService {
     }
   }
 
-  static async sendTicketStatusUpdate(to, homeownerName, ticketId, status, company = null, companyId = null) {
+  static async sendTicketStatusUpdate(to, homeownerName, ticket, status, company = null, companyId = null) {
     const statusLabel = status.replace("_", " ").toLowerCase();
-    const subject = `Ticket Update: ${ticketId} is now ${statusLabel}`;
+    const subject = `Ticket Update: ${ticketRef(ticket)} is now ${statusLabel}`;
 
     const companyName = company?.name || "Aiforhomebuilder";
     const companyEmail = company?.email || this.SENDER_EMAIL;
@@ -135,7 +136,7 @@ export class MailService {
 
     const html = Templates.getTicketUpdateEmail(
       homeownerName,
-      ticketId,
+      ticket,
       statusLabel,
       portalUrl,
       companyName

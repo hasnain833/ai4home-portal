@@ -28,7 +28,7 @@ export class MessagingService {
     return sendSms({ to, body: finalBody, companyId, tag, source });
   }
 
-  static async sendTicketStatusUpdate({ companyId, to, homeownerName, ticketId, status, company }) {
+  static async sendTicketStatusUpdate({ companyId, to, homeownerName, ticket, status, company }) {
     if (companyId && to) {
       const { suppressed, reason } = await ComplianceService.checkSuppression(companyId, "EMAIL", to);
       if (suppressed) {
@@ -36,7 +36,7 @@ export class MessagingService {
         return { success: false, outcome: "blocked", blocked: true, reason: `Suppressed (${reason})` };
       }
     }
-    return MailService.sendTicketStatusUpdate(to, homeownerName, ticketId, status, company, companyId);
+    return MailService.sendTicketStatusUpdate(to, homeownerName, ticket, status, company, companyId);
   }
 
   static async notifyTicketStatusChange(ticketId, status) {
@@ -53,7 +53,7 @@ export class MessagingService {
         companyId,
         to: ticket.homeowner.email,
         homeownerName: ticket.homeowner.name || "Homeowner",
-        ticketId: ticket.id,
+        ticket,
         status,
         company: ticket.homeowner.company,
       });

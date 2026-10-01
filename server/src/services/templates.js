@@ -1,4 +1,5 @@
 import { priorityLabel } from "../lib/warranty-classify.js";
+import { ticketRef as formatTicketRef } from "../lib/ticket-number.js";
 
 const COLORS = {
   primary: "#0F3B3D",
@@ -79,10 +80,12 @@ export const Templates = {
     return wrapEmail(content, "Sign-in email change requested");
   },
 
-  getTicketUpdateEmail: (homeownerName, ticketId, statusLabel, portalUrl, companyName) => {
+  getTicketUpdateEmail: (homeownerName, ticket, statusLabel, portalUrl, companyName) => {
+    const ticketId = ticket.id;
+    const ticketRef = formatTicketRef(ticket);
     const content = `
       <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
-      <p>The status of your warranty ticket <strong>#${ticketId}</strong> has been updated to:</p>
+      <p>The status of your warranty ticket <strong>${ticketRef}</strong> has been updated to:</p>
       ${emailHighlightBox(statusLabel)}
       <p>Our team is working to resolve this as quickly as possible. You can track the progress of your claim in the portal.</p>
       ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket in Portal")}
@@ -91,10 +94,12 @@ export const Templates = {
   },
 
 
-  getTicketCreatedHomeownerEmail: (homeownerName, ticketId, issueType, portalUrl, companyName) => {
+  getTicketCreatedHomeownerEmail: (homeownerName, ticket, issueType, portalUrl, companyName) => {
+    const ticketId = ticket.id;
+    const ticketRef = formatTicketRef(ticket);
     const content = `
       <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
-      <p>We've received your warranty request and opened ticket <strong>#${ticketId}</strong>.</p>
+      <p>We've received your warranty request and opened ticket <strong>${ticketRef}</strong>.</p>
       ${emailHighlightBox(issueType)}
       <p>Our team will review it and be in touch. You can follow the progress of your claim in the portal at any time.</p>
       ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket in Portal")}
@@ -102,7 +107,9 @@ export const Templates = {
     return wrapEmail(content, "Warranty Ticket Received", companyName, COLORS.accent);
   },
 
-  getTicketCreatedAdminEmail: (ticketId, issueType, priority, isEmergency, homeownerName, propertyAddress, portalUrl, companyName) => {
+  getTicketCreatedAdminEmail: (ticket, issueType, priority, isEmergency, homeownerName, propertyAddress, portalUrl, companyName) => {
+    const ticketId = ticket.id;
+    const ticketRef = formatTicketRef(ticket);
     const urgencyNote = isEmergency
       ? `<p style="color: #b91c1c; font-weight: 600; margin-top: 0;">This ticket was flagged as an emergency and needs immediate attention.</p>`
       : "";
@@ -110,7 +117,7 @@ export const Templates = {
       ${urgencyNote}
       <p${isEmergency ? "" : ' style="margin-top: 0;"'}>A new warranty ticket has been filed and is waiting for review.</p>
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
-        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Ticket</td><td style="padding: 12px 0;">#${ticketId}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Ticket</td><td style="padding: 12px 0;">${ticketRef}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Issue</td><td style="padding: 12px 0;">${issueType}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Priority</td><td style="padding: 12px 0;">${priorityLabel(priority)}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Homeowner</td><td style="padding: 12px 0;">${homeownerName}</td></tr>
@@ -158,14 +165,16 @@ export const Templates = {
     return wrapEmail(content, heading, companyName, COLORS.primary);
   },
 
-  getTicketReminderEmail: (ticketId, issueType, priority, isEmergency, homeownerName, ageLabel, portalUrl, companyName) => {
+  getTicketReminderEmail: (ticket, issueType, priority, isEmergency, homeownerName, ageLabel, portalUrl, companyName) => {
+    const ticketId = ticket.id;
+    const ticketRef = formatTicketRef(ticket);
     const lead = isEmergency
       ? `This <strong>emergency</strong> ticket has been open for ${ageLabel} and has not been actioned yet.`
       : `This ticket has been open for ${ageLabel} and has not been actioned yet.`;
     const content = `
       <p style="margin-top: 0;">${lead}</p>
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
-        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Ticket</td><td style="padding: 12px 0;">#${ticketId}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Ticket</td><td style="padding: 12px 0;">${ticketRef}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Issue</td><td style="padding: 12px 0;">${issueType}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Priority</td><td style="padding: 12px 0;">${priorityLabel(priority)}</td></tr>
         <tr><td style="padding: 12px 12px 12px 0; font-weight: 600;">Homeowner</td><td style="padding: 12px 0;">${homeownerName}</td></tr>
@@ -177,7 +186,7 @@ export const Templates = {
   },
 
   getTicketDispatchStaffEmail: (
-    { ticketId, issueType, ticketCategory, description, priority, warrantyYear, whenLabel,
+    { ticketId, ticketRef, issueType, ticketCategory, description, priority, warrantyYear, whenLabel,
       durationMinutes, address, homeownerName, homeownerEmail, notes },
     portalUrl,
     companyName,
@@ -187,7 +196,7 @@ export const Templates = {
       ["When", `${whenLabel}${durationMinutes ? ` (${durationMinutes} min)` : ""}`],
       ["Property", address || "Not specified"],
       ["Homeowner", homeownerEmail ? `${homeownerName} &mdash; ${homeownerEmail}` : homeownerName],
-      ["Ticket", `#${ticketId}`],
+      ["Ticket", `${ticketRef}`],
       ["Issue", issueType],
       ...(ticketCategory ? [["Source", ticketCategory]] : []),
       ["Priority", priorityLabel(priority || "MEDIUM")],
@@ -196,8 +205,8 @@ export const Templates = {
     const content = `
       <p style="margin-top: 0;">${
         rescheduled
-          ? `The visit for ticket <strong>#${ticketId}</strong> has been moved.`
-          : `You have been assigned to ticket <strong>#${ticketId}</strong>.`
+          ? `The visit for ticket <strong>${ticketRef}</strong> has been moved.`
+          : `You have been assigned to ticket <strong>${ticketRef}</strong>.`
       }</p>
       ${emailHighlightBox(whenLabel)}
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
@@ -211,7 +220,7 @@ export const Templates = {
   },
 
   getTicketDispatchHomeownerEmail: (
-    { ticketId, issueType, whenLabel, address, staffName, homeownerName, manageUrl },
+    { ticketId, ticketRef, issueType, whenLabel, address, staffName, homeownerName, manageUrl },
     portalUrl,
     companyName,
     { rescheduled = false } = {},
@@ -239,7 +248,7 @@ export const Templates = {
   },
 
   getTicketBookingInviteEmail: (
-    { ticketId, issueType, address, staffName, homeownerName },
+    { ticketId, ticketRef, issueType, address, staffName, homeownerName },
     bookingUrl,
     companyName,
     { nudge = false } = {},
@@ -255,7 +264,7 @@ export const Templates = {
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Visiting</td><td style="padding: 12px 0;">${staffName || companyName}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Address</td><td style="padding: 12px 0;">${address || "Your property"}</td></tr>
-        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Claim</td><td style="padding: 12px 0;">#${ticketId}</td></tr>
+        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Claim</td><td style="padding: 12px 0;">${ticketRef}</td></tr>
       </table>
       <p style="font-size: 14px; color: ${COLORS.textMuted};">The times shown are the ones
       ${staffName || "your assigned team member"} has free. If none of them work, reply to this
@@ -270,7 +279,7 @@ export const Templates = {
   },
 
   getTicketAssignmentEmail: (
-    { ticketId, issueType, ticketCategory, description, priority, warrantyYear, address,
+    { ticketId, ticketRef, issueType, ticketCategory, description, priority, warrantyYear, address,
       homeownerName, homeownerEmail, notes },
     portalUrl,
     companyName,
@@ -278,14 +287,14 @@ export const Templates = {
     const rows = [
       ["Property", address || "Not specified"],
       ["Homeowner", homeownerEmail ? `${homeownerName} &mdash; ${homeownerEmail}` : homeownerName],
-      ["Ticket", `#${ticketId}`],
+      ["Ticket", `${ticketRef}`],
       ["Issue", issueType],
       ...(ticketCategory ? [["Source", ticketCategory]] : []),
       ["Priority", priorityLabel(priority || "MEDIUM")],
       ["Warranty year", `Year ${warrantyYear ?? 1}`],
     ];
     const content = `
-      <p style="margin-top: 0;">You have been assigned to ticket <strong>#${ticketId}</strong>.</p>
+      <p style="margin-top: 0;">You have been assigned to ticket <strong>${ticketRef}</strong>.</p>
       ${emailHighlightBox("Awaiting the homeowner's chosen time")}
       <p>The homeowner has been sent your available times. You'll get a confirmation
       with the details as soon as they pick one.</p>
@@ -299,10 +308,10 @@ export const Templates = {
     return wrapEmail(content, "New Assignment", companyName, COLORS.primary);
   },
 
-  getTicketResolvedEmail: ({ ticketId, issueType, homeownerName }, portalUrl, companyName) => {
+  getTicketResolvedEmail: ({ ticketId, ticketRef, issueType, homeownerName }, portalUrl, companyName) => {
     const content = `
       <p style="margin-top: 0;">Hello <strong>${homeownerName}</strong>,</p>
-      <p>Your warranty claim for <strong>${issueType}</strong> (ticket <strong>#${ticketId}</strong>)
+      <p>Your warranty claim for <strong>${issueType}</strong> (ticket <strong>${ticketRef}</strong>)
       has been marked resolved.</p>
       ${emailHighlightBox("Thank you")}
       <p>Thank you for your patience while we took care of this, and for giving us the chance
@@ -313,14 +322,14 @@ export const Templates = {
     return wrapEmail(content, "Claim Resolved", companyName, COLORS.primary);
   },
 
-  getTicketAppointmentReminderEmail: (role, { ticketId, issueType, whenLabel, address, tradeName, homeownerName, manageUrl }, windowLabel, portalUrl, companyName) => {
+  getTicketAppointmentReminderEmail: (role, { ticketId, ticketRef, issueType, whenLabel, address, tradeName, homeownerName, manageUrl }, windowLabel, portalUrl, companyName) => {
     const forHomeowner = role === "homeowner";
     const lead = forHomeowner
       ? `A reminder that your repair visit is ${windowLabel}.`
       : `A reminder that you have a repair visit ${windowLabel}.`;
     const rows = [
       ["When", whenLabel],
-      ["Ticket", `#${ticketId}`],
+      ["Ticket", `${ticketRef}`],
       ["Issue", issueType],
       ["Property", address || "Not specified"],
       forHomeowner ? ["Attending", tradeName || companyName] : ["Homeowner", homeownerName],
@@ -340,10 +349,10 @@ export const Templates = {
     return wrapEmail(content, "Appointment Reminder", companyName, COLORS.accent);
   },
 
-  getTicketAppointmentCancelledEmail: (role, { ticketId, issueType, whenLabel }, portalUrl, companyName) => {
+  getTicketAppointmentCancelledEmail: (role, { ticketId, ticketRef, issueType, whenLabel }, portalUrl, companyName) => {
     const who = role === "homeowner" ? "Your" : "The";
     const content = `
-      <p style="margin-top: 0;">${who} repair visit for ticket <strong>#${ticketId}</strong> (${issueType}) has been cancelled.</p>
+      <p style="margin-top: 0;">${who} repair visit for ticket <strong>${ticketRef}</strong> (${issueType}) has been cancelled.</p>
       ${emailHighlightBox(`Cancelled — ${whenLabel}`)}
       <p>If this was not expected, please get in touch and we'll rebook.</p>
       ${emailButton(`${portalUrl}/warranty/tickets/${ticketId}`, "View Ticket")}

@@ -7,6 +7,10 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
 import { TicketAppointments } from "@/components/warranty/TicketAppointments";
+import {
+  DispatchTicketDialog,
+  type DispatchStaffOption,
+} from "@/components/warranty/DispatchTicketDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,8 +41,9 @@ import {
   MapPin,
   ShieldCheck,
   AlertTriangle,
+  Send,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, ticketRef } from "@/lib/utils";
 import { apiFetch, ApiError } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -55,6 +60,7 @@ type KbReference = {
 
 type TicketDetailData = {
   id: string;
+  number?: number | null;
   homeownerId?: string | null;
   status: TicketStatus;
   priority: TicketPriority;
@@ -236,6 +242,8 @@ export default function TicketDetail() {
   const [draftResponse, setDraftResponse] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
   const [isProcessingDraft, setIsProcessingDraft] = useState(false);
+  const [staff, setStaff] = useState<DispatchStaffOption[]>([]);
+  const [dispatchOpen, setDispatchOpen] = useState(false);
 
   useEffect(() => {
     const fetchTicket = async () => {
@@ -257,6 +265,20 @@ export default function TicketDetail() {
     };
     fetchTicket();
   }, [id]);
+
+  useEffect(() => {
+    if (user?.role !== "admin" && user?.role !== "staff") return;
+    apiFetch<DispatchStaffOption[] | { staff?: DispatchStaffOption[] }>("/api/admin/staff")
+      .then((payload) => setStaff(Array.isArray(payload) ? payload : payload.staff || []))
+      .catch((error) => console.error("Error fetching staff:", error));
+  }, [user?.role]);
+
+  const handleDispatched = async (notice?: string) => {
+    // Dispatch sets the status and assignee; reload so both show.
+    setTicket(await apiFetch<TicketDetailData>(`/api/tickets/${id}`));
+    if (notice) toast.error(notice);
+    else toast.success("Ticket dispatched. The homeowner has been emailed a link to pick a time.");
+  };
 
   // Manual overrides, for correcting a ticket that went the wrong way. Dispatch
   // is still the normal route out of OPEN — the server refuses a manual move to
@@ -420,7 +442,7 @@ export default function TicketDetail() {
                 </Link>
                 <div className="flex items-baseline gap-2 flex-wrap">
                   <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-50">
-                    Ticket <span className="text-slate-500 dark:text-slate-400 font-mono text-2xl">#{ticket.id}</span>
+                    Ticket <span className="text-slate-500 dark:text-slate-400 font-mono text-2xl">{ticketRef(ticket)}</span>
                   </h1>
                 </div>
               </div>
@@ -451,6 +473,16 @@ export default function TicketDetail() {
               <Badge variant="outline" className={cn("rounded-full px-3 py-1 font-semibold border shadow-2xs", pr.bg, pr.text, pr.border)}>
                 {ticket.priority} Priority
               </Badge>
+              {canManage && ticket.status === "OPEN" && (
+                <Button
+                  size="sm"
+                  onClick={() => setDispatchOpen(true)}
+                  className="h-8 px-3 text-xs bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-semibold rounded-lg gap-1.5"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  Dispatch
+                </Button>
+              )}
             </div>
           </div>
 
@@ -814,8 +846,8 @@ export default function TicketDetail() {
                 </CardContent>
               </Card>
 
-              {/* Assignment — read-only. Status moves and dispatching happen from
-                  the quick actions on the tickets list. */}
+              {/* Assignment — status and priority overrides. Dispatching is the button
+                  in the page header. */}
               <Card className="border-slate-200/60 dark:border-slate-800/60 shadow-xs bg-white/70 dark:bg-slate-900/60 backdrop-blur-md overflow-hidden">
                 <CardHeader className="border-b border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 py-4 px-6 flex flex-row items-center gap-3">
                   <div className="p-2 bg-[#0F3B3D]/10 dark:bg-[#0f3b3d]/30 text-[#0F3B3D] dark:text-[#a0c5c7] rounded-lg">
@@ -913,9 +945,9 @@ export default function TicketDetail() {
 
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {canManage && ticket.status === "OPEN" && !ticket.assignedStaff
-                      ? "Moving straight to Dispatched needs an assignee — use Dispatch on the tickets list to pick one and send the booking link."
+                      ? "Moving straight to Dispatched needs an assignee — use Dispatch at the top of this page to pick one and send the booking link."
                       : ticket.status === "OPEN"
-                      ? "Dispatch this ticket from the tickets list to assign a staff member and send the homeowner a booking link."
+                      ? "Dispatch this ticket to assign a staff member and send the homeowner a booking link."
                       : ticket.status === "DISPATCHED"
                         ? ticket.nextVisitAt
                           ? "Mark it resolved from the tickets list once the work is done."
@@ -927,6 +959,13 @@ export default function TicketDetail() {
             </div>
           </div>
         </div>
+
+        <DispatchTicketDialog
+          ticket={dispatchOpen ? ticket : null}
+          staff={staff}
+          onClose={() => setDispatchOpen(false)}
+          onDispatched={handleDispatched}
+        />
       </PortalLayout>
     </ProtectedRoute>
   );

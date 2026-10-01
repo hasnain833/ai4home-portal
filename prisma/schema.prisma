@@ -64,6 +64,8 @@ model User {
 model Company {
   id                      String                  @id @default(cuid())
   name                    String
+  /// Last ticket number handed out; see nextTicketNumber.
+  ticketCounter           Int                     @default(0)
   logo                    String?
   email                   String?
   phone                   String?
@@ -215,6 +217,8 @@ model Property {
 
 model Ticket {
   id             String         @id @default(cuid())
+  /// Per-company, shown as WC-<number>. Assigned by nextTicketNumber.
+  number         Int?
   issueType      String
   ticketType     String?
   description    String?        @db.Text
@@ -245,6 +249,7 @@ model Ticket {
 
   @@index([homeownerId])
   @@index([propertyId])
+  @@unique([companyId, number])
   @@index([companyId, status])
   @@index([status])
   @@index([assignedStaffId])

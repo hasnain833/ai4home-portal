@@ -1,6 +1,7 @@
 import prisma from "./prisma.js";
 import { calculateWarrantyYear } from "./utils.js";
 import { normalizePriority } from "./warranty-classify.js";
+import { nextTicketNumber } from "./ticket-number.js";
 import { syncTicketToERP } from "../services/erp-service.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
@@ -127,9 +128,11 @@ export async function createWarrantyTicket({
   });
   const issueType = String(classification?.issueType || "General Warranty").slice(0, 80);
 
-  const ticket = await prisma.ticket.create({
+  const ticketCompanyId = homeowner.companyId ?? companyId ?? null;
+  const ticket = await prisma.$transaction(async (tx) => tx.ticket.create({
     data: {
       // id is omitted — Supabase/Prisma auto-assigns a cuid
+      number: await nextTicketNumber(tx, ticketCompanyId),
       issueType,
       ticketType,
       description: String(description || classification?.summary || "").slice(0, 5000) || null,
@@ -138,7 +141,7 @@ export async function createWarrantyTicket({
       kbReferences: buildKbReferences(kbRefs),
       propertyId: selectedPropertyId || null,
       homeownerId: homeowner.id,
-      companyId: homeowner.companyId ?? companyId ?? null,
+      companyId: ticketCompanyId,
       isEmergency,
       priority,
       warrantyYear,
@@ -146,7 +149,7 @@ export async function createWarrantyTicket({
       // A fixed issue must not open a work order in the builder's ERP.
       erpSyncStatus: resolvedInChat ? "SKIPPED" : "PENDING",
     },
-  });
+  }));
 
   if (!resolvedInChat) {
     try {

@@ -6,7 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
-import { cn } from "@/lib/utils";
+import { DispatchTicketDialog } from "@/components/warranty/DispatchTicketDialog";
+import { cn, ticketRef } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,7 @@ type TicketPriority = "NORMAL" | "MEDIUM" | "HIGH" | "URGENT";
 
 interface Ticket {
   id: string;
+  number?: number | null;
   homeowner?: {
     name: string;
     email: string;
@@ -127,13 +129,6 @@ const EMPTY_TICKET_FORM = {
   priority: "MEDIUM" as TicketPriority,
   isEmergency: false,
   notifyHomeowner: true,
-};
-
-// No date here: dispatch assigns the staff member and emails the homeowner a
-// link to pick a time from that person's availability.
-const EMPTY_DISPATCH_FORM = {
-  staffId: "",
-  notes: "",
 };
 
 // Animation variants
@@ -236,9 +231,6 @@ function TicketsPageInner() {
   const [allProperties, setAllProperties] = useState<PropertyOption[]>([]);
   const [staff, setStaff] = useState<StaffOption[]>([]);
   const [dispatchTarget, setDispatchTarget] = useState<Ticket | null>(null);
-  const [dispatchForm, setDispatchForm] = useState(EMPTY_DISPATCH_FORM);
-  const [dispatchError, setDispatchError] = useState("");
-  const [dispatching, setDispatching] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const showToast = (type: "success" | "error", text: string) => {
     setToastMessage({ type, text });
@@ -321,6 +313,7 @@ function TicketsPageInner() {
       const matchSearch =
         search === "" ||
         t.id.toLowerCase().includes(search.toLowerCase()) ||
+        ticketRef(t).toLowerCase().includes(search.toLowerCase()) ||
         homeownerName.toLowerCase().includes(search.toLowerCase()) ||
         (t.property?.address ?? "").toLowerCase().includes(search.toLowerCase()) ||
         t.issueType.toLowerCase().includes(search.toLowerCase());
@@ -425,59 +418,12 @@ function TicketsPageInner() {
     }
   };
 
-  const openDispatch = (ticket: Ticket) => {
-    setDispatchTarget(ticket);
-    setDispatchForm(EMPTY_DISPATCH_FORM);
-    setDispatchError("");
-  };
-
-  const closeDispatch = () => {
-    setDispatchTarget(null);
-    setDispatchForm(EMPTY_DISPATCH_FORM);
-    setDispatchError("");
-  };
-
-  const handleDispatchSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!dispatchTarget) return;
-    setDispatchError("");
-
-    if (!dispatchForm.staffId) {
-      setDispatchError("Please choose a staff member.");
-      return;
-    }
-
-    setDispatching(true);
-    try {
-      const response = await fetch(`/api/tickets/${dispatchTarget.id}/dispatch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          staffId: dispatchForm.staffId,
-          notes: dispatchForm.notes.trim() || null,
-        }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        setDispatchError(data.message || "Failed to dispatch the ticket.");
-        return;
-      }
-
-      closeDispatch();
-      await fetchTickets(true);
-      showToast(
-        data.notice ? "error" : "success",
-        data.notice ||
-          "Ticket dispatched. The homeowner has been emailed a link to pick a time.",
-      );
-    } catch (error) {
-      console.error("Error dispatching ticket:", error);
-      setDispatchError("Error connecting to server.");
-    } finally {
-      setDispatching(false);
-    }
+  const handleDispatched = async (notice?: string) => {
+    await fetchTickets(true);
+    showToast(
+      notice ? "error" : "success",
+      notice || "Ticket dispatched. The homeowner has been emailed a link to pick a time.",
+    );
   };
 
   const handleResolve = async (ticket: Ticket) => {
@@ -513,7 +459,7 @@ function TicketsPageInner() {
       return (
         <Button
           size="sm"
-          onClick={() => openDispatch(ticket)}
+          onClick={() => setDispatchTarget(ticket)}
           className="h-8 px-3 text-xs bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-semibold rounded-lg gap-1.5"
         >
           <Send className="h-3.5 w-3.5" />
@@ -789,7 +735,7 @@ function TicketsPageInner() {
                             <div>
                               <div className="flex items-center gap-1.5">
                                 <span className="font-mono text-[10px] text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded border border-border/50" title={ticket.id}>
-                                  {ticket.id.startsWith("T-") ? ticket.id : `#${ticket.id.substring(0, 8)}`}
+                                  {ticketRef(ticket)}
                                 </span>
                               </div>
                               <div className="text-sm font-semibold mt-1.5 text-foreground">{ticket.homeowner?.name || "Unknown"}</div>
@@ -951,125 +897,12 @@ function TicketsPageInner() {
             </Card>
           </motion.div>
 
-          {/* Dispatch Modal */}
-          <AnimatePresence>
-            {dispatchTarget && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-                <motion.div
-                  initial={{ scale: 0.95, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.95, opacity: 0 }}
-                  className="bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-lg shadow-2xl relative border dark:border-gray-800 my-8"
-                >
-                  <button
-                    type="button"
-                    onClick={closeDispatch}
-                    className="absolute right-4 top-4 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-400 hover:text-gray-600 transition"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-
-                  <div className="flex items-center gap-3 mb-5 border-b dark:border-gray-800 pb-4">
-                    <div className="bg-[#0F3B3D] p-2.5 rounded-2xl text-white">
-                      <Send className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-bold text-[#0F3B3D] dark:text-[#E8B86B]">
-                        Dispatch Ticket
-                      </h3>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Assign a staff member and book the repair visit.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border dark:border-gray-800 bg-muted/20 p-3 mb-4 space-y-1">
-                    <p className="text-sm font-semibold text-foreground">
-                      {dispatchTarget.issueType}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {dispatchTarget.homeowner?.name || "Unknown homeowner"}
-                      {dispatchTarget.property?.address ? ` · ${dispatchTarget.property.address}` : ""}
-                    </p>
-                  </div>
-
-                  <form onSubmit={handleDispatchSubmit} className="space-y-4">
-                    <div className="space-y-1.5">
-                      <Label className="font-semibold">Assign to</Label>
-                      <Select
-                        value={dispatchForm.staffId}
-                        onValueChange={(val) => setDispatchForm((f) => ({ ...f, staffId: val }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select staff member..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {staff.map((member) => (
-                            <SelectItem key={member.id} value={member.id}>
-                              {member.name || member.email} &mdash; {member.email}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {staff.length === 0 && (
-                        <p className="text-xs text-amber-600">
-                          No staff members yet. Add one on the Staff page first.
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label htmlFor="dispatchNotes" className="font-semibold">Notes for the visit</Label>
-                      <Textarea
-                        id="dispatchNotes"
-                        rows={3}
-                        placeholder="Anything the staff member should know before turning up"
-                        value={dispatchForm.notes}
-                        onChange={(e) => setDispatchForm((f) => ({ ...f, notes: e.target.value }))}
-                      />
-                    </div>
-
-                    <div className="flex items-start gap-2.5 rounded-2xl border dark:border-gray-800 p-3">
-                      <CalendarClock className="h-4 w-4 mt-0.5 text-[#0F3B3D] dark:text-[#E8B86B] shrink-0" />
-                      <p className="text-xs text-gray-500 dark:text-slate-400 leading-snug">
-                        The homeowner picks the time. They&apos;re emailed a link showing when
-                        this staff member is free; the staff member gets the full ticket now
-                        and a confirmation once a slot is chosen.
-                      </p>
-                    </div>
-
-                    {dispatchError && (
-                      <div className="text-red-600 bg-red-50 dark:bg-red-950/30 p-3 rounded-xl text-sm font-semibold">
-                        {dispatchError}
-                      </div>
-                    )}
-
-                    <div className="flex gap-3 justify-end pt-3 border-t dark:border-gray-800">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={closeDispatch}
-                        className="text-gray-600"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={dispatching}
-                        className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white font-semibold gap-2"
-                      >
-                        {dispatching ? (
-                          <><Loader2 className="h-4 w-4 animate-spin" /> Dispatching...</>
-                        ) : (
-                          <><Send className="h-4 w-4" /> Dispatch &amp; Send Link</>
-                        )}
-                      </Button>
-                    </div>
-                  </form>
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
+          <DispatchTicketDialog
+            ticket={dispatchTarget}
+            staff={staff}
+            onClose={() => setDispatchTarget(null)}
+            onDispatched={handleDispatched}
+          />
 
           {/* Create Ticket Modal */}
           <AnimatePresence>

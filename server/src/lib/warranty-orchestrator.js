@@ -6,6 +6,7 @@ import { queryDetailed as kbQueryDetailed } from "../services/warranty-vector.se
 import { getCoverageStatus, COVERAGE } from "./coverage.js";
 import { classifyClaim } from "./warranty-classify.js";
 import { createWarrantyTicket, escalateWarrantyTicket } from "./warranty-ticket.js";
+import { ticketRef } from "./ticket-number.js";
 import {
   SEVERITY,
   detectHazard,
@@ -673,8 +674,8 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       const reason = input.emergency_reason || "Emergency reported during diagnosis.";
 
       if (ticketId && !sandboxMode) {
-        await escalateWarrantyTicket(ticketId, { reason });
-        replyText = `${input.message}\n\nI've escalated your existing ticket (${ticketId}) to our emergency queue.`;
+        const escalated = await escalateWarrantyTicket(ticketId, { reason });
+        replyText = `${input.message}\n\nI've escalated your existing ticket (${ticketRef(escalated || { id: ticketId })}) to our emergency queue.`;
         nextPhase = "RESOLVE";
       } else {
         const result = await fileClaim({

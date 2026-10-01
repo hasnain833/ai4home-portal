@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import {
@@ -417,6 +418,9 @@ export default function SalesDashboardPage() {
                     CSV.
                   </CardDescription>
                 </div>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/sales/leads">View all</Link>
+                </Button>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
                 <table className="w-full text-left text-sm border-collapse">
@@ -485,14 +489,19 @@ export default function SalesDashboardPage() {
             <div className="space-y-6">
               {/* Appointments Card */}
               <Card className="border border-border/80 shadow-xs">
-                <CardHeader>
-                  <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                    <Calendar className="h-4.5 w-4.5 text-[#b48c3c]" />
-                    Upcoming Appointments
-                  </CardTitle>
-                  <CardDescription>
-                    Bookings scheduled by the AI Assistant and manual links.
-                  </CardDescription>
+                <CardHeader className="flex flex-row items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                      <Calendar className="h-4.5 w-4.5 text-[#b48c3c]" />
+                      Upcoming Appointments
+                    </CardTitle>
+                    <CardDescription>
+                      Bookings scheduled by the AI Assistant and manual links.
+                    </CardDescription>
+                  </div>
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link href="/sales/scheduling">View all</Link>
+                  </Button>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {appointments.length === 0 && !loading ? (

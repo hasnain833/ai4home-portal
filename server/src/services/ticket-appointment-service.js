@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { ticketRef } from "../lib/ticket-number.js";
 import { MessagingService } from "./messaging-service.js";
 import { MailService } from "./mail-service.js";
 import { Templates } from "./templates.js";
@@ -37,6 +38,7 @@ function detailsFor(appointment, whenLabel) {
   const ticket = appointment.ticket || {};
   return {
     ticketId: appointment.ticketId,
+    ticketRef: ticketRef({ id: appointment.ticketId, number: ticket.number }),
     issueType: ticket.issueType || "Warranty issue",
     ticketCategory: ticket.ticketType || null,
     description: ticket.description || null,
@@ -68,6 +70,7 @@ export function appointmentWithContext(id) {
       company: true,
       ticket: {
         select: {
+          number: true,
           issueType: true,
           ticketType: true,
           description: true,
@@ -96,17 +99,17 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
   const notificationCopy = {
     scheduled: {
       type: "APPOINTMENT_SCHEDULED",
-      title: `Visit booked for ticket #${appointment.ticketId}`,
+      title: `Visit booked for ticket ${details.ticketRef}`,
       body: `${whenLabel} with ${details.homeownerName}${details.tradeName ? ` — ${details.tradeName}` : ""}.`,
     },
     reminder: {
       type: "APPOINTMENT_REMINDER",
-      title: `Visit ${windowLabel} — ticket #${appointment.ticketId}`,
+      title: `Visit ${windowLabel} — ticket ${details.ticketRef}`,
       body: `${whenLabel} with ${details.homeownerName}${details.tradeName ? ` — ${details.tradeName}` : ""}.`,
     },
     cancelled: {
       type: "APPOINTMENT_CANCELLED",
-      title: `Visit cancelled for ticket #${appointment.ticketId}`,
+      title: `Visit cancelled for ticket ${details.ticketRef}`,
       body: `The visit scheduled for ${whenLabel} was cancelled.`,
     },
   }[kind];
@@ -145,7 +148,7 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
   };
 
   const subjectFor = (role) => {
-    const suffix = `ticket #${appointment.ticketId}`;
+    const suffix = `ticket ${details.ticketRef}`;
     if (kind === "scheduled") {
       if (rescheduled)
         return role === "homeowner"
@@ -268,6 +271,7 @@ export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
 
     const details = {
       ticketId: ticket.id,
+      ticketRef: ticketRef(ticket),
       issueType: ticket.issueType || "Warranty issue",
       ticketCategory: ticket.ticketType || null,
       description: ticket.description || null,
@@ -289,7 +293,7 @@ export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
           companyId,
           userId: a.id,
           type: "APPOINTMENT_SCHEDULED",
-          title: `Ticket #${ticket.id} dispatched to ${staffName || "a staff member"}`,
+          title: `Ticket ${ticketRef(ticket)} dispatched to ${staffName || "a staff member"}`,
           body: `Awaiting the homeowner's chosen time.`,
           link: `/warranty/tickets/${ticket.id}`,
           ticketId: ticket.id,
@@ -324,7 +328,7 @@ export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
         ticket.homeowner.email,
         nudge
           ? `Reminder: pick a time for your repair visit`
-          : `Choose a time for your repair visit — claim #${ticket.id}`,
+          : `Choose a time for your repair visit — claim ${ticketRef(ticket)}`,
         Templates.getTicketBookingInviteEmail(details, bookingUrl, companyName, { nudge }),
       );
       homeownerDelivered = Boolean(r.success);
@@ -342,7 +346,7 @@ export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
     if (!nudge && ticket.assignedStaff?.email) {
       const r = await send(
         ticket.assignedStaff.email,
-        `You've been assigned ticket #${ticket.id}`,
+        `You've been assigned ticket ${ticketRef(ticket)}`,
         Templates.getTicketAssignmentEmail(details, portalUrl(), companyName),
       );
       if (!r.success) {
