@@ -2,15 +2,11 @@ import { toolCall } from "./llm.js";
 
 export const TICKET_PRIORITIES = ["NORMAL", "MEDIUM", "HIGH", "URGENT"];
 
-export const RESOLVED_PRIORITY = "HAPPY";
-export const STORABLE_PRIORITIES = [...TICKET_PRIORITIES, RESOLVED_PRIORITY];
-
 const PRIORITY_LABELS = {
   NORMAL: "Normal",
   MEDIUM: "Medium",
   HIGH: "High",
   URGENT: "Urgent",
-  HAPPY: "Happy",
 };
 
 export function priorityLabel(priority) {

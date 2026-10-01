@@ -43,7 +43,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { toast } from "sonner";
 
 type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
-type TicketPriority = "NORMAL" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
+type TicketPriority = "NORMAL" | "MEDIUM" | "HIGH" | "URGENT";
 
 /** One knowledge-base document the agent drew on, as buildKbReferences stores it. */
 type KbReference = {
@@ -222,11 +222,6 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
     text: "text-rose-700 dark:text-rose-400",
     border: "border-rose-200 dark:border-rose-900/50",
   },
-  HAPPY: {
-    bg: "bg-teal-50 dark:bg-teal-950/20",
-    text: "text-teal-700 dark:text-teal-400",
-    border: "border-teal-200 dark:border-teal-900/50",
-  },
 };
 
 export default function TicketDetail() {
@@ -278,8 +273,8 @@ export default function TicketDetail() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: value }),
       });
-      // The server may change more than was asked — resolving stamps HAPPY,
-      // reopening drops the assignee — so take its version, not ours.
+      // The server may change more than was asked — reopening drops the
+      // assignee — so take its version, not ours.
       setTicket((prev) => (prev ? { ...prev, ...updated } : prev));
       toast.success(
         field === "status" ? `Moved to ${statusLabels[value as TicketStatus]}.` : "Priority updated.",
@@ -869,7 +864,7 @@ export default function TicketDetail() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {(["NORMAL", "MEDIUM", "HIGH", "URGENT", "HAPPY"] as TicketPriority[]).map(
+                            {(["NORMAL", "MEDIUM", "HIGH", "URGENT"] as TicketPriority[]).map(
                               (v) => (
                                 <SelectItem key={v} value={v}>
                                   {v.charAt(0) + v.slice(1).toLowerCase()}

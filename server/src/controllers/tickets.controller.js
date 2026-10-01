@@ -10,8 +10,7 @@ import { syncTicketToERP } from "../services/erp-service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
 import {
   normalizePriority,
-  STORABLE_PRIORITIES,
-  RESOLVED_PRIORITY,
+  TICKET_PRIORITIES,
 } from "../lib/warranty-classify.js";
 
 const TICKET_STATUSES = ["OPEN", "DISPATCHED", "RESOLVED"];
@@ -307,9 +306,9 @@ export const updateTicket = async (req, res) => {
           "Assign someone first — use Dispatch to pick a staff member and send the homeowner a booking link.",
       });
     }
-    if (priority && !STORABLE_PRIORITIES.includes(priority)) {
+    if (priority && !TICKET_PRIORITIES.includes(priority)) {
       return res.status(400).json({
-        message: `Invalid priority. Expected one of: ${STORABLE_PRIORITIES.join(", ")}`,
+        message: `Invalid priority. Expected one of: ${TICKET_PRIORITIES.join(", ")}`,
       });
     }
 
@@ -323,22 +322,12 @@ export const updateTicket = async (req, res) => {
     }
     if (priority) updatedData.priority = priority;
 
-    if (statusChanged && status === "RESOLVED" && !priority) {
-      // Nobody is waiting on a resolved claim, so the urgency it was filed with
-      // stops being true. An explicit priority in the same request still wins.
-      updatedData.priority = RESOLVED_PRIORITY;
-    }
-
     if (statusChanged && status === "OPEN") {
       // Reopening has to undo the dispatch, or the ticket keeps an assignee and
       // a booking link for work that is no longer assigned to them.
       updatedData.assignedStaffId = null;
       updatedData.bookingToken = null;
       updatedData.dispatchNotes = null;
-      if (oldTicket.priority === RESOLVED_PRIORITY && !priority) {
-        // HAPPY is meaningless on an open claim; fall back to the default.
-        updatedData.priority = "MEDIUM";
-      }
     }
 
     if (action === "approve") {

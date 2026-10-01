@@ -51,7 +51,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 // Types
 type TicketStatus = "OPEN" | "DISPATCHED" | "RESOLVED";
-type TicketPriority = "NORMAL" | "MEDIUM" | "HIGH" | "URGENT" | "HAPPY";
+type TicketPriority = "NORMAL" | "MEDIUM" | "HIGH" | "URGENT";
 
 interface Ticket {
   id: string;
@@ -115,8 +115,6 @@ const ISSUE_TYPES = [
   "Windows & Doors",
 ];
 
-// What a ticket can be filed as. HAPPY is not here on purpose — a claim only
-// reaches it by being resolved.
 const PRIORITY_OPTIONS: TicketPriority[] = ["NORMAL", "MEDIUM", "HIGH", "URGENT"];
 
 const EMPTY_TICKET_FORM = {
@@ -204,11 +202,6 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
     bg: "bg-rose-50 dark:bg-rose-950/20",
     text: "text-rose-700 dark:text-rose-400",
     border: "border-rose-200 dark:border-rose-900/50",
-  },
-  HAPPY: {
-    bg: "bg-teal-50 dark:bg-teal-950/20",
-    text: "text-teal-700 dark:text-teal-400",
-    border: "border-teal-200 dark:border-teal-900/50",
   },
 };
 
@@ -719,7 +712,6 @@ function TicketsPageInner() {
                         <SelectItem value="MEDIUM">Medium</SelectItem>
                         <SelectItem value="HIGH">High</SelectItem>
                         <SelectItem value="URGENT">Urgent</SelectItem>
-                        <SelectItem value="HAPPY">Happy</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

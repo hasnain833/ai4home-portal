@@ -1,6 +1,6 @@
 import prisma from "./prisma.js";
 import { calculateWarrantyYear } from "./utils.js";
-import { normalizePriority, RESOLVED_PRIORITY } from "./warranty-classify.js";
+import { normalizePriority } from "./warranty-classify.js";
 import { syncTicketToERP } from "../services/erp-service.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
@@ -140,8 +140,7 @@ export async function createWarrantyTicket({
       homeownerId: homeowner.id,
       companyId: homeowner.companyId ?? companyId ?? null,
       isEmergency,
-      // Same as a ticket staff mark resolved: HAPPY, not the urgency it had.
-      priority: resolvedInChat ? RESOLVED_PRIORITY : priority,
+      priority,
       warrantyYear,
       status: resolvedInChat ? "RESOLVED" : "OPEN",
       // A fixed issue must not open a work order in the builder's ERP.

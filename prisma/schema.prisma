@@ -24,7 +24,6 @@ enum TicketPriority {
   MEDIUM
   HIGH
   URGENT
-  HAPPY
 }
 
 model User {
