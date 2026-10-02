@@ -1,7 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { ticketRef } from "../lib/ticket-number.js";
 import { MessagingService } from "./messaging-service.js";
-import { Templates } from "./templates.js";
+import { Templates, SmsTemplates } from "./templates.js";
 import { MailService } from "./mail-service.js";
 
 
@@ -77,6 +77,13 @@ export async function notifyTicketCreated(ticketId, { sendEmail = true } = {}) {
         emailSkipped: true,
       };
     }
+
+    await MessagingService.sendWarrantySms({
+      companyId,
+      to: ticket.homeowner?.phone,
+      body: SmsTemplates.getTicketCreatedSms(ticketRef(ticket), ticket.issueType, `${portalUrl()}${link}`),
+      source: "ticket-created",
+    });
 
     if (!emailReady) {
       console.warn(
@@ -155,7 +162,7 @@ export async function notifyTicketReminder(ticket, ageLabel) {
     const assignedStaff = ticket.assignedStaff || (ticket.assignedStaffId
       ? await prisma.user.findFirst({
           where: { id: ticket.assignedStaffId, companyId, role: "STAFF" },
-          select: { id: true, email: true, name: true },
+          select: { id: true, email: true, name: true, phone: true },
         })
       : null);
     if (!assignedStaff) {
@@ -177,6 +184,13 @@ export async function notifyTicketReminder(ticket, ageLabel) {
         emailFallback: !emailReady,
       }],
     );
+
+    await MessagingService.sendWarrantySms({
+      companyId,
+      to: assignedStaff.phone,
+      body: SmsTemplates.getTicketOpenReminderSms(ticketRef(ticket), ageLabel, `${portalUrl()}/warranty/tickets/${ticket.id}`),
+      source: "ticket-reminder",
+    });
 
     if (!emailReady) {
       return { ok: true, notified: 1, emailed: 0, attempted: 0, emailConfigured: false };

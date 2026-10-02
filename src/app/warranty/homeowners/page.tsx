@@ -36,6 +36,8 @@ import {
   CheckCircle,
   Home,
   Lock,
+  Phone,
+  Pencil,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -43,6 +45,7 @@ interface Homeowner {
   id: string;
   name: string;
   email: string;
+  phone?: string | null;
   role: string;
   hasSalesAccess?: boolean;
   createdAt: string;
@@ -66,8 +69,34 @@ export default function HomeownersManagementPage() {
   const [newHomeowner, setNewHomeowner] = useState({
     name: "",
     email: "",
+    phone: "",
     password: "",
   });
+
+  // Phone edit for an existing homeowner — needed so warranty SMS can reach them.
+  const [phoneEdit, setPhoneEdit] = useState<{ id: string; name: string; value: string } | null>(null);
+  const [phoneError, setPhoneError] = useState("");
+
+  const savePhone = async () => {
+    if (!phoneEdit) return;
+    setPhoneError("");
+    try {
+      const res = await fetch(`/api/homeowners/${phoneEdit.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ phone: phoneEdit.value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setPhoneError(data.message || "Could not save phone number."); return; }
+      setHomeowners((prev) => prev.map((h) => (h.id === phoneEdit.id ? { ...h, phone: data.phone ?? null } : h)));
+      setSuccess(`Phone number updated for ${phoneEdit.name}.`);
+      setPhoneEdit(null);
+      setTimeout(() => setSuccess(""), 4000);
+    } catch {
+      setPhoneError("Could not save phone number.");
+    }
+  };
 
   // Redirect if not admin or staff
   useEffect(() => {
@@ -120,7 +149,7 @@ export default function HomeownersManagementPage() {
       if (!res.ok) { setFormError(data.message || "Failed to create homeowner"); return; }
 
       setSuccess(`Homeowner ${newHomeowner.name} added successfully! They can now log in with their credentials.`);
-      setNewHomeowner({ name: "", email: "", password: "" });
+      setNewHomeowner({ name: "", email: "", phone: "", password: "" });
       setIsDialogOpen(false);
       fetchHomeowners();
       setTimeout(() => setSuccess(""), 5000);
@@ -259,6 +288,21 @@ export default function HomeownersManagementPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="phone">Mobile Phone (optional)</Label>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="phone"
+                      type="tel"
+                      placeholder="(555) 123-4567"
+                      className="pl-9"
+                      value={newHomeowner.phone}
+                      onChange={(e) => setNewHomeowner({ ...newHomeowner, phone: e.target.value })}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Ticket and visit updates are also sent by SMS to this number.</p>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -350,6 +394,14 @@ export default function HomeownersManagementPage() {
                             )}
                           </button>
                         </div>
+                        <button
+                          onClick={() => { setPhoneError(""); setPhoneEdit({ id: homeowner.id, name: homeowner.name, value: homeowner.phone || "" }); }}
+                          className="flex items-center gap-1.5 mt-0.5 text-sm text-muted-foreground hover:text-[#0F3B3D] dark:hover:text-[#b48c3c] transition-colors"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          {homeowner.phone || "Add phone"}
+                          <Pencil className="h-3 w-3" />
+                        </button>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -394,6 +446,34 @@ export default function HomeownersManagementPage() {
         </Card>
       </motion.div>
     </div>
+
+    {/* Edit Phone Dialog */}
+    <Dialog open={phoneEdit !== null} onOpenChange={(open) => { if (!open) setPhoneEdit(null); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Mobile phone</DialogTitle>
+          <DialogDescription>
+            Ticket and visit updates for {phoneEdit?.name} are also sent by SMS to this number. Leave empty to stop SMS.
+          </DialogDescription>
+        </DialogHeader>
+        {phoneError && (
+          <Alert variant="destructive">
+            <AlertDescription>{phoneError}</AlertDescription>
+          </Alert>
+        )}
+        <Input
+          type="tel"
+          placeholder="(555) 123-4567"
+          value={phoneEdit?.value ?? ""}
+          onChange={(e) => setPhoneEdit((p) => (p ? { ...p, value: e.target.value } : p))}
+          onKeyDown={(e) => { if (e.key === "Enter") savePhone(); }}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setPhoneEdit(null)}>Cancel</Button>
+          <Button className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90" onClick={savePhone}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     {/* Delete Homeowner Confirmation Dialog */}
     <Dialog open={deleteConfirmId !== null} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>

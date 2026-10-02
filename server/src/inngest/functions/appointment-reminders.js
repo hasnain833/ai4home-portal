@@ -54,7 +54,7 @@ export async function sendDueAppointmentReminders({
           description: true,
           priority: true,
           warrantyYear: true,
-          assignedStaff: { select: { id: true, name: true, email: true } },
+          assignedStaff: { select: { id: true, name: true, email: true, phone: true } },
           property: { select: { address: true } },
         },
       },

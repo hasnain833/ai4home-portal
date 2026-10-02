@@ -3,7 +3,7 @@ import { listTicketPhotos } from "../services/warranty-photos.service.js";
 import { calculateWarrantyYear } from "../lib/utils.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { MAIL_OUTCOME } from "../services/mail-service.js";
-import { Templates } from "../services/templates.js";
+import { Templates, SmsTemplates } from "../services/templates.js";
 import { notifyTicketDispatched } from "../services/ticket-appointment-service.js";
 import { randomUUID } from "node:crypto";
 import { syncTicketToERP } from "../services/erp-service.js";
@@ -388,6 +388,16 @@ export const updateTicket = async (req, res) => {
           .catch((err) =>
             console.error(`[Ticket API] Could not close visits for #${ticket.id}:`, err.message),
           );
+
+        await MessagingService.sendWarrantySms({
+          companyId: oldTicket.homeowner?.companyId,
+          to: oldTicket.homeowner?.phone,
+          body: SmsTemplates.getTicketResolvedSms(
+            ticketRef(ticket),
+            `${process.env.NEXT_PUBLIC_URL || ""}/warranty/tickets/${ticket.id}`,
+          ),
+          source: "ticket-resolved",
+        });
 
         if (oldTicket.homeowner?.email) {
           try {

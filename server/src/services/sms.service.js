@@ -67,6 +67,18 @@ export function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+// Phone as typed by an admin -> E.164 for Telnyx. Bare 10-digit numbers are
+// taken as US. "" -> null (clear); anything unparseable -> undefined (reject).
+export function toE164(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const digits = normalizePhone(raw);
+  if (raw.startsWith("+")) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : undefined;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return undefined;
+}
+
 // Company names are read on every send, including bulk announcements, so they
 // are cached briefly. Looked up here rather than via getSenderIdentity because
 // messaging-config imports this module.

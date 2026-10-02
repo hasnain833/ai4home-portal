@@ -398,7 +398,7 @@ export const Templates = {
   getWorkspaceActiveEmail: (companyName, portalUrl) => {
     const content = `
       <h2 style="color: ${COLORS.primary}; margin-top: 0;">You're all set, ${companyName}!</h2>
-      <p>Your invoice payment has been verified and your <strong>Warranty Care</strong> workspace is now fully unlocked.</p>
+      <p>Your submitted documents have been verified and your signed agreement has been accepted. Your <strong>Warranty Care</strong> workspace is now fully unlocked.</p>
       ${emailButton(portalUrl, "Open Your Workspace")}
     `;
     return wrapEmail(content, "Workspace Activated");
@@ -561,5 +561,39 @@ export const SmsTemplates = {
     `Hi ${homeownerName}, reminder: You have a ${type} appointment scheduled for ${dateStr} with ${companyName}. Reply STOP to opt out.`,
 
   getNurtureSms: (userText, companyName) =>
-    `${companyName}: ${userText}`
+    `${companyName}: ${userText}`,
+
+  // Warranty texts mirror the emails one-for-one. sendSms prefixes the company
+  // name, so it is not repeated here.
+  getTicketCreatedSms: (ref, issueType, url) =>
+    `We received your warranty request ${ref} (${issueType}). Track it here: ${url}`,
+
+  getTicketStatusSms: (ref, statusLabel, url) =>
+    `Your warranty ticket ${ref} is now ${statusLabel}. Details: ${url}`,
+
+  getTicketResolvedSms: (ref, url) =>
+    `Your warranty claim ${ref} is resolved. Thank you! Details: ${url}`,
+
+  getBookingInviteSms: (ref, url, nudge) =>
+    nudge
+      ? `Reminder: please pick a time for your repair visit (claim ${ref}): ${url}`
+      : `Please choose a time for your repair visit for claim ${ref}: ${url}`,
+
+  getTicketAssignedSms: (ref, issueType, address, url) =>
+    `You've been assigned ticket ${ref} (${issueType})${address ? ` at ${address}` : ""}. ${url}`,
+
+  getTicketOpenReminderSms: (ref, ageLabel, url) =>
+    `Reminder: ticket ${ref} has been open for ${ageLabel} with no action. ${url}`,
+
+  getVisitSms: (role, kind, { ticketRef, whenLabel, address, homeownerName }, { rescheduled = false, windowLabel = null } = {}) => {
+    const where = address ? ` at ${address}` : "";
+    if (role === "homeowner") {
+      if (kind === "scheduled") return `Your repair visit ${rescheduled ? "has moved to" : "is booked for"} ${whenLabel}${where}.`;
+      if (kind === "reminder") return `Reminder: your repair visit is ${windowLabel} (${whenLabel})${where}.`;
+      return `Your repair visit on ${whenLabel} has been cancelled.`;
+    }
+    if (kind === "scheduled") return `Visit ${rescheduled ? "rescheduled" : "booked"} for ticket ${ticketRef}: ${whenLabel} with ${homeownerName}${where}.`;
+    if (kind === "reminder") return `Reminder: visit ${windowLabel} for ticket ${ticketRef}: ${whenLabel}${where}.`;
+    return `Visit for ticket ${ticketRef} on ${whenLabel} was cancelled.`;
+  },
 };

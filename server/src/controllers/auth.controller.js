@@ -244,6 +244,7 @@ export const requestEmailChange = async (req, res) => {
       subject: "Confirm your new sign-in email",
       companyId: user.companyId,
       source: "email-change",
+      noReply: true,
       html: Templates.getEmailChangeVerifyEmail(
         user.name,
         currentEmail,
@@ -537,6 +538,7 @@ export const signup = async (req, res) => {
       html: Templates.getSignupVerificationEmail(companyName, actionLink),
       companyId: newCompany.id,
       source: "signup-verification",
+      noReply: true,
     });
 
     if (!verificationMail.success) {
@@ -562,8 +564,8 @@ export const signup = async (req, res) => {
     }
 
     try {
-      const adminNotifyEmail = process.env.ADMIN_NOTIFY_EMAIL;
-      const adminNotifyPhone = process.env.ADMIN_NOTIFY_PHONE;
+      const adminNotifyEmail = process.env.SUPERADMIN_EMAIL;
+      const adminNotifyPhone = process.env.SUPERADMIN_PHONE;
       const adminUrl = `${process.env.NEXT_PUBLIC_URL || ""}/admin/verifications`;
 
       if (adminNotifyEmail) {
@@ -573,10 +575,11 @@ export const signup = async (req, res) => {
           html: Templates.getAdminNewTenantEmail(companyName, companyEmail, companyPhone, adminUrl),
           companyId: newCompany.id,
           source: "new-tenant-alert",
+          noReply: true,
         });
       } else {
         console.warn(
-          "[Signup] ADMIN_NOTIFY_EMAIL missing - skipping admin email notification.",
+          "[Signup] SUPERADMIN_EMAIL missing - skipping admin email notification.",
         );
       }
 
@@ -597,7 +600,7 @@ export const signup = async (req, res) => {
         }
       } else {
         console.warn(
-          "[Signup] ADMIN_NOTIFY_PHONE missing - skipping admin SMS notification.",
+          "[Signup] SUPERADMIN_PHONE missing - skipping admin SMS notification.",
         );
       }
     } catch (adminMailError) {

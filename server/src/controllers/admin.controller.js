@@ -1,3 +1,4 @@
+import { toE164 } from "../services/sms.service.js";
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
@@ -32,6 +33,7 @@ export const getStaff = async (req, res) => {
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         createdAt: true,
         avatar: true,
@@ -61,6 +63,9 @@ export const createStaff = async (req, res) => {
         .status(400)
         .json({ message: "Name, email, and password are required" });
     }
+
+    const phone = toE164(req.body.phone);
+    if (phone === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -92,11 +97,13 @@ export const createStaff = async (req, res) => {
         password: hashedPassword, 
         role: "STAFF",
         companyId: session.companyId,
+        phone,
       },
       select: {
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         createdAt: true,
         avatar: true,
@@ -124,6 +131,9 @@ export const updateStaff = async (req, res) => {
         .status(400)
         .json({ message: "Staff ID, name, and email are required" });
     }
+
+    const phone = toE164(req.body.phone);
+    if (req.body.phone !== undefined && phone === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
 
     const staff = await prisma.user.findFirst({
       where: { id: staffId, companyId: session.companyId, role: "STAFF" },
@@ -188,6 +198,8 @@ export const updateStaff = async (req, res) => {
       dbUpdateData.password = await bcrypt.hash(password, 10);
     }
 
+    if (req.body.phone !== undefined) dbUpdateData.phone = phone;
+
     if (salesPermissions !== undefined) {
       dbUpdateData.salesPermissions = normalizeSalesPermissions(salesPermissions);
     }
@@ -199,6 +211,7 @@ export const updateStaff = async (req, res) => {
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         createdAt: true,
         avatar: true,

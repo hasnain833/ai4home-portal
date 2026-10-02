@@ -1,3 +1,4 @@
+import { toE164 } from "../services/sms.service.js";
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
@@ -55,6 +56,9 @@ export const createHomeowner = async (req, res) => {
       return res.status(400).json({ message: "Name, email, and password are required" });
     }
 
+    const phone = toE164(req.body.phone);
+    if (phone === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+
     if (password.length < 8) {
       return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
@@ -89,11 +93,13 @@ export const createHomeowner = async (req, res) => {
           password: hashedPassword,
           role: "HOMEOWNER",
           companyId: session.companyId,
+          phone,
         },
         select: {
           id: true,
           name: true,
           email: true,
+          phone: true,
           role: true,
           createdAt: true,
         },
@@ -261,7 +267,11 @@ export const updateHomeowner = async (req, res) => {
     if (password) dbUpdateData.password = await bcrypt.hash(password, 10);
     // Phone lives only in our own table — Supabase auth is not involved, and an
     // empty string is a deliberate "clear it" rather than "leave it alone".
-    if (phone !== undefined) dbUpdateData.phone = String(phone).trim().slice(0, 40) || null;
+    if (phone !== undefined) {
+      const e164 = toE164(phone);
+      if (e164 === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+      dbUpdateData.phone = e164;
+    }
 
     // Sales workspace access for a homeowner (SRS 4.12). Only a builder admin
     // may grant it — staff can edit homeowner details but not widen access.

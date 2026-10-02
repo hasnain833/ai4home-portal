@@ -139,8 +139,7 @@ The following represents the complete list of environment variables used across 
 | `TELNYX_FROM_NUMBER` | Backend | Shared platform sending number |
 | `SUPERADMIN_EMAIL` | Backend | Default super admin login email |
 | `SUPERADMIN_PASSWORD` | Backend | Default super admin login password |
-| `ADMIN_NOTIFY_EMAIL` | Backend | Target email for new tenant registration alerts |
-| `ADMIN_NOTIFY_PHONE` | Backend | Target phone for new tenant registration alerts |
+| `SUPERADMIN_PHONE` | Backend | Super admin phone for SMS alerts (email alerts go to `SUPERADMIN_EMAIL`) |
 
 ### AI provider keys
 

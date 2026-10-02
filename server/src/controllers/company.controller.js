@@ -193,6 +193,7 @@ async function notifySuperAdminOfSubmission(company) {
       html: Templates.getAdminVerificationDocEmail(company.name, adminUrl),
       companyId: company.id,
       source: "verification-submitted",
+      noReply: true,
     });
   } catch (mailErr) {
     console.error("[Verification] Failed to notify super admin of submission:", mailErr);

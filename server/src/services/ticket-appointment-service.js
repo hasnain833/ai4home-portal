@@ -2,7 +2,7 @@ import prisma from "../lib/prisma.js";
 import { ticketRef } from "../lib/ticket-number.js";
 import { MessagingService } from "./messaging-service.js";
 import { MailService } from "./mail-service.js";
-import { Templates } from "./templates.js";
+import { Templates, SmsTemplates } from "./templates.js";
 import { companyAdmins, writeNotifications } from "./notification-service.js";
 
 const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
@@ -76,7 +76,7 @@ export function appointmentWithContext(id) {
           description: true,
           priority: true,
           warrantyYear: true,
-          assignedStaff: { select: { id: true, name: true, email: true } },
+          assignedStaff: { select: { id: true, name: true, email: true, phone: true } },
           property: { select: { address: true } },
         },
       },
@@ -129,6 +129,21 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
       }],
     );
   }
+
+  const smsSource = `visit-${kind}`;
+  const smsOpts = { rescheduled, windowLabel };
+  await MessagingService.sendWarrantySms({
+    companyId,
+    to: appointment.homeowner?.phone,
+    body: SmsTemplates.getVisitSms("homeowner", kind, details, smsOpts) + (details.manageUrl ? ` Manage: ${details.manageUrl}` : ""),
+    source: smsSource,
+  });
+  await MessagingService.sendWarrantySms({
+    companyId,
+    to: assignedStaff?.phone,
+    body: SmsTemplates.getVisitSms("staff", kind, details, smsOpts),
+    source: smsSource,
+  });
 
   if (!emailReady) {
     console.warn(
@@ -257,7 +272,7 @@ export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
       include: {
         homeowner: true,
         company: true,
-        assignedStaff: { select: { name: true, email: true } },
+        assignedStaff: { select: { name: true, email: true, phone: true } },
         property: { select: { address: true } },
       },
     });
@@ -302,14 +317,30 @@ export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
       );
     }
 
+    const bookingUrl = `${portalUrl()}/schedule/${ticket.bookingToken}`;
+
+    const homeownerSms = await MessagingService.sendWarrantySms({
+      companyId,
+      to: ticket.homeowner?.phone,
+      body: SmsTemplates.getBookingInviteSms(ticketRef(ticket), bookingUrl, nudge),
+      source: nudge ? "booking-nudge" : "booking-invite",
+    });
+    // A nudge is aimed at the homeowner alone; the staff member already knows.
+    if (!nudge) {
+      await MessagingService.sendWarrantySms({
+        companyId,
+        to: ticket.assignedStaff?.phone,
+        body: SmsTemplates.getTicketAssignedSms(ticketRef(ticket), details.issueType, details.address, `${portalUrl()}/warranty/tickets/${ticket.id}`),
+        source: "ticket-assigned",
+      });
+    }
+
     if (!emailReady) {
       console.warn(
         `[Dispatch Notify] ${ticket.id}: in-portal only — no email credentials for this workspace.`,
       );
-      return { ok: true, emailed: 0, emailConfigured: false, homeownerDelivered: false };
+      return { ok: true, emailed: 0, emailConfigured: false, homeownerDelivered: homeownerSms.outcome === "sent" };
     }
-
-    const bookingUrl = `${portalUrl()}/schedule/${ticket.bookingToken}`;
 
     const send = (to, subject, html) =>
       MessagingService.sendEmail({
@@ -331,14 +362,14 @@ export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
           : `Choose a time for your repair visit — claim ${ticketRef(ticket)}`,
         Templates.getTicketBookingInviteEmail(details, bookingUrl, companyName, { nudge }),
       );
-      homeownerDelivered = Boolean(r.success);
+      homeownerDelivered = Boolean(r.success) || homeownerSms.outcome === "sent";
       if (!r.success) {
         console.warn(
           `[Dispatch Notify] ${ticket.id}: booking link did NOT reach the homeowner — ${r.error || r.reason}`,
         );
       }
     } else {
-      homeownerDelivered = false;
+      homeownerDelivered = homeownerSms.outcome === "sent";
       console.warn(`[Dispatch Notify] ${ticket.id}: homeowner has no email address on file.`);
     }
 

@@ -56,8 +56,8 @@ export const bookAppointment = async (req, res) => {
     }
 
     // Notify Admin
-    const adminPhone = process.env.ADMIN_NOTIFY_PHONE;
-    const adminEmail = process.env.ADMIN_NOTIFY_EMAIL;
+    const adminPhone = process.env.SUPERADMIN_PHONE;
+    const adminEmail = process.env.SUPERADMIN_EMAIL;
 
     if (adminPhone) {
       const adminSms = await sendSms({
@@ -73,7 +73,7 @@ export const bookAppointment = async (req, res) => {
         );
       }
     } else {
-      console.log("[Sales Agent Booking] ADMIN_NOTIFY_PHONE not set. Skipping admin SMS notification.");
+      console.log("[Sales Agent Booking] SUPERADMIN_PHONE not set. Skipping admin SMS notification.");
     }
 
     if (adminEmail) {
@@ -97,7 +97,7 @@ export const bookAppointment = async (req, res) => {
         console.error("[Sales Agent Booking] Failed to send Email to admin:", adminEmailError);
       }
     } else {
-      console.log("[Sales Agent Booking] ADMIN_NOTIFY_EMAIL not set. Skipping admin email notification.");
+      console.log("[Sales Agent Booking] SUPERADMIN_EMAIL not set. Skipping admin email notification.");
     }
 
     return res.status(201).json({

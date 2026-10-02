@@ -180,10 +180,11 @@ export const verifyCompany = async (req, res) => {
         const portalUrl = `${process.env.NEXT_PUBLIC_URL || ""}/warranty/dashboard`;
         await MailService.sendEmail({
           to: company.email,
-          subject: "Your invoice is approved – workspace active",
+          subject: "Your documents are verified – workspace active",
           html: Templates.getWorkspaceActiveEmail(company.name, portalUrl),
           companyId,
           source: "workspace-activated",
+          noReply: true,
         });
       }
     } catch (mailErr) {

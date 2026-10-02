@@ -39,6 +39,7 @@ import {
   CheckCircle,
   Shield,
   Pencil,
+  Phone,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -46,6 +47,7 @@ interface StaffMember {
   id: string;
   name: string;
   email: string;
+  phone?: string | null;
   role: string;
   createdAt: string;
   avatar?: string | null;
@@ -73,6 +75,7 @@ export default function TeamManagementPage() {
   const [newStaff, setNewStaff] = useState({
     name: "",
     email: "",
+    phone: "",
     password: "",
   });
 
@@ -82,6 +85,7 @@ export default function TeamManagementPage() {
   const [editForm, setEditForm] = useState({
     name: "",
     email: "",
+    phone: "",
     password: "",
     // SRS §4.12: which Sales features this member is authorized for.
     salesPermissions: [] as string[],
@@ -149,7 +153,7 @@ export default function TeamManagementPage() {
       if (!res.ok) { setFormError(data.message || "Failed to create staff member"); return; }
 
       setSuccess(`Staff account for ${newStaff.name} created successfully!`);
-      setNewStaff({ name: "", email: "", password: "" });
+      setNewStaff({ name: "", email: "", phone: "", password: "" });
       setIsDialogOpen(false);
       fetchStaff();
       setTimeout(() => setSuccess(""), 4000);
@@ -187,6 +191,7 @@ export default function TeamManagementPage() {
     setEditForm({
       name: staff.name || "",
       email: staff.email || "",
+      phone: staff.phone || "",
       password: "", // empty by default
       salesPermissions: staff.salesPermissions || [],
     });
@@ -219,6 +224,7 @@ export default function TeamManagementPage() {
           staffId: editingStaff.id,
           name: editForm.name,
           email: editForm.email,
+          phone: editForm.phone,
           password: editForm.password || undefined,
           salesPermissions: editForm.salesPermissions,
         }),
@@ -322,6 +328,21 @@ export default function TeamManagementPage() {
                           onChange={(e) => setNewStaff({ ...newStaff, email: e.target.value })}
                         />
                       </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="staff-phone">Mobile Phone (optional)</Label>
+                      <div className="relative">
+                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          id="staff-phone"
+                          type="tel"
+                          placeholder="(555) 123-4567"
+                          className="pl-9"
+                          value={newStaff.phone}
+                          onChange={(e) => setNewStaff({ ...newStaff, phone: e.target.value })}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">Ticket assignments and visit updates are also sent by SMS.</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="staff-password">Temporary Password</Label>
@@ -465,6 +486,12 @@ export default function TeamManagementPage() {
                               )}
                             </button>
                           </div>
+                          {staff.phone && (
+                            <p className="flex items-center gap-1.5 mt-0.5 text-sm text-muted-foreground">
+                              <Phone className="h-3.5 w-3.5" />
+                              {staff.phone}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
@@ -544,6 +571,21 @@ export default function TeamManagementPage() {
                         onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
                       />
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-staff-phone">Mobile Phone (optional)</Label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="edit-staff-phone"
+                        type="tel"
+                        placeholder="(555) 123-4567"
+                        className="pl-9"
+                        value={editForm.phone}
+                        onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Ticket assignments and visit updates are also sent by SMS.</p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="edit-staff-password">New Password (Optional)</Label>

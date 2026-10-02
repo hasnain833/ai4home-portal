@@ -46,10 +46,7 @@ export class MailService {
     return !!(this.SMTP_USER && this.SMTP_PASS);
   }
 
-  // Every send goes out over the platform account. The tenant supplies only a
-  // display identity: their name on the From line and their address as Reply-To,
-  // so the mail stays aligned with the platform's SPF/DKIM records.
-  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null }) {
+  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null, noReply = false }) {
     if (!this.hasPlatformSender()) {
       console.warn(`[Mail Service] ⏭️ Platform SMTP credentials are not set — nothing sent to ${to}.`);
       return {
@@ -61,15 +58,8 @@ export class MailService {
 
     const senderName = fromName || this.SENDER_NAME;
     const fromString = `"${senderName}" <${this.SENDER_EMAIL}>`;
-
-    // Where a reply lands. With an inbound domain configured, it comes back to
-    // us at reply+<companyId>@domain so the sales agent sees it and the tenant
-    // is identified exactly. Without one, replies go straight to the tenant's
-    // own address and the agent never sees them.
-    // fromEmail is the tenant's own address; it cannot be the envelope sender
-    // without breaking domain alignment, so it is only ever a reply target.
     const inboundDomain = String(process.env.INBOUND_EMAIL_DOMAIN || "").trim();
-    const replyToAddress =
+    const replyToAddress = noReply ? null :
       replyTo ||
       (inboundDomain && companyId ? `reply+${companyId}@${inboundDomain}` : null) ||
       fromEmail ||
