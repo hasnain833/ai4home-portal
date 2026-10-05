@@ -66,24 +66,28 @@ const PLATFORM_META: Record<string, {
   description: string;
   icon: React.ReactNode;
   hasSecret: boolean;
+  comingSoon?: boolean;
 }> = {
   BUILTOPIA: {
     label: "Builtopia",
     description: "New home construction management and warranty tracking platform.",
     icon: <Database className="h-6 w-6 text-[#0F3B3D]" />,
     hasSecret: true,
+    comingSoon: true,
   },
   BUILDERTREND: {
     label: "Buildertrend",
     description: "Cloud-based construction project management for homebuilders.",
     icon: <Zap className="h-6 w-6 text-[#0F3B3D]" />,
     hasSecret: true,
+    comingSoon: true,
   },
   HYPHEN: {
     label: "Hyphen Solutions",
     description: "Integrated supply chain and homebuilder operations platform.",
     icon: <Plug className="h-6 w-6 text-[#0F3B3D]" />,
     hasSecret: false,
+    comingSoon: true,
   },
 };
 
@@ -268,7 +272,11 @@ export default function IntegrationsPage() {
                               )}
                             </div>
                           </div>
-                          {isConfigured ? (
+                          {meta.comingSoon ? (
+                            <Badge variant="outline" className="text-[#b48c3c] border-[#b48c3c]/40 shrink-0">
+                              Coming soon
+                            </Badge>
+                          ) : isConfigured ? (
                             <Badge className="bg-green-100 text-green-800 border-green-200 shrink-0">
                               <Wifi className="h-3 w-3 mr-1" /> Connected
                             </Badge>
@@ -319,6 +327,26 @@ export default function IntegrationsPage() {
                           )}
                         </AnimatePresence>
 
+                        {meta.comingSoon ? (
+                          <div className="space-y-3 pt-1">
+                            <p className="text-xs text-muted-foreground">
+                              The {meta.label} connection is on the way. Tickets are not sent to {meta.label} yet.
+                            </p>
+                            {isConfigured && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="w-full gap-1.5 text-xs text-red-500 hover:text-red-700"
+                                onClick={() => handleDisconnect(platform)}
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                Remove saved keys
+                              </Button>
+                            )}
+                          </div>
+                        ) : (
+                        <>
                         {/* Credential form */}
                         <div className="space-y-2 pt-1">
                           <div>
@@ -407,6 +435,8 @@ export default function IntegrationsPage() {
                             </>
                           )}
                         </div>
+                        </>
+                        )}
                       </CardContent>
                     </Card>
                   </motion.div>

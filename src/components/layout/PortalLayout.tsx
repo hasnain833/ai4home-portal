@@ -49,7 +49,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Circle } from "lucide-react";
+import { Circle, MapPinned } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SALES_PERMISSION, hasSalesPermission, type SalesPermission } from "@/lib/sales-permissions";
 
@@ -65,6 +65,7 @@ const warrantyNavItems: NavItem[] = [
   { name: "Dashboard", href: "/warranty/dashboard", icon: LayoutDashboard, roles: ["admin", "staff", "homeowner"] },
   { name: "AI Assistant", href: "/warranty/chat", icon: Bot, roles: ["admin", "staff", "homeowner"] },
   { name: "Properties", href: "/warranty/properties", icon: Building2, roles: ["admin", "staff", "homeowner"] },
+  { name: "Communities", href: "/warranty/communities", icon: MapPinned, roles: ["admin", "staff"] },
   { name: "Tickets", href: "/warranty/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
   { name: "Team", href: "/warranty/team", icon: Users, roles: ["admin"] },
   { name: "Homeowners", href: "/warranty/homeowners", icon: User, roles: ["admin", "staff"] },
@@ -80,6 +81,7 @@ const salesNavItems: NavItem[] = [
   { name: "AI Assistant", href: "/sales/chat", icon: Bot, roles: ["admin", "staff", "homeowner"] },
   { name: "Leads", href: "/sales/leads", icon: Users, roles: ["admin", "staff", "homeowner"] },
   { name: "Homes", href: "/sales/homes", icon: Home, roles: ["admin", "staff"] },
+  { name: "Communities", href: "/sales/communities", icon: MapPinned, roles: ["admin", "staff"] },
   { name: "Campaigns", href: "/sales/campaigns", icon: Layers, roles: ["admin", "staff"], permission: SALES_PERMISSION.campaignsManage },
   { name: "Content Calendar", href: "/sales/calendar", icon: CalendarDays, roles: ["admin", "staff", "homeowner"] },
   { name: "Appointments", href: "/sales/scheduling", icon: CalendarClock, roles: ["admin", "staff"] },

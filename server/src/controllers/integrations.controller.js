@@ -1,5 +1,9 @@
 import prisma from "../lib/prisma.js";
-import { testERPConnection, syncTicketToERP } from "../services/erp-service.js";
+import {
+  COMING_SOON_PLATFORMS,
+  testERPConnection,
+  syncTicketToERP,
+} from "../services/erp-service.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { encrypt, decryptSafe } from "../lib/crypto.js";
 
@@ -118,6 +122,9 @@ export const saveCredentials = async (req, res) => {
       return res
         .status(400)
         .json({ message: "Platform and API Key are required" });
+    }
+    if (COMING_SOON_PLATFORMS.includes(platform.toUpperCase())) {
+      return res.status(400).json({ message: "This integration is coming soon." });
     }
 
     // Upsert: if a record already exists for this company+platform, update it

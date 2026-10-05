@@ -1,5 +1,10 @@
 import prisma from "../lib/prisma.js";
-import { MAX_HOMES_PER_COMMUNITY } from "../lib/communities.js";
+import {
+  COUNTED_HOMES,
+  MAX_HOMES_PER_COMMUNITY,
+  homeTotal,
+  roomInCommunity,
+} from "../lib/communities.js";
 
 const COVERAGE_YEARS = 1;
 
@@ -20,11 +25,6 @@ function parseUnits(value) {
 
 const COMMUNITY_SELECT = { select: { id: true, name: true, type: true, color: true } };
 
-/**
- * A home belongs to exactly one community, and a community holds at most 50.
- * `excludePropertyId` lets an edit that keeps a property in place not count
- * itself towards the limit.
- */
 async function checkCommunity(communityId, companyId, excludePropertyId = null) {
   if (!communityId) return { error: "Please choose a community for this home." };
 
@@ -34,13 +34,7 @@ async function checkCommunity(communityId, companyId, excludePropertyId = null) 
   });
   if (!community) return { error: "That community does not belong to this company." };
 
-  const homes = await prisma.property.count({
-    where: {
-      communityId,
-      ...(excludePropertyId ? { id: { not: excludePropertyId } } : {}),
-    },
-  });
-  if (homes >= MAX_HOMES_PER_COMMUNITY) {
+  if ((await roomInCommunity(communityId, { excludePropertyId })) <= 0) {
     return {
       error: `${community.name} is full — a community can hold at most ${MAX_HOMES_PER_COMMUNITY} homes.`,
     };
@@ -48,10 +42,7 @@ async function checkCommunity(communityId, companyId, excludePropertyId = null) 
   return { community };
 }
 
-/**
- * One home per homeowner. The database enforces this with a unique index; this
- * check exists so the failure is a sentence rather than a constraint violation.
- */
+
 async function checkHomeownerFree(homeownerId, excludePropertyId = null) {
   const existing = await prisma.property.findFirst({
     where: {
@@ -83,7 +74,6 @@ export const getProperties = async (req, res) => {
       });
       return res.json(properties);
     } else {
-      // Admins and Staff: fetch all properties under their company
       const properties = await prisma.property.findMany({
         where: {
           homeowner: {
@@ -93,8 +83,6 @@ export const getProperties = async (req, res) => {
         include: {
           homeowner: { select: { name: true, email: true } },
           community: COMMUNITY_SELECT,
-          // Outstanding means not yet resolved: a dispatched ticket still needs
-          // watching, so it counts the same as an untouched one.
           _count: {
             select: { tickets: { where: { status: { not: "RESOLVED" } } } },
           },
@@ -102,9 +90,6 @@ export const getProperties = async (req, res) => {
         orderBy: { createdAt: "desc" },
       });
 
-      // Tickets the warranty agent never tied to a home sit against the owner
-      // with propertyId null. The per-home ticket list counts them in, so the
-      // badge has to as well or the two disagree.
       const orphans = await prisma.ticket.groupBy({
         by: ["homeownerId"],
         where: {
@@ -160,8 +145,6 @@ export const createProperty = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    // Denormalize companyId for tenant-scoped queries. Homeowners inherit their
-    // own company; staff/admins inherit the target homeowner's company.
     let companyId = session.companyId ?? null;
     if (session.role !== "HOMEOWNER" && assignedHomeownerId) {
       const owner = await prisma.user.findUnique({
@@ -286,20 +269,7 @@ export const deleteProperty = async (req, res) => {
   }
 };
 
-/**
- * Bulk-register homes from a CSV the page has already parsed into rows.
- *
- * Deliberately synchronous, unlike the leads importer: a community holds at
- * most 50 homes, so a realistic file is tens of rows, not tens of thousands.
- *
- * Every rule that applies to a single home applies here too — one home per
- * homeowner, and 50 per community — but counted across the whole batch, so a
- * 60-row file cannot slip past a 50-home cap one row at a time.
- *
- * Expected columns: address, city, state, zipCode, coeDate, units,
- * homeownerEmail, community (name). Rows are validated as a set and nothing is
- * written unless every row passes, so a part-imported file never happens.
- */
+
 export const importProperties = async (req, res) => {
   try {
     const session = req.user;
@@ -324,17 +294,15 @@ export const importProperties = async (req, res) => {
       }),
       prisma.community.findMany({
         where: { companyId },
-        select: { id: true, name: true, _count: { select: { properties: true } } },
+        select: { id: true, name: true, _count: { select: COUNTED_HOMES } },
       }),
     ]);
 
     const ownerByEmail = new Map(homeowners.map((h) => [h.email.toLowerCase(), h]));
     const communityByName = new Map(communities.map((c) => [c.name.toLowerCase(), c]));
 
-    // Seeded from what is already stored, then incremented as the batch is
-    // walked, so the file is judged against the end state rather than the start.
     const roomLeft = new Map(
-      communities.map((c) => [c.id, MAX_HOMES_PER_COMMUNITY - c._count.properties]),
+      communities.map((c) => [c.id, MAX_HOMES_PER_COMMUNITY - homeTotal(c._count)]),
     );
     const claimedOwners = new Set();
 
@@ -342,7 +310,7 @@ export const importProperties = async (req, res) => {
     const prepared = [];
 
     rows.forEach((row, index) => {
-      const line = index + 2; // +1 for zero-index, +1 for the header row
+      const line = index + 2;
       const address = String(row.address || "").trim();
       const email = String(row.homeownerEmail || "").trim().toLowerCase();
       const communityName = String(row.community || "").trim();
@@ -405,8 +373,6 @@ export const importProperties = async (req, res) => {
       });
     });
 
-    // All or nothing: a half-imported file leaves staff guessing which homes
-    // landed, and the rules above were judged against the whole batch anyway.
     if (errors.length > 0) {
       return res.status(400).json({
         message: `${errors.length} row${errors.length === 1 ? "" : "s"} could not be imported. Nothing was saved.`,

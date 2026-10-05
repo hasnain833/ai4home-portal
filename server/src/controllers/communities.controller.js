@@ -1,13 +1,26 @@
 import prisma from "../lib/prisma.js";
 import {
   COMMUNITY_TYPES,
+  COUNTED_HOMES,
   MAX_HOMES_PER_COMMUNITY,
+  homeTotal,
   isCommunityType,
 } from "../lib/communities.js";
 
 const MANAGE_ROLES = ["ADMIN", "STAFF"];
 
 const canManage = (session) => session && MANAGE_ROLES.includes(session.role);
+
+const COUNTS = { _count: { select: { ...COUNTED_HOMES, warrantyKBs: true } } };
+
+const withCounts = ({ _count, ...c }) => ({
+  ...c,
+  homeCount: homeTotal(_count),
+  propertyCount: _count.properties,
+  salesHomeCount: _count.salesHomes,
+  kbCount: _count.warrantyKBs,
+  isFull: homeTotal(_count) >= MAX_HOMES_PER_COMMUNITY,
+});
 
 export const getCommunities = async (req, res) => {
   try {
@@ -18,17 +31,12 @@ export const getCommunities = async (req, res) => {
 
     const communities = await prisma.community.findMany({
       where: { companyId: session.companyId || "demo-company" },
-      include: { _count: { select: { properties: true, salesHomes: true } } },
+      include: COUNTS,
       orderBy: { name: "asc" },
     });
 
     return res.json({
-      communities: communities.map(({ _count, ...c }) => ({
-        ...c,
-        homeCount: _count.properties,
-        salesHomeCount: _count.salesHomes,
-        isFull: _count.properties >= MAX_HOMES_PER_COMMUNITY,
-      })),
+      communities: communities.map(withCounts),
       types: COMMUNITY_TYPES,
       maxHomes: MAX_HOMES_PER_COMMUNITY,
     });
@@ -75,7 +83,14 @@ export const createCommunity = async (req, res) => {
       },
     });
 
-    return res.json({ ...community, homeCount: 0, salesHomeCount: 0, isFull: false });
+    return res.json({
+      ...community,
+      homeCount: 0,
+      propertyCount: 0,
+      salesHomeCount: 0,
+      kbCount: 0,
+      isFull: false,
+    });
   } catch (error) {
     console.error("Error creating community:", error);
     return res.status(500).json({ message: "Error creating community" });
@@ -131,16 +146,10 @@ export const updateCommunity = async (req, res) => {
     const community = await prisma.community.update({
       where: { id },
       data,
-      include: { _count: { select: { properties: true, salesHomes: true } } },
+      include: COUNTS,
     });
 
-    const { _count, ...rest } = community;
-    return res.json({
-      ...rest,
-      homeCount: _count.properties,
-      salesHomeCount: _count.salesHomes,
-      isFull: _count.properties >= MAX_HOMES_PER_COMMUNITY,
-    });
+    return res.json(withCounts(community));
   } catch (error) {
     console.error("Error updating community:", error);
     return res.status(500).json({ message: "Error updating community" });
@@ -159,7 +168,7 @@ export const deleteCommunity = async (req, res) => {
 
     const community = await prisma.community.findFirst({
       where: { id, companyId: session.companyId || "demo-company" },
-      include: { _count: { select: { properties: true, salesHomes: true } } },
+      include: { _count: { select: { properties: true, salesHomes: true, warrantyKBs: true } } },
     });
 
     if (!community) {
@@ -178,6 +187,16 @@ export const deleteCommunity = async (req, res) => {
         message:
           `${community.name} still has ${community._count.salesHomes} home` +
           `${community._count.salesHomes === 1 ? "" : "s"} for sale. Remove or move them first.`,
+      });
+    }
+
+    // Unlinked docs would fall back to "shared by all communities", turning one
+    // community's rules into everyone's.
+    if (community._count.warrantyKBs > 0) {
+      return res.status(400).json({
+        message:
+          `${community.name} still has ${community._count.warrantyKBs} knowledge base document` +
+          `${community._count.warrantyKBs === 1 ? "" : "s"}. Delete or move them first.`,
       });
     }
 

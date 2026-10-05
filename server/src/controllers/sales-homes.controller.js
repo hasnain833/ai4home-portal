@@ -11,6 +11,12 @@ import {
   parseNumber,
   parsePrice,
 } from "../lib/sales-homes.js";
+import {
+  COUNTED_HOMES,
+  MAX_HOMES_PER_COMMUNITY,
+  homeTotal,
+  roomInCommunity,
+} from "../lib/communities.js";
 import { invalidateSalesSuggestions } from "../services/sales-suggestions.service.js";
 
 const MAX_IMPORT_ROWS = 2000;
@@ -64,6 +70,8 @@ function readHomeFields(body = {}, { partial = false } = {}) {
   return { data, errors };
 }
 
+const FULL_MESSAGE = `That community is full — it can hold at most ${MAX_HOMES_PER_COMMUNITY} homes, sold ones included.`;
+
 async function assertCommunity(companyId, communityId) {
   if (!communityId) return null;
   return prisma.community.findFirst({ where: { id: communityId, companyId }, select: { id: true } });
@@ -93,6 +101,9 @@ export const createHome = async (req, res) => {
     const companyId = req.user.companyId;
     const { data, errors } = readHomeFields(req.body);
     if (!(await assertCommunity(companyId, req.body?.communityId))) errors.push("Choose a community");
+    else if (data.status !== "SOLD" && (await roomInCommunity(req.body.communityId)) <= 0) {
+      errors.push(FULL_MESSAGE);
+    }
     if (errors.length) return res.status(400).json({ message: errors[0], errors });
 
     const home = await prisma.salesHome.create({
@@ -116,6 +127,17 @@ export const updateHome = async (req, res) => {
     if (req.body?.communityId !== undefined) {
       if (!(await assertCommunity(companyId, req.body.communityId))) errors.push("Choose a community");
       else data.communityId = req.body.communityId;
+    }
+    // Only a move into a community, or un-selling a home, takes up a new place.
+    const communityId = data.communityId ?? existing.communityId;
+    const status = data.status ?? existing.status;
+    if (
+      !errors.length &&
+      status !== "SOLD" &&
+      (communityId !== existing.communityId || existing.status === "SOLD") &&
+      (await roomInCommunity(communityId, { excludeSalesHomeId: existing.id })) <= 0
+    ) {
+      errors.push(FULL_MESSAGE);
     }
     if (errors.length) return res.status(400).json({ message: errors[0], errors });
 
@@ -302,8 +324,15 @@ export const importHomes = async (req, res) => {
       });
     }
 
-    const communities = await prisma.community.findMany({ where: { companyId }, select: { id: true, name: true } });
+    const communities = await prisma.community.findMany({
+      where: { companyId },
+      select: { id: true, name: true, _count: { select: COUNTED_HOMES } },
+    });
     const byName = new Map(communities.map((c) => [c.name.trim().toLowerCase(), c.id]));
+    // Seeded from what is stored, then spent as rows go in, so the whole file is held to the limit.
+    const roomLeft = new Map(
+      communities.map((c) => [c.id, MAX_HOMES_PER_COMMUNITY - homeTotal(c._count)]),
+    );
     let communitiesCreated = 0;
     const communityIdFor = async (name) => {
       const clean = String(name || "").trim();
@@ -312,6 +341,7 @@ export const importHomes = async (req, res) => {
       if (hit) return hit;
       const created = await prisma.community.create({ data: { companyId, name: clean }, select: { id: true } });
       byName.set(clean.toLowerCase(), created.id);
+      roomLeft.set(created.id, MAX_HOMES_PER_COMMUNITY);
       communitiesCreated++;
       return created.id;
     };
@@ -341,8 +371,16 @@ export const importHomes = async (req, res) => {
           address: { equals: data.address, mode: "insensitive" },
           ...(data.lotNumber ? { lotNumber: data.lotNumber } : {}),
         },
-        select: { id: true },
+        select: { id: true, status: true },
       });
+
+      if (data.status !== "SOLD" && (!match || match.status === "SOLD")) {
+        if ((roomLeft.get(communityId) ?? 0) <= 0) {
+          rowErrors.push({ row: i + 1, message: FULL_MESSAGE });
+          continue;
+        }
+        roomLeft.set(communityId, roomLeft.get(communityId) - 1);
+      }
 
       if (match) {
         const changes = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== null));

@@ -165,6 +165,9 @@ class HyphenClient {
 // ─── Public helpers ───────────────────────────────────────────────────────────
 
 export async function testERPConnection(companyId, platform) {
+  if (COMING_SOON_PLATFORMS.includes(platform)) {
+    return { ok: false, message: "This integration is coming soon." };
+  }
   const config = await getERPConfig(companyId, platform);
   if (!config) return { ok: false, message: "No credentials saved for this platform" };
 
@@ -177,6 +180,11 @@ export async function testERPConnection(companyId, platform) {
       return new HyphenClient(config).testConnection();
   }
 }
+
+// None of the clients above were built against the vendor's real API docs, so
+// they cannot reach a real account (Buildertrend's API is partner-only). They
+// stay out of sync until each is built for real; drop a platform from here then.
+export const COMING_SOON_PLATFORMS = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
 
 const MAX_ERP_ATTEMPTS = 3;
 
@@ -241,7 +249,9 @@ export async function syncTicketToERP(ticketId, { reason = "manual" } = {}) {
   const companyId = ticket.homeowner?.companyId;
   if (!companyId) return false;
 
-  const platforms = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
+  const platforms = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"].filter(
+    (p) => !COMING_SOON_PLATFORMS.includes(p),
+  );
   let anyConfigured = false;
 
   for (const platform of platforms) {

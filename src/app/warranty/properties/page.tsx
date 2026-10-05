@@ -41,7 +41,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  CommunitiesPanel,
+  HomesCsvImport,
   COMMUNITY_TYPE_LABELS,
   type CommunityInfo,
 } from "@/components/warranty/CommunitiesPanel";
@@ -378,6 +378,17 @@ export default function PropertiesPage() {
                   : "Manage all properties under builder warranty coverage."}
               </p>
             </div>
+            <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+            {canManage && (
+              <HomesCsvImport
+                disabled={communities.length === 0}
+                onImported={() => {
+                  void fetchProperties();
+                  void fetchCommunities();
+                }}
+                showToast={showToast}
+              />
+            )}
             {(isHomeowner || canManage) && (
               <Button
                 onClick={openAddModal}
@@ -386,6 +397,7 @@ export default function PropertiesPage() {
                 <Plus className="h-4 w-4" /> Add Property
               </Button>
             )}
+            </div>
           </motion.div>
 
           {/* Properties Grid or Table */}
@@ -461,16 +473,6 @@ export default function PropertiesPage() {
           ) : (
             // ADMIN / STAFF TABLE WITH CRUD
             <motion.div variants={fadeInUp} className="space-y-4">
-              <CommunitiesPanel
-                communities={communities}
-                maxHomes={maxHomes}
-                onChanged={fetchCommunities}
-                onImported={() => {
-                  void fetchProperties();
-                  void fetchCommunities();
-                }}
-                showToast={showToast}
-              />
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">

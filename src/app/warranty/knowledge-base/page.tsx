@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -78,10 +79,6 @@ export default function KnowledgeBasePage() {
     text: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // New Community Form State
-  const [showCommunityForm, setShowCommunityForm] = useState(false);
-  const [newCommunityName, setNewCommunityName] = useState("");
 
   // Delete Confirmation State
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -236,57 +233,6 @@ export default function KnowledgeBasePage() {
     }
   };
 
-  const handleCreateCommunity = async () => {
-    if (!newCommunityName.trim()) return;
-
-    // Pick a random aesthetic theme color
-    const colors = [
-      "#0F3B3D",
-      "#1E3A8A",
-      "#4C1D95",
-      "#064E3B",
-      "#701A75",
-      "#7C2D12",
-      "#0F172A",
-    ];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
-
-    try {
-      const res = await fetch("/api/communities", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCommunityName, color: randomColor }),
-      });
-      if (res.ok) {
-        const comm = await res.json();
-        setCommunities([comm, ...communities]);
-        setNewCommunityName("");
-        setShowCommunityForm(false);
-        setSelectedCommunityId(comm.id);
-        showToast("success", "Community created");
-      }
-    } catch (error) {
-      console.error("[warranty/knowledge-base]", error);
-      showToast("error", "Failed to create community");
-    }
-  };
-
-  const handleDeleteCommunity = async (id: string) => {
-    try {
-      const res = await fetch(`/api/communities?id=${id}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        setCommunities((prev) => prev.filter((c) => c.id !== id));
-        showToast("info", "Community deleted");
-        fetchData();
-      }
-    } catch (error) {
-      console.error("[warranty/knowledge-base]", error);
-      showToast("error", "Failed to delete community");
-    }
-  };
-
   // Drag and drop handlers
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -348,85 +294,26 @@ export default function KnowledgeBasePage() {
               <p className="text-muted-foreground mt-1">
                 {isAdmin
                   ? "View builder documents the warranty AI assistant answers from"
-                  : "Manage communities and upload KB documents"}
+                  : "Upload KB documents for each community, or shared by all"}
               </p>
             </div>
           </div>
 
           {!isAdmin && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Communities Management */}
-              <Card className="md:col-span-1 shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-lg">Communities</CardTitle>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowCommunityForm(!showCommunityForm)}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  <AnimatePresence>
-                    {showCommunityForm && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="mb-4 space-y-2 overflow-hidden">
-                        <Input
-                          placeholder="Community Name"
-                          value={newCommunityName}
-                          onChange={(e) => setNewCommunityName(e.target.value)}
-                        />
-                        <Button
-                          className="w-full"
-                          onClick={handleCreateCommunity}>
-                          Add Community
-                        </Button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  <div className="space-y-2 max-h-75 overflow-y-auto pr-2">
-                    {communities.map((c) => (
-                      <div
-                        key={c.id}
-                        className="flex items-center justify-between p-2 rounded-md border bg-card hover:bg-muted/50 transition-colors">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: c.color }}></div>
-                          <span className="text-sm font-medium">{c.name}</span>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 text-red-500"
-                          onClick={() => handleDeleteCommunity(c.id)}>
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ))}
-                    {communities.length === 0 && (
-                      <p className="text-xs text-muted-foreground text-center py-4">
-                        No communities created.
-                      </p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
               {/* Upload Zone */}
-              <Card className="md:col-span-2 shadow-sm">
+              <Card className="md:col-span-3 shadow-sm">
                 <CardHeader>
                   <CardTitle className="text-lg">Upload Document</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="mb-4">
-                    <label className="text-sm font-medium mb-1 block">
-                      Select Community
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-sm font-medium">Select Community</label>
+                      <Link href="/warranty/communities" className="text-xs font-semibold text-[#b48c3c] hover:underline">
+                        Manage communities
+                      </Link>
+                    </div>
                     <select
                       className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       value={selectedCommunityId}
