@@ -17,7 +17,7 @@ export const getIntegrations = async (req, res) => {
 
     const platforms = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
     const saved = await prisma.integration.findMany({
-      where: { companyId: session.companyId || "demo-company" },
+      where: { companyId: session.companyId },
       select: {
         platform: true,
         environment: true,
@@ -60,7 +60,7 @@ export const testIntegration = async (req, res) => {
     }
 
     const result = await testERPConnection(
-      session.companyId || "demo-company",
+      session.companyId,
       platform.toUpperCase(),
     );
     return res.json(result);
@@ -78,7 +78,7 @@ export const getCredentials = async (req, res) => {
     }
 
     const integrations = await prisma.integration.findMany({
-      where: { companyId: session.companyId || "demo-company" },
+      where: { companyId: session.companyId },
       select: {
         id: true,
         platform: true,
@@ -130,7 +130,7 @@ export const saveCredentials = async (req, res) => {
     // Upsert: if a record already exists for this company+platform, update it
     const existing = await prisma.integration.findFirst({
       where: {
-        companyId: session.companyId || "demo-company",
+        companyId: session.companyId,
         platform: platform.toUpperCase(),
       },
     });
@@ -153,7 +153,7 @@ export const saveCredentials = async (req, res) => {
     } else {
       integration = await prisma.integration.create({
         data: {
-          companyId: session.companyId || "demo-company",
+          companyId: session.companyId,
           platform: platform.toUpperCase(),
           apiKey: encApiKey,
           secretKey: encSecretKey,
@@ -196,7 +196,7 @@ export const deleteCredentials = async (req, res) => {
 
     await prisma.integration.deleteMany({
       where: {
-        companyId: session.companyId || "demo-company",
+        companyId: session.companyId,
         platform: platform.toUpperCase(),
       },
     });

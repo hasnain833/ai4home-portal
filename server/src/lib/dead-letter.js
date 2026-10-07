@@ -55,10 +55,45 @@ export async function deadLetterJob({ functionId, event, error }) {
   });
 }
 
+// Failed sales-to-warranty hand-offs. Stored here but shown only to super
+// admins (Admin > Hand-off Issues), never in a builder's Failed Sends.
+export const HANDOFF_CHANNEL = "HANDOFF";
+
+/** Records (or refreshes) the open exception for a lead's failed hand-off. */
+export async function recordHandoffFailure({ companyId, leadId, payload, error }) {
+  try {
+    const open = await prisma.deadLetter.findFirst({
+      where: { companyId, leadId, channel: HANDOFF_CHANNEL, status: "PENDING" },
+      select: { id: true },
+    });
+    if (open) {
+      return await prisma.deadLetter.update({
+        where: { id: open.id },
+        data: { payload, error: String(error).slice(0, 2000), attempts: { increment: 1 } },
+      });
+    }
+    return await deadLetter({ companyId, source: "CLOSE_WON", channel: HANDOFF_CHANNEL, leadId, payload, error });
+  } catch (e) {
+    console.error("[DLQ] Failed to record hand-off failure:", e?.message || e);
+    return null;
+  }
+}
+
+/** Closes any open hand-off exception once the lead's hand-off succeeds. */
+export function resolveHandoffFailures(companyId, leadId) {
+  return prisma.deadLetter
+    .updateMany({
+      where: { companyId, leadId, channel: HANDOFF_CHANNEL, status: "PENDING" },
+      data: { status: "RESOLVED", replayedAt: new Date() },
+    })
+    .catch(() => null);
+}
+
 export async function listDeadLetters(companyId, { status, refId, limit = 100 } = {}) {
   return prisma.deadLetter.findMany({
     where: {
       companyId,
+      channel: { not: HANDOFF_CHANNEL },
       ...(status ? { status } : {}),
       ...(refId ? { refId } : {}),
     },
@@ -70,7 +105,7 @@ export async function listDeadLetters(companyId, { status, refId, limit = 100 } 
 export async function countByStatus(companyId) {
   const rows = await prisma.deadLetter.groupBy({
     by: ["status"],
-    where: { companyId },
+    where: { companyId, channel: { not: HANDOFF_CHANNEL } },
     _count: { _all: true },
   });
   return rows.reduce((acc, r) => ({ ...acc, [r.status]: r._count._all }), {});
@@ -163,7 +198,9 @@ export async function replayDeadLetter(companyId, id) {
 }
 
 export async function discardDeadLetter(companyId, id) {
-  const row = await prisma.deadLetter.findFirst({ where: { id, companyId } });
+  const row = await prisma.deadLetter.findFirst({
+    where: { id, companyId, channel: { not: HANDOFF_CHANNEL } },
+  });
   if (!row) return { success: false, reason: "Not found" };
 
   await prisma.deadLetter.update({

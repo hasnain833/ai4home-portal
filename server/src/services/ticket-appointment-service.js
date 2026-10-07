@@ -95,6 +95,8 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
   const emailReady = MailService.hasPlatformSender();
 
   const assignedStaff = appointment.ticket?.assignedStaff || null;
+  // No assignee: the company's admins get the staff side of every visit message.
+  const staffSide = assignedStaff ? [assignedStaff] : await companyAdmins(companyId);
 
   const notificationCopy = {
     scheduled: {
@@ -114,11 +116,11 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
     },
   }[kind];
 
-  if (companyId && assignedStaff?.id) {
+  if (companyId && staffSide.length) {
     await writeNotifications(
-      [{
+      staffSide.map((u) => ({
         companyId,
-        userId: assignedStaff.id,
+        userId: u.id,
         workspace: "WARRANTY",
         type: notificationCopy.type,
         title: notificationCopy.title,
@@ -126,7 +128,7 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
         link: `/warranty/tickets/${appointment.ticketId}`,
         ticketId: appointment.ticketId,
         emailFallback: !emailReady,
-      }],
+      })),
     );
   }
 
@@ -149,7 +151,7 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
     console.warn(
       `[Appointment Notify] ${appointment.id} (${kind}): in-portal only — no email credentials for this workspace.`,
     );
-    return { ok: true, notified: assignedStaff ? 1 : 0, emailed: 0, emailConfigured: false };
+    return { ok: true, notified: staffSide.length, emailed: 0, emailConfigured: false };
   }
 
   const htmlFor = (role) => {
@@ -171,7 +173,9 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
           : `Visit rescheduled for ${suffix} — ${whenLabel}`;
       return role === "homeowner"
         ? `Your repair visit is booked — ${whenLabel}`
-        : `You've been assigned ${suffix} — ${whenLabel}`;
+        : details.staffName
+          ? `You've been assigned ${suffix} — ${whenLabel}`
+          : `Visit booked for ${suffix} (unassigned) — ${whenLabel}`;
     }
     if (kind === "reminder")
       return role === "homeowner"
@@ -210,7 +214,7 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
   }
 
   const staffRecipients = new Set(
-    [appointment.tradeEmail, assignedStaff?.email].filter(Boolean),
+    [appointment.tradeEmail, ...staffSide.map((u) => u.email)].filter(Boolean),
   );
 
   for (const to of staffRecipients) {
@@ -226,7 +230,7 @@ async function dispatch(appointment, kind, { windowLabel = null, rescheduled = f
   const ok = attempted === 0 || emailed > 0;
   return {
     ok,
-    notified: assignedStaff ? 1 : 0,
+    notified: staffSide.length,
     emailed,
     attempted,
     homeownerDelivered,
@@ -308,7 +312,7 @@ export async function notifyTicketDispatched(ticketId, { nudge = false } = {}) {
           companyId,
           userId: a.id,
           type: "APPOINTMENT_SCHEDULED",
-          title: `Ticket ${ticketRef(ticket)} dispatched to ${staffName || "a staff member"}`,
+          title: `Ticket ${ticketRef(ticket)} dispatched${staffName ? ` to ${staffName}` : " (unassigned)"}`,
           body: `Awaiting the homeowner's chosen time.`,
           link: `/warranty/tickets/${ticket.id}`,
           ticketId: ticket.id,

@@ -155,7 +155,7 @@ export default function DashboardPage() {
     agentStatus: "Checking...",
     agentHealthy: false,
     erpSync: "Checking...",
-    erpHealthy: false,
+    erpHealthy: null as boolean | null, // null = not available yet, shown neutral
     kbDocs: "Checking...",
     lastEscalation: "Checking...",
   });
@@ -758,8 +758,8 @@ export default function DashboardPage() {
                     <div>
                       <p className="text-sm text-muted-foreground">ERP Sync</p>
                       <p
-                        className={`font-medium ${systemHealth.erpHealthy ? "text-green-600" : "text-red-500"}`}>
-                        {systemHealth.erpHealthy ? "OK " : "X "}
+                        className={`font-medium ${systemHealth.erpHealthy === null ? "text-muted-foreground" : systemHealth.erpHealthy ? "text-green-600" : "text-red-500"}`}>
+                        {systemHealth.erpHealthy === null ? "" : systemHealth.erpHealthy ? "OK " : "X "}
                         {systemHealth.erpSync}
                       </p>
                     </div>

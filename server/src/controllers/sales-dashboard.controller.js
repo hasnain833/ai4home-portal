@@ -34,6 +34,42 @@ function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups) {
   });
 }
 
+const PERIOD_DAYS = { "7d": 7, "30d": 30, "90d": 90 };
+
+/**
+ * The Sales Agent metrics the onboarding SOP reports on (Part C): interactions,
+ * nurtured touches, booked appointments and leads-to-booked success rate.
+ */
+export const getAgentPerformance = async (req, res) => {
+  try {
+    const companyId = req.user.companyId;
+    const days = PERIOD_DAYS[req.query.period] || 30;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const [interactions, nurturedTouches, booked, newLeads, newLeadsBooked] = await Promise.all([
+      // Conversations the agent held with leads (email/SMS scheduling assistant).
+      prisma.schedulingConversation.count({ where: { lead: { companyId }, createdAt: { gte: since } } }),
+      // Campaign / nurture messages that went out.
+      prisma.messageUsage.count({ where: { companyId, source: "nurture", outcome: "sent", createdAt: { gte: since } } }),
+      prisma.salesAppointment.count({ where: { lead: { companyId }, createdAt: { gte: since } } }),
+      prisma.lead.count({ where: { companyId, createdAt: { gte: since } } }),
+      prisma.lead.count({ where: { companyId, createdAt: { gte: since }, appointments: { some: {} } } }),
+    ]);
+
+    return res.json({
+      period: `${days}d`,
+      interactions,
+      nurturedTouches,
+      bookedAppointments: booked,
+      newLeads,
+      successRate: newLeads > 0 ? round1((newLeadsBooked / newLeads) * 100) : null,
+    });
+  } catch (error) {
+    console.error("Sales agent performance error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const getDashboardStats = async (req, res) => {
   try {
     const companyId = req.user.companyId;
@@ -60,6 +96,7 @@ export const getDashboardStats = async (req, res) => {
       activeCampaigns,
       upcomingCalendarItems,
       totalEnrolled,
+      upcomingCount,
     ] = await prisma.$transaction([
       prisma.lead.count({ where: leadWhere }),
       prisma.lead.count({ where: { ...leadWhere, status: "New" } }),
@@ -109,6 +146,8 @@ export const getDashboardStats = async (req, res) => {
         },
       }),
       prisma.campaignEnrollment.count({ where: { campaign: { companyId } } }),
+      // The list above stops at 5; the card needs the real number.
+      prisma.salesAppointment.count({ where: { lead: leadWhere, time: { gte: now }, status: "CONFIRMED" } }),
     ]);
 
     const campaignIds = activeCampaigns.map((c) => c.id);
@@ -149,6 +188,7 @@ export const getDashboardStats = async (req, res) => {
         ),
       },
       upcomingAppointments,
+      upcomingCount,
       upcomingCalendarItems,
       crmSyncHealth: salesforceConnection || null,
     });

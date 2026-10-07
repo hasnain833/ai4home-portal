@@ -28,10 +28,13 @@ import {
   Flag,
   Send,
   User,
+  Trophy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch, ApiError } from "@/lib/api";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import CloseWonDialog from "@/components/sales/CloseWonDialog";
 
 type Agent = { id: string; name: string | null; email: string };
 
@@ -185,12 +188,23 @@ const formatWhen = (iso: string) =>
     minute: "2-digit",
   });
 
+// Email replies carry the whole thread below "On <date>, <sender> wrote:".
+// Only the new text matters; the earlier turns are already in the transcript.
+const stripQuotedReply = (text: string) =>
+  text
+    .split(/\n\s*On [^\n]*(?:\n[^\n]*)?wrote:\s*(?:\n|$)/)[0]
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(">"))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
 const conversationMessages = (transcript: unknown): ConversationMessage[] => {
   if (!Array.isArray(transcript)) return [];
   return transcript.flatMap((entry) => {
     if (!entry || typeof entry !== "object") return [];
     const value = entry as Record<string, unknown>;
-    const content = typeof value.content === "string" ? value.content.trim() : "";
+    const content = typeof value.content === "string" ? stripQuotedReply(value.content) : "";
     if (!content) return [];
     return [{
       role: typeof value.role === "string" ? value.role.toLowerCase() : "unknown",
@@ -219,6 +233,7 @@ export default function LeadDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState<"status" | "ownerId" | null>(null);
+  const [closeWonOpen, setCloseWonOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -376,124 +391,86 @@ export default function LeadDetailPage() {
                 ))}
               </div>
             </div>
+            {lead.status !== "Closed Won" && (
+              <Button onClick={() => setCloseWonOpen(true)} className="gap-2 self-start sm:self-center">
+                <Trophy className="h-4 w-4" /> Mark Closed Won
+              </Button>
+            )}
           </div>
+
+          {closeWonOpen && (
+          <CloseWonDialog
+            open={closeWonOpen}
+            onOpenChange={setCloseWonOpen}
+            leadId={lead.id}
+            leadName={`${lead.firstName} ${lead.lastName}`.trim()}
+            hasEmail={!!lead.email}
+            onDone={load}
+          />
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Main column */}
             <div className="lg:col-span-2 space-y-6">
-              {/* The most useful thing on the page, so it leads. */}
-              {summary && (
-                <Card className="border-amber-500/20 bg-linear-to-br from-slate-900 to-slate-950 text-slate-100 overflow-hidden">
-                  <div className="bg-linear-to-r from-amber-600/10 to-orange-600/10 px-6 py-4 flex items-center gap-3 border-b border-slate-800">
-                    <div className="p-2 bg-amber-500/20 rounded-xl">
-                      <Sparkles className="h-5 w-5 text-amber-400" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-sm font-bold tracking-tight">
-                        AI Conversation Summary
-                      </CardTitle>
-                      <p className="text-[10px] text-amber-300/80 font-medium">
-                        What happened in the conversation so far
-                      </p>
-                    </div>
-                  </div>
-                  <CardContent className="p-6">
-                    <p className="text-sm leading-relaxed text-slate-200 whitespace-pre-line">
-                      {summary}
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-
-              <Card className="overflow-hidden">
-                <CardHeader className="border-b bg-muted/20 py-4 px-6 flex flex-row items-center gap-3">
-                  <div className="p-2 bg-primary/10 text-primary rounded-lg">
-                    <MessageSquare className="h-4 w-4" />
+              {/* The most useful thing on the page, so it leads. Same layout as the
+                  ticket page: one compact line per turn, not a chat transcript. */}
+              <Card className="border-amber-500/20 bg-linear-to-br from-slate-900 to-slate-950 text-slate-100 shadow-md overflow-hidden">
+                <div className="bg-linear-to-r from-amber-600/10 to-orange-600/10 px-6 py-4 flex items-center gap-3 border-b border-slate-800">
+                  <div className="p-2 bg-amber-500/20 rounded-xl">
+                    <Sparkles className="h-5 w-5 text-amber-400" />
                   </div>
                   <div>
-                    <CardTitle className="text-base font-bold">AI conversations</CardTitle>
-                    <CardDescription className="text-[11px]">
+                    <CardTitle className="text-sm font-bold tracking-tight">AI Conversation Summary</CardTitle>
+                    <p className="text-[10px] text-amber-300/80 font-medium">
                       Email and SMS conversations handled by the scheduling assistant
-                    </CardDescription>
+                    </p>
                   </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                  {lead.schedulingConversations.length === 0 ? (
-                    <div className="px-6 py-10 text-center">
-                      <MessageSquare className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
-                      <p className="text-sm font-medium">No AI conversations yet</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Conversations will appear after this lead replies to the scheduling assistant.
-                      </p>
-                    </div>
+                </div>
+                <CardContent className="p-6 space-y-4">
+                  {summary && (
+                    <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-line bg-slate-950/40 p-4 rounded-xl border border-slate-800/40">
+                      {summary}
+                    </p>
+                  )}
+                  {lead.schedulingConversations.length === 0 && !summary ? (
+                    <p className="text-sm text-slate-400">
+                      No AI conversations yet. They will appear after this lead replies to the scheduling assistant.
+                    </p>
                   ) : (
-                    lead.schedulingConversations.map((conversation, conversationIndex) => {
+                    lead.schedulingConversations.map((conversation) => {
                       const messages = conversationMessages(conversation.transcript);
                       return (
-                        <section
-                          key={conversation.id}
-                          className={cn(
-                            "px-4 py-5 sm:px-6 space-y-4",
-                            conversationIndex > 0 && "border-t border-border/70",
-                          )}
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold capitalize">
-                                {conversation.channel.toLowerCase()} conversation
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                Updated {formatWhen(conversation.updatedAt)} · {conversation.mode.toLowerCase()} mode
-                              </p>
-                            </div>
+                        <div key={conversation.id} className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                            <span className="font-semibold capitalize text-slate-200">
+                              {conversation.channel.toLowerCase()}
+                            </span>
                             <Badge
                               variant="outline"
-                              className={cn(
-                                "w-fit text-[10px] capitalize",
-                                conversationStatusColor(conversation.status),
-                              )}
+                              className={cn("text-[10px] capitalize", conversationStatusColor(conversation.status))}
                             >
                               {conversation.status.toLowerCase()}
                             </Badge>
+                            <span>Updated {formatWhen(conversation.updatedAt)}</span>
                           </div>
-
-                          {messages.length === 0 ? (
-                            <p className="text-xs text-muted-foreground py-2">
-                              This conversation has no recorded messages.
-                            </p>
-                          ) : (
-                            <div className="space-y-3" aria-label={`${conversation.channel} conversation transcript`}>
-                              {messages.map((message, messageIndex) => {
+                          <div className="text-sm text-slate-300 leading-relaxed bg-slate-950/40 p-4 rounded-xl border border-slate-800/40 space-y-1.5">
+                            {messages.length === 0 ? (
+                              <p className="text-slate-400">No recorded messages.</p>
+                            ) : (
+                              messages.map((message, i) => {
                                 const isAgent = message.role === "agent" || message.role === "assistant";
                                 return (
-                                  <div
-                                    key={`${conversation.id}-${messageIndex}`}
-                                    className={cn("flex", isAgent ? "justify-start" : "justify-end")}
-                                  >
-                                    <div className={cn("max-w-[88%] sm:max-w-[78%] space-y-1", !isAgent && "text-right")}>
-                                      <div className="flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
-                                        <span className="font-semibold">
-                                          {isAgent ? "AI assistant" : lead.firstName}
-                                        </span>
-                                        {message.at && <span>{formatWhen(message.at)}</span>}
-                                      </div>
-                                      <p
-                                        className={cn(
-                                          "rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-left",
-                                          isAgent
-                                            ? "bg-muted text-foreground"
-                                            : "bg-primary text-primary-foreground",
-                                        )}
-                                      >
-                                        {message.content}
-                                      </p>
-                                    </div>
-                                  </div>
+                                  <p key={`${conversation.id}-${i}`}>
+                                    <span className={cn("font-semibold", isAgent ? "text-amber-300" : "text-slate-100")}>
+                                      {isAgent ? "Assistant" : lead.firstName}:
+                                    </span>{" "}
+                                    {message.content}
+                                  </p>
                                 );
-                              })}
-                            </div>
-                          )}
-                        </section>
+                              })
+                            )}
+                          </div>
+                        </div>
                       );
                     })
                   )}
@@ -639,7 +616,8 @@ export default function LeadDetailPage() {
                     </label>
                     <Select
                       value={lead.status}
-                      onValueChange={(v) => patch("status", v)}
+                      // Closed Won is the hand-off to Warranty, so it goes through the dialog.
+                      onValueChange={(v) => (v === "Closed Won" ? setCloseWonOpen(true) : patch("status", v))}
                       disabled={saving !== null}
                     >
                       <SelectTrigger className="h-9 text-sm">

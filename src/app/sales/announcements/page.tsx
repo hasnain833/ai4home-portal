@@ -402,7 +402,7 @@ export default function AnnouncementsPage() {
                 </strong>{" "}
                 Broadcasts on that channel cannot be sent. Set it up in{" "}
                 <a href="/sales/settings" className="font-semibold underline underline-offset-2">
-                  Settings &rarr; Messaging
+                  Integrations &rarr; Email, SMS &amp; News
                 </a>
                 .
               </span>

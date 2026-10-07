@@ -184,13 +184,13 @@ app.use("/api/tickets", ...warrantyGuard, ticketsRouter);
 app.use("/api/properties", ...warrantyGuard, propertiesRouter);
 app.use("/api/company", companyRouter);
 app.use("/api/knowledge-base", ...warrantyGuard, knowledgeBaseRouter);
-app.use("/api/integrations", integrationsRouter);
+app.use("/api/integrations", requireAuth, requireCompany, integrationsRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/communities", ...warrantyGuard, communitiesRouter);
 app.use("/api/homeowners", ...warrantyGuard, homeownersRouter);
 app.use("/api/warranty/chat", ...warrantyGuard, warrantyChatRouter);
 app.use("/api/webhooks/warranty", warrantyWebhooksRouter);
-app.use("/api/users", usersRouter);
+app.use("/api/users", requireAuth, requireCompany, usersRouter);
 app.use(
   "/api/notifications",
   ...warrantyGuard,

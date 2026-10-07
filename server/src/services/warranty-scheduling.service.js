@@ -41,6 +41,9 @@ export async function availabilityForStaff(staffId, companyId, db = prisma) {
 }
 
 async function busyFor(staffId, staffEmail, from, to, db = prisma) {
+  // ponytail: unassigned visits don't block each other, so two homeowners can pick
+  // the same company slot; add a per-company capacity if builders need it.
+  if (!staffId) return [];
   const busy = [];
 
   const visits = await db.ticketAppointment.findMany({

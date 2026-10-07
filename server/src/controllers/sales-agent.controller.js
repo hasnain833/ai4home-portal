@@ -112,33 +112,6 @@ export const bookAppointment = async (req, res) => {
 
 
 
-export const simulateInbound = async (req, res) => {
-  try {
-    const { leadId = "demo-lead", body = "I am interested in a home.", channel = "SMS" } = req.body;
-    
-    // We fetch a dummy/default company for the demo.
-    const company = await prisma.company.findFirst();
-    if (!company) {
-      return res.status(500).json({ message: "No company found for demo" });
-    }
-
-    const { inngest } = await import("../lib/inngest.js");
-    
-    await inngest.send({ name: "campaign.exit", data: { leadId, reason: "REPLY" } });
-    
-    await inngest.send({
-      name: "lead.reply.received",
-      data: { leadId, companyId: company.id, channel, body, sender: "+1234567890" },
-    });
-    
-    return res.json({ message: "Inbound message simulated and Inngest agent triggered successfully." });
-  } catch (error) {
-    console.error("[Simulate Inbound] Error:", error);
-    return res.status(500).json({ message: error.message || "Failed to trigger Inngest event. Make sure Inngest Dev Server is running." });
-  }
-};
-
-
 const MAX_MESSAGE_CHARS = 1600;
 const EMAIL_RE = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/;
 const PLATFORM_SENDER_NAME = "AI4Homebuilders";

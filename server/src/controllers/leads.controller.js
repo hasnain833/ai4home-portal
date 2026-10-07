@@ -1,8 +1,16 @@
 import prisma from "../lib/prisma.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { findDuplicateLead, resolveMergedField } from "../lib/lead-dedup.js";
-import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
+import { writeBackLeadToSalesforce, pushLeadToSalesforce } from "../services/salesforce-writeback.js";
 import { DEFAULT_LEAD_STATUSES, LEAD_STATUS } from "../lib/lead-statuses.js";
+import { roomInCommunity } from "../lib/communities.js";
+import { createHomeownerAccount, passwordSetupLink } from "../lib/homeowner-account.js";
+import { coverageTermFor } from "./properties.controller.js";
+import { toE164 } from "../services/sms.service.js";
+import { MessagingService } from "../services/messaging-service.js";
+import { Templates } from "../services/templates.js";
+import { invalidateSalesSuggestions } from "../services/sales-suggestions.service.js";
+import { recordHandoffFailure, resolveHandoffFailures } from "../lib/dead-letter.js";
 
 const LEADS_DEFAULT_PAGE_SIZE = 25;
 const LEADS_MAX_PAGE_SIZE = 200;
@@ -249,12 +257,202 @@ export const createLead = async (req, res) => {
       leadId: lead.id,
       event: "MANUAL_CREATION",
     });
+    void pushLeadToSalesforce(lead.companyId, lead.id);
 
     return res.json(lead);
   } catch (error) {
     console.error("Create lead error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
+};
+
+/** Campaign exit + STATUS_CHANGE automation for a lead whose status just changed. */
+async function afterStatusChange(companyId, leadId, status, previousStatus) {
+  try {
+    const { inngest } = await import("../lib/inngest.js");
+    await inngest.send({
+      name: "campaign.exit",
+      data: { leadId, reason: "STATUS_CHANGE", newStatus: status },
+    });
+  } catch (e) {
+    console.error(`[Lead Update] campaign.exit not queued for ${leadId}:`, e?.message || e);
+  }
+
+  try {
+    await triggerAutomation({
+      companyId,
+      leadId,
+      event: "STATUS_CHANGE",
+      context: { newStatus: status, previousStatus },
+    });
+  } catch (e) {
+    console.error(`[Lead Update] STATUS_CHANGE automation not triggered for ${leadId}:`, e?.message || e);
+  }
+}
+
+/**
+ * Closed Won: the sales-to-warranty hand-off. The buyer becomes a Warranty
+ * homeowner with their property (1-year coverage from closing), the home they
+ * bought is marked SOLD so the Sales Agent stops offering it, and the lead is
+ * set to Closed Won. The homeowner is emailed a link to set their password.
+ */
+/** Emails a new homeowner their set-password link. Throws when it does not send. */
+export async function sendHomeownerWelcome(companyId, homeownerId) {
+  const [company, homeowner] = await Promise.all([
+    prisma.company.findUnique({ where: { id: companyId }, select: { name: true, email: true } }),
+    prisma.user.findFirst({
+      where: { id: homeownerId, companyId, role: "HOMEOWNER" },
+      select: { name: true, email: true, properties: { select: { address: true, coverageTerm: true }, take: 1 } },
+    }),
+  ]);
+  if (!homeowner) throw new Error("Homeowner not found");
+  const home = homeowner.properties[0];
+  const link = await passwordSetupLink(homeowner.email);
+  const r = await MessagingService.sendEmail({
+    companyId,
+    to: homeowner.email,
+    subject: `Welcome home - your ${company?.name || "warranty"} account`,
+    html: Templates.getHomeownerWelcomeEmail(
+      {
+        name: homeowner.name || "there",
+        address: home?.address,
+        coverageEnd: home?.coverageTerm?.toLocaleDateString("en-US", { dateStyle: "long" }),
+      },
+      link,
+      company?.name || "Aiforhomebuilder",
+    ),
+    fromName: company?.name || undefined,
+    fromEmail: company?.email || undefined,
+    source: "homeowner-welcome",
+  });
+  if (!r.success) throw new Error(r.error || r.reason || "not delivered");
+}
+
+export async function runCloseWon(companyId, id, body = {}) {
+  try {
+    const { salesHomeId, communityId, address, closingDate } = body;
+
+    const lead = await prisma.lead.findFirst({ where: { id, companyId } });
+    if (!lead) return reply(404, { message: "Lead not found" });
+    if (lead.status === LEAD_STATUS.CLOSED_WON) {
+      return reply(400, { message: "This lead is already Closed Won." });
+    }
+    if (!lead.email) {
+      return reply(400, { message: "Add an email address to this lead first. The homeowner signs in with it." });
+    }
+
+    const coeDate = closingDate ? new Date(closingDate) : new Date();
+    if (Number.isNaN(coeDate.getTime())) return reply(400, { message: "Enter a valid closing date." });
+
+    // Where they bought: a home from Sales > Homes, or a community + address.
+    let home = null;
+    let place;
+    if (salesHomeId) {
+      home = await prisma.salesHome.findFirst({ where: { id: salesHomeId, companyId } });
+      if (!home) return reply(400, { message: "That home was not found." });
+      if (home.status === "SOLD") return reply(400, { message: "That home is already sold." });
+      place = { communityId: home.communityId, address: home.address, city: home.city, state: home.state, zipCode: home.zipCode };
+    } else {
+      if (!communityId || !String(address || "").trim()) {
+        return reply(400, { message: "Choose the home, or a community and address." });
+      }
+      const community = await prisma.community.findFirst({ where: { id: communityId, companyId }, select: { id: true } });
+      if (!community) return reply(400, { message: "That community was not found." });
+      if ((await roomInCommunity(communityId)) <= 0) {
+        return reply(400, { message: "That community is full." });
+      }
+      place = { communityId, address: String(address).trim(), city: lead.city, state: lead.state, zipCode: lead.zipCode };
+    }
+
+    // Reuse a homeowner already on file for this builder; refuse anyone else's account.
+    const name = `${lead.firstName} ${lead.lastName === "-" ? "" : lead.lastName}`.trim();
+    let homeowner = await prisma.user.findUnique({ where: { email: lead.email } });
+    let created = false;
+    if (homeowner) {
+      if (homeowner.role !== "HOMEOWNER" || homeowner.companyId !== companyId) {
+        return reply(400, { message: `${lead.email} already belongs to another account.` });
+      }
+      const owned = await prisma.property.findFirst({ where: { homeownerId: homeowner.id }, select: { address: true } });
+      if (owned) {
+        return reply(400, { message: `This homeowner already has a home registered (${owned.address}).` });
+      }
+    } else {
+      try {
+        homeowner = await createHomeownerAccount({
+          name,
+          email: lead.email,
+          phone: toE164(lead.phone) || null,
+          companyId,
+        });
+        created = true;
+      } catch (err) {
+        if (err.status === 400) return reply(400, { message: err.message });
+        throw err;
+      }
+    }
+
+    const coverageTerm = coverageTermFor(coeDate);
+    const [property] = await prisma.$transaction([
+      prisma.property.create({
+        data: { ...place, coeDate, coverageTerm, homeownerId: homeowner.id, companyId },
+      }),
+      ...(home ? [prisma.salesHome.update({ where: { id: home.id }, data: { status: "SOLD" } })] : []),
+      prisma.lead.update({ where: { id }, data: { status: LEAD_STATUS.CLOSED_WON } }),
+    ]);
+
+    await afterStatusChange(companyId, id, LEAD_STATUS.CLOSED_WON, lead.status);
+    writeBackLeadToSalesforce(companyId, id, { status: LEAD_STATUS.CLOSED_WON }).catch((e) =>
+      console.error("[Close Won] Salesforce write-back failed:", e?.message || e),
+    );
+    if (home) invalidateSalesSuggestions(companyId);
+
+    // The welcome is the homeowner's only way in, so say so when it fails.
+    let notice = null;
+    if (created) {
+      try {
+        await sendHomeownerWelcome(companyId, homeowner.id);
+      } catch (e) {
+        console.error(`[Close Won] Welcome email to ${lead.email} failed:`, e?.message || e);
+        notice = "Closed Won, but the welcome email did not send. Ask the homeowner to use 'Forgot password' with their email to sign in.";
+      }
+    }
+
+    return reply(200, { success: true, homeownerId: homeowner.id, propertyId: property.id, createdHomeowner: created, notice });
+  } catch (error) {
+    console.error("[Close Won] Error:", error);
+    return reply(500, {
+      message: "Could not complete the hand-off. Please try again.",
+      detail: String(error?.message || error),
+    });
+  }
+}
+
+const reply = (status, body) => ({ status, body });
+
+export const closeLeadWon = async (req, res) => {
+  const companyId = req.user.companyId;
+  const leadId = req.params.id;
+  const body = req.body || {};
+  const { status, body: out } = await runCloseWon(companyId, leadId, body);
+
+  // Anything that did not fully work lands in Admin > Hand-off Issues.
+  if (status >= 400 || out.notice) {
+    await recordHandoffFailure({
+      companyId,
+      leadId,
+      payload: {
+        request: body,
+        requestedBy: req.user.email || req.user.id,
+        partial: status < 400,
+        homeownerId: out.homeownerId || null,
+      },
+      error: out.notice || out.detail || out.message,
+    });
+  } else {
+    await resolveHandoffFailures(companyId, leadId);
+  }
+  const { detail: _detail, ...visible } = out;
+  return res.status(status).json(visible);
 };
 
 export const importLeads = async (req, res) => {
@@ -557,32 +755,7 @@ export const updateLead = async (req, res) => {
     });
 
     if (status !== undefined && status !== lead.status) {
-      try {
-        const { inngest } = await import("../lib/inngest.js");
-        await inngest.send({
-          name: "campaign.exit",
-          data: { leadId: id, reason: "STATUS_CHANGE", newStatus: status },
-        });
-      } catch (e) {
-        console.error(
-          `[Lead Update] campaign.exit not queued for ${id}:`,
-          e?.message || e,
-        );
-      }
-
-      try {
-        await triggerAutomation({
-          companyId: req.user.companyId,
-          leadId: id,
-          event: "STATUS_CHANGE",
-          context: { newStatus: status, previousStatus: lead.status },
-        });
-      } catch (e) {
-        console.error(
-          `[Lead Update] STATUS_CHANGE automation not triggered for ${id}:`,
-          e?.message || e,
-        );
-      }
+      await afterStatusChange(req.user.companyId, id, status, lead.status);
     }
     const writeBack = {};
     if (status !== undefined && status !== lead.status)

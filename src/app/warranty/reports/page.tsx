@@ -21,6 +21,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { AgentMetricsGrid } from "@/components/reports/AgentMetricsGrid";
+import { Bot } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Types
@@ -42,9 +44,24 @@ interface Metrics {
   dispatchedTickets: number;
   homeownerEngagement: number;
   engagementTarget: number;
+  erpAvailable: boolean;
   erpSyncSuccessRate: number;
   erpSyncedCount: number;
   erpFailedCount: number;
+  agentMetrics: WarrantyAgentMetrics | null;
+}
+
+interface WarrantyAgentMetrics {
+  inquiriesHandled: number;
+  inquiriesDiagnosed: number;
+  inquiriesResolvedByAi: number;
+  ticketsWrittenToErp: number;
+  claimsDispatched: number;
+  homeownerReminders: number;
+  tradeReminders: number;
+  appointmentKeptRate: number | null;
+  appointmentsRescheduled: number;
+  firstAppointmentResolutionRate: number | null;
 }
 
 // Animation variants
@@ -109,6 +126,30 @@ const useCountUp = (target: number, duration = 800, delay = 0) => {
   return count;
 };
 
+function agentMetricRows(m: WarrantyAgentMetrics, erpAvailable: boolean) {
+  return [
+    { label: "Inquiries handled", value: m.inquiriesHandled, hint: "Warranty chats the agent took" },
+    { label: "Inquiries diagnosed", value: m.inquiriesDiagnosed, hint: "Chats the agent wrote up as a ticket" },
+    { label: "Resolved by the AI", value: m.inquiriesResolvedByAi, hint: "Fixed in chat, no visit needed" },
+    {
+      label: "Tickets written to ERP",
+      value: erpAvailable ? m.ticketsWrittenToErp : null,
+      hint: erpAvailable ? "Tickets synced to your ERP" : "No ERP connected yet",
+    },
+    { label: "Claims dispatched", value: m.claimsDispatched, hint: "Sent out for a repair visit" },
+    { label: "Reminders to homeowners", value: m.homeownerReminders, hint: "Visit reminders sent" },
+    { label: "Reminders to trades", value: m.tradeReminders, hint: "Visit reminders sent to the assigned trade" },
+    { label: "Appointment kept rate", value: m.appointmentKeptRate, suffix: "%", hint: "Visits completed vs. cancelled" },
+    { label: "Appointments rescheduled", value: m.appointmentsRescheduled, hint: "Visits moved at least once" },
+    {
+      label: "First-visit resolution",
+      value: m.firstAppointmentResolutionRate,
+      suffix: "%",
+      hint: "Resolved claims fixed in one visit",
+    },
+  ];
+}
+
 export default function ReportsPage() {
   const [period, setPeriod] = useState<Period>("7d");
   const [startDate, setStartDate] = useState(() => {
@@ -133,9 +174,11 @@ export default function ReportsPage() {
     dispatchedTickets: 0,
     homeownerEngagement: 0,
     engagementTarget: 98,
+    erpAvailable: false,
     erpSyncSuccessRate: 100,
     erpSyncedCount: 0,
     erpFailedCount: 0,
+    agentMetrics: null,
   });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -193,9 +236,11 @@ export default function ReportsPage() {
           dispatchedTickets: data.dispatchedTickets ?? 0,
           homeownerEngagement: data.homeownerEngagement ?? 0,
           engagementTarget: data.engagementTarget ?? 98,
+          erpAvailable: !!data.erpAvailable,
           erpSyncSuccessRate: data.erpSyncSuccessRate ?? 100,
           erpSyncedCount: data.erpSyncedCount ?? 0,
           erpFailedCount: data.erpFailedCount ?? 0,
+          agentMetrics: data.agentMetrics ?? null,
         });
       } else {
         showToast("error", "Failed to retrieve reports data.");
@@ -237,7 +282,17 @@ export default function ReportsPage() {
       [`Auto-resolution Rate (${period})`, `${metrics.autoResolutionRate}%`],
       [`Trade Resolution Rate (${period})`, `${metrics.tradeResolutionRate}%`],
       [`Homeowner Engagement (${period})`, `${metrics.homeownerEngagement}% (target ${metrics.engagementTarget}%)`],
-      [`ERP Sync Success Rate (${period})`, `${metrics.erpSyncSuccessRate}%`],
+      ...(metrics.erpAvailable ? [[`ERP Sync Success Rate (${period})`, `${metrics.erpSyncSuccessRate}%`]] : []),
+      ...(metrics.agentMetrics
+        ? [
+            [],
+            ["Warranty Agent", "Value"],
+            ...agentMetricRows(metrics.agentMetrics, metrics.erpAvailable).map((m) => [
+              m.label,
+              m.value === null ? "n/a" : `${m.value}${m.suffix || ""}`,
+            ]),
+          ]
+        : []),
       [],
       ["Issue Type", "Percentage"],
       ...metrics.issueBreakdown.map((item) => [
@@ -482,6 +537,14 @@ export default function ReportsPage() {
             </motion.div>
           )}
 
+          {!loading && metrics.agentMetrics && (
+            <AgentMetricsGrid
+              title="Warranty Agent performance"
+              icon={<Bot className="h-5 w-5 text-primary" />}
+              metrics={agentMetricRows(metrics.agentMetrics, metrics.erpAvailable)}
+            />
+          )}
+
           {/* Detailed Charts Row */}
           <motion.div
             variants={containerVariants}
@@ -535,7 +598,7 @@ export default function ReportsPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <TrendingUp className="h-5 w-5 text-primary" />
-                    Agent Performance
+                    AI vs Team
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -623,19 +686,13 @@ export default function ReportsPage() {
                       </div>
                       <p className="text-muted-foreground/80 mt-0.5">Claims sent to a trade that were completed and closed.</p>
                     </div>
-                    <div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Auto-resolution Rate</span>
-                        <Badge variant="secondary" className="bg-[#b48c3c]/10 text-[#b48c3c] font-bold border-none">{metrics.autoResolutionRate}%</Badge>
-                      </div>
-                      <p className="text-muted-foreground/80 mt-0.5">Claims the AI agent resolved without your team or a trade.</p>
-                    </div>
                   </div>
                 </CardContent>
               </Card>
             </motion.div>
 
-            {/* ERP Sync Health */}
+            {/* ERP Sync Health — hidden until a platform can actually sync */}
+            {metrics.erpAvailable && (
             <motion.div variants={cardVariants} whileHover="hover">
               <Card className="shadow-sm border-l-4 border-l-secondary h-full">
                 <CardHeader>
@@ -668,7 +725,9 @@ export default function ReportsPage() {
                 </CardContent>
               </Card>
             </motion.div>
+            )}
           </motion.div>
+
         </motion.div>
       </PortalLayout>
     </ProtectedRoute>

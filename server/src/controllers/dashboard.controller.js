@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { hasPlatformAi } from "../lib/ai-config.js";
+import { ERP_LIVE_PLATFORMS } from "../services/erp-service.js";
 
 const ERP_LABELS = {
   BUILTOPIA: "Builtopia",
@@ -65,12 +66,12 @@ export const getDashboardStats = async (req, res) => {
         }
       }),
       prisma.integration.findFirst({
-        where: { companyId: session.companyId || "demo-company", isActive: true }
+        where: { companyId: session.companyId, isActive: true }
       }),
       prisma.warrantyKB.count({
         where: {
           scope: "COMPANY",
-          companyId: session.companyId || "demo-company",
+          companyId: session.companyId,
           isActive: true,
           status: "READY",
         },
@@ -78,13 +79,13 @@ export const getDashboardStats = async (req, res) => {
       prisma.ticket.findFirst({
         where: {
           isEmergency: true,
-          homeowner: { companyId: session.companyId || "demo-company" },
+          homeowner: { companyId: session.companyId },
         },
         orderBy: { updatedAt: "desc" },
       }),
       prisma.syncLog.findFirst({
         where: {
-          companyId: session.companyId || "demo-company",
+          companyId: session.companyId,
           action: { startsWith: "ERP_SYNC:" },
         },
         orderBy: { createdAt: "desc" },
@@ -130,8 +131,12 @@ export const getDashboardStats = async (req, res) => {
     const erpName = activeIntegration
       ? ERP_LABELS[activeIntegration.platform] || activeIntegration.platform
       : null;
-    const erpHealthy = lastErpSync?.status === "SUCCESS";
-    const erpSync = !activeIntegration
+    // null = neutral: no platform can sync yet, so neither OK nor a failure.
+    const erpLive = ERP_LIVE_PLATFORMS.length > 0;
+    const erpHealthy = erpLive ? lastErpSync?.status === "SUCCESS" : null;
+    const erpSync = !erpLive
+      ? "Coming soon"
+      : !activeIntegration
       ? "Not Connected"
       : !lastErpSync
         ? `${erpName} configured; no sync yet`

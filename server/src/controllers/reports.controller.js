@@ -1,7 +1,59 @@
 import prisma from "../lib/prisma.js";
+import { ERP_LIVE_PLATFORMS } from "../services/erp-service.js";
 
 const AUTO_RESOLVED_TYPE = "AI Chat — Resolved in chat";
 const ENGAGEMENT_TARGET = 98;
+
+const pct = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : null);
+
+/**
+ * The Warranty Agent metrics the onboarding SOP reports on (Part C), for one
+ * builder and period. Rates are null when there is nothing to divide by yet.
+ */
+async function warrantyAgentMetrics(companyId, since, until) {
+  const inPeriod = { gte: since, lte: until };
+
+  const [inquiries, diagnosed, resolvedByAi, visits, resolvedWithVisits] = await Promise.all([
+    // Every warranty chat the agent took.
+    prisma.warrantyConversation.count({ where: { companyId, createdAt: inPeriod } }),
+    // The agent worked out the issue and wrote it up as a ticket.
+    prisma.warrantyConversation.count({ where: { companyId, createdAt: inPeriod, ticketId: { not: null } } }),
+    // Fixed in the chat, no visit needed.
+    prisma.ticket.count({ where: { homeowner: { companyId }, createdAt: inPeriod, ticketType: AUTO_RESOLVED_TYPE } }),
+    // Visits that fell in the period.
+    prisma.ticketAppointment.findMany({
+      where: { companyId, scheduledAt: inPeriod },
+      select: { status: true, scheduledAt: true, remindersSent: true, rescheduleCount: true, tradeEmail: true },
+    }),
+    // Resolved claims that needed a visit, with how many visits it took.
+    prisma.ticket.findMany({
+      where: { homeowner: { companyId }, status: "RESOLVED", updatedAt: inPeriod, appointments: { some: { status: "COMPLETED" } } },
+      select: { appointments: { where: { status: { not: "CANCELLED" } }, select: { id: true } } },
+    }),
+  ]);
+
+  // Each reminder window goes to the homeowner, and to the trade when one is named.
+  const homeownerReminders = visits.reduce((n, v) => n + v.remindersSent.length, 0);
+  const tradeReminders = visits.reduce((n, v) => n + (v.tradeEmail ? v.remindersSent.length : 0), 0);
+
+  // Kept = the visit happened (completed) out of visits whose time has come.
+  const now = Date.now();
+  const due = visits.filter((v) => v.scheduledAt.getTime() <= now && v.status !== "SCHEDULED");
+  const kept = due.filter((v) => v.status === "COMPLETED").length;
+
+  const firstVisitFixes = resolvedWithVisits.filter((t) => t.appointments.length === 1).length;
+
+  return {
+    inquiriesHandled: inquiries,
+    inquiriesDiagnosed: diagnosed,
+    inquiriesResolvedByAi: resolvedByAi,
+    homeownerReminders,
+    tradeReminders,
+    appointmentKeptRate: pct(kept, due.length),
+    appointmentsRescheduled: visits.filter((v) => v.rescheduleCount > 0).length,
+    firstAppointmentResolutionRate: pct(firstVisitFixes, resolvedWithVisits.length),
+  };
+}
 
 export const getAnalytics = async (req, res) => {
   try {
@@ -29,7 +81,7 @@ export const getAnalytics = async (req, res) => {
       sinceDate.setDate(sinceDate.getDate() - days);
     }
 
-    const companyScope = { homeowner: { companyId: session.companyId || "demo-company" } };
+    const companyScope = { homeowner: { companyId: session.companyId } };
 
     const tickets = await prisma.ticket.findMany({
       where: {
@@ -52,8 +104,10 @@ export const getAnalytics = async (req, res) => {
       }
     });
 
+    const agentMetrics = await warrantyAgentMetrics(session.companyId, sinceDate, untilDate);
+
     // NFR 6.5: ERP sync health — success rate + recent failure log for the dashboard.
-    const companyId = session.companyId || "demo-company";
+    const companyId = session.companyId;
     const erpSyncedCount = tickets.filter((t) => t.erpSyncStatus === "SYNCED").length;
     const erpFailedCount = tickets.filter((t) => t.erpSyncStatus === "FAILED").length;
     const erpAttempted = erpSyncedCount + erpFailedCount;
@@ -147,10 +201,16 @@ export const getAnalytics = async (req, res) => {
       dispatchedTickets: dispatched.length,
       homeownerEngagement,
       engagementTarget: ENGAGEMENT_TARGET,
+      erpAvailable: ERP_LIVE_PLATFORMS.length > 0,
       erpSyncSuccessRate,
       erpSyncedCount,
       erpFailedCount,
-      erpFailureLog
+      erpFailureLog,
+      agentMetrics: {
+        ...agentMetrics,
+        claimsDispatched: tickets.filter(t => t.assignedStaffId).length,
+        ticketsWrittenToErp: erpSyncedCount,
+      },
     });
 
   } catch (error) {

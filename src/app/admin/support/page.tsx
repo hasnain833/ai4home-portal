@@ -13,9 +13,77 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, LifeBuoy, Search, ShieldAlert, History } from "lucide-react";
+import { Loader2, LifeBuoy, Search, ShieldAlert, History, Phone } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSupportContact } from "@/components/layout/HelpMenu";
+import { QUERY_KEYS, fetchKey } from "@/lib/use-query";
+
+/** The phone and chatbot link builders see in the Help menu and on Communities. */
+function SupportContactCard() {
+  const contact = useSupportContact();
+  const [phone, setPhone] = useState("");
+  const [chatUrl, setChatUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (contact) {
+      setPhone(contact.phone);
+      setChatUrl(contact.chatUrl);
+    }
+  }, [contact]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/support-contact", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, chatUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || "Could not save");
+      await fetchKey(QUERY_KEYS.supportContact, { force: true });
+      toast.success("Support contact updated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="border-border bg-card shadow-sm">
+      <CardHeader className="border-b border-border pb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#b48c3c]/10 text-[#b48c3c]">
+            <Phone className="h-5 w-5" />
+          </div>
+          <div>
+            <CardTitle className="text-xl text-foreground">Builder Support Contact</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Shown to every builder in the sidebar Help menu and on the Communities page.
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-4 p-4 md:grid-cols-[1fr_2fr_auto] md:items-end md:p-6">
+        <div className="space-y-1.5">
+          <Label htmlFor="supportPhone">Support phone</Label>
+          <Input id="supportPhone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="supportChat">Chatbot URL</Label>
+          <Input id="supportChat" value={chatUrl} onChange={(e) => setChatUrl(e.target.value)} />
+        </div>
+        <Button onClick={save} disabled={saving || !contact}>
+          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Save
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 interface CompanyOption {
   id: string;
@@ -114,6 +182,7 @@ export default function AdminSupportPage() {
 
   return (
     <div className="space-y-6">
+      {user?.isSuperAdmin && <SupportContactCard />}
       <Card className="border-border bg-card shadow-sm">
         <CardHeader className="border-b border-border pb-4">
           <div className="flex items-center gap-3">

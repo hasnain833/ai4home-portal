@@ -27,8 +27,10 @@ export interface DispatchTicketTarget {
   property?: { address?: string | null } | null;
 }
 
-// No date here: dispatch assigns the staff member and emails the homeowner a
-// link to pick a time from that person's availability.
+// No date here: dispatch emails the homeowner a link to pick a time — from the
+// assignee's availability, or the company's hours when no one is assigned.
+const UNASSIGNED = "none";
+
 const EMPTY_DISPATCH_FORM = {
   staffId: "",
   notes: "",
@@ -61,18 +63,13 @@ export function DispatchTicketDialog({
     if (!ticket) return;
     setError("");
 
-    if (!form.staffId) {
-      setError("Please choose a staff member.");
-      return;
-    }
-
     setDispatching(true);
     try {
       const response = await fetch(`/api/tickets/${ticket.id}/dispatch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          staffId: form.staffId,
+          staffId: form.staffId && form.staffId !== UNASSIGNED ? form.staffId : null,
           notes: form.notes.trim() || null,
         }),
       });
@@ -121,7 +118,7 @@ export function DispatchTicketDialog({
                   Dispatch Ticket
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Assign a staff member and book the repair visit.
+                  Send the homeowner a link to book the repair visit.
                 </p>
               </div>
             </div>
@@ -138,15 +135,18 @@ export function DispatchTicketDialog({
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="font-semibold">Assign to</Label>
+                <Label className="font-semibold">
+                  Assign to <span className="font-normal text-muted-foreground">(optional)</span>
+                </Label>
                 <Select
                   value={form.staffId}
                   onValueChange={(val) => setForm((f) => ({ ...f, staffId: val }))}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select staff member..." />
+                    <SelectValue placeholder="No one yet" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={UNASSIGNED}>No one yet</SelectItem>
                     {staff.map((member) => (
                       <SelectItem key={member.id} value={member.id}>
                         {member.name || member.email} &mdash; {member.email}
@@ -154,11 +154,6 @@ export function DispatchTicketDialog({
                     ))}
                   </SelectContent>
                 </Select>
-                {staff.length === 0 && (
-                  <p className="text-xs text-amber-600">
-                    No staff members yet. Add one on the Staff page first.
-                  </p>
-                )}
               </div>
 
               <div className="space-y-1.5">
@@ -166,7 +161,7 @@ export function DispatchTicketDialog({
                 <Textarea
                   id="dispatchNotes"
                   rows={3}
-                  placeholder="Anything the staff member should know before turning up"
+                  placeholder="Anything the visiting team should know before turning up"
                   value={form.notes}
                   onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                 />
@@ -175,9 +170,9 @@ export function DispatchTicketDialog({
               <div className="flex items-start gap-2.5 rounded-2xl border dark:border-gray-800 p-3">
                 <CalendarClock className="h-4 w-4 mt-0.5 text-[#0F3B3D] dark:text-[#E8B86B] shrink-0" />
                 <p className="text-xs text-gray-500 dark:text-slate-400 leading-snug">
-                  The homeowner picks the time. They&apos;re emailed a link showing when
-                  this staff member is free; the staff member gets the full ticket now
-                  and a confirmation once a slot is chosen.
+                  {form.staffId && form.staffId !== UNASSIGNED
+                    ? "The homeowner picks the time. They're emailed a link showing when this staff member is free; the staff member gets the full ticket now and a confirmation once a slot is chosen."
+                    : "The homeowner picks the time from your company's working hours. No staff name is shown to them, and admins get the confirmation once a slot is chosen."}
                 </p>
               </div>
 

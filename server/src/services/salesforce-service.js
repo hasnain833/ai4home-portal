@@ -196,6 +196,20 @@ export class SalesforceClient {
     return res.text();
   }
 
+  async createRecord(sObjectType, data) {
+    const res = await this.apiRequest(`/services/data/v59.0/sobjects/${sObjectType}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return res.id;
+  }
+
+  async deleteRecord(sObjectType, recordId) {
+    await this.apiRequest(`/services/data/v59.0/sobjects/${sObjectType}/${recordId}`, {
+      method: "DELETE",
+    });
+  }
+
   async updateRecord(sObjectType, recordId, data) {
     await this.apiRequest(`/services/data/v59.0/sobjects/${sObjectType}/${recordId}`, {
       method: "PATCH",

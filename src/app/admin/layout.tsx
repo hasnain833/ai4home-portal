@@ -25,6 +25,7 @@ import {
   PanelLeftOpen,
   FlaskConical,
   Send,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -36,6 +37,7 @@ const adminNavItems = [
   { name: "Verifications", href: "/admin/verifications", icon: ShieldCheck },
   { name: "Users & Access", href: "/admin/users", icon: Users },
   { name: "CRM Health", href: "/admin/crm-health", icon: PlugZap },
+  { name: "Hand-off Issues", href: "/admin/handoffs", icon: ArrowRightLeft },
   { name: "News Defaults", href: "/admin/news-defaults", icon: Newspaper },
   { name: "Support Access", href: "/admin/support", icon: LifeBuoy },
   {

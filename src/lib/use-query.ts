@@ -132,4 +132,5 @@ export const QUERY_KEYS = {
   company: "/api/company",
   segments: "/api/sales/segments",
   messagingCapabilities: "/api/sales/settings/messaging/capabilities",
+  supportContact: "/api/admin/support-contact",
 } as const;

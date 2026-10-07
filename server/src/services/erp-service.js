@@ -186,6 +186,12 @@ export async function testERPConnection(companyId, platform) {
 // stay out of sync until each is built for real; drop a platform from here then.
 export const COMING_SOON_PLATFORMS = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
 
+// What can actually sync. Empty means ERP is off everywhere: the dashboard and
+// reports hide their ERP figures, and ticket hooks skip sync entirely.
+export const ERP_LIVE_PLATFORMS = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"].filter(
+  (p) => !COMING_SOON_PLATFORMS.includes(p),
+);
+
 const MAX_ERP_ATTEMPTS = 3;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -240,6 +246,9 @@ async function logErpSync({ companyId, ticketId, platform, status, message }) {
 }
 
 export async function syncTicketToERP(ticketId, { reason = "manual" } = {}) {
+  // Runs inline on every ticket create/status change; skip the lookup when nothing can sync.
+  if (!ERP_LIVE_PLATFORMS.length) return false;
+
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
     include: { homeowner: { include: { company: true } } },
@@ -249,9 +258,7 @@ export async function syncTicketToERP(ticketId, { reason = "manual" } = {}) {
   const companyId = ticket.homeowner?.companyId;
   if (!companyId) return false;
 
-  const platforms = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"].filter(
-    (p) => !COMING_SOON_PLATFORMS.includes(p),
-  );
+  const platforms = ERP_LIVE_PLATFORMS;
   let anyConfigured = false;
 
   for (const platform of platforms) {

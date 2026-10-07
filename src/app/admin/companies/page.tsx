@@ -12,6 +12,24 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Loader2, Building2 } from "lucide-react";
+import { toast } from "sonner";
+
+// SOP: a new builder goes live within 30 days of signing.
+const GO_LIVE_TARGET_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dateInput = (iso: string | null) => (iso ? iso.slice(0, 10) : "");
+
+function onboardingBadge(c: { contractSignedAt: string | null; goLiveAt: string | null }) {
+  if (!c.contractSignedAt) return null;
+  const signed = new Date(c.contractSignedAt).getTime();
+  if (c.goLiveAt) {
+    const days = Math.round((new Date(c.goLiveAt).getTime() - signed) / DAY_MS);
+    const late = days > GO_LIVE_TARGET_DAYS;
+    return { text: `Live in ${days} day${days === 1 ? "" : "s"}`, late };
+  }
+  const day = Math.max(0, Math.floor((Date.now() - signed) / DAY_MS));
+  return { text: `Day ${day} of ${GO_LIVE_TARGET_DAYS}`, late: day > GO_LIVE_TARGET_DAYS };
+}
 import { useAuth } from "@/contexts/AuthContext";
 
 interface CompanyRecord {
@@ -24,6 +42,8 @@ interface CompanyRecord {
   salesEnabled: boolean;
   verificationStatus: string;
   createdAt: string;
+  contractSignedAt: string | null;
+  goLiveAt: string | null;
   _count?: {
     users: number;
     integrations: number;
@@ -61,6 +81,22 @@ export default function AdminCompaniesPage() {
     if (user?.isSuperAdmin) fetchCompanies();
   }, [user]);
 
+  const saveOnboarding = async (id: string, field: "contractSignedAt" | "goLiveAt", value: string) => {
+    const previous = companies;
+    setCompanies((list) => list.map((c) => (c.id === id ? { ...c, [field]: value || null } : c)));
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/onboarding`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value || null }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Could not save");
+    } catch (e) {
+      setCompanies(previous);
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <Card className="bg-card border-border shadow-sm">
@@ -86,20 +122,21 @@ export default function AdminCompaniesPage() {
                   <TableHead>Verification</TableHead>
                   <TableHead>Workspaces</TableHead>
                   <TableHead className="text-center">Users</TableHead>
+                  <TableHead>Onboarding</TableHead>
                   <TableHead className="pr-6">Joined</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
                       <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
                       Loading companies...
                     </TableCell>
                   </TableRow>
                 ) : companies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">No companies found.</TableCell>
+                    <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">No companies found.</TableCell>
                   </TableRow>
                 ) : (
                   companies.map((company) => (
@@ -131,6 +168,36 @@ export default function AdminCompaniesPage() {
                       </TableCell>
                       <TableCell className="text-center text-sm text-foreground/80">
                         {company._count?.users ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex min-w-[170px] flex-col gap-1 text-[11px] text-muted-foreground">
+                          <label className="flex items-center justify-between gap-2">
+                            Signed
+                            <input
+                              type="date"
+                              className="rounded border border-border bg-background px-1 py-0.5 text-foreground"
+                              value={dateInput(company.contractSignedAt)}
+                              onChange={(e) => saveOnboarding(company.id, "contractSignedAt", e.target.value)}
+                            />
+                          </label>
+                          <label className="flex items-center justify-between gap-2">
+                            Live
+                            <input
+                              type="date"
+                              className="rounded border border-border bg-background px-1 py-0.5 text-foreground"
+                              value={dateInput(company.goLiveAt)}
+                              onChange={(e) => saveOnboarding(company.id, "goLiveAt", e.target.value)}
+                            />
+                          </label>
+                          {(() => {
+                            const badge = onboardingBadge(company);
+                            return badge ? (
+                              <span className={badge.late ? "font-semibold text-rose-600" : "font-semibold text-emerald-600"}>
+                                {badge.text}
+                              </span>
+                            ) : null;
+                          })()}
+                        </div>
                       </TableCell>
                       <TableCell className="pr-6 text-sm text-muted-foreground whitespace-nowrap">
                         {company.createdAt ? new Date(company.createdAt).toLocaleDateString() : "—"}

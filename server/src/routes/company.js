@@ -1,5 +1,5 @@
 import express from "express";
-import { requireAuth } from "../middlewares/auth.js";
+import { requireAuth, requireCompany } from "../middlewares/auth.js";
 import multer from "multer";
 import {
   getCompany,
@@ -20,7 +20,7 @@ const upload = multer({
 const uploadFile = handleUploadErrors(upload.single("file"));
 
 router.get("/", requireAuth, getCompany);
-router.put("/", requireAuth, updateCompany);
+router.put("/", requireAuth, requireCompany, updateCompany);
 
 router.get("/branding", getCompanyBranding);
 router.options("/branding", (req, res) => {
@@ -30,7 +30,7 @@ router.options("/branding", (req, res) => {
   return res.status(204).end();
 });
 
-router.post("/logo", requireAuth, uploadFile, uploadCompanyLogo);
+router.post("/logo", requireAuth, requireCompany, uploadFile, uploadCompanyLogo);
 router.post("/verification", requireAuth, uploadFile, submitVerificationDocument);
 router.post("/agreement", requireAuth, uploadFile, submitAgreementDocument);
 

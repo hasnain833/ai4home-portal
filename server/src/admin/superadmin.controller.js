@@ -172,6 +172,7 @@ export const verifyCompany = async (req, res) => {
         verificationStatus: "VERIFIED",
         verifiedAt: new Date(),
         warrantyEnabled: true,
+        contractSignedAt: existing.contractSignedAt ?? new Date(),
       },
     });
 
@@ -231,5 +232,35 @@ export const updateUserAccess = async (req, res) => {
   } catch (error) {
     console.error("Failed to update user access:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+/** Onboarding dates; time to go-live is reported against the SOP's 30-day target. */
+export const updateCompanyOnboarding = async (req, res) => {
+  try {
+    if (!req.user?.isSuperAdmin) return res.status(403).json({ message: "Unauthorized" });
+
+    const data = {};
+    for (const field of ["contractSignedAt", "goLiveAt"]) {
+      if (req.body?.[field] === undefined) continue;
+      if (!req.body[field]) {
+        data[field] = null;
+        continue;
+      }
+      const date = new Date(req.body[field]);
+      if (Number.isNaN(date.getTime())) return res.status(400).json({ message: `${field} is not a valid date` });
+      data[field] = date;
+    }
+
+    const company = await prisma.company.update({
+      where: { id: req.params.companyId },
+      data,
+      select: { id: true, contractSignedAt: true, goLiveAt: true },
+    });
+    return res.json(company);
+  } catch (error) {
+    if (error?.code === "P2025") return res.status(404).json({ message: "Company not found" });
+    console.error("Error updating onboarding dates:", error);
+    return res.status(500).json({ message: "Error updating onboarding dates" });
   }
 };

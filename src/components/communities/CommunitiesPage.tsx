@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Building2, FileText, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import PortalLayout from "@/components/layout/PortalLayout";
+import { SupportContactStrip } from "@/components/layout/HelpMenu";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -137,6 +138,8 @@ export default function CommunitiesPage({ workspace }: { workspace: "warranty" |
               </Button>
             </div>
           </div>
+
+          <SupportContactStrip />
 
           <Card>
             <CardContent className="p-4 flex flex-col sm:flex-row gap-3">

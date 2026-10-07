@@ -39,6 +39,7 @@ import { Button } from "@/components/ui/button";
 import VerificationGate from "@/components/layout/VerificationGate";
 import { BrandLogo } from "@/components/BrandLogo";
 import { NotificationBell } from "@/components/warranty/NotificationBell";
+import { HelpMenu } from "@/components/layout/HelpMenu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -90,7 +91,7 @@ const salesNavItems: NavItem[] = [
   { name: "Blog Posts", href: "/sales/blog", icon: Pencil, roles: ["admin", "staff"], permission: SALES_PERMISSION.blogManage },
   { name: "Knowledge Base", href: "/sales/knowledge-base", icon: Database, roles: ["admin", "staff"], permission: SALES_PERMISSION.kbManage },
   { name: "Automations", href: "/sales/automations", icon: Plug, roles: ["admin", "staff"], permission: SALES_PERMISSION.automationsManage },
-  { name: "Settings", href: "/sales/settings", icon: Settings, roles: ["admin", "staff"], permission: SALES_PERMISSION.settingsManage },
+  { name: "Integrations", href: "/sales/settings", icon: Settings, roles: ["admin", "staff"], permission: SALES_PERMISSION.settingsManage },
 ];
 
 export default function PortalLayout({
@@ -293,6 +294,8 @@ export default function PortalLayout({
                 className="text-white/80 hover:bg-white/10 hover:text-white"
               />
             )}
+            {/* Support is for builder users, not homeowners. */}
+            {user?.role !== "homeowner" && <HelpMenu expanded={sidebarExpanded} />}
             <Button
               variant="ghost"
               size="sm"
@@ -497,6 +500,7 @@ export default function PortalLayout({
                         <p className="text-xs capitalize text-white/60">{user?.role}</p>
                       </div>
                     </div>
+                    {user?.role !== "homeowner" && <HelpMenu />}
                     <Button
                       variant="ghost"
                       className="w-full justify-start text-white/80 hover:bg-white/10"

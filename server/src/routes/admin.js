@@ -12,6 +12,7 @@ import {
   updateCompanyWorkspaces,
   updateUserAccess,
   verifyCompany,
+  updateCompanyOnboarding,
 } from "../admin/superadmin.controller.js";
 import {
   getCrmHealth,
@@ -22,8 +23,11 @@ import {
   getSecurityPosture,
   getMessagingSpend,
   setMessagingPricing,
+  getSupportContact,
+  updateSupportContact,
 } from "../admin/platform.controller.js";
 import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
+import { listHandoffIssues, retryHandoffIssue, resolveHandoffIssue } from "../admin/handoffs.controller.js";
 import {
   getPromptLab,
   savePromptVersion,
@@ -69,11 +73,17 @@ router.patch(
 );
 router.patch("/users/:userId/access", requireAuth, updateUserAccess);
 router.patch("/companies/:companyId/verify", requireAuth, verifyCompany);
+router.patch("/companies/:companyId/onboarding", requireAuth, updateCompanyOnboarding);
 router.get("/crm-health", requireAuth, getCrmHealth);
 router.get("/news-defaults", requireAuth, getDefaultNewsSources);
 router.put("/news-defaults", requireAuth, updateDefaultNewsSources);
 router.get("/support/leads/:companyId", requireAuth, getSupportLeads);
 router.get("/support/access-log", requireAuth, getSupportAccessLog);
+router.get("/handoff-issues", requireAuth, listHandoffIssues);
+router.post("/handoff-issues/:id/retry", requireAuth, retryHandoffIssue);
+router.post("/handoff-issues/:id/resolve", requireAuth, resolveHandoffIssue);
+router.get("/support-contact", requireAuth, getSupportContact);
+router.put("/support-contact", requireAuth, updateSupportContact);
 router.get("/security-posture", requireAuth, getSecurityPosture);
 router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);

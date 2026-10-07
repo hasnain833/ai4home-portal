@@ -6,7 +6,8 @@ import {
   createLead,
   importLeads,
   deleteLead,
-  updateLead
+  updateLead,
+  closeLeadWon,
 } from "../controllers/leads.controller.js";
 
 const router = Router();
@@ -17,5 +18,6 @@ router.post("/import", requireAuth, importLeads);
 router.get("/:id", requireAuth, getLead);
 router.delete("/:id", requireAuth, deleteLead);
 router.patch("/:id", requireAuth, updateLead);
+router.post("/:id/close-won", requireAuth, closeLeadWon);
 
 export default router;

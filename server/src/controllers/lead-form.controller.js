@@ -2,6 +2,7 @@ import prisma from "../lib/prisma.js";
 import { findDuplicateLead } from "../lib/lead-dedup.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { normalizePhone } from "../services/sms.service.js";
+import { pushLeadToSalesforce } from "../services/salesforce-writeback.js";
 
 // A builder's website form, hosted here (iframe or link) or posted to directly
 // from their own form. The URL carries the company id, which is already public
@@ -120,6 +121,7 @@ export const submitLeadForm = async (req, res) => {
       event: "WEB_FORM",
       context: { returning: !!existing },
     });
+    void pushLeadToSalesforce(company.id, lead.id);
 
     return done();
   } catch (error) {

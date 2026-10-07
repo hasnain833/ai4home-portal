@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import HomeownerDashboard from "@/components/sales/HomeownerDashboard";
+import SalesAgentPerformance from "@/components/sales/SalesAgentPerformance";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -130,7 +131,8 @@ export default function SalesDashboardPage() {
     nurturingLeads: 0,
     activeCampaigns: 0,
     totalEnrolled: 0,
-    appointmentRate: 0,
+    closedWon: 0,
+    upcomingCount: 0,
   });
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -145,7 +147,6 @@ export default function SalesDashboardPage() {
       if (dashboardRes.ok) {
         const data = await dashboardRes.json();
         const total = data.leads?.total || 0;
-        const appointmentSet = data.leads?.appointmentSet || 0;
         setStats((s) => ({
           ...s,
           totalLeads: total,
@@ -153,8 +154,8 @@ export default function SalesDashboardPage() {
           nurturingLeads: data.leads?.nurturing || 0,
           activeCampaigns: data.campaigns?.activeCount || 0,
           totalEnrolled: data.campaigns?.totalEnrolled || 0,
-          appointmentRate:
-            total > 0 ? Math.round((appointmentSet / total) * 1000) / 10 : 0,
+          closedWon: data.leads?.closedWon || 0,
+          upcomingCount: data.upcomingCount ?? (data.upcomingAppointments || []).length,
         }));
         setCampaigns(data.campaigns?.active || []);
         setCalendarItems(data.upcomingCalendarItems || []);
@@ -366,13 +367,13 @@ export default function SalesDashboardPage() {
                 <Card className="hover:shadow-md transition-all">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">
-                      Model Home Bookings
+                      Upcoming Bookings
                     </CardTitle>
                     <Calendar className="h-4 w-4 text-green-500" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-                      {appointments.length}
+                      {stats.upcomingCount}
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       {appointments.length > 0
@@ -385,22 +386,24 @@ export default function SalesDashboardPage() {
                 <Card className="hover:shadow-md transition-all">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">
-                      Avg Lead Conversion
+                      Closed Won
                     </CardTitle>
                     <TrendingUp className="h-4 w-4 text-emerald-500" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-                      {stats.appointmentRate}%
+                      {stats.closedWon}
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Lead → Appointment rate
+                      Homes sold, handed to Warranty
                     </p>
                   </CardContent>
                 </Card>
               </>
             )}
           </motion.div>
+
+          <SalesAgentPerformance />
 
           {/* Main Dashboard Grid */}
           <motion.div

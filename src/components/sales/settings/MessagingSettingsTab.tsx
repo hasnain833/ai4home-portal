@@ -37,7 +37,7 @@ export default function MessagingSettingsTab() {
 
     (async () => {
       try {
-        const res = await fetch("/api/sales/messaging-settings");
+        const res = await fetch("/api/sales/settings/messaging");
         if (!cancelled && res.ok) setSettings(await res.json());
       } catch (error) {
         console.error("Failed to load messaging settings:", error);

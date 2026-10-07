@@ -668,7 +668,7 @@ function SettingsPageContent() {
           <motion.div variants={fadeInUp} className="flex justify-between items-center">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
-                Sales Workspace Settings
+                Integrations
               </h1>
               <p className="text-muted-foreground text-sm mt-1">
                 Configure Salesforce CRM connector integration, compliance rules, and custom fields metadata.

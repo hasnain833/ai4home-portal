@@ -18,8 +18,11 @@ export const getCompany = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
+    // Super admins have no company; they get an empty profile, as before.
+    if (!session.companyId) return res.json({});
+
     const company = await prisma.company.findUnique({
-      where: { id: session.companyId || "demo-company" }
+      where: { id: session.companyId }
     });
 
     return res.json({ ...(company || {}) });
@@ -36,7 +39,7 @@ export const updateCompany = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const companyId = session.companyId || "demo-company";
+    const companyId = session.companyId;
     const SETTINGS_FIELDS = [
       "defaultLeadOwner",
       "voiceProfile",
@@ -307,7 +310,7 @@ export const uploadCompanyLogo = async (req, res) => {
       return res.status(400).json({ message: "No file provided" });
     }
 
-    const companyId = session.companyId || "demo-company";
+    const companyId = session.companyId;
     await assertUploadSafe(file, "image");
 
     const { publicUrl } = await uploadObject({

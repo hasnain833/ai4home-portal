@@ -1,17 +1,7 @@
 import { toE164 } from "../services/sms.service.js";
 import prisma from "../lib/prisma.js";
-import { createClient } from "@supabase/supabase-js";
+import { createHomeownerAccount, getSupabaseAdmin } from "../lib/homeowner-account.js";
 import bcrypt from "bcryptjs";
-
-// Initialize Supabase Admin client
-const getSupabaseAdmin = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error("Missing Supabase credentials");
-  }
-  return createClient(supabaseUrl, supabaseServiceKey);
-};
 
 export const getHomeowners = async (req, res) => {
   try {
@@ -22,7 +12,7 @@ export const getHomeowners = async (req, res) => {
 
     const homeowners = await prisma.user.findMany({
       where: {
-        companyId: session.companyId || "demo-company",
+        companyId: session.companyId,
         role: "HOMEOWNER",
       },
       select: {
@@ -68,46 +58,12 @@ export const createHomeowner = async (req, res) => {
       return res.status(400).json({ message: "Email already in use" });
     }
 
-    // 1. Create Supabase Auth account — email_confirm: true means account is immediately active, no invite needed
-    const supabaseAdmin = getSupabaseAdmin();
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { name },
-    });
-
-    if (authError) {
-      console.error("[Homeowner] Supabase auth creation error:", authError);
-      return res.status(400).json({ message: authError.message || "Failed to create authentication account" });
-    }
-
-    // 2. Create user in Prisma DB
-    const hashedPassword = await bcrypt.hash(password, 10);
     let homeowner;
     try {
-      homeowner = await prisma.user.create({
-        data: {
-          name,
-          email,
-          password: hashedPassword,
-          role: "HOMEOWNER",
-          companyId: session.companyId,
-          phone,
-        },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          role: true,
-          createdAt: true,
-        },
-      });
-    } catch (dbError) {
-      // Rollback: delete the Supabase user if DB insert fails
-      await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
-      throw dbError;
+      homeowner = await createHomeownerAccount({ name, email, phone, companyId: session.companyId, password });
+    } catch (err) {
+      if (err.status === 400) return res.status(400).json({ message: err.message });
+      throw err;
     }
 
     return res.status(201).json(homeowner);
@@ -172,7 +128,7 @@ export const getHomeowner = async (req, res) => {
     const homeowner = await prisma.user.findFirst({
       where: {
         id,
-        companyId: session.companyId || "demo-company",
+        companyId: session.companyId,
         role: "HOMEOWNER",
       },
       select: {
@@ -208,7 +164,7 @@ export const updateHomeowner = async (req, res) => {
     const existingHomeowner = await prisma.user.findFirst({
       where: {
         id,
-        companyId: session.companyId || "demo-company",
+        companyId: session.companyId,
         role: "HOMEOWNER",
       },
     });
@@ -284,7 +240,7 @@ export const updateHomeowner = async (req, res) => {
       if (hasSalesAccess) {
         // A tenant cannot grant access to a workspace it is not entitled to.
         const company = await prisma.company.findUnique({
-          where: { id: session.companyId || "demo-company" },
+          where: { id: session.companyId },
           select: { salesEnabled: true },
         });
         if (!company?.salesEnabled) {

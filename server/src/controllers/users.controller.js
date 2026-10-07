@@ -11,7 +11,7 @@ export const getUsers = async (req, res) => {
 
     const users = await prisma.user.findMany({
       where: {
-        companyId: session.companyId || "demo-company",
+        companyId: session.companyId,
         role: roleParam === "homeowner" ? "HOMEOWNER" : undefined,
       },
       select: {

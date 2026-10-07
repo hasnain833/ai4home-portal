@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { triggerAutomation } from "../lib/automation-events.js";
-import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
+import { writeBackLeadToSalesforce, pushAppointmentToSalesforce } from "../services/salesforce-writeback.js";
 import { appointmentTokenData, getOrCreateLeadBookingToken } from "../lib/public-tokens.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
 import { notifySalesAppointment } from "../services/notification-service.js";
@@ -324,9 +324,11 @@ export const bookAppointment = async (req, res) => {
         event: "APPOINTMENT_BOOKED",
         context: { appointmentId: appointment.id, bookedVia: "CTA" },
       });
-      writeBackLeadToSalesforce(apptLead.companyId, leadId, {
-        status: LEAD_STATUS.APPOINTMENT_SET,
-      }).catch((e) =>
+      pushAppointmentToSalesforce(appointment.id)
+        .then(() => writeBackLeadToSalesforce(apptLead.companyId, leadId, {
+          status: LEAD_STATUS.APPOINTMENT_SET,
+        }))
+        .catch((e) =>
         console.error(
           "[Appointment Book] Salesforce write-back failed:",
           e?.message || e,

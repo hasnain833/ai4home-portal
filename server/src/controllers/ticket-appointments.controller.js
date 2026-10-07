@@ -144,6 +144,7 @@ export const updateAppointment = async (req, res) => {
       data.scheduledAt = when;
       // A new time deserves a fresh set of reminders.
       data.remindersSent = [];
+      if (when.getTime() !== existing.scheduledAt?.getTime()) data.rescheduleCount = { increment: 1 };
     }
 
     if (status !== undefined) {

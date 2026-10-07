@@ -301,12 +301,10 @@ export const updateTicket = async (req, res) => {
         message: `Invalid status. Expected one of: ${TICKET_STATUSES.join(", ")}`,
       });
     }
-    // The one state that cannot be made coherent after the fact: dispatched to
-    // nobody means no one to visit and no link for the homeowner to book with.
+    // Setting DISPATCHED by hand would leave the homeowner with no booking link.
     if (status === "DISPATCHED" && status !== oldTicket.status && !oldTicket.assignedStaffId) {
       return res.status(400).json({
-        message:
-          "Assign someone first — use Dispatch to pick a staff member and send the homeowner a booking link.",
+        message: "Use Dispatch to send the homeowner a booking link.",
       });
     }
     if (priority && !TICKET_PRIORITIES.includes(priority)) {
@@ -450,8 +448,9 @@ export const updateTicket = async (req, res) => {
 };
 
 /**
- * Dispatch: the one door out of OPEN. Names the staff member who owns the fix
- * and sends the homeowner a link to pick a time from that person's availability.
+ * Dispatch: the one door out of OPEN. Optionally names the staff member who owns
+ * the fix, and sends the homeowner a link to pick a time from that person's
+ * availability (or the company's hours when no one is assigned).
  *
  * No time is chosen here on purpose — the homeowner picks it. So a dispatched
  * ticket may sit with no visit booked yet, which the tickets list surfaces as
@@ -469,10 +468,6 @@ export const dispatchTicket = async (req, res) => {
 
     const { id } = req.params;
     const { staffId, notes } = req.body;
-
-    if (!staffId) {
-      return res.status(400).json({ message: "Please choose a staff member to assign." });
-    }
 
     const ticket = await prisma.ticket.findUnique({
       where: { id },
@@ -500,19 +495,23 @@ export const dispatchTicket = async (req, res) => {
       });
     }
 
-    const staff = await prisma.user.findFirst({
-      where: { id: staffId, companyId, role: { in: DISPATCH_ROLES } },
-      select: { id: true, name: true, email: true },
-    });
-    if (!staff) {
-      return res.status(400).json({ message: "That staff member is not part of this company." });
+    // Assignee is optional: unassigned, the homeowner books from company hours.
+    let staff = null;
+    if (staffId) {
+      staff = await prisma.user.findFirst({
+        where: { id: staffId, companyId, role: { in: DISPATCH_ROLES } },
+        select: { id: true, name: true, email: true },
+      });
+      if (!staff) {
+        return res.status(400).json({ message: "That staff member is not part of this company." });
+      }
     }
 
     const updated = await prisma.ticket.update({
       where: { id },
       data: {
         status: "DISPATCHED",
-        assignedStaffId: staff.id,
+        assignedStaffId: staff?.id ?? null,
         bookingToken: randomUUID(),
         dispatchNotes: String(notes || "").trim().slice(0, 2000) || null,
         reminderCount: 0,

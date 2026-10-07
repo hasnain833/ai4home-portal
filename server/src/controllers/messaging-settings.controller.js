@@ -7,7 +7,7 @@ export const getMessagingSettings = async (req, res) => {
     const session = req.user;
     if (!session) return res.status(401).json({ message: "Unauthorized" });
 
-    const companyId = session.companyId || "demo-company";
+    const companyId = session.companyId;
 
     const company = await prisma.company.findUnique({
       where: { id: companyId },

@@ -187,13 +187,14 @@ export const Templates = {
 
   getTicketDispatchStaffEmail: (
     { ticketId, ticketRef, issueType, ticketCategory, description, priority, warrantyYear, whenLabel,
-      durationMinutes, address, homeownerName, homeownerEmail, notes },
+      durationMinutes, address, homeownerName, homeownerEmail, notes, staffName },
     portalUrl,
     companyName,
     { rescheduled = false } = {},
   ) => {
     const rows = [
       ["When", `${whenLabel}${durationMinutes ? ` (${durationMinutes} min)` : ""}`],
+      ...(staffName ? [] : [["Assigned to", "No one yet"]]),
       ["Property", address || "Not specified"],
       ["Homeowner", homeownerEmail ? `${homeownerName} &mdash; ${homeownerEmail}` : homeownerName],
       ["Ticket", `${ticketRef}`],
@@ -206,7 +207,9 @@ export const Templates = {
       <p style="margin-top: 0;">${
         rescheduled
           ? `The visit for ticket <strong>${ticketRef}</strong> has been moved.`
-          : `You have been assigned to ticket <strong>${ticketRef}</strong>.`
+          : staffName
+            ? `You have been assigned to ticket <strong>${ticketRef}</strong>.`
+            : `The homeowner booked a visit for ticket <strong>${ticketRef}</strong>. No one is assigned yet.`
       }</p>
       ${emailHighlightBox(whenLabel)}
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
@@ -227,7 +230,7 @@ export const Templates = {
   ) => {
     const rows = [
       ["When", whenLabel],
-      ["Visiting", staffName || companyName],
+      ...(staffName ? [["Visiting", staffName]] : []),
       ["Address", address || "Your property"],
     ];
     const content = `
@@ -258,16 +261,18 @@ export const Templates = {
       <p>${
         nudge
           ? `You have not picked a time yet for your <strong>${issueType}</strong> repair visit. Choose one below and we'll lock it in.`
-          : `<strong>${staffName || "One of our team"}</strong> has been assigned to your <strong>${issueType}</strong> claim. Pick a time that suits you and they'll come to you.`
+          : staffName
+            ? `<strong>${staffName}</strong> has been assigned to your <strong>${issueType}</strong> claim. Pick a time that suits you and they'll come to you.`
+            : `We're ready to book a repair visit for your <strong>${issueType}</strong> claim. Pick a time that suits you and we'll come to you.`
       }</p>
       ${emailButton(bookingUrl, "Choose your appointment time")}
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">
-        <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Visiting</td><td style="padding: 12px 0;">${staffName || companyName}</td></tr>
+        ${staffName ? `<tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600; width: 120px;">Visiting</td><td style="padding: 12px 0;">${staffName}</td></tr>` : ""}
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Address</td><td style="padding: 12px 0;">${address || "Your property"}</td></tr>
         <tr style="border-bottom: 1px solid ${COLORS.border};"><td style="padding: 12px 12px 12px 0; font-weight: 600;">Claim</td><td style="padding: 12px 0;">${ticketRef}</td></tr>
       </table>
       <p style="font-size: 14px; color: ${COLORS.textMuted};">The times shown are the ones
-      ${staffName || "your assigned team member"} has free. If none of them work, reply to this
+      ${staffName || "our team"} has free. If none of them work, reply to this
       email and we'll sort something out.</p>
     `;
     return wrapEmail(
@@ -332,7 +337,7 @@ export const Templates = {
       ["Ticket", `${ticketRef}`],
       ["Issue", issueType],
       ["Property", address || "Not specified"],
-      forHomeowner ? ["Attending", tradeName || companyName] : ["Homeowner", homeownerName],
+      ...(forHomeowner ? (tradeName ? [["Attending", tradeName]] : []) : [["Homeowner", homeownerName]]),
     ];
     const content = `
       <p style="margin-top: 0;">${lead}</p>
@@ -382,6 +387,20 @@ export const Templates = {
       ${emailButton(adminUrl, "Open Verifications")}
     `;
     return wrapEmail(content, "New Tenant Registration");
+  },
+
+  getHomeownerWelcomeEmail: ({ name, address, coverageEnd }, actionLink, companyName) => {
+    const content = `
+      <p style="margin-top: 0;">Hello <strong>${name}</strong>,</p>
+      <p>Congratulations on your new home${address ? ` at <strong>${address}</strong>` : ""}! Your warranty
+      account with ${companyName} is ready. If anything needs fixing, you can report it any time and
+      our warranty assistant will help you straight away.</p>
+      ${coverageEnd ? emailHighlightBox(`Warranty coverage until ${coverageEnd}`) : ""}
+      ${emailButton(actionLink, "Set your password")}
+      <p style="font-size: 14px; color: ${COLORS.textMuted};">This link expires after a short time. If it has,
+      use "Forgot password" on the sign-in page with this email address.</p>
+    `;
+    return wrapEmail(content, "Welcome Home", companyName, COLORS.primary);
   },
 
   getForgotPasswordEmail: (actionLink) => {

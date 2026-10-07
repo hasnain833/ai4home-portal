@@ -30,7 +30,7 @@ export const getCommunities = async (req, res) => {
     }
 
     const communities = await prisma.community.findMany({
-      where: { companyId: session.companyId || "demo-company" },
+      where: { companyId: session.companyId },
       include: COUNTS,
       orderBy: { name: "asc" },
     });
@@ -64,7 +64,7 @@ export const createCommunity = async (req, res) => {
         .json({ message: `Type must be one of: ${COMMUNITY_TYPES.join(", ")}` });
     }
 
-    const companyId = session.companyId || "demo-company";
+    const companyId = session.companyId;
 
     const clash = await prisma.community.findFirst({
       where: { companyId, name: { equals: trimmed, mode: "insensitive" } },
@@ -106,7 +106,7 @@ export const updateCommunity = async (req, res) => {
 
     const { id } = req.params;
     const { name, color, type } = req.body;
-    const companyId = session.companyId || "demo-company";
+    const companyId = session.companyId;
 
     const existing = await prisma.community.findFirst({
       where: { id, companyId },
@@ -167,7 +167,7 @@ export const deleteCommunity = async (req, res) => {
     if (!id) return res.status(400).json({ message: "ID required" });
 
     const community = await prisma.community.findFirst({
-      where: { id, companyId: session.companyId || "demo-company" },
+      where: { id, companyId: session.companyId },
       include: { _count: { select: { properties: true, salesHomes: true, warrantyKBs: true } } },
     });
 

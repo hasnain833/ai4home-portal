@@ -580,3 +580,54 @@ export const setMessagingPricing = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// Support contact shown to builders (Help menu, Communities pages).
+const SUPPORT_CONTACT_KEY = "support.contact";
+// Placeholders until the client sends the real line and chatbot URL.
+const DEFAULT_SUPPORT_CONTACT = {
+  phone: "(800) 555-0142",
+  chatUrl: "https://support.ai4homebuilders.com/chat",
+};
+
+// Any signed-in user may read this; only super admins edit it.
+export const getSupportContact = async (req, res) => {
+  try {
+    const row = await prisma.platformSetting.findUnique({ where: { key: SUPPORT_CONTACT_KEY } });
+    return res.json({ ...DEFAULT_SUPPORT_CONTACT, ...(row?.value || {}) });
+  } catch (error) {
+    console.error("[Platform getSupportContact] Error:", error);
+    return res.json(DEFAULT_SUPPORT_CONTACT);
+  }
+};
+
+export const updateSupportContact = async (req, res) => {
+  try {
+    if (denyUnlessSuperAdmin(req, res)) return;
+    const phone = String(req.body?.phone || "").trim().slice(0, 40);
+    const chatUrl = String(req.body?.chatUrl || "").trim().slice(0, 500);
+    if (!phone || !chatUrl) {
+      return res.status(400).json({ message: "Phone number and chatbot URL are both required." });
+    }
+    if (!/^https?:\/\//i.test(chatUrl)) {
+      return res.status(400).json({ message: "Chatbot URL must start with http:// or https://" });
+    }
+
+    const value = { phone, chatUrl };
+    await prisma.platformSetting.upsert({
+      where: { key: SUPPORT_CONTACT_KEY },
+      create: { key: SUPPORT_CONTACT_KEY, value },
+      update: { value },
+    });
+    await writeAuditLog({
+      req,
+      action: "PLATFORM_SUPPORT_CONTACT_UPDATED",
+      targetType: "PlatformSetting",
+      targetId: SUPPORT_CONTACT_KEY,
+      metadata: value,
+    });
+    return res.json(value);
+  } catch (error) {
+    console.error("[Platform updateSupportContact] Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};

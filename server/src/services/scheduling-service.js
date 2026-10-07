@@ -7,7 +7,11 @@ import { ComplianceService } from "./compliance-service.js";
 import { Templates } from "./templates.js";
 import { getSenderIdentity } from "../lib/messaging-config.js";
 import { triggerAutomation } from "../lib/automation-events.js";
-import { writeBackLeadToSalesforce } from "./salesforce-writeback.js";
+import {
+  writeBackLeadToSalesforce,
+  pushAppointmentToSalesforce,
+  deleteSalesforceEvent,
+} from "./salesforce-writeback.js";
 import { appointmentTokenData } from "../lib/public-tokens.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
 import { notifySalesAppointment } from "./notification-service.js";
@@ -147,10 +151,11 @@ export async function bookSlot({
     context: { appointmentId: appointment.id, bookedVia },
   });
 
-  // SW-CRM-008: reflect the new status on the Salesforce record (gated per tenant).
-  writeBackLeadToSalesforce(lead.companyId, leadId, { status: LEAD_STATUS.APPOINTMENT_SET }).catch((e) =>
-    console.error("[Scheduling] Salesforce write-back failed:", e?.message || e),
-  );
+  // SW-CRM-008: write the Event (creating the Lead if Salesforce has none yet),
+  // then reflect the new status on the Lead. Both gated per tenant.
+  pushAppointmentToSalesforce(appointment.id)
+    .then(() => writeBackLeadToSalesforce(lead.companyId, leadId, { status: LEAD_STATUS.APPOINTMENT_SET }))
+    .catch((e) => console.error("[Scheduling] Salesforce write-back failed:", e?.message || e));
 
   await notifySalesAppointment("BOOKED", { ...appointment, lead });
 
@@ -227,6 +232,7 @@ export async function rescheduleAppointment({ appointmentId, rescheduleToken, ne
 
   const tz = appt.leadTimezone || (await getAvailabilitySetting(appt.lead.companyId)).timezone;
   await sendConfirmations(appt.lead, updated, tz).catch(() => { });
+  void pushAppointmentToSalesforce(updated.id);
   await notifySalesAppointment("RESCHEDULED", { ...updated, lead: appt.lead }, { previousTime: appt.time });
   return { success: true, appointment: updated };
 }
@@ -239,6 +245,7 @@ export async function cancelAppointment({ appointmentId, cancelToken, reason = "
 
   const tz = appt.leadTimezone || (await getAvailabilitySetting(appt.lead.companyId)).timezone;
   await prisma.salesAppointment.delete({ where: { id: appt.id } });
+  void deleteSalesforceEvent(appt.lead.companyId, appt.salesforceEventId);
 
   try {
     const { replyTo } = await getSenderIdentity(appt.lead.companyId);

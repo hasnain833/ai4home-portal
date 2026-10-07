@@ -528,7 +528,7 @@ export default function CampaignsPage() {
                 </strong>{" "}
                 Steps on that channel will not be delivered. Set it up in{" "}
                 <a href="/sales/settings" className="font-semibold underline underline-offset-2">
-                  Settings &rarr; Messaging
+                  Integrations &rarr; Email, SMS &amp; News
                 </a>
                 .
               </span>

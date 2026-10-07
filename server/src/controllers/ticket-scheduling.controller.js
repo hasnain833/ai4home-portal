@@ -53,13 +53,10 @@ export const publicGetBooking = async (req, res) => {
         alreadyBooked: true,
       });
     }
-    if (!ticket.assignedStaff) {
-      return res.status(409).json({ message: "This claim has no one assigned yet." });
-    }
-
+    // Unassigned tickets book against the company's working hours.
     const availability = await slotsForStaff({
-      staffId: ticket.assignedStaff.id,
-      staffEmail: ticket.assignedStaff.email,
+      staffId: ticket.assignedStaff?.id,
+      staffEmail: ticket.assignedStaff?.email,
       companyId: ticket.companyId,
     });
 
@@ -94,15 +91,22 @@ export const publicBook = async (req, res) => {
     if (ticket.appointments.length > 0) {
       return res.status(409).json({ message: "A visit is already booked for this claim." });
     }
-    if (!ticket.assignedStaff) {
-      return res.status(409).json({ message: "This claim has no one assigned yet." });
+    // createdById is required; with no assignee, a company admin stands in.
+    const bookerId =
+      ticket.assignedStaff?.id ||
+      (await prisma.user.findFirst({
+        where: { companyId: ticket.companyId, role: "ADMIN" },
+        select: { id: true },
+      }))?.id;
+    if (!bookerId) {
+      return res.status(409).json({ message: "This claim cannot be booked online yet. Please contact us." });
     }
 
     const appointment = await prisma.$transaction(
       async (tx) => {
         const check = await isSlotBookable({
-          staffId: ticket.assignedStaff.id,
-          staffEmail: ticket.assignedStaff.email,
+          staffId: ticket.assignedStaff?.id,
+          staffEmail: ticket.assignedStaff?.email,
           companyId: ticket.companyId,
           startTime,
           db: tx,
@@ -129,12 +133,12 @@ export const publicBook = async (req, res) => {
             homeownerId: ticket.homeownerId,
             scheduledAt: new Date(startTime),
             durationMinutes: check.slotDuration || 60,
-            tradeName: ticket.assignedStaff.name || ticket.assignedStaff.email,
-            tradeEmail: ticket.assignedStaff.email,
+            tradeName: ticket.assignedStaff ? ticket.assignedStaff.name || ticket.assignedStaff.email : null,
+            tradeEmail: ticket.assignedStaff?.email || null,
             location: ticket.property?.address || null,
             notes: ticket.dispatchNotes || null,
             // Self-booked, so the assignee is the closest thing to a booker.
-            createdById: ticket.assignedStaff.id,
+            createdById: bookerId,
           },
         });
       },
@@ -267,6 +271,7 @@ export const publicReschedule = async (req, res) => {
         durationMinutes: check.slotDuration || appointment.durationMinutes,
         // A new time earns a fresh set of reminders.
         remindersSent: [],
+        rescheduleCount: { increment: 1 },
       },
     });
 

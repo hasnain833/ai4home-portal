@@ -8,7 +8,7 @@ import {
 
 const COVERAGE_YEARS = 1;
 
-function coverageTermFor(coeDate) {
+export function coverageTermFor(coeDate) {
   if (!coeDate) return null;
   const coe = new Date(coeDate);
   if (Number.isNaN(coe.getTime())) return null;

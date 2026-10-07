@@ -20,7 +20,7 @@ export const getKnowledgeBaseDocs = async (req, res) => {
     const docs = await prisma.warrantyKB.findMany({
       // scope pins this to the company tier — a null companyId would otherwise
       // become `IS NULL` and match the shared PLATFORM documents.
-      where: { scope: "COMPANY", companyId: session.companyId || "demo-company", isActive: true },
+      where: { scope: "COMPANY", companyId: session.companyId, isActive: true },
       orderBy: { createdAt: "desc" },
       include: { community: { select: { id: true, name: true, color: true } } },
     });
@@ -44,7 +44,7 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
       return res.status(400).json({ message: "No file provided" });
     }
 
-    const companyId = session.companyId || "demo-company";
+    const companyId = session.companyId;
 
     // 1. Initialize Supabase Admin Client
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -168,7 +168,7 @@ export const deleteKnowledgeBaseDoc = async (req, res) => {
 
     // Verify document belongs to company
     const doc = await prisma.warrantyKB.findFirst({
-      where: { id, scope: "COMPANY", companyId: session.companyId || "demo-company" },
+      where: { id, scope: "COMPANY", companyId: session.companyId },
     });
 
     if (!doc) {
