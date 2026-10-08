@@ -97,6 +97,17 @@ export async function connectCalendly(userId, code) {
   } catch (err) {
     console.error(`[Calendly] webhook not set up for user ${userId}:`, err.status, err.message);
   }
+
+  // Without an event type, homeowners book from the builder's hours. With only
+  // one to choose from, choose it; otherwise the trade picks in Settings.
+  if (!conn.eventTypeUri) {
+    try {
+      const types = await listEventTypes(userId);
+      if (types.length === 1) await setEventType(userId, types[0].uri);
+    } catch (err) {
+      console.error(`[Calendly] could not pick an event type for user ${userId}:`, err.message);
+    }
+  }
 }
 
 const webhookUrl = () => `${process.env.NEXT_PUBLIC_URL || ""}/api/webhooks/calendly`;

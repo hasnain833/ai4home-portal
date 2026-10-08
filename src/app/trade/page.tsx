@@ -11,7 +11,8 @@ import { formatVisit, type TradeJob } from "@/components/trade/jobs";
 export default function TradeOverviewPage() {
   const { user } = useAuth();
   const [jobs, setJobs] = useState<TradeJob[] | null>(null);
-  const [calendlyNeeded, setCalendlyNeeded] = useState(false);
+  // What the trade still has to do in Calendly: connect it, or pick the event type.
+  const [calendlyTodo, setCalendlyTodo] = useState<"connect" | "event-type" | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -21,7 +22,9 @@ export default function TradeOverviewPage() {
       .catch(() => setError("Could not load your jobs."));
     fetch("/api/trade/calendly")
       .then((r) => (r.ok ? r.json() : null))
-      .then((s) => setCalendlyNeeded(!!s?.available && !s.connected))
+      .then((s) =>
+        setCalendlyTodo(!s?.available ? null : !s.connected ? "connect" : !s.eventType ? "event-type" : null),
+      )
       .catch(() => {});
   }, []);
 
@@ -43,15 +46,17 @@ export default function TradeOverviewPage() {
         <p className="text-muted-foreground mt-1">Your warranty jobs across every builder you work with.</p>
       </div>
 
-      {calendlyNeeded && (
+      {calendlyTodo && (
         <Card className="border-[#E8B86B]/50 bg-[#E8B86B]/5">
           <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <p className="text-sm flex items-start gap-2">
               <CalendarCheck className="h-5 w-5 shrink-0 text-[#b48c3c]" />
-              Connect your Calendly so homeowners can only book visits when you&apos;re free.
+              {calendlyTodo === "connect"
+                ? "Connect your Calendly so homeowners book your visits from your real openings."
+                : "Pick which Calendly event type homeowners book. Until you do, they book from the builder's hours, not your Calendly."}
             </p>
             <Button asChild size="sm" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 shrink-0">
-              <Link href="/trade/settings">Connect Calendly</Link>
+              <Link href="/trade/settings">{calendlyTodo === "connect" ? "Connect Calendly" : "Pick event type"}</Link>
             </Button>
           </CardContent>
         </Card>
