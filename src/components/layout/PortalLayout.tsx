@@ -50,7 +50,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Circle, MapPinned } from "lucide-react";
+import { Circle, MapPinned, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SALES_PERMISSION, hasSalesPermission, type SalesPermission } from "@/lib/sales-permissions";
 
@@ -69,6 +69,7 @@ const warrantyNavItems: NavItem[] = [
   { name: "Communities", href: "/warranty/communities", icon: MapPinned, roles: ["admin", "staff"] },
   { name: "Tickets", href: "/warranty/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
   { name: "Team", href: "/warranty/team", icon: Users, roles: ["admin"] },
+  { name: "Trades", href: "/warranty/trades", icon: Wrench, roles: ["admin", "staff"] },
   { name: "Homeowners", href: "/warranty/homeowners", icon: User, roles: ["admin", "staff"] },
   { name: "Integrations", href: "/warranty/integrations", icon: Plug, roles: ["admin"] },
   { name: "Knowledge Base", href: "/warranty/knowledge-base", icon: Database, roles: ["admin", "staff"] },
@@ -94,12 +95,24 @@ const salesNavItems: NavItem[] = [
   { name: "Integrations", href: "/sales/settings", icon: Settings, roles: ["admin", "staff"], permission: SALES_PERMISSION.settingsManage },
 ];
 
+const tradeNavItems: NavItem[] = [
+  { name: "Overview", href: "/trade", icon: LayoutDashboard, roles: ["trade"] },
+  { name: "My Jobs", href: "/trade/jobs", icon: Wrench, roles: ["trade"] },
+  { name: "Settings", href: "/trade/settings", icon: Settings, roles: ["trade"] },
+];
+
+/** A section stays highlighted on its sub-pages (a ticket, a job). */
+const isNavActive = (pathname: string, href: string) =>
+  pathname === href || (href !== "/trade" && pathname.startsWith(`${href}/`));
+
+const WORKSPACE_HOME = { warranty: "/warranty/dashboard", sales: "/sales/dashboard", trade: "/trade" };
+
 export default function PortalLayout({
   children,
   workspace = "warranty",
 }: {
   children: React.ReactNode;
-  workspace?: "warranty" | "sales";
+  workspace?: "warranty" | "sales" | "trade";
 }) {
   const [sidebarExpanded, setSidebarExpanded] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -139,7 +152,13 @@ export default function PortalLayout({
     if (mounted && user?.isSuperAdmin) {
       router.push("/admin");
     }
-  }, [user, mounted, router]);
+    // Trades have their own portal. Ticket links in their emails point here,
+    // so they land on the same job there.
+    if (mounted && user?.role === "trade" && workspace !== "trade") {
+      const ticketId = pathname.match(/^\/warranty\/tickets\/([^/]+)/)?.[1];
+      router.replace(ticketId ? `/trade/jobs/${ticketId}` : "/trade");
+    }
+  }, [user, mounted, router, pathname, workspace]);
 
   const warrantyLocked =
     workspace === "warranty" &&
@@ -148,7 +167,8 @@ export default function PortalLayout({
     !!user.verificationStatus &&
     user.verificationStatus !== "VERIFIED";
 
-  const navItems = workspace === "warranty" ? warrantyNavItems : salesNavItems;
+  const navItems =
+    workspace === "trade" ? tradeNavItems : workspace === "warranty" ? warrantyNavItems : salesNavItems;
   const filteredNav = navItems.filter((item) => {
     if (!user || !item.roles.includes(user.role)) return false;
     // Items without a permission key are open to anyone holding the role.
@@ -197,7 +217,7 @@ export default function PortalLayout({
           <div className={`flex h-16 items-center ${sidebarExpanded ? "justify-between px-4" : "justify-center px-0"}`}>
             {sidebarExpanded ? (
               <button
-                onClick={() => router.push(workspace === "warranty" ? "/warranty/dashboard" : "/sales/dashboard")}
+                onClick={() => router.push(WORKSPACE_HOME[workspace])}
                 className="flex min-w-0 items-center gap-3.5 hover:opacity-80 transition"
                 title={companyName}
               >
@@ -264,7 +284,7 @@ export default function PortalLayout({
           {/* Navigation */}
           <nav className="no-scrollbar flex-1 space-y-1 overflow-y-auto p-3">
             {filteredNav.map((item) => {
-              const isActive = pathname === item.href;
+              const isActive = isNavActive(pathname, item.href);
               return (
                 <Link key={item.name} href={item.href}>
                   <motion.div
@@ -295,7 +315,7 @@ export default function PortalLayout({
               />
             )}
             {/* Support is for builder users, not homeowners. */}
-            {user?.role !== "homeowner" && <HelpMenu expanded={sidebarExpanded} />}
+            {user?.role !== "homeowner" && user?.role !== "trade" && <HelpMenu expanded={sidebarExpanded} />}
             <Button
               variant="ghost"
               size="sm"
@@ -467,7 +487,7 @@ export default function PortalLayout({
                   <nav className="no-scrollbar flex-1 space-y-1 overflow-y-auto p-3">
                     {filteredNav.map((item) => (
                       <Link key={item.name} href={item.href} onClick={closeMobileSidebar}>
-                        <div className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${pathname === item.href
+                        <div className={`flex items-center space-x-3 rounded-md px-3 py-2 text-sm font-medium transition-all ${isNavActive(pathname, item.href)
                           ? "bg-white/10 text-white font-semibold"
                           : "text-white/80 hover:bg-white/10 hover:text-white"
                           }`}>
@@ -500,7 +520,7 @@ export default function PortalLayout({
                         <p className="text-xs capitalize text-white/60">{user?.role}</p>
                       </div>
                     </div>
-                    {user?.role !== "homeowner" && <HelpMenu />}
+                    {user?.role !== "homeowner" && user?.role !== "trade" && <HelpMenu />}
                     <Button
                       variant="ghost"
                       className="w-full justify-start text-white/80 hover:bg-white/10"

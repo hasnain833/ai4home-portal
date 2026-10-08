@@ -11,6 +11,7 @@ enum Role {
   ADMIN
   STAFF
   HOMEOWNER
+  TRADE
 }
 
 enum TicketStatus {
@@ -59,6 +60,11 @@ model User {
   bookedAppointments    TicketAppointment[]    @relation("BookedTicketAppointments")
   assignedTickets       Ticket[]               @relation("AssignedTickets")
   staffAvailability     StaffAvailability?     @relation("StaffAvailability")
+  /// TRADE users only: one row per builder company that has added them.
+  tradeCompanies        CompanyTrade[]
+  /// TRADE users only: when they marked their part of a job done.
+  workDoneTickets       Ticket[]               @relation("WorkDoneTickets")
+  calendly              CalendlyConnection?
 }
 
 model Company {
@@ -133,6 +139,7 @@ model Company {
   notifications           Notification[]
   ticketAppointments      TicketAppointment[]
   salesHomes              SalesHome[]
+  trades                  CompanyTrade[]
 }
 
 model CsvMappingTemplate {
@@ -245,6 +252,11 @@ model Ticket {
   assignedStaff   User?         @relation("AssignedTickets", fields: [assignedStaffId], references: [id])
   bookingToken    String?       @unique
   dispatchNotes   String?       @db.Text
+  /// Set when the assigned trade marks their work done; staff still resolves.
+  workDoneAt      DateTime?
+  workDoneById    String?
+  workDoneBy      User?         @relation("WorkDoneTickets", fields: [workDoneById], references: [id])
+  workDoneNotes   String?       @db.Text
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -260,6 +272,49 @@ model Ticket {
   lastReminderAt DateTime?
   notifications  Notification[]
   appointments   TicketAppointment[]
+}
+
+/// A trade (plumber, electrician, ...) on a builder's list. The login is one
+/// TRADE User shared across every builder that adds the same email; each
+/// builder keeps its own trade type, business name and on/off switch here.
+model CompanyTrade {
+  id           String   @id @default(cuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeType    String
+  businessName String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([companyId, userId])
+  @@index([userId])
+}
+
+/// A user's linked Calendly account. With an event type chosen, homeowners
+/// book that event type's open times and the visit is booked in Calendly;
+/// without one, their Calendly busy times are just hidden from booking.
+/// Tokens are stored encrypted (lib/crypto).
+model CalendlyConnection {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calendlyUser      String
+  email             String?
+  accessToken       String   @db.Text
+  refreshToken      String   @db.Text
+  expiresAt         DateTime
+  eventTypeUri      String?
+  eventTypeName     String?
+  eventDuration     Int?
+  /// The event type's first location kind, e.g. "ask_invitee" or "physical".
+  eventLocationKind String?
+  /// Our webhook subscription on their Calendly (changes made in Calendly flow back).
+  webhookUri        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Community {
@@ -1079,6 +1134,8 @@ model TicketAppointment {
    remindersSent   String[]          @default([])
   /// How many times this visit was moved (homeowner or staff). Reports only.
   rescheduleCount Int               @default(0)
+  /// Set when the visit was booked in the trade's Calendly; kept in step on move/cancel.
+  calendlyEventUri String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 

@@ -46,6 +46,8 @@ import { scopeNotifications } from "./controllers/notifications.controller.js";
 import salesHomesRouter from "./routes/sales-homes.js";
 import salesChatRouter from "./routes/sales-chat.js";
 import ticketAppointmentsRouter from "./routes/ticket-appointments.js";
+import { tradesRouter, tradePortalRouter } from "./routes/trades.js";
+import { calendlyWebhook } from "./controllers/calendly-webhooks.controller.js";
 import ticketSchedulingRouter from "./routes/ticket-scheduling.js";
 import deadLetterRouter from "./routes/dead-letter.js";
 import privacyRouter from "./routes/privacy.js";
@@ -198,6 +200,9 @@ app.use(
   notificationsRouter,
 );
 app.use("/api/ticket-appointments", ...warrantyGuard, ticketAppointmentsRouter);
+app.use("/api/trades", ...warrantyGuard, tradesRouter);
+app.use("/api/trade", tradePortalRouter);
+app.post("/api/webhooks/calendly", calendlyWebhook);
 app.use("/api/ticket-scheduling", ticketSchedulingRouter);
 app.use(
   "/api/inngest",

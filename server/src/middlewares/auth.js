@@ -9,6 +9,8 @@ import {
 import { hasSalesPermission, SALES_PERMISSIONS } from "../lib/permissions.js";
 import { withDbRetry } from "../lib/utils.js";
 
+const TRADE_API_PREFIXES = ["/api/trade/", "/api/auth/"];
+
 export async function requireAuth(req, res, next) {
   try {
     if (req.user && req.user.id) return next();
@@ -174,19 +176,29 @@ export async function requireAuth(req, res, next) {
         .json({ message: "User profile not found in local database." });
     }
 
+    // Trades have no company of their own and see only the jobs they are
+    // assigned. Every company-scoped controller assumes "not a homeowner" means
+    // staff, so they are fenced to the trade API here, in one place.
+    if (dbUser.role === "TRADE" && !TRADE_API_PREFIXES.some((p) => req.originalUrl.startsWith(p))) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
     const isSuperAdmin = dbUser.role === "SUPER_ADMIN";
     const isAdmin = dbUser.role === "ADMIN" || isSuperAdmin;
     const isStaff = dbUser.role === "STAFF";
+    const isTrade = dbUser.role === "TRADE";
     const companySalesEnabled = dbUser.company?.salesEnabled ?? true;
     const companyWarrantyEnabled = dbUser.company?.warrantyEnabled ?? true;
 
     const hasWarrantyAccess = isSuperAdmin
       ? true
-      : (isAdmin || isStaff || dbUser.hasWarrantyAccess) &&
+      : !isTrade &&
+        (isAdmin || isStaff || dbUser.hasWarrantyAccess) &&
         companyWarrantyEnabled;
     const hasSalesAccess = isSuperAdmin
       ? true
-      : (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
+      : !isTrade &&
+        (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
 
     req.user = {
       id: dbUser.id,

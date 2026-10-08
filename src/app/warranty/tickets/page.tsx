@@ -94,12 +94,6 @@ interface PropertyOption {
   homeownerId: string;
 }
 
-interface StaffOption {
-  id: string;
-  name: string | null;
-  email: string;
-}
-
 // Mirrors the categories the classifier assigns to AI-created tickets
 // (server/src/lib/warranty-classify.js) so manual and automatic tickets stay in
 // the same taxonomy and the Issue filter keeps working across both.
@@ -229,7 +223,6 @@ function TicketsPageInner() {
   const [creating, setCreating] = useState(false);
   const [homeowners, setHomeowners] = useState<HomeownerOption[]>([]);
   const [allProperties, setAllProperties] = useState<PropertyOption[]>([]);
-  const [staff, setStaff] = useState<StaffOption[]>([]);
   const [dispatchTarget, setDispatchTarget] = useState<Ticket | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const showToast = (type: "success" | "error", text: string) => {
@@ -272,18 +265,13 @@ function TicketsPageInner() {
 
     (async () => {
       try {
-        const [ownerRes, propertyRes, staffRes] = await Promise.all([
+        const [ownerRes, propertyRes] = await Promise.all([
           fetch("/api/users?role=homeowner"),
           fetch("/api/properties"),
-          fetch("/api/admin/staff"),
         ]);
         if (cancelled) return;
         if (ownerRes.ok) setHomeowners(await ownerRes.json());
         if (propertyRes.ok) setAllProperties(await propertyRes.json());
-        if (staffRes.ok) {
-          const payload = await staffRes.json();
-          setStaff(Array.isArray(payload) ? payload : payload.staff || []);
-        }
       } catch (error) {
         console.error("Error loading ticket form options:", error);
       }
@@ -899,7 +887,6 @@ function TicketsPageInner() {
 
           <DispatchTicketDialog
             ticket={dispatchTarget}
-            staff={staff}
             onClose={() => setDispatchTarget(null)}
             onDispatched={handleDispatched}
           />

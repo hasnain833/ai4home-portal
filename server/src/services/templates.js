@@ -1,4 +1,5 @@
 import { priorityLabel } from "../lib/warranty-classify.js";
+import { escapeHtml } from "../lib/utils.js";
 import { ticketRef as formatTicketRef } from "../lib/ticket-number.js";
 
 const COLORS = {
@@ -401,6 +402,21 @@ export const Templates = {
       use "Forgot password" on the sign-in page with this email address.</p>
     `;
     return wrapEmail(content, "Welcome Home", companyName, COLORS.primary);
+  },
+
+  /** Staff and trades: "you've been added, set your password". */
+  getAccountInviteEmail: ({ name, roleLabel, existingAccount }, actionLink, companyName) => {
+    const content = `
+      <p style="margin-top: 0;">Hello <strong>${escapeHtml(name)}</strong>,</p>
+      <p>${escapeHtml(companyName)} has added you as ${roleLabel} on their warranty portal.
+      ${existingAccount
+        ? "You can use your existing login; their jobs now show alongside your others."
+        : "Set your password to sign in."}</p>
+      ${emailButton(actionLink, existingAccount ? "Sign in" : "Set your password")}
+      ${existingAccount ? "" : `<p style="font-size: 14px; color: ${COLORS.textMuted};">This link expires after a short time. If it has,
+      use "Forgot password" on the sign-in page with this email address.</p>`}
+    `;
+    return wrapEmail(content, "You've been invited", companyName, COLORS.primary);
   },
 
   getForgotPasswordEmail: (actionLink) => {

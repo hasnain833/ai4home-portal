@@ -6,6 +6,7 @@ import {
   SALES_PERMISSIONS,
   normalizeSalesPermissions,
 } from "../lib/permissions.js";
+import { createHomeownerAccount, sendAccountInvite } from "../lib/homeowner-account.js";
 
 const getSupabaseAdmin = () => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -56,12 +57,14 @@ export const createStaff = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const { name, email, password } = req.body;
+    const { name, password } = req.body;
+    const email = String(req.body.email || "").trim().toLowerCase();
 
-    if (!name || !email || !password) {
-      return res
-        .status(400)
-        .json({ message: "Name, email, and password are required" });
+    if (!name || !email) {
+      return res.status(400).json({ message: "Name and email are required" });
+    }
+    if (password && password.length < 8) {
+      return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
 
     const phone = toE164(req.body.phone);
@@ -74,41 +77,36 @@ export const createStaff = async (req, res) => {
         .json({ message: "An account with this email already exists" });
     }
 
-    const supabaseAdmin = getSupabaseAdmin();
-    const { error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { name },
-    });
-
-    if (authError) {
-      console.error("Supabase auth creation error:", authError);
-      return res.status(400).json({
-        message: authError.message || "Failed to create authentication account",
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newStaff = await prisma.user.create({
-      data: {
+    let newStaff;
+    try {
+      newStaff = await createHomeownerAccount({
         name,
         email,
-        password: hashedPassword, 
-        role: "STAFF",
-        companyId: session.companyId,
         phone,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        role: true,
-        createdAt: true,
-        avatar: true,
-      },
-    });
+        companyId: session.companyId,
+        password: password || null,
+        role: "STAFF",
+      });
+    } catch (err) {
+      if (err.status === 400) return res.status(400).json({ message: err.message });
+      throw err;
+    }
+
+    // No password typed: the staff member chooses their own from the invite.
+    if (!password) {
+      const invited = await sendAccountInvite({
+        email,
+        name,
+        companyId: session.companyId,
+        roleLabel: "a staff member",
+      }).catch(() => false);
+      if (!invited) {
+        return res.status(201).json({
+          ...newStaff,
+          notice: "Staff member added, but the invite email did not send. They can use \"Forgot password\" on the sign-in page.",
+        });
+      }
+    }
 
     return res.status(201).json(newStaff);
   } catch (error) {

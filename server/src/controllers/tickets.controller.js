@@ -7,6 +7,7 @@ import { Templates, SmsTemplates } from "../services/templates.js";
 import { notifyTicketDispatched } from "../services/ticket-appointment-service.js";
 import { randomUUID } from "node:crypto";
 import { syncTicketToERP } from "../services/erp-service.js";
+import { cancelCalendlyVisit } from "../services/calendly.service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
 import { nextTicketNumber, ticketRef } from "../lib/ticket-number.js";
 import {
@@ -21,7 +22,10 @@ const TICKET_STATUSES = ["OPEN", "DISPATCHED", "RESOLVED"];
 // hand to correct a mistake — the rules in updateTicket keep the row coherent
 // when they do, rather than forbidding it outright.
 
-const ASSIGNED_STAFF_SELECT = { select: { id: true, name: true, email: true } };
+const ASSIGNED_STAFF_SELECT = { select: { id: true, name: true, email: true, role: true } };
+const WORK_DONE_BY_SELECT = { select: { id: true, name: true } };
+// A new dispatch or a reopen starts the work over.
+const CLEAR_WORK_DONE = { workDoneAt: null, workDoneById: null, workDoneNotes: null };
 
 // The soonest still-standing visit, so the list can tell a dispatched ticket
 // that has been booked from one still waiting on the homeowner.
@@ -227,6 +231,7 @@ export const getTicket = async (req, res) => {
         homeowner: true,
         property: true,
         assignedStaff: ASSIGNED_STAFF_SELECT,
+        workDoneBy: WORK_DONE_BY_SELECT,
         appointments: NEXT_VISIT_SELECT,
       },
     });
@@ -329,6 +334,7 @@ export const updateTicket = async (req, res) => {
       updatedData.assignedStaffId = null;
       updatedData.bookingToken = null;
       updatedData.dispatchNotes = null;
+      Object.assign(updatedData, CLEAR_WORK_DONE);
     }
 
     if (action === "approve") {
@@ -365,6 +371,10 @@ export const updateTicket = async (req, res) => {
       }
 
       if (status === "OPEN") {
+        const calendlyVisits = await prisma.ticketAppointment.findMany({
+          where: { ticketId: ticket.id, status: "SCHEDULED", calendlyEventUri: { not: null } },
+          select: { calendlyEventUri: true },
+        });
         await prisma.ticketAppointment
           .updateMany({
             where: { ticketId: ticket.id, status: "SCHEDULED" },
@@ -373,6 +383,10 @@ export const updateTicket = async (req, res) => {
           .catch((err) =>
             console.error(`[Ticket API] Could not clear visits for #${ticket.id}:`, err.message),
           );
+        // After the save, so the cancellation echoing back by webhook matches nothing.
+        for (const v of calendlyVisits) {
+          await cancelCalendlyVisit(oldTicket.assignedStaffId, v.calendlyEventUri, "Claim reopened by the builder");
+        }
       }
 
       if (status === "RESOLVED") {
@@ -495,15 +509,16 @@ export const dispatchTicket = async (req, res) => {
       });
     }
 
-    // Assignee is optional: unassigned, the homeowner books from company hours.
+    // The trade is optional: with none, the homeowner books from company hours.
+    // Tickets go out to trades only, never to staff.
     let staff = null;
     if (staffId) {
       staff = await prisma.user.findFirst({
-        where: { id: staffId, companyId, role: { in: DISPATCH_ROLES } },
+        where: { id: staffId, role: "TRADE", tradeCompanies: { some: { companyId, isActive: true } } },
         select: { id: true, name: true, email: true },
       });
       if (!staff) {
-        return res.status(400).json({ message: "That staff member is not part of this company." });
+        return res.status(400).json({ message: "That trade is not active on your trades list." });
       }
     }
 
@@ -514,6 +529,7 @@ export const dispatchTicket = async (req, res) => {
         assignedStaffId: staff?.id ?? null,
         bookingToken: randomUUID(),
         dispatchNotes: String(notes || "").trim().slice(0, 2000) || null,
+        ...CLEAR_WORK_DONE,
         reminderCount: 0,
         lastReminderAt: null,
       },

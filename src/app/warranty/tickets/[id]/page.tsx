@@ -9,7 +9,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { TicketAppointments } from "@/components/warranty/TicketAppointments";
 import {
   DispatchTicketDialog,
-  type DispatchStaffOption,
 } from "@/components/warranty/DispatchTicketDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -86,7 +85,12 @@ type TicketDetailData = {
     id: string;
     name?: string | null;
     email?: string | null;
+    role?: string | null;
   } | null;
+  /** Set when the assigned trade marks their work done. */
+  workDoneAt?: string | null;
+  workDoneNotes?: string | null;
+  workDoneBy?: { id: string; name?: string | null } | null;
   nextVisitAt?: string | null;
   property?: {
     address?: string | null;
@@ -242,7 +246,6 @@ export default function TicketDetail() {
   const [draftResponse, setDraftResponse] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
   const [isProcessingDraft, setIsProcessingDraft] = useState(false);
-  const [staff, setStaff] = useState<DispatchStaffOption[]>([]);
   const [dispatchOpen, setDispatchOpen] = useState(false);
 
   useEffect(() => {
@@ -266,12 +269,6 @@ export default function TicketDetail() {
     fetchTicket();
   }, [id]);
 
-  useEffect(() => {
-    if (user?.role !== "admin" && user?.role !== "staff") return;
-    apiFetch<DispatchStaffOption[] | { staff?: DispatchStaffOption[] }>("/api/admin/staff")
-      .then((payload) => setStaff(Array.isArray(payload) ? payload : payload.staff || []))
-      .catch((error) => console.error("Error fetching staff:", error));
-  }, [user?.role]);
 
   const handleDispatched = async (notice?: string) => {
     // Dispatch sets the status and assignee; reload so both show.
@@ -923,7 +920,10 @@ export default function TicketDetail() {
                         </div>
                         <div className="min-w-0 space-y-0.5">
                           <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">
-                            {ticket.assignedStaff.name || "Staff member"}
+                            {ticket.assignedStaff.name || (ticket.assignedStaff.role === "TRADE" ? "Trade" : "Staff member")}
+                            {ticket.assignedStaff.role === "TRADE" && (
+                              <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wider text-[#b48c3c]">Trade</span>
+                            )}
                           </p>
                           {ticket.assignedStaff.email && (
                             <a
@@ -943,11 +943,26 @@ export default function TicketDetail() {
                     )}
                   </div>
 
+                  {ticket.workDoneAt && (
+                    <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 p-3 text-sm">
+                      <p className="font-semibold text-emerald-800 dark:text-emerald-300">
+                        Work done by {ticket.workDoneBy?.name || "the trade"} ·{" "}
+                        {new Date(ticket.workDoneAt).toLocaleString()}
+                      </p>
+                      {ticket.workDoneNotes && (
+                        <p className="mt-1 whitespace-pre-wrap text-slate-700 dark:text-slate-300">{ticket.workDoneNotes}</p>
+                      )}
+                      {ticket.status === "DISPATCHED" && (
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Check the work, then set the status to Resolved.</p>
+                      )}
+                    </div>
+                  )}
+
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {canManage && ticket.status === "OPEN" && !ticket.assignedStaff
                       ? "Moving straight to Dispatched needs an assignee — use Dispatch at the top of this page to pick one and send the booking link."
                       : ticket.status === "OPEN"
-                      ? "Dispatch this ticket to assign a staff member and send the homeowner a booking link."
+                      ? "Dispatch this ticket to assign a trade and send the homeowner a booking link."
                       : ticket.status === "DISPATCHED"
                         ? ticket.nextVisitAt
                           ? "Mark it resolved from the tickets list once the work is done."
@@ -962,7 +977,6 @@ export default function TicketDetail() {
 
         <DispatchTicketDialog
           ticket={dispatchOpen ? ticket : null}
-          staff={staff}
           onClose={() => setDispatchOpen(false)}
           onDispatched={handleDispatched}
         />

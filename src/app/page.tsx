@@ -15,6 +15,10 @@ export default function Home() {
           router.push("/admin");
           return;
         }
+        if (user.role === "trade") {
+          router.push("/trade");
+          return;
+        }
 
         const storedLastWorkspace = localStorage.getItem("last-workspace");
         const getCookie = (name: string) => {

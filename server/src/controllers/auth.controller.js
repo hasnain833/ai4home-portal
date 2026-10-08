@@ -8,10 +8,11 @@ import {
   SESSION_COOKIE_OPTIONS,
 } from "../lib/superadmin-session.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
-import { sendSms, smsSent } from "../services/sms.service.js";
+import { sendSms, smsSent, toE164 } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { Templates, SmsTemplates } from "../services/templates.js";
 import { effectiveSalesPermissions } from "../lib/permissions.js";
+import { passwordSetupLink } from "../lib/homeowner-account.js";
 
 const safeEqual = (a, b) => {
   const ab = Buffer.from(String(a ?? ""), "utf8");
@@ -76,13 +77,16 @@ export const getMe = async (req, res) => {
     const companyWarrantyEnabled = dbUser.company?.warrantyEnabled ?? true;
     const companySalesEnabled = dbUser.company?.salesEnabled ?? true;
 
+    const isTrade = dbUser.role === "TRADE";
     const hasWarrantyAccess = isSuperAdmin
       ? true
-      : (isAdmin || isStaff || dbUser.hasWarrantyAccess) &&
+      : !isTrade &&
+        (isAdmin || isStaff || dbUser.hasWarrantyAccess) &&
         companyWarrantyEnabled;
     const hasSalesAccess = isSuperAdmin
       ? true
-      : (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
+      : !isTrade &&
+        (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
 
     const verificationStatus = isSuperAdmin
       ? "VERIFIED"
@@ -134,6 +138,13 @@ export const updateProfile = async (req, res) => {
 
     const updateData = {};
     if (name) updateData.name = name;
+    if (req.body.phone !== undefined) {
+      const phone = toE164(req.body.phone);
+      if (phone === undefined) {
+        return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+      }
+      updateData.phone = phone;
+    }
     if (avatar !== undefined) updateData.avatar = avatar;
     if (lastActiveWorkspace)
       updateData.lastActiveWorkspace = lastActiveWorkspace;
@@ -158,6 +169,7 @@ export const updateProfile = async (req, res) => {
         role: true,
         companyId: true,
         avatar: true,
+        phone: true,
         lastActiveWorkspace: true,
       },
     });
@@ -634,24 +646,12 @@ export const forgotPassword = async (req, res) => {
         .json({ message: "No account found with this email address." });
     }
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-    );
-
-    const { data, error } = await supabaseAdmin.auth.admin.generateLink({
-      type: "recovery",
-      email,
-      options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_URL}/forgot-password/update`,
-      },
-    });
-
-    if (error) {
-      return res.status(400).json({ message: error.message });
+    let actionLink;
+    try {
+      actionLink = await passwordSetupLink(email);
+    } catch (err) {
+      return res.status(400).json({ message: err.message });
     }
-
-    const actionLink = data.properties?.action_link;
     if (!actionLink) {
       return res
         .status(500)

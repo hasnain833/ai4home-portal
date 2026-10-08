@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { computeAvailableSlots, formatSlotLabel } from "../lib/scheduling.js";
+import { calendlyAvailableTimes, calendlyBookingFor, calendlyBusyFor } from "./calendly.service.js";
 
 export const BOOKING_HORIZON_DAYS = 21;
 export const MIN_LEAD_MINUTES = 120;
@@ -40,7 +41,7 @@ export async function availabilityForStaff(staffId, companyId, db = prisma) {
   };
 }
 
-async function busyFor(staffId, staffEmail, from, to, db = prisma) {
+async function busyFor(staffId, staffEmail, from, to, db = prisma, { withCalendly = true } = {}) {
   // ponytail: unassigned visits don't block each other, so two homeowners can pick
   // the same company slot; add a per-company capacity if builders need it.
   if (!staffId) return [];
@@ -55,10 +56,11 @@ async function busyFor(staffId, staffEmail, from, to, db = prisma) {
         { ticket: { assignedStaffId: staffId } },
       ],
     },
-    select: { scheduledAt: true, durationMinutes: true },
+    select: { id: true, scheduledAt: true, durationMinutes: true },
   });
   for (const v of visits) {
     busy.push({
+      appointmentId: v.id,
       start: v.scheduledAt,
       end: new Date(v.scheduledAt.getTime() + (v.durationMinutes || 60) * 60000),
     });
@@ -77,7 +79,38 @@ async function busyFor(staffId, staffEmail, from, to, db = prisma) {
     });
   }
 
+  // Busy in their linked Calendly (trades connect it from their portal).
+  if (withCalendly) busy.push(...(await calendlyBusyFor(staffId, from, to)));
+
   return busy;
+}
+
+/**
+ * Open times from the trade's Calendly event type, minus portal visits they
+ * already have (some may predate the Calendly link). Calendly unreachable:
+ * no times rather than times the trade may not be free for.
+ */
+async function calendlySlots({ calendly, staffId, staffEmail, from, to, limit, excludeAppointmentId, setting, db }) {
+  const slotDuration = calendly.eventDuration || setting.slotDuration;
+  let times = [];
+  try {
+    times = await calendlyAvailableTimes(calendly, from, to);
+  } catch (err) {
+    console.error(`[Scheduling] Calendly times unavailable for ${staffId}:`, err.message);
+  }
+  const busy = (await busyFor(staffId, staffEmail, from, to, db, { withCalendly: false })).filter(
+    (b) => !excludeAppointmentId || b.appointmentId !== excludeAppointmentId,
+  );
+  const open = times.filter((t) => {
+    const end = t.getTime() + slotDuration * 60000;
+    return !busy.some((b) => t.getTime() < b.end.getTime() && end > b.start.getTime());
+  });
+  return {
+    timezone: setting.timezone,
+    slotDuration,
+    viaCalendly: true,
+    slots: open.slice(0, limit).map((s) => ({ iso: s.toISOString(), label: formatSlotLabel(s, setting.timezone) })),
+  };
 }
 
 export async function slotsForStaff({
@@ -92,6 +125,12 @@ export async function slotsForStaff({
   const setting = await availabilityForStaff(staffId, companyId, db);
   const from = new Date(Date.now() + MIN_LEAD_MINUTES * 60000);
   const to = new Date(from.getTime() + days * 24 * 60 * 60 * 1000);
+
+  // A trade with a Calendly event type is booked from its real open times.
+  const calendly = await calendlyBookingFor(staffId);
+  if (calendly) {
+    return calendlySlots({ calendly, staffId, staffEmail, from, to, limit, excludeAppointmentId, setting, db });
+  }
 
   let busy = await busyFor(staffId, staffEmail, from, to, db);
 

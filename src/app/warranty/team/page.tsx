@@ -69,7 +69,6 @@ export default function TeamManagementPage() {
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [success, setSuccess] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const [newStaff, setNewStaff] = useState({
@@ -134,12 +133,8 @@ export default function TeamManagementPage() {
     e.preventDefault();
     setFormError("");
 
-    if (!newStaff.name.trim() || !newStaff.email.trim() || !newStaff.password.trim()) {
-      setFormError("All fields are required");
-      return;
-    }
-    if (newStaff.password.length < 8) {
-      setFormError("Password must be at least 8 characters");
+    if (!newStaff.name.trim() || !newStaff.email.trim()) {
+      setFormError("Name and email are required");
       return;
     }
 
@@ -152,7 +147,7 @@ export default function TeamManagementPage() {
       const data = await res.json();
       if (!res.ok) { setFormError(data.message || "Failed to create staff member"); return; }
 
-      setSuccess(`Staff account for ${newStaff.name} created successfully!`);
+      setSuccess(data.notice || `Invite sent to ${newStaff.email}. They'll set their own password.`);
       setNewStaff({ name: "", email: "", phone: "", password: "" });
       setIsDialogOpen(false);
       fetchStaff();
@@ -293,7 +288,7 @@ export default function TeamManagementPage() {
                   <DialogHeader>
                     <DialogTitle>Add Staff Member</DialogTitle>
                     <DialogDescription>
-                      Create login credentials for a new warranty staff member. Share these details with them securely.
+                      We&apos;ll email them a link to set their own password.
                     </DialogDescription>
                   </DialogHeader>
                   <form onSubmit={handleCreateStaff} className="space-y-4 mt-2">
@@ -344,36 +339,12 @@ export default function TeamManagementPage() {
                       </div>
                       <p className="text-xs text-muted-foreground">Ticket assignments and visit updates are also sent by SMS.</p>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="staff-password">Temporary Password</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          id="staff-password"
-                          type={showPassword ? "text" : "password"}
-                          placeholder="Min. 8 characters"
-                          className="pl-9 pr-10"
-                          value={newStaff.password}
-                          onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                        >
-                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Share this password securely. The staff member should change it after first login.
-                      </p>
-                    </div>
                     <DialogFooter>
                       <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                         Cancel
                       </Button>
                       <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
-                        Create Account
+                        Send Invite
                       </Button>
                     </DialogFooter>
                   </form>
@@ -406,7 +377,7 @@ export default function TeamManagementPage() {
                     {user.role === "admin" ? (
                       <>
                         Staff accounts can only be created by you (the Admin). Public signup is only for administrators. Staff log in via the same{" "}
-                        <span className="font-medium text-[#0F3B3D] dark:text-[#b48c3c]">/login</span> page using the credentials you provide.
+                        <span className="font-medium text-[#0F3B3D] dark:text-[#b48c3c]">/login</span> page after setting a password from their invite email.
                       </>
                     ) : (
                       <>

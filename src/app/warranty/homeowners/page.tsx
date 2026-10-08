@@ -35,7 +35,6 @@ import {
   Copy,
   CheckCircle,
   Home,
-  Lock,
   Phone,
   Pencil,
 } from "lucide-react";
@@ -134,11 +133,6 @@ export default function HomeownersManagementPage() {
       return;
     }
 
-    if (!newHomeowner.password || newHomeowner.password.length < 8) {
-      setFormError("Password must be at least 8 characters");
-      return;
-    }
-
     try {
       const res = await fetch("/api/homeowners", {
         method: "POST",
@@ -148,7 +142,7 @@ export default function HomeownersManagementPage() {
       const data = await res.json();
       if (!res.ok) { setFormError(data.message || "Failed to create homeowner"); return; }
 
-      setSuccess(`Homeowner ${newHomeowner.name} added successfully! They can now log in with their credentials.`);
+      setSuccess(data.notice || `Homeowner ${newHomeowner.name} added. A welcome email with a set-password link is on its way.`);
       setNewHomeowner({ name: "", email: "", phone: "", password: "" });
       setIsDialogOpen(false);
       fetchHomeowners();
@@ -251,7 +245,7 @@ export default function HomeownersManagementPage() {
               <DialogHeader>
                 <DialogTitle>Add Homeowner</DialogTitle>
                 <DialogDescription>
-                  Create a login account for the homeowner. They can log in immediately with these credentials and reset their password at any time.
+                  We&apos;ll email the homeowner a welcome link to set their own password.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleCreateHomeowner} className="space-y-4 mt-2">
@@ -301,21 +295,6 @@ export default function HomeownersManagementPage() {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">Ticket and visit updates are also sent by SMS to this number.</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="password"
-                      type="password"
-                      placeholder="Min. 8 characters"
-                      className="pl-9"
-                      value={newHomeowner.password}
-                      onChange={(e) => setNewHomeowner({ ...newHomeowner, password: e.target.value })}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">The homeowner can reset this via "Forgot Password" at any time.</p>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>

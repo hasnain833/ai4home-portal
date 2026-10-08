@@ -2,6 +2,7 @@ import { toE164 } from "../services/sms.service.js";
 import prisma from "../lib/prisma.js";
 import { createHomeownerAccount, getSupabaseAdmin } from "../lib/homeowner-account.js";
 import bcrypt from "bcryptjs";
+import { sendHomeownerWelcome } from "./leads.controller.js";
 
 export const getHomeowners = async (req, res) => {
   try {
@@ -42,14 +43,14 @@ export const createHomeowner = async (req, res) => {
 
     const { name, email, password } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "Name, email, and password are required" });
+    if (!name || !email) {
+      return res.status(400).json({ message: "Name and email are required" });
     }
 
     const phone = toE164(req.body.phone);
     if (phone === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
 
-    if (password.length < 8) {
+    if (password && password.length < 8) {
       return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
 
@@ -60,10 +61,23 @@ export const createHomeowner = async (req, res) => {
 
     let homeowner;
     try {
-      homeowner = await createHomeownerAccount({ name, email, phone, companyId: session.companyId, password });
+      homeowner = await createHomeownerAccount({ name, email, phone, companyId: session.companyId, password: password || null });
     } catch (err) {
       if (err.status === 400) return res.status(400).json({ message: err.message });
       throw err;
+    }
+
+    // No password typed: the homeowner chooses their own from the welcome email.
+    if (!password) {
+      try {
+        await sendHomeownerWelcome(session.companyId, homeowner.id);
+      } catch (err) {
+        console.error("[Homeowners] welcome email failed:", err.message);
+        return res.status(201).json({
+          ...homeowner,
+          notice: "Homeowner added, but the welcome email did not send. They can use \"Forgot password\" on the sign-in page.",
+        });
+      }
     }
 
     return res.status(201).json(homeowner);

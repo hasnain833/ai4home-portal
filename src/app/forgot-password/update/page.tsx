@@ -87,6 +87,21 @@ export default function UpdatePasswordPage() {
             errorMsg = queryError;
           }
 
+          // Invite and reset emails link here with a one-time token (see
+          // passwordSetupLink); trading it for a session happens on this page.
+          const tokenHash = queryParams.get("token_hash");
+          if (!errorMsg && tokenHash && queryParams.get("type") === "recovery") {
+            const { error: verifyError } = await supabase.auth.verifyOtp({
+              token_hash: tokenHash,
+              type: "recovery",
+            });
+            if (verifyError) {
+              errorMsg = "This link has expired or was already used. Use \"Forgot password\" on the sign-in page to get a new one.";
+            }
+            // Drop the spent token from the address bar.
+            window.history.replaceState(null, "", window.location.pathname);
+          }
+
           // 2. Check hash parameters
           if (window.location.hash) {
             const hash = window.location.hash.substring(1);

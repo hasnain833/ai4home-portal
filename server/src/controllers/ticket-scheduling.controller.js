@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import prisma from "../lib/prisma.js";
 import { slotsForStaff, isSlotBookable } from "../services/warranty-scheduling.service.js";
 import {
+  calendlyBookingFor,
+  createCalendlyVisit,
+  cancelCalendlyVisit,
+  CalendlyBookingError,
+} from "../services/calendly.service.js";
+import { ticketRef } from "../lib/ticket-number.js";
+import {
   notifyAppointmentScheduled,
   notifyAppointmentCancelled,
 } from "../services/ticket-appointment-service.js";
@@ -79,6 +86,7 @@ export const publicBook = async (req, res) => {
       where: { bookingToken: token },
       include: {
         assignedStaff: { select: { id: true, name: true, email: true } },
+        homeowner: { select: { name: true, email: true, phone: true } },
         property: { select: { address: true } },
         appointments: { where: { status: "SCHEDULED" }, select: { id: true } },
       },
@@ -102,16 +110,44 @@ export const publicBook = async (req, res) => {
       return res.status(409).json({ message: "This claim cannot be booked online yet. Please contact us." });
     }
 
+    // A trade with a Calendly event type: book it there first. Calendly is
+    // their calendar of record and turns away a slot that has gone.
+    const calendly = await calendlyBookingFor(ticket.assignedStaff?.id);
+    let calendlyEventUri = null;
+    let slotDuration = null;
+    if (calendly) {
+      const check = await isSlotBookable({
+        staffId: ticket.assignedStaff.id,
+        staffEmail: ticket.assignedStaff.email,
+        companyId: ticket.companyId,
+        startTime,
+      });
+      if (!check.ok) return res.status(409).json({ message: check.reason });
+      slotDuration = check.slotDuration;
+      calendlyEventUri = await createCalendlyVisit(calendly, {
+        startTime,
+        name: ticket.homeowner?.name,
+        email: ticket.homeowner?.email,
+        phone: ticket.homeowner?.phone,
+        timezone: check.timezone,
+        address: ticket.property?.address,
+        ticketRef: ticketRef(ticket),
+      });
+    }
+
     const appointment = await prisma.$transaction(
       async (tx) => {
-        const check = await isSlotBookable({
-          staffId: ticket.assignedStaff?.id,
-          staffEmail: ticket.assignedStaff?.email,
-          companyId: ticket.companyId,
-          startTime,
-          db: tx,
-        });
-        if (!check.ok) throw new BookingConflictError(check.reason);
+        if (!calendly) {
+          const check = await isSlotBookable({
+            staffId: ticket.assignedStaff?.id,
+            staffEmail: ticket.assignedStaff?.email,
+            companyId: ticket.companyId,
+            startTime,
+            db: tx,
+          });
+          if (!check.ok) throw new BookingConflictError(check.reason);
+          slotDuration = check.slotDuration;
+        }
 
         const claimed = await tx.ticket.updateMany({
           where: {
@@ -132,7 +168,8 @@ export const publicBook = async (req, res) => {
             companyId: ticket.companyId,
             homeownerId: ticket.homeownerId,
             scheduledAt: new Date(startTime),
-            durationMinutes: check.slotDuration || 60,
+            durationMinutes: slotDuration || 60,
+            calendlyEventUri,
             tradeName: ticket.assignedStaff ? ticket.assignedStaff.name || ticket.assignedStaff.email : null,
             tradeEmail: ticket.assignedStaff?.email || null,
             location: ticket.property?.address || null,
@@ -143,7 +180,13 @@ export const publicBook = async (req, res) => {
         });
       },
       { isolationLevel: "Serializable" },
-    );
+    ).catch(async (err) => {
+      // Not saved on our side: don't leave the trade a Calendly booking nobody tracks.
+      if (calendlyEventUri) {
+        await cancelCalendlyVisit(ticket.assignedStaff.id, calendlyEventUri, "Booking could not be completed");
+      }
+      throw err;
+    });
 
     const result = await notifyAppointmentScheduled(appointment.id);
 
@@ -154,10 +197,10 @@ export const publicBook = async (req, res) => {
       ...(result.emailConfigured === false ? { notice: NOT_CONFIGURED_NOTICE } : {}),
     });
   } catch (error) {
-    if (error instanceof BookingConflictError || error?.code === "P2034") {
+    if (error instanceof BookingConflictError || error instanceof CalendlyBookingError || error?.code === "P2034") {
       return res.status(409).json({
         message:
-          error instanceof BookingConflictError
+          error instanceof BookingConflictError || error instanceof CalendlyBookingError
             ? error.message
             : "That slot has just been taken. Please pick another.",
       });
@@ -237,8 +280,11 @@ export const publicReschedule = async (req, res) => {
     const appointment = await prisma.ticketAppointment.findUnique({
       where: { rescheduleToken: token },
       include: {
+        homeowner: { select: { name: true, email: true, phone: true } },
         ticket: {
           select: {
+            id: true,
+            number: true,
             status: true,
             companyId: true,
             assignedStaff: { select: { id: true, email: true } },
@@ -264,16 +310,43 @@ export const publicReschedule = async (req, res) => {
     });
     if (!check.ok) return res.status(409).json({ message: check.reason });
 
+    // Calendly: book the new time first, then drop the old event.
+    const staffId = appointment.ticket?.assignedStaff?.id;
+    const calendly = await calendlyBookingFor(staffId);
+    let calendlyEventUri = appointment.calendlyEventUri;
+    if (calendly) {
+      try {
+        calendlyEventUri = await createCalendlyVisit(calendly, {
+          startTime,
+          name: appointment.homeowner?.name,
+          email: appointment.homeowner?.email,
+          phone: appointment.homeowner?.phone,
+          timezone: check.timezone,
+          address: appointment.location,
+          ticketRef: ticketRef(appointment.ticket),
+        });
+      } catch (err) {
+        if (err instanceof CalendlyBookingError) return res.status(409).json({ message: err.message });
+        throw err;
+      }
+    }
+
     const updated = await prisma.ticketAppointment.update({
       where: { id: appointment.id },
       data: {
         scheduledAt: new Date(startTime),
         durationMinutes: check.slotDuration || appointment.durationMinutes,
+        calendlyEventUri,
         // A new time earns a fresh set of reminders.
         remindersSent: [],
         rescheduleCount: { increment: 1 },
       },
     });
+
+    // After the save, so the cancellation echoing back by webhook matches nothing.
+    if (calendly && appointment.calendlyEventUri) {
+      await cancelCalendlyVisit(staffId, appointment.calendlyEventUri, "Moved to a new time");
+    }
 
     const result = await notifyAppointmentScheduled(updated.id, { rescheduled: true });
 
@@ -296,7 +369,7 @@ export const publicCancel = async (req, res) => {
 
     const appointment = await prisma.ticketAppointment.findFirst({
       where: { OR: [{ cancelToken: token }, { rescheduleToken: token }] },
-      include: { ticket: { select: { id: true, status: true, bookingToken: true } } },
+      include: { ticket: { select: { id: true, status: true, bookingToken: true, assignedStaffId: true } } },
     });
 
     if (!appointment) return res.status(404).json({ message: "This link is not valid." });
@@ -319,6 +392,8 @@ export const publicCancel = async (req, res) => {
           : appointment.notes,
       },
     });
+
+    await cancelCalendlyVisit(appointment.ticket?.assignedStaffId, appointment.calendlyEventUri, "Cancelled by the homeowner");
 
     // Without a fresh token the ticket would be stuck: dispatched, no visit, and
     // no way for the homeowner to pick another time.

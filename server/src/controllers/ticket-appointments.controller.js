@@ -3,6 +3,14 @@ import {
   notifyAppointmentScheduled,
   notifyAppointmentCancelled,
 } from "../services/ticket-appointment-service.js";
+import {
+  calendlyBookingFor,
+  createCalendlyVisit,
+  cancelCalendlyVisit,
+  CalendlyBookingError,
+} from "../services/calendly.service.js";
+import { availabilityForStaff } from "../services/warranty-scheduling.service.js";
+import { ticketRef } from "../lib/ticket-number.js";
 
 const BOOKING_ROLES = ["ADMIN", "STAFF"];
 
@@ -115,7 +123,10 @@ export const updateAppointment = async (req, res) => {
 
     const existing = await prisma.ticketAppointment.findUnique({
       where: { id: req.params.id },
-      include: { ticket: { select: { status: true } } },
+      include: {
+        homeowner: { select: { name: true, email: true, phone: true } },
+        ticket: { select: { id: true, number: true, status: true, assignedStaffId: true } },
+      },
     });
     if (!existing || existing.companyId !== session.companyId) {
       return res.status(404).json({ message: "Appointment not found" });
@@ -159,10 +170,45 @@ export const updateAppointment = async (req, res) => {
     if (location !== undefined) data.location = location?.trim() || null;
     if (notes !== undefined) data.notes = notes?.trim() || null;
 
+    // Keep the trade's Calendly in step. A new time is booked there first, so
+    // staff can't move a visit to a time the trade isn't free.
+    const tradeId = existing.ticket?.assignedStaffId;
+    const moving = data.scheduledAt && data.scheduledAt.getTime() !== existing.scheduledAt.getTime();
+    const cancelling = status === "CANCELLED" && existing.status !== "CANCELLED";
+    if (moving && !cancelling && existing.calendlyEventUri) {
+      const calendly = await calendlyBookingFor(tradeId);
+      if (calendly) {
+        try {
+          const setting = await availabilityForStaff(tradeId, existing.companyId);
+          data.calendlyEventUri = await createCalendlyVisit(calendly, {
+            startTime: data.scheduledAt,
+            name: existing.homeowner?.name,
+            email: existing.homeowner?.email,
+            phone: existing.homeowner?.phone,
+            timezone: setting.timezone,
+            address: existing.location,
+            ticketRef: ticketRef(existing.ticket),
+          });
+        } catch (err) {
+          if (err instanceof CalendlyBookingError) {
+            return res.status(409).json({ message: "The trade isn't free at that time in their Calendly." });
+          }
+          throw err;
+        }
+      } else {
+        data.calendlyEventUri = null;
+      }
+    }
+    if (cancelling) data.calendlyEventUri = null;
+
     const appointment = await prisma.ticketAppointment.update({
       where: { id: existing.id },
       data,
     });
+
+    if (existing.calendlyEventUri && data.calendlyEventUri !== undefined) {
+      await cancelCalendlyVisit(tradeId, existing.calendlyEventUri, cancelling ? "Cancelled by the builder" : "Moved to a new time");
+    }
 
     let result = { emailConfigured: true };
     const nowCancelled = status === "CANCELLED" && existing.status !== "CANCELLED";
