@@ -16,6 +16,7 @@ const publicRoutes = [
   "/terms",
   "/privacy",
   "/blog",
+  "/report", // DEMO ticket form, remove with the demo
 ];
 
 const EXPECTED_AUTH_ERRORS = new Set([

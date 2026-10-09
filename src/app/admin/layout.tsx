@@ -26,6 +26,7 @@ import {
   FlaskConical,
   Send,
   ArrowRightLeft,
+  KanbanSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -47,6 +48,7 @@ const adminNavItems = [
   },
   { name: "Messaging", href: "/admin/messaging", icon: Send },
   { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical },
+  { name: "Tickets", href: "/admin/tickets", icon: KanbanSquare },
 ];
 
 const subscribeToHydration = () => () => {};
@@ -164,7 +166,7 @@ export default function AdminLayout({
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 space-y-2 p-3 overflow-y-auto">
+          <nav className="flex-1 space-y-2 p-3 overflow-y-auto no-scrollbar">
             {adminNavItems.map((item) => {
               const isActive = pathname === item.href;
               return (

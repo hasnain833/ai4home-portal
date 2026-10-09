@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, LifeBuoy, Phone } from "lucide-react";
+import { Bot, LifeBuoy, MessageSquarePlus, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { QUERY_KEYS, useQuery } from "@/lib/use-query";
 import { HelpChatDialog } from "@/components/layout/HelpChat";
-
+import { ReportIssueDialog } from "@/components/layout/ReportIssueDialog";
 type SupportContact = { phone: string };
 
 // Edited by platform admins on Admin → Support.
@@ -26,6 +26,7 @@ const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, "")}`;
 export function HelpMenu({ expanded = true }: { expanded?: boolean }) {
   const contact = useSupportContact();
   const [chatOpen, setChatOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   return (
     <>
       <DropdownMenu>
@@ -63,9 +64,18 @@ export function HelpMenu({ expanded = true }: { expanded?: boolean }) {
               </a>
             </DropdownMenuItem>
           )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="cursor-pointer" onSelect={() => setReportOpen(true)}>
+            <MessageSquarePlus className="h-4 w-4 mr-2" />
+            <div>
+              <p className="text-sm font-medium">Report an issue</p>
+              <p className="text-xs text-muted-foreground">Bug, feature request or feedback</p>
+            </div>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <HelpChatDialog open={chatOpen} onOpenChange={setChatOpen} />
+      <ReportIssueDialog open={reportOpen} onOpenChange={setReportOpen} />
     </>
   );
 }
