@@ -12,11 +12,6 @@ export function isNewLeadEvent(triggerEvent, context = {}) {
   return false;
 }
 
-/**
- * The company's built-in nurture campaign, created on first use and switched on.
- * Serialised per company: a CSV import fires many enrollments at once, and each
- * would otherwise create its own copy.
- */
 export async function ensureAutoCampaign(companyId) {
   const find = (db) =>
     db.campaign.findFirst({ where: { companyId, kind: AUTO_KIND }, orderBy: { createdAt: "asc" } });

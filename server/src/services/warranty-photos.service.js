@@ -2,10 +2,6 @@ import prisma from "../lib/prisma.js";
 import { assertUploadSafe, buildStorageKey } from "../lib/file-security.js";
 import { BUCKETS, uploadObject, resolveDownloadUrl, deleteObject } from "../lib/storage.js";
 
-// Photos of a warranty issue. They are taken during the chat, before any ticket
-// exists, so they belong to the conversation first; filing the ticket moves
-// them onto it.
-
 export const MAX_PHOTOS_PER_CLAIM = 6;
 const SIGNED_URL_TTL = 60 * 60;
 

@@ -76,15 +76,11 @@ export async function writeBackLeadToSalesforce(companyId, leadId, changedFields
           message: (err?.message || "Write-back failed").slice(0, 500),
         },
       });
-      // SW-CRM-007: repeated write-back failures are as invisible as sync ones.
       await maybeAlertOnSyncFailure(companyId, { action: "write-back" });
     } catch { /* ignore logging failure */ }
   }
 }
 
-// ── Pushing AI4HB-created records into the builder's Salesforce ──────────────
-// Gated by the same per-tenant write-back switch as field updates. Every record
-// we write carries a link back to the portal for the full conversation.
 
 const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
 const leadLink = (leadId) => `${portalUrl()}/sales/leads/${leadId}`;
@@ -115,11 +111,14 @@ async function logPush(companyId, ok, message) {
   } catch { /* ignore logging failure */ }
 }
 
-/**
- * Creates the Salesforce Lead for a portal lead that has none yet, and stores
- * its id as the lead's externalId so the inbound sync matches it from then on.
- * Returns the Salesforce Lead id, or null when push is off or it failed.
- */
+async function addressState(client, state) {
+  if (!state) return {};
+  const code = String(state).trim().match(/^([A-Za-z]{2})(?![A-Za-z])/)?.[1]?.toUpperCase();
+  const leadFields = await client.describeSObjectFields("Lead").catch(() => null);
+  if (code && leadFields?.has("statecode")) return { StateCode: code, CountryCode: "US" };
+  return { State: state };
+}
+
 export async function pushLeadToSalesforce(companyId, leadId, client = null) {
   try {
     const lead = await prisma.lead.findFirst({ where: { id: leadId, companyId } });
@@ -139,13 +138,13 @@ export async function pushLeadToSalesforce(companyId, leadId, client = null) {
       MobilePhone: lead.phone || undefined,
       Street: lead.street || undefined,
       City: lead.city || undefined,
-      State: lead.state || undefined,
+      ...(await addressState(client, lead.state)),
       PostalCode: lead.zipCode || undefined,
       Description: `Captured by the AI4HB Sales Agent.\nFull conversation and details: ${leadLink(lead.id)}`,
     });
 
-    // Only claim the id if nothing else (e.g. a sync) linked the lead meanwhile.
     await prisma.lead.updateMany({ where: { id: lead.id, externalId: null }, data: { externalId: sfId } });
+    await writeBackLeadToSalesforce(companyId, lead.id, { emailOptIn: lead.emailOptIn, smsOptIn: lead.smsOptIn });
     await logPush(companyId, true, `Created Salesforce Lead ${sfId} for ${name}`);
     return sfId;
   } catch (err) {

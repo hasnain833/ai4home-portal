@@ -2,10 +2,6 @@ import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { runIncrementalSync } from "../../services/salesforce-sync.js";
 
-// SW-CRM-006: scheduled per-tenant incremental Salesforce sync. The cron ticks
-// every 15 minutes; each active connection is synced only when it is due per its
-// own `syncInterval` (default 15 min). Per-tenant failures are isolated so one
-// bad connection doesn't stop the others.
 export const salesforceSyncCron = inngest.createFunction(
   {
     id: "salesforce-incremental-sync-cron",

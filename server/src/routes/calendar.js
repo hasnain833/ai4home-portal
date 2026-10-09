@@ -10,9 +10,6 @@ import {
 
 const router = Router();
 
-// SRS 4.12: a homeowner may VIEW their own calendar items — reads are already
-// scoped by ownerScope() in the controller. Creating items, generating AI
-// suggestions and approving or rescheduling are builder actions.
 const builderOnly = requireRoles(["ADMIN", "STAFF"]);
 
 router.get("/", requireAuth, getCalendarEvents);

@@ -6,20 +6,13 @@ import {
   notifyAppointmentCancelled,
 } from "../services/ticket-appointment-service.js";
 
-// Changes a trade (or homeowner) makes inside Calendly, applied to the portal
-// visit booked as that Calendly event. Our own changes echo back here too;
-// they find nothing to do, because the portal row is updated before Calendly.
-
-/** The scheduled event an invitee URI belongs to: .../scheduled_events/<id>/invitees/<id>. */
 const eventOfInvitee = (inviteeUri) => String(inviteeUri || "").split("/invitees/")[0] || null;
 
-/** Applies one webhook delivery. Returns what it did, for the log and tests. */
 export async function handleCalendlyEvent({ event, payload } = {}) {
   const eventUri = payload?.scheduled_event?.uri || payload?.event || eventOfInvitee(payload?.uri);
   if (!eventUri) return "ignored";
 
   if (event === "invitee.canceled") {
-    // A reschedule cancels the old event; invitee.created brings the new time.
     if (payload.rescheduled) return "ignored";
 
     const visit = await prisma.ticketAppointment.findFirst({
@@ -37,7 +30,6 @@ export async function handleCalendlyEvent({ event, payload } = {}) {
         notes: `${visit.notes ? `${visit.notes}\n\n` : ""}[Cancelled in Calendly by ${by}]${reason ? ` ${reason.slice(0, 500)}` : ""}`,
       },
     });
-    // Same as a portal cancel: the homeowner needs a link to pick a new time.
     if (visit.ticket?.status !== "RESOLVED") {
       await prisma.ticket.update({
         where: { id: visit.ticketId },
@@ -49,7 +41,6 @@ export async function handleCalendlyEvent({ event, payload } = {}) {
   }
 
   if (event === "invitee.created") {
-    // Only a reschedule of one of our visits; a fresh Calendly booking is not a claim.
     const oldEventUri = eventOfInvitee(payload.old_invitee);
     if (!oldEventUri) return "ignored";
 

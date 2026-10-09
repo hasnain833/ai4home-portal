@@ -176,9 +176,6 @@ export async function requireAuth(req, res, next) {
         .json({ message: "User profile not found in local database." });
     }
 
-    // Trades have no company of their own and see only the jobs they are
-    // assigned. Every company-scoped controller assumes "not a homeowner" means
-    // staff, so they are fenced to the trade API here, in one place.
     if (dbUser.role === "TRADE" && !TRADE_API_PREFIXES.some((p) => req.originalUrl.startsWith(p))) {
       return res.status(403).json({ message: "Forbidden" });
     }
@@ -287,4 +284,12 @@ export function requirePermission(permission) {
       missingPermission: permission,
     });
   };
+}
+
+export function denyUnlessSuperAdmin(req, res) {
+  if (!req.user?.isSuperAdmin) {
+    res.status(403).json({ message: "Unauthorized" });
+    return true;
+  }
+  return false;
 }

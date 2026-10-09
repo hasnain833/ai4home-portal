@@ -41,7 +41,9 @@ Engineering work from "SOP: Onboarding a New Client and New Communities".
 - Note: "Appointments rescheduled" only counts moves made after this change; earlier moves were never recorded and can't be recovered.
 
 ## 7. AI4HB Help Agent
-- [ ] Customer-service chatbot for builder staff (portal how-to, uploading communities). Needs its own prompt and KB.
+- [x] Customer-service chatbot for builder staff (portal how-to, uploading communities). Needs its own prompt and KB.
+  - Help → "Ask the AI assistant" (also on Communities). Built-in prompt with a full portal guide; super admins edit the prompt, test it and upload docs on Admin → Prompt Lab → Help Agent.
+  - [ ] DB: run `prisma/sql/2026-10-09-kbscope-help.sql`, then `prisma db push` (adds the `HELP` KB scope). Until then, doc uploads fail; chat works without docs.
 
 ## 8. ERP write-back (blocked)
 - [ ] Get ERP name and sandbox/API credentials from the client
@@ -49,9 +51,9 @@ Engineering work from "SOP: Onboarding a New Client and New Communities".
 - [ ] Pull homeowners from the ERP
 
 ## 9. Ticket management + staff roles (Oct 8–9, 2026)
-- [ ] Complete the task/ticket management system in AI4HB
-- [ ] Add staff roles for Super Admin users
-- [ ] Both regular staff and Super Admin staff can create and resolve tickets
+- [x] Complete the task/ticket management system in AI4HB
+- [x] Add staff roles for Super Admin users
+- [x] Both regular staff and Super Admin staff can create and resolve tickets
 
 ## 10. Trades (Oct 8–9, 2026)
 - [x] Separate auth role for trades (plumbers, electricians, etc.): `TRADE` role, own portal at `/trade`, API fenced to `/api/trade/*`
@@ -71,10 +73,10 @@ Engineering work from "SOP: Onboarding a New Client and New Communities".
 - [ ] Test end to end on staging: add trade → invite → dispatch → book → mark done → resolve
 
 ## 11. Google Drive: Working Documents (Oct 8–9, 2026)
-- [ ] Create a "Working Documents" folder in ghulamali9020's Google Drive
-- [ ] Upload the latest SRS for the mobile app
-- [ ] Upload the Daily Updates document
-- [ ] Upload Changes to Contract (Terms and Conditions)
+- [x] Create a "Working Documents" folder in ghulamali9020's Google Drive
+- [x] Upload the latest SRS for the mobile app
+- [x] Upload the Daily Updates document
+- [x] Upload Changes to Contract (Terms and Conditions)
 
 ## Questions for the client
 - [ ] Which warranty ERP does the first builder use? Can we get API access?

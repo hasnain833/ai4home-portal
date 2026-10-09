@@ -20,9 +20,6 @@ import {
 
 const router = Router();
 
-// §4.12: nurture sequences are "Per permission" for a Builder Member. Reads stay
-// open to anyone with Sales access — the grant gates changing and launching, which
-// is what actually reaches a lead.
 const canManage = requirePermission("campaigns.manage");
 
 router.get("/", requireAuth, getCampaigns);

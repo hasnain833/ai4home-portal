@@ -4,9 +4,6 @@ import { triggerAutomation } from "../lib/automation-events.js";
 import { normalizePhone } from "../services/sms.service.js";
 import { pushLeadToSalesforce } from "../services/salesforce-writeback.js";
 
-// A builder's website form, hosted here (iframe or link) or posted to directly
-// from their own form. The URL carries the company id, which is already public
-// in reply addresses; abuse is held back by the rate limit and a honeypot.
 // ponytail: no per-company form key, add a rotatable one if a form gets spammed.
 
 const EMAIL_RE = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/;

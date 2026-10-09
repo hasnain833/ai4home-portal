@@ -126,9 +126,6 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
       },
     });
 
-    // 6. Parse and embed. Inngest makes this durable and retried; if it is not
-    // configured the send throws, so fall back to running it in-process rather
-    // than leaving the document stuck at PENDING forever.
     try {
       await inngest.send({
         name: "warranty.kb.ingest",

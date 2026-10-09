@@ -48,11 +48,6 @@ const COLUMN_ALIASES: Record<string, string> = {
   communityname: "community",
 };
 
-/**
- * A small CSV reader, quoted fields included. The files here are short lists of
- * homes — at most a few hundred rows — so this stays in the browser rather than
- * going through the async job pipeline the leads importer uses.
- */
 function parseCsv(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return [];
@@ -94,11 +89,6 @@ function parseCsv(text: string): Record<string, string>[] {
   });
 }
 
-/**
- * The homes CSV import for the properties page header — bulk upload is how a
- * community gets its sold homes. Communities themselves are managed on the
- * Communities page, which both workspaces share.
- */
 export function HomesCsvImport({
   disabled,
   onImported,

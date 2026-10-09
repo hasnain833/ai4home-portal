@@ -29,10 +29,6 @@ const formatWhen = (iso: string) =>
     minute: "2-digit",
   });
 
-/**
- * Reached from the "change or cancel" button on every appointment email. This
- * is what makes the reminders actionable rather than just informational.
- */
 export default function ManageVisitPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
   const [data, setData] = useState<ManageData | null>(null);

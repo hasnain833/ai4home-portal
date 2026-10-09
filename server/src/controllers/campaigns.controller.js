@@ -126,9 +126,6 @@ export const getCampaignDetail = async (req, res) => {
         SUPPRESSED: enrollments.filter(
           (e) => e.status === "EXITED" && e.exitedReason === "SUPPRESSED",
         ).length,
-        // Enrollments stopped because the workspace lost its email/SMS
-        // credentials mid-sequence. Broken out so this reads as a setup problem
-        // the tenant can fix, not as leads that opted out.
         NOT_CONFIGURED: enrollments.filter(
           (e) => e.status === "EXITED" && e.exitedReason === "NOT_CONFIGURED",
         ).length,

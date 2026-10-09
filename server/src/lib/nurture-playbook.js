@@ -1,12 +1,3 @@
-// The built-in 180-day lead nurture: one per company, enrolled automatically for
-// every new lead. Timing and order are fixed; builders can edit the wording and
-// switch touches off. `at` is minutes from enrollment.
-//
-// Default copy uses only merge fields every lead has and makes no factual claims
-// (prices, incentives, rates) — those come from the builder's knowledge base via
-// the AI rewrite. Replies are handed to the AI sales agent, so SMS never asks for
-// a numbered menu answer it would have no context for.
-
 const DAY = 24 * 60;
 
 export const PLAYBOOK_NAME = "180-Day Lead Nurture";

@@ -12,7 +12,7 @@ import { sendSms, smsSent, toE164 } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { Templates, SmsTemplates } from "../services/templates.js";
 import { effectiveSalesPermissions } from "../lib/permissions.js";
-import { passwordSetupLink } from "../lib/homeowner-account.js";
+import { passwordSetupLink, getSupabaseAdmin } from "../lib/homeowner-account.js";
 
 const safeEqual = (a, b) => {
   const ab = Buffer.from(String(a ?? ""), "utf8");
@@ -22,14 +22,6 @@ const safeEqual = (a, b) => {
 };
 
 // Initialize Supabase Admin client
-const getSupabaseAdmin = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error("Missing Supabase credentials");
-  }
-  return createClient(supabaseUrl, supabaseServiceKey);
-};
 
 export const getMe = async (req, res) => {
   try {

@@ -75,11 +75,4 @@ export async function embedBatch(texts, batchSize = 32) {
 }
 
 
-export async function preloadModel() {
-  try {
-    await getPipeline();
-  } catch {
-  }
-}
-
 export { EMBEDDING_DIM };

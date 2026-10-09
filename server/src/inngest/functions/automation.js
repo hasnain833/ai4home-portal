@@ -94,9 +94,6 @@ export async function executeAction(action, lead, ctx = {}) {
       });
       if (!campaign) return { type, error: "campaign not found" };
 
-      // This path enrolls straight into the database, so it has to repeat the
-      // check the enroll endpoint makes — otherwise a rule quietly enrols leads
-      // into a campaign the workspace cannot send on.
       const missing = await missingChannelsForSteps(lead.companyId, campaign.steps);
       if (missing.length) {
         return { type, skipped: `${missing.join(" and ").toLowerCase()} not configured` };

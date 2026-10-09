@@ -107,9 +107,6 @@ export default function TeamManagementPage() {
       const res = await fetch("/api/admin/staff");
       if (!res.ok) throw new Error("Failed to load staff");
       const data = await res.json();
-      // The endpoint used to return a bare array and now returns
-      // { staff, permissionCatalogue }. Accept both so a stale cached bundle
-      // against a new server (or vice versa) still renders the team list.
       if (Array.isArray(data)) {
         setStaffList(data);
       } else {

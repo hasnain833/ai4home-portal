@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { isEncrypted } from "../lib/crypto.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import {
   snapshotMappings,
@@ -26,6 +27,10 @@ function getPortalUrl() {
   return process.env.NEXT_PUBLIC_URL;
 }
 
+function appCredentials() {
+  return { clientId: process.env.SALESFORCE_CLIENT_ID, clientSecret: process.env.SALESFORCE_CLIENT_SECRET };
+}
+
 export const connectSalesforce = async (req, res) => {
   try {
     if (!req.user || !req.user.companyId) {
@@ -33,12 +38,11 @@ export const connectSalesforce = async (req, res) => {
     }
 
     const companyId = req.user.companyId;
-    const { clientId, clientSecret, environment } = req.body;
+    const { environment } = req.body;
+    const { clientId, clientSecret } = appCredentials();
 
     if (!clientId || !clientSecret) {
-      return res
-        .status(400)
-        .json({ message: "Client ID and Client Secret are required" });
+      return res.status(500).json({ message: "Salesforce connect is not set up on this server yet." });
     }
 
     const env = environment === "production" ? "production" : "sandbox";
@@ -47,15 +51,8 @@ export const connectSalesforce = async (req, res) => {
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = codeChallengeFromVerifier(codeVerifier);
 
-    // Encode credentials + companyId into state payload
-    const statePayload = JSON.stringify({
-      companyId,
-      clientId,
-      clientSecret: encrypt(clientSecret),
-      environment: env,
-      codeVerifier: encrypt(codeVerifier),
-    });
-    const state = Buffer.from(statePayload).toString("base64url");
+    // Encrypted so the callback can trust companyId.
+    const state = encrypt(JSON.stringify({ companyId, environment: env, codeVerifier }));
 
     const authUrl = SalesforceClient.getAuthorizationUrl({
       clientId,
@@ -95,23 +92,14 @@ export const salesforceCallback = async (req, res) => {
     let stateData;
 
     try {
-      const decoded = Buffer.from(stateParam, "base64url").toString("utf-8");
-      stateData = JSON.parse(decoded);
+      if (!isEncrypted(stateParam)) throw new Error("unsigned state");
+      stateData = JSON.parse(decrypt(stateParam));
     } catch {
       return res.redirect(`${baseUrl}/sales/settings?sf_error=invalid_state`);
     }
 
-    const {
-      companyId,
-      clientId,
-      clientSecret: encryptedSecret,
-      environment,
-      codeVerifier: encryptedVerifier,
-    } = stateData;
-    const clientSecret = decrypt(encryptedSecret);
-    // PKCE: recover the verifier that pairs with the challenge we sent earlier.
-    // Older in-flight states (pre-PKCE) simply won't have it.
-    const codeVerifier = encryptedVerifier ? decrypt(encryptedVerifier) : undefined;
+    const { companyId, environment, codeVerifier } = stateData;
+    const { clientId, clientSecret } = appCredentials();
     const redirectUri = `${baseUrl}/api/sales/salesforce/callback`;
 
     // Exchange the authorization code for tokens
@@ -154,8 +142,6 @@ export const salesforceCallback = async (req, res) => {
 
     await seedDefaultMappings(companyId);
 
-    // SW-CRM-004: record the seeded defaults as the baseline version, so the
-    // history has a v1 to roll back to rather than starting at the first edit.
     await snapshotMappings(companyId, {
       changeType: "SAVE",
       note: "Seeded default field mappings on connect",

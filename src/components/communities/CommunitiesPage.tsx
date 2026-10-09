@@ -25,12 +25,6 @@ import {
 
 const TYPE_KEYS = Object.keys(COMMUNITY_TYPE_LABELS) as CommunityType[];
 
-/**
- * One community list for both workspaces. Sold homes (warranty properties),
- * homes for sale and KB documents all hang off the same community, so each
- * workspace shows the same rows — only the API path differs, because each path
- * sits behind its own workspace's access check.
- */
 export default function CommunitiesPage({ workspace }: { workspace: "warranty" | "sales" }) {
   const api = workspace === "sales" ? "/api/sales/communities" : "/api/communities";
   const confirm = useConfirm();

@@ -50,9 +50,6 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // API authentication is enforced by the backend routes themselves. Running a
-  // second Supabase lookup here adds latency to webhooks and logs signed-out API
-  // requests as proxy errors even though the proxy allows every API route.
   if (pathname.startsWith("/api/")) {
     return NextResponse.next({ request });
   }

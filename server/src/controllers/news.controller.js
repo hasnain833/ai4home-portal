@@ -1,10 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { scrapeNewsForCompany } from "../services/news-service.js";
 
-// Market news goes stale fast — a two-month-old "rates are climbing" headline is
-// worse than no headline, because campaign and calendar drafts are grounded in it.
-// Rows are hidden rather than deleted: BlogPost.sourceNewsIds cites them, and those
-// citations should keep resolving after the item drops off this list.
 const NEWS_MAX_AGE_DAYS = 30;
 
 export const getNews = async (req, res) => {
@@ -43,9 +39,6 @@ export const getNews = async (req, res) => {
   }
 };
 
-// SW-NEWS-001: on-demand scrape for the current tenant against its own
-// configured sources (or the platform default), without waiting for the daily
-// cron. Returns how many new items were stored.
 export const refreshNews = async (req, res) => {
   try {
     const { companyId, role } = req.user;

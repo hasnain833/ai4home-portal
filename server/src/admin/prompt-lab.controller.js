@@ -17,14 +17,8 @@ import {
   AGENT_TYPES,
 } from "../prompts/index.js";
 import { getLivePrompts, invalidateLivePrompts } from "../prompts/live.js";
+import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
 
-function denyUnlessSuperAdmin(req, res) {
-  if (!req.user?.isSuperAdmin) {
-    res.status(403).json({ message: "Unauthorized" });
-    return true;
-  }
-  return false;
-}
 
 const MAX_TRANSCRIPT_TURNS = 40;
 

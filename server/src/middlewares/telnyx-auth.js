@@ -1,8 +1,5 @@
 import crypto from "crypto";
 
-// Telnyx signs webhooks with Ed25519 over `${timestamp}|${rawBody}` and sends the
-// signature base64-encoded in `telnyx-signature-ed25519`. The verifying key is the
-// account's Public Key from the Telnyx portal (TELNYX_PUBLIC_KEY).
 const TOLERANCE_SECONDS = 5 * 60;
 
 function toEd25519PublicKey(base64Key) {

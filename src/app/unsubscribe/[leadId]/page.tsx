@@ -8,9 +8,6 @@ export default function UnsubscribePage() {
   const params = useParams();
   const leadId = Array.isArray(params.leadId) ? params.leadId[0] : params.leadId;
 
-  // A missing route param is knowable at render time, so it seeds the initial
-  // state instead of being corrected by an effect — that version rendered a
-  // spinner for one frame before flipping to the error.
   const [state, setState] = useState<"loading" | "success" | "error">(
     leadId ? "loading" : "error",
   );

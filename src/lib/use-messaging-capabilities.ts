@@ -7,15 +7,6 @@ export interface MessagingCapabilities {
   sms: { configured: boolean; provider: string | null };
 }
 
-/**
- * Whether the platform can currently deliver on each channel. Since messaging
- * moved to platform-owned accounts this is no longer a tenant setting — an
- * unavailable channel means a platform outage or missing platform credentials,
- * not something the tenant can fix.
- *
- * While loading, both channels are reported as available: a slow request must
- * not flash an "unavailable" warning when everything is fine.
- */
 export function useMessagingCapabilities() {
   const { data, loading, error, refresh } = useQuery<MessagingCapabilities>(
     QUERY_KEYS.messagingCapabilities,

@@ -42,11 +42,6 @@ const TYPES = {
     magic: "zip",
   },
   txt: { ext: ["txt", "md"], mime: ["text/plain", "text/markdown"], magic: null },
-  // Browsers disagree wildly about what a .csv is. Windows with Excel installed
-  // reports application/vnd.ms-excel; some report nothing useful at all and fall
-  // back to octet-stream. Widening this is safe because csv has no magic number,
-  // so every upload still has to survive the looksLikeText check below — a real
-  // .xls renamed to .csv is caught there, not here.
   csv: {
     ext: ["csv"],
     mime: [

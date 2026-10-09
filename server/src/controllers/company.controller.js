@@ -6,9 +6,6 @@ import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
 import { Templates } from "../services/templates.js";
 import { hasSalesPermission } from "../lib/permissions.js";
 
-// Bump together with the PDF in public/legal/ and the constants in
-// VerificationGate.tsx, so a stored agreementVersion always names the
-// wording that was actually signed.
 const AGREEMENT_VERSION = "1.0";
 
 export const getCompany = async (req, res) => {

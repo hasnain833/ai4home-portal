@@ -31,11 +31,6 @@ export function countSegments(body: string) {
 
 const OPT_OUT_SUFFIX = " Reply STOP to opt out.";
 
-/**
- * What a composed body will actually cost once the server has added the
- * company-name prefix and the mandatory opt-out suffix. Both are invisible in
- * the editor, and together they take ~36 characters off the first segment.
- */
 export function describeSmsCost(body: string, companyName?: string | null) {
   const text = String(body || "").trim();
 

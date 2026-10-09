@@ -118,9 +118,6 @@ export default function AppointmentsPage() {
     timezone: "America/New_York",
     appointmentMode: "AI",
   });
-  // SRS §4.12: a homeowner gets "own availability" — the window is read-only for
-  // them because AvailabilitySetting is a single shared row per company. The API
-  // reports this as `canEditAvailability`.
   const [canEdit, setCanEdit] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [slotPreview, setSlotPreview] = useState<{

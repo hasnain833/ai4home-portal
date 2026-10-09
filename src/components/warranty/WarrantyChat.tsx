@@ -69,25 +69,10 @@ export default function WarrantyChat({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  /**
-   * Choices the agent offered on the most recent turn.
-   *
-   * Only the latest turn's, deliberately: the panel is docked to the composer, so
-   * answering one question replaces its choices with the next question's.
-   */
   const [options, setOptions] = useState<string[]>([]);
 
-  // Held in memory only, for the life of this tab.
-  //
-  // The server still keeps a conversation row while a chat is in progress — it is
-  // the agent's working memory for phase, collected facts and the property — but
-  // nothing pins the id anywhere durable, so a reload starts a fresh conversation
-  // and no past one can be reopened.
   const [conversationId, setConversationId] = useState<string | null>(null);
 
-  // Starter prompts come from the warranty knowledge base, so they track whatever
-  // of the diagnostic matrix has been indexed. An empty list hides the panel, which
-  // is the correct behaviour for a tenant whose KB has no matrix in it yet.
   useEffect(() => {
     if (!companyId) return;
     let cancelled = false;
@@ -116,10 +101,6 @@ export default function WarrantyChat({
     scrollToBottom();
   }, [messages, isLoading]);
 
-  /**
-   * Sends one turn. Takes the text explicitly so a suggestion chip can send
-   * without first round-tripping through the input box.
-   */
   const sendMessage = async (text: string, { photoStepDone = false }: { photoStepDone?: boolean } = {}) => {
     const trimmed = text.trim();
     if (!trimmed || isLoading) return;
@@ -346,10 +327,6 @@ export default function WarrantyChat({
             placeholder="Type your message..."
             className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent dark:text-white"
             style={{ "--tw-ring-color": themeColor } as React.CSSProperties}
-            // Deliberately not disabled while a reply is in flight: disabling an
-            // input makes the browser drop focus, so the caret vanished after
-            // every message. sendMessage() already refuses to send twice, and
-            // being able to type the next question while waiting is no loss.
             disabled={!companyId}
           />
           <button

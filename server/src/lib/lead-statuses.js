@@ -21,11 +21,6 @@ export const LEAD_STATUS = {
   UNSUBSCRIBED: "Unsubscribed",
 };
 
-export function normalizeLeadStatuses(input) {
-  void input;
-  return DEFAULT_LEAD_STATUSES;
-}
-
 export function resolveLeadStatuses(company) {
   void company;
   return DEFAULT_LEAD_STATUSES;

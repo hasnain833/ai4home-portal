@@ -2,9 +2,6 @@ import prisma from "../lib/prisma.js";
 import { getLeadTimezone } from "../lib/timezone.js";
 import { Templates } from "./templates.js";
 
-// Spam-complaint monitoring thresholds. 0.1% over a rolling 24 hours is the
-// figure the major mailbox providers publish, so these are fixed rather than
-// configurable — a deployment that "tunes" them is just hiding a problem.
 const COMPLAINT_RATE_WINDOW_HOURS = 24;
 const COMPLAINT_RATE_THRESHOLD = 0.001;
 const COMPLAINT_RATE_MIN_VOLUME = 100;
@@ -140,9 +137,6 @@ export class ComplianceService {
       },
     });
 
-    // A STOP is honoured even when it matches no lead — recording it is what
-    // keeps us from messaging that number again. Only non-compliance traffic
-    // needs a lead to be worth handling.
     const isComplianceKeyword =
       stopKeywords.includes(text) || startKeywords.includes(text) || helpKeywords.includes(text);
     if (leads.length === 0 && !isComplianceKeyword) {
@@ -203,9 +197,6 @@ export class ComplianceService {
         });
       }
 
-      // Clears the platform-wide row (the sender is re-consenting on this
-      // number) and this tenant's own row when we know which tenant it is.
-      // Other tenants' deliberate suppressions are left alone.
       await prisma.suppressionList
         .deleteMany({
           where: {
@@ -439,9 +430,6 @@ export class ComplianceService {
   }
 
   static async checkComplaintRate(companyId, channel = "EMAIL") {
-    // Industry practice: investigate above a 0.1% complaint rate, measured over
-    // a rolling day, and ignore small samples where one complaint would skew the
-    // percentage. These are standards rather than per-deployment preferences.
     const windowHours = COMPLAINT_RATE_WINDOW_HOURS;
     const threshold = COMPLAINT_RATE_THRESHOLD;
     const minVolume = COMPLAINT_RATE_MIN_VOLUME;

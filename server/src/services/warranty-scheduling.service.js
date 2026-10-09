@@ -85,11 +85,6 @@ async function busyFor(staffId, staffEmail, from, to, db = prisma, { withCalendl
   return busy;
 }
 
-/**
- * Open times from the trade's Calendly event type, minus portal visits they
- * already have (some may predate the Calendly link). Calendly unreachable:
- * no times rather than times the trade may not be free for.
- */
 async function calendlySlots({ calendly, staffId, staffEmail, from, to, limit, excludeAppointmentId, setting, db }) {
   const slotDuration = calendly.eventDuration || setting.slotDuration;
   let times = [];

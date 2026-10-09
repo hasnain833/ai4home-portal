@@ -12,6 +12,8 @@ import {
   queryDetailed as salesQuery,
   deleteDocument as salesDeleteChunks,
   getRetrievalStatus as salesRetrievalStatus,
+  queryHelp,
+  getHelpRetrievalStatus,
 } from "../services/vector-store.service.js";
 import {
   queryDetailed as warrantyQuery,
@@ -19,14 +21,8 @@ import {
   getRetrievalStatus as warrantyRetrievalStatus,
 } from "../services/warranty-vector.service.js";
 import { KB_SCOPES } from "../lib/sales-ai.js";
+import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
 
-function denyUnlessSuperAdmin(req, res) {
-  if (!req.user?.isSuperAdmin) {
-    res.status(403).json({ message: "Unauthorized" });
-    return true;
-  }
-  return false;
-}
 
 const KB_BACKENDS = {
   sales: {
@@ -52,6 +48,19 @@ const KB_BACKENDS = {
     supportsCommunities: true,
     targetType: "WarrantyKB",
     softDelete: false,
+  },
+  help: {
+    model: () => prisma.salesKB,
+    bucket: BUCKETS.salesKb,
+    ingest: runKbIngestion,
+    query: (_companyId, question, limit) => queryHelp(question, limit),
+    deleteChunks: salesDeleteChunks,
+    retrievalStatus: getHelpRetrievalStatus,
+    defaultScopeCategories: null,
+    supportsCommunities: false,
+    targetType: "SalesKB",
+    softDelete: true,
+    scope: "HELP",
   },
 };
 
@@ -108,7 +117,7 @@ export const listKbDocuments = async (req, res) => {
     const backend = backendFor(req, res);
     if (!backend) return;
 
-    const where = { scope: "PLATFORM" };
+    const where = { scope: backend.scope || "PLATFORM" };
     if (backend.softDelete) where.isDeleted = false;
 
     const documents = await backend.model().findMany({
@@ -138,9 +147,6 @@ export const listKbDocuments = async (req, res) => {
         if (picked.error) return res.status(400).json({ message: picked.error });
 
         if (picked.communityId) {
-          // Both the tenant's real documents and the lab's own test uploads.
-          // `isSandbox` travels to the client so the two can be told apart and
-          // only the test ones get destructive controls.
           const rows = await backend.model().findMany({
             where: {
               scope: "COMPANY",
@@ -183,12 +189,7 @@ export const uploadKbDocument = async (req, res) => {
     const file = req.file;
     if (!file) return res.status(400).json({ message: "No file provided" });
 
-    // Uploading against a community produces a SANDBOX document: it is a
-    // COMPANY-scoped row, because a community belongs to a tenant and retrieval
-    // cannot reach it otherwise, but `isSandbox` keeps it out of every
-    // production query. Without a community it is an ordinary platform
-    // document, exactly as before.
-    let scope = "PLATFORM";
+    let scope = backend.scope || "PLATFORM";
     let companyId = null;
     let communityId = null;
     let isSandbox = false;
@@ -282,14 +283,9 @@ export const uploadKbDocument = async (req, res) => {
   }
 };
 
-/**
- * The lab may only mutate what it owns: the platform tier, and the sandbox
- * documents it created for testing. A tenant's real community document is
- * listed here for context and must survive being looked at — enforced on the
- * server, because hiding the button is not a permission.
- */
+
 function mayMutate(doc) {
-  return doc.scope === "PLATFORM" || doc.isSandbox === true;
+  return doc.scope === "PLATFORM" || doc.scope === "HELP" || doc.isSandbox === true;
 }
 
 export const deleteKbDocument = async (req, res) => {
@@ -380,7 +376,7 @@ export const getKbDocumentUrl = async (req, res) => {
         company ? { scope: "COMPANY", companyId: company.id } : { scope: "PLATFORM" },
       ];
     } else {
-      where.scope = "PLATFORM";
+      where.scope = backend.scope || "PLATFORM";
     }
 
     const doc = await backend.model().findFirst({ where });

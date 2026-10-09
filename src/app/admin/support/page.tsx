@@ -19,17 +19,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSupportContact } from "@/components/layout/HelpMenu";
 import { QUERY_KEYS, fetchKey } from "@/lib/use-query";
 
-/** The phone and chatbot link builders see in the Help menu and on Communities. */
+/** The support phone builders see in the Help menu and on Communities. */
 function SupportContactCard() {
   const contact = useSupportContact();
   const [phone, setPhone] = useState("");
-  const [chatUrl, setChatUrl] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (contact) {
       setPhone(contact.phone);
-      setChatUrl(contact.chatUrl);
     }
   }, [contact]);
 
@@ -39,7 +37,7 @@ function SupportContactCard() {
       const res = await fetch("/api/admin/support-contact", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, chatUrl }),
+        body: JSON.stringify({ phone }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Could not save");
@@ -67,14 +65,10 @@ function SupportContactCard() {
           </div>
         </div>
       </CardHeader>
-      <CardContent className="grid gap-4 p-4 md:grid-cols-[1fr_2fr_auto] md:items-end md:p-6">
+      <CardContent className="grid gap-4 p-4 md:grid-cols-[1fr_auto] md:items-end md:p-6">
         <div className="space-y-1.5">
           <Label htmlFor="supportPhone">Support phone</Label>
           <Input id="supportPhone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="supportChat">Chatbot URL</Label>
-          <Input id="supportChat" value={chatUrl} onChange={(e) => setChatUrl(e.target.value)} />
         </div>
         <Button onClick={save} disabled={saving || !contact}>
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

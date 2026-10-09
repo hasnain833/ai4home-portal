@@ -12,12 +12,6 @@ export function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
-/**
- * Creates a login: the Supabase auth account plus the User row. Homeowner by
- * default; staff and trades pass `role`. Without a password the account gets a
- * random one and the person sets their own through a recovery link (see
- * passwordSetupLink / sendAccountInvite).
- */
 export async function createHomeownerAccount({ name, email, phone = null, companyId, password = null, role = "HOMEOWNER" }) {
   const secret = password || randomBytes(24).toString("base64url");
   const supabaseAdmin = getSupabaseAdmin();
@@ -52,12 +46,6 @@ export async function createHomeownerAccount({ name, email, phone = null, compan
   }
 }
 
-/**
- * A one-time link to choose a password (invites and "forgot password").
- * It points straight at our own page with the token; the page verifies it.
- * Supabase's action_link instead bounces through its redirect allowlist, and
- * any portal URL not on that list silently lands on the Site URL home page.
- */
 export async function passwordSetupLink(email) {
   const { data, error } = await getSupabaseAdmin().auth.admin.generateLink({ type: "recovery", email });
   if (error) throw new Error(error.message);
@@ -66,11 +54,6 @@ export async function passwordSetupLink(email) {
   return `${process.env.NEXT_PUBLIC_URL || ""}/forgot-password/update?token_hash=${encodeURIComponent(tokenHash)}&type=recovery`;
 }
 
-/**
- * Emails a staff member or trade that a company has added them. New accounts
- * get a set-password link; a trade who already has a login (added by another
- * builder) just gets a sign-in link. Returns false when the email did not go.
- */
 export async function sendAccountInvite({ email, name, companyId, roleLabel, existingAccount = false }) {
   const company = await prisma.company.findUnique({
     where: { id: companyId },

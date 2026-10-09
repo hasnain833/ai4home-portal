@@ -1,5 +1,6 @@
 import express from "express";
 import { requireAuth } from "../middlewares/auth.js";
+import { getHelpAgent, saveHelpAgent, helpChat } from "../admin/help-agent.controller.js";
 import {
   getStaff,
   createStaff,
@@ -84,6 +85,9 @@ router.post("/handoff-issues/:id/retry", requireAuth, retryHandoffIssue);
 router.post("/handoff-issues/:id/resolve", requireAuth, resolveHandoffIssue);
 router.get("/support-contact", requireAuth, getSupportContact);
 router.put("/support-contact", requireAuth, updateSupportContact);
+router.get("/help-agent", requireAuth, getHelpAgent);
+router.put("/help-agent", requireAuth, saveHelpAgent);
+router.post("/help-agent/chat", requireAuth, helpChat);
 router.get("/security-posture", requireAuth, getSecurityPosture);
 router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);

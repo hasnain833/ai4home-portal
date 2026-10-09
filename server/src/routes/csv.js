@@ -13,9 +13,6 @@ import {
 
 const router = Router();
 
-// §4.12: CSV upload is "Per permission" for a Builder Member. Admins and
-// homeowners pass automatically (homeowners are capped by SW-CSV-006 inside the
-// controller); staff need the grant.
 const canImport = requirePermission("csv.upload");
 
 router.post("/upload", requireAuth, canImport, uploadCsvMiddleware, handleCsvUpload);

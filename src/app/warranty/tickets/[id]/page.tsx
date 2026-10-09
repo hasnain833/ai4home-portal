@@ -277,9 +277,6 @@ export default function TicketDetail() {
     else toast.success("Ticket dispatched. The homeowner has been emailed a link to pick a time.");
   };
 
-  // Manual overrides, for correcting a ticket that went the wrong way. Dispatch
-  // is still the normal route out of OPEN — the server refuses a manual move to
-  // DISPATCHED unless somebody is already assigned.
   const handleFieldChange = async (field: "status" | "priority", value: string) => {
     if (!ticket) return;
     const previous = ticket;

@@ -12,17 +12,11 @@ import { AGENT_TYPES } from "../prompts/registry.js";
 import { getLivePrompts, invalidateLivePrompts } from "../prompts/live.js";
 import { detectHazard, hazardNotice } from "../lib/warranty-hazards.js";
 import { describeKnown } from "../lib/warranty-known.js";
+import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
 
 /** Fixed so the preview renders the same text every time it is opened. */
 const SAMPLE_COVERAGE_END = "2029-01-09T00:00:00.000Z";
 
-function denyUnlessSuperAdmin(req, res) {
-  if (!req.user?.isSuperAdmin) {
-    res.status(403).json({ message: "Unauthorized" });
-    return true;
-  }
-  return false;
-}
 
 const MAX_TRANSCRIPT_TURNS = 40;
 const PHASE_KEYS = ["INTAKE", "IDENTIFY", "DIAGNOSE", "RESOLVE"];

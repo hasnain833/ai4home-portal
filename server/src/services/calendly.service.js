@@ -2,11 +2,6 @@ import crypto from "node:crypto";
 import prisma from "../lib/prisma.js";
 import { encrypt, decrypt } from "../lib/crypto.js";
 
-// A trade links Calendly and picks the event type homeowners book. The
-// booking page then offers that event type's open times and the visit is
-// booked in Calendly (Scheduling API: needs a paid Calendly plan). With no
-// event type picked, their Calendly busy times are only hidden from booking.
-
 const AUTH_URL = "https://auth.calendly.com/oauth";
 const API_URL = "https://api.calendly.com";
 const SCOPES = "users:read availability:read event_types:read scheduled_events:write webhooks:write";
@@ -132,10 +127,6 @@ async function ensureWebhook(conn, organization) {
   return created.resource?.uri || null;
 }
 
-/**
- * Checks the Calendly-Webhook-Signature header: `t=<unix>,v1=<hex hmac>` over
- * `${t}.${rawBody}`. Deliveries older than 3 minutes are refused as replays.
- */
 export function verifyCalendlySignature(header, rawBody, now = Date.now()) {
   const key = process.env.CALENDLY_WEBHOOK_SIGNING_KEY;
   if (!key || !header || !rawBody) return false;
@@ -184,11 +175,6 @@ async function accessTokenFor(conn) {
 // only costs a few Calendly calls. Move to a shared store if rate limits bite.
 const busyCache = new Map();
 
-/**
- * The user's Calendly busy blocks between `from` and `to`, as { start, end }.
- * No Calendly link, or Calendly unreachable: an empty list, so booking still
- * works from the portal's own calendar rather than failing outright.
- */
 export async function calendlyBusyFor(userId, from, to) {
   if (!userId || !calendlyConfigured()) return [];
   const cached = busyCache.get(userId);
@@ -245,10 +231,6 @@ export async function calendlyStatus(userId) {
       : null,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Booking through the trade's Calendly event type.
-// ---------------------------------------------------------------------------
 
 /** A Calendly call failed for a reason the homeowner should see (slot gone, plan). */
 export class CalendlyBookingError extends Error {}
@@ -349,10 +331,6 @@ function inviteeLocation(conn, { address, phone }) {
   return { kind };
 }
 
-/**
- * Books the visit in the trade's Calendly. Returns the scheduled event URI.
- * Throws CalendlyBookingError when Calendly refuses the slot or the plan.
- */
 export async function createCalendlyVisit(conn, { startTime, name, email, timezone, address, phone, ticketRef }) {
   const location = inviteeLocation(conn, { address, phone });
   try {

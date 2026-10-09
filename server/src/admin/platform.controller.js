@@ -13,14 +13,8 @@ import {
   getPricing,
   invalidatePricingCache,
 } from "../lib/usage.js";
+import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
 
-function denyUnlessSuperAdmin(req, res) {
-  if (!req.user?.isSuperAdmin) {
-    res.status(403).json({ message: "Unauthorized" });
-    return true;
-  }
-  return false;
-}
 
 const SYNC_WINDOW_HOURS = 24;
 export const getCrmHealth = async (req, res) => {
@@ -396,10 +390,6 @@ export const getSecurityPosture = async (req, res) => {
   }
 };
 
-// ─── Platform messaging spend ────────────────────────────────────────────────
-// All messaging is billed to the platform now, so this is our own cost view:
-// what each tenant is spending, on which channel, and where delivery is failing.
-
 const MONTHS_BACK = 6;
 
 export const getMessagingSpend = async (req, res) => {
@@ -582,12 +572,9 @@ export const setMessagingPricing = async (req, res) => {
 };
 
 // Support contact shown to builders (Help menu, Communities pages).
-const SUPPORT_CONTACT_KEY = "support.contact";
-// Placeholders until the client sends the real line and chatbot URL.
-const DEFAULT_SUPPORT_CONTACT = {
-  phone: "(800) 555-0142",
-  chatUrl: "https://support.ai4homebuilders.com/chat",
-};
+export const SUPPORT_CONTACT_KEY = "support.contact";
+// Placeholder until the client sends the real line.
+export const DEFAULT_SUPPORT_CONTACT = { phone: "(800) 555-0142" };
 
 // Any signed-in user may read this; only super admins edit it.
 export const getSupportContact = async (req, res) => {
@@ -604,15 +591,9 @@ export const updateSupportContact = async (req, res) => {
   try {
     if (denyUnlessSuperAdmin(req, res)) return;
     const phone = String(req.body?.phone || "").trim().slice(0, 40);
-    const chatUrl = String(req.body?.chatUrl || "").trim().slice(0, 500);
-    if (!phone || !chatUrl) {
-      return res.status(400).json({ message: "Phone number and chatbot URL are both required." });
-    }
-    if (!/^https?:\/\//i.test(chatUrl)) {
-      return res.status(400).json({ message: "Chatbot URL must start with http:// or https://" });
-    }
+    if (!phone) return res.status(400).json({ message: "Phone number is required." });
 
-    const value = { phone, chatUrl };
+    const value = { phone };
     await prisma.platformSetting.upsert({
       where: { key: SUPPORT_CONTACT_KEY },
       create: { key: SUPPORT_CONTACT_KEY, value },

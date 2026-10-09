@@ -114,12 +114,6 @@ const statusColor = (status: string) => {
   }
 };
 
-/**
- * The fields the "Mock up sales leads" sheet defines, grouped the way a sales
- * counsellor reads them. Anything in customFields that is NOT listed here — a
- * Salesforce-mapped field, say — still renders, in a catch-all section, so a
- * mapped field never silently vanishes.
- */
 const FIELD_GROUPS: { title: string; icon: typeof Target; keys: [string, string][] }[] = [
   {
     title: "Fit & requirements",
@@ -247,9 +241,6 @@ export default function LeadDetailPage() {
     }
   }, [id]);
 
-  // The fetch is kicked off inside the effect and guarded, so the effect body
-  // never sets state synchronously and a slow response cannot land after the
-  // page has been navigated away from.
   useEffect(() => {
     let cancelled = false;
     const run = async () => {

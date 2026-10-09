@@ -1,11 +1,3 @@
-/**
- * Client-side mirror of the server's sales permission keys.
- *
- * This is for showing and hiding UI only. Every one of these is also enforced
- * on the server by `requirePermission`, and that check is the one that actually
- * protects anything — hiding a button does not stop a request.
- */
-
 export const SALES_PERMISSION = {
   csvUpload: "csv.upload",
   campaignsManage: "campaigns.manage",

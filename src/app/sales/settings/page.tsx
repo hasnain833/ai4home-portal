@@ -45,14 +45,10 @@ import {
   Plus,
   Trash2,
   Clock,
-  Key,
   History,
   ArrowDownToLine,
   ArrowUpFromLine,
-  ExternalLink,
   Loader2,
-  Copy,
-  Check,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -96,15 +92,6 @@ interface GroupedSyncLog extends SyncLogEntry {
   firstSeenAt: string;
 }
 
-/**
- * A cron that keeps failing writes one identical row per attempt, which buries
- * everything else in the feed. Runs of consecutive logs with the same action,
- * status and message collapse into one row carrying a count and a time span.
- *
- * Only *consecutive* runs collapse: an error, then a success, then the same
- * error again is two separate incidents and stays two rows. Counts are summed
- * so a collapsed row still reports the true number of records and errors.
- */
 function groupSyncLogs(logs: SyncLogEntry[]): GroupedSyncLog[] {
   const grouped: GroupedSyncLog[] = [];
   for (const log of logs) {
@@ -147,27 +134,11 @@ function SettingsPageContent() {
   const [activeTab, setActiveTab] = useState("crm");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
-  const [oauthModalOpen, setOauthModalOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [bulkIngesting, setBulkIngesting] = useState(false);
   const [syncingIncremental, setSyncingIncremental] = useState(false);
-  const [sfClientId, setSfClientId] = useState("");
-  const [sfClientSecret, setSfClientSecret] = useState("");
-  const [sfEnvironment, setSfEnvironment] = useState<"sandbox" | "production">("sandbox");
-  const [copiedRedirect, setCopiedRedirect] = useState(false);
-  const redirectUri =
-    typeof window !== "undefined" ? `${window.location.origin}/api/sales/salesforce/callback` : "";
-
-  const copyRedirectUri = async () => {
-    try {
-      await navigator.clipboard.writeText(redirectUri);
-      setCopiedRedirect(true);
-      setTimeout(() => setCopiedRedirect(false), 2000);
-    } catch {
-      showToast("Couldn't copy — copy it manually.", "error");
-    }
-  };
+  const [sfEnvironment, setSfEnvironment] = useState<"sandbox" | "production">("production");
 
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
   const [loadingMappings, setLoadingMappings] = useState(false);
@@ -423,20 +394,12 @@ function SettingsPageContent() {
   }, [activeTab, fetchLogs]);
 
   const handleConnectSF = async () => {
-    if (!sfClientId.trim() || !sfClientSecret.trim()) {
-      showToast("Client ID and Client Secret are required", "error");
-      return;
-    }
     setConnecting(true);
     try {
       const res = await fetch("/api/sales/salesforce/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: sfClientId,
-          clientSecret: sfClientSecret,
-          environment: sfEnvironment,
-        }),
+        body: JSON.stringify({ environment: sfEnvironment }),
       });
       const data = await res.json();
       if (res.ok && data.authUrl) {
@@ -713,8 +676,8 @@ function SettingsPageContent() {
                             <Plug className="h-5 w-5" />
                           </div>
                           <div>
-                            <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100">Salesforce OAuth 2.0 Integration</CardTitle>
-                            <CardDescription className="text-xs">Connect to Salesforce REST & Bulk APIs for background contacts fetching.</CardDescription>
+                            <CardTitle className="text-sm font-bold text-slate-800 dark:text-slate-100">Salesforce</CardTitle>
+                            <CardDescription className="text-xs">Your Salesforce leads sync here automatically.</CardDescription>
                           </div>
                         </div>
                         {loadingStatus ? (
@@ -732,127 +695,151 @@ function SettingsPageContent() {
                         )}
                       </div>
                     </CardHeader>
-                    <CardContent className="p-5 space-y-4">
+                    {!isConnected && !loadingStatus ? (
+                    <CardContent className="p-5 space-y-5">
+                      <ul className="grid gap-3 sm:grid-cols-3">
+                        {[
+                          { icon: ArrowDownToLine, title: "Leads come in", text: "New and updated Salesforce leads sync here every 15 minutes." },
+                          { icon: ArrowUpFromLine, title: "Bookings go back", text: "AI-booked appointments and new leads show up in Salesforce." },
+                          { icon: Shield, title: "Opt-outs respected", text: "Unsubscribes stay in step on both sides." },
+                        ].map(({ icon: Icon, title, text }) => (
+                          <li key={title} className="rounded-lg border border-border/60 p-3 space-y-1">
+                            <Icon className="h-4 w-4 text-sky-600" />
+                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">{title}</p>
+                            <p className="text-[11px] text-muted-foreground leading-relaxed">{text}</p>
+                          </li>
+                        ))}
+                      </ul>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold text-muted-foreground">Connected Environment</Label>
-                          <div className="h-9 flex items-center px-3 rounded-md border bg-muted text-xs">
-                            {isConnected
-                              ? connectionStatus?.environment === "production"
-                                ? "Production Instance"
-                                : "Sandbox / Developer Org"
-                              : "Not connected"
-                            }
-                          </div>
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t">
+                        <div className="inline-flex rounded-lg border p-0.5 text-xs" role="radiogroup" aria-label="Which Salesforce">
+                          {(["production", "sandbox"] as const).map((env) => (
+                            <button
+                              key={env}
+                              type="button"
+                              role="radio"
+                              aria-checked={sfEnvironment === env}
+                              onClick={() => setSfEnvironment(env)}
+                              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${sfEnvironment === env ? "bg-[#0F3B3D] text-white" : "text-muted-foreground hover:text-foreground"}`}
+                            >
+                              {env === "production" ? "Live Salesforce" : "Test (sandbox)"}
+                            </button>
+                          ))}
                         </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold text-muted-foreground">Background Sync Schedule</Label>
-                          <Select
-                            value={String(connectionStatus?.syncInterval || 15)}
-                            onValueChange={handleSyncIntervalChange}
-                            disabled={!isConnected}
-                          >
-                            <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="5">Every 5 minutes (Real-time)</SelectItem>
-                              <SelectItem value="15">Every 15 minutes (Standard)</SelectItem>
-                              <SelectItem value="60">Every 1 hour</SelectItem>
-                              <SelectItem value="1440">Daily at Midnight</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold text-muted-foreground">OAuth Consumer Key (Client ID)</Label>
-                          <Input
-                            value={isConnected ? (connectionStatus?.clientIdMasked || "••••••••") : "Not configured"}
-                            readOnly
-                            disabled
-                            className="bg-muted h-9 text-xs font-mono"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold text-muted-foreground">Last Sync</Label>
-                          <div className="h-9 flex items-center gap-2 px-3 rounded-md border bg-muted text-xs">
-                            <Clock className="h-3 w-3 text-muted-foreground" />
-                            <span>{formatTimeAgo(connectionStatus?.lastSyncAt || null)}</span>
-                            {connectionStatus?.lastSyncStatus && (
-                              <Badge className={`ml-auto text-[9px] font-semibold px-1.5 py-0 border-none ${getLogStatusColor(connectionStatus.lastSyncStatus)}`}>
-                                {connectionStatus.lastSyncStatus}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-start justify-between gap-4 rounded-lg border border-border/60 p-4">
-                        <div className="space-y-1">
-                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Write changes back to Salesforce</p>
-                          <p className="text-[11px] text-muted-foreground leading-relaxed max-w-md">
-                            When enabled, lead status changes, consent/opt-outs, and appointment bookings made in the portal are pushed back to the linked Salesforce record. Off by default.
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={!isConnected}
-                          onClick={() => handleWriteBackToggle(!connectionStatus?.writeBackEnabled)}
-                          className={`shrink-0 h-8 text-xs font-semibold ${connectionStatus?.writeBackEnabled ? "border-emerald-300 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}`}
-                        >
-                          {connectionStatus?.writeBackEnabled ? "Enabled" : "Disabled"}
+                        <Button onClick={handleConnectSF} disabled={connecting} className="bg-sky-600 text-white hover:bg-sky-700 h-9 text-xs gap-2 border-none">
+                          {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plug className="h-3.5 w-3.5" />}
+                          {connecting ? "Opening Salesforce..." : "Connect with Salesforce"}
                         </Button>
                       </div>
 
-                      {isConnected && connectionStatus?.syncedLeadCount !== undefined && (
-                        <div className="bg-sky-50/50 dark:bg-sky-950/10 p-3 rounded-lg border border-sky-100/50 dark:border-sky-900/20 flex items-center gap-3">
-                          <Database className="h-4 w-4 text-sky-600" />
-                          <span className="text-xs text-slate-700 dark:text-slate-300">
-                            <strong className="text-sky-700 dark:text-sky-400">{connectionStatus.syncedLeadCount}</strong> leads synchronized from Salesforce
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="flex gap-2 pt-3 border-t justify-end flex-wrap">
-                        {isConnected ? (
-                          <>
-                            <Button
-                              variant="ghost"
-                              onClick={handleDisconnectSF}
-                              disabled={disconnecting}
-                              className="text-red-500 hover:bg-red-500/10 h-9 text-xs"
-                            >
-                              {disconnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
-                              Disconnect CRM
-                            </Button>
-                            <Button
-                              variant="outline"
-                              onClick={handleIncrementalSync}
-                              disabled={syncingIncremental || bulkIngesting}
-                              className="gap-2 h-9 text-xs"
-                            >
-                              <RefreshCw className={`h-3.5 w-3.5 ${syncingIncremental ? "animate-spin" : ""}`} />
-                              {syncingIncremental ? "Syncing..." : "Incremental Sync"}
-                            </Button>
-                            <Button
-                              onClick={handleBulkIngest}
-                              disabled={bulkIngesting || syncingIncremental}
-                              className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-2 h-9 text-xs border-none"
-                            >
-                              <RefreshCw className={`h-3.5 w-3.5 ${bulkIngesting ? "animate-spin" : ""}`} />
-                              {bulkIngesting ? "Syncing Bulk API 2.0..." : "Sync Salesforce Bulk Now"}
-                            </Button>
-                          </>
-                        ) : (
-                          <Button onClick={() => setOauthModalOpen(true)} className="bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90 h-9 text-xs">
-                            Setup Salesforce Connection
-                          </Button>
-                        )}
+                      <div className="flex items-start gap-2 rounded-lg bg-slate-50 dark:bg-slate-900/40 p-3 text-[11px] text-muted-foreground">
+                        <AlertCircle className="h-3.5 w-3.5 mt-px shrink-0" />
+                        <span>
+                          Sign in as a Salesforce user who can see all your leads. If Salesforce says the app is blocked, your Salesforce admin approves &ldquo;AI4HB&rdquo; once under Setup &rarr; Connected Apps OAuth Usage.
+                        </span>
                       </div>
                     </CardContent>
+                    ) : (
+                    <CardContent className="p-5 space-y-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 rounded-xl border border-border/60 divide-y sm:divide-y-0 sm:divide-x divide-border/60">
+                        <div className="p-4 space-y-1">
+                          <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5"><Database className="h-3.5 w-3.5" /> Leads synced</p>
+                          <p className="text-2xl font-bold text-slate-800 dark:text-slate-100">{connectionStatus?.syncedLeadCount ?? 0}</p>
+                        </div>
+                        <div className="p-4 space-y-1">
+                          <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> Last sync</p>
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                            {formatTimeAgo(connectionStatus?.lastSyncAt || null)}
+                            {connectionStatus?.lastSyncStatus && (
+                              <Badge className={`text-[9px] font-semibold px-1.5 py-0 border-none ${getLogStatusColor(connectionStatus.lastSyncStatus)}`}>
+                                {connectionStatus.lastSyncStatus}
+                              </Badge>
+                            )}
+                          </p>
+                        </div>
+                        <div className="p-4 space-y-1 min-w-0">
+                          <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5"><Plug className="h-3.5 w-3.5" /> Salesforce org</p>
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                            {connectionStatus?.environment === "production" ? "Live" : "Sandbox"}
+                          </p>
+                          {connectionStatus?.instanceUrl && (
+                            <p className="text-[11px] text-muted-foreground truncate" title={connectionStatus.instanceUrl}>
+                              {connectionStatus.instanceUrl.replace("https://", "")}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-border/60 divide-y divide-border/60">
+                        <div className="flex items-center justify-between gap-4 p-4">
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-100">Sync schedule</p>
+                            <p className="text-[11px] text-muted-foreground">How often new and updated Salesforce leads come in.</p>
+                          </div>
+                          <Select value={String(connectionStatus?.syncInterval || 15)} onValueChange={handleSyncIntervalChange}>
+                            <SelectTrigger className="h-8 w-44 shrink-0 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="5">Every 5 minutes</SelectItem>
+                              <SelectItem value="15">Every 15 minutes</SelectItem>
+                              <SelectItem value="60">Every hour</SelectItem>
+                              <SelectItem value="1440">Daily at midnight</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 p-4">
+                          <div className="space-y-0.5">
+                            <p id="sf-writeback-label" className="text-xs font-semibold text-slate-800 dark:text-slate-100">Write changes back to Salesforce</p>
+                            <p className="text-[11px] text-muted-foreground max-w-md">
+                              New leads, booked appointments, status changes and opt-outs from the portal are added to Salesforce.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={!!connectionStatus?.writeBackEnabled}
+                            aria-labelledby="sf-writeback-label"
+                            onClick={() => handleWriteBackToggle(!connectionStatus?.writeBackEnabled)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 ${connectionStatus?.writeBackEnabled ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"}`}
+                          >
+                            <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${connectionStatus?.writeBackEnabled ? "translate-x-5" : "translate-x-0.5"}`} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Button
+                          variant="ghost"
+                          onClick={handleDisconnectSF}
+                          disabled={disconnecting}
+                          className="text-red-500 hover:bg-red-500/10 h-9 text-xs"
+                        >
+                          {disconnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+                          Disconnect
+                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={handleIncrementalSync}
+                            disabled={syncingIncremental || bulkIngesting}
+                            className="gap-2 h-9 text-xs"
+                            title="Bring in leads changed since the last sync"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${syncingIncremental ? "animate-spin" : ""}`} />
+                            {syncingIncremental ? "Syncing..." : "Sync now"}
+                          </Button>
+                          <Button
+                            onClick={handleBulkIngest}
+                            disabled={bulkIngesting || syncingIncremental}
+                            className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-2 h-9 text-xs border-none"
+                            title="Re-import every lead from Salesforce (can take a minute)"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${bulkIngesting ? "animate-spin" : ""}`} />
+                            {bulkIngesting ? "Importing all leads..." : "Re-import all leads"}
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                    )}
                   </Card>
 
                   <Card className="border border-border/80 shadow-xs">
@@ -1316,112 +1303,6 @@ function SettingsPageContent() {
 
           </Tabs>
         </motion.div>
-
-        <Dialog open={oauthModalOpen} onOpenChange={setOauthModalOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-sky-600">
-                <Key className="h-5 w-5" />
-                Salesforce OAuth credentials
-              </DialogTitle>
-              <DialogDescription>
-                Input your Salesforce Connected App details to acquire bearer session tokens.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="sfEnvSelect" className="font-semibold text-xs">Environment Type</Label>
-                <Select value={sfEnvironment} onValueChange={(val) => setSfEnvironment(val as "production" | "sandbox")}>
-                  <SelectTrigger id="sfEnvSelect" className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="production">Production Instance (login.salesforce.com)</SelectItem>
-                    <SelectItem value="sandbox">Sandbox Org (test.salesforce.com)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="clientIdForm" className="font-semibold text-xs">Consumer Key (Client ID) *</Label>
-                <Input
-                  id="clientIdForm"
-                  placeholder="Enter Salesforce consumer key..."
-                  value={sfClientId}
-                  onChange={(e) => setSfClientId(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="clientSecretForm" className="font-semibold text-xs">Consumer Secret *</Label>
-                <Input
-                  id="clientSecretForm"
-                  type="password"
-                  placeholder="Enter consumer secret..."
-                  value={sfClientSecret}
-                  onChange={(e) => setSfClientSecret(e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-
-              {connecting && (
-                <div className="p-4 bg-slate-50 dark:bg-slate-900 border rounded-xl flex items-center justify-center gap-3">
-                  <Loader2 className="h-4 w-4 animate-spin text-[#b48c3c]" />
-                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Redirecting to Salesforce OAuth 2.0 Login...</span>
-                </div>
-              )}
-
-              <div className="bg-sky-50 dark:bg-sky-950/20 p-3 rounded-lg border border-sky-100/50 text-[11px] text-slate-600 dark:text-slate-400 space-y-1.5">
-                <p className="font-semibold flex items-center gap-1.5">
-                  <ExternalLink className="h-3 w-3" />
-                  OAuth Redirect URI
-                </p>
-                <div className="flex items-stretch gap-1.5">
-                  <code className="flex-1 min-w-0 truncate text-[10px] font-mono bg-white dark:bg-slate-900 px-2 py-1.5 rounded border text-sky-700 dark:text-sky-400">
-                    {redirectUri}
-                  </code>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={copyRedirectUri}
-                    className="h-auto shrink-0 px-2 text-[10px] font-semibold gap-1"
-                    title="Copy redirect URI"
-                  >
-                    {copiedRedirect ? (
-                      <><Check className="h-3 w-3 text-emerald-600" /> Copied</>
-                    ) : (
-                      <><Copy className="h-3 w-3" /> Copy</>
-                    )}
-                  </Button>
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Add this URI <strong>exactly</strong> (no trailing slash) to your Salesforce Connected App&apos;s Callback URLs.
-                </p>
-                <div className="flex items-start gap-1.5 pt-1.5 mt-1 border-t border-sky-100/60 dark:border-sky-900/40 text-[10px] text-amber-700 dark:text-amber-400">
-                  <AlertCircle className="h-3 w-3 mt-px shrink-0" />
-                  <span>
-                    The Connected App must live in your{" "}
-                    <strong>{sfEnvironment === "production" ? "Production" : "Sandbox"}</strong>{" "}
-                    org — matching the environment selected above (
-                    <span className="font-mono">
-                      {sfEnvironment === "production" ? "login.salesforce.com" : "test.salesforce.com"}
-                    </span>
-                    ). PKCE is supported, so you can safely keep &ldquo;Require Proof Key for Code Exchange&rdquo; enabled.
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="ghost" onClick={() => setOauthModalOpen(false)} disabled={connecting}>Cancel</Button>
-              <Button onClick={handleConnectSF} disabled={connecting || !sfClientId.trim() || !sfClientSecret.trim()} className="bg-sky-600 text-white hover:bg-sky-700 border-none">
-                {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
-                Connect CRM
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
 
         <MappingHistoryDialog
           open={mappingHistoryOpen}

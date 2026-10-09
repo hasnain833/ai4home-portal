@@ -61,8 +61,6 @@ export function resolveAiConfig() {
   };
 }
 
-export const resolvePlatformAiConfig = resolveAiConfig;
-
 export function hasPlatformAi() {
   return !!getPlatformAiKey();
 }

@@ -14,15 +14,6 @@ import { withInventory, homeCards } from "../lib/sales-homes.js";
 import { hasPlatformAi } from "../lib/ai-config.js";
 import { getSalesSuggestions } from "../services/sales-suggestions.service.js";
 
-// The Sales workspace's own AI Assistant: the same agent, prompt and knowledge
-// the SMS / email agent uses, talking in the portal as a web chat. The
-// transcript lives in the browser and comes back with each turn, so there is no
-// conversation row to keep — the agent's memory is the transcript itself.
-//
-// The agent picks the time; the buyer's details come from a form the chat shows
-// when it does. The person signed in is often staff chatting on a buyer's
-// behalf, so their own account is never taken to be the buyer.
-
 const MAX_TURNS = 20;
 const MAX_MESSAGE_CHARS = 4000;
 const EMAIL_RE = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/;
@@ -38,8 +29,6 @@ function readTranscript(body) {
     if (!content) continue;
     if (content.length > MAX_MESSAGE_CHARS) return { error: `Messages must be under ${MAX_MESSAGE_CHARS} characters` };
     const role = m.role === "agent" ? "agent" : "lead";
-    // The agent only sees text, so note which home cards a turn already showed —
-    // otherwise it re-attaches the same home to every later reply about it.
     const homeIds = role === "agent" && Array.isArray(m.homeIds) ? m.homeIds.map(String).filter(Boolean).slice(0, 6) : [];
     if (homeIds.length) {
       homeIds.forEach((id) => shownHomeIds.add(id));
@@ -53,7 +42,6 @@ function readTranscript(body) {
   return { transcript, shownHomeIds };
 }
 
-// A buyer asking for pictures again is the one reason to repeat a card.
 const ASKS_FOR_PICTURES = /\b(photos?|pictures?|pics?|images?|show me)\b/i;
 
 function newHomeIds(ids, shownHomeIds, question) {
@@ -67,7 +55,6 @@ function firstNameOf(name) {
   return String(name || "").trim().split(/\s+/)[0] || null;
 }
 
-/** Open slots for a first-time lead of this company, labelled in its zone. */
 async function openSlots(companyId) {
   const setting = await getAvailabilitySetting(companyId);
   const timezone = leadTimezone(null, setting);
@@ -163,7 +150,6 @@ export const postMessage = async (req, res) => {
       action: decision.action || "reply",
       homes: await homeCards(companyId, newHomeIds(decision.home_ids, shownHomeIds, question)),
       pendingBooking,
-      // Prefill only for someone booking for themselves.
       contactPrefill: isHomeowner(req.user)
         ? { name: req.user.name || "", email: req.user.email || "", phone: "" }
         : null,
@@ -174,11 +160,6 @@ export const postMessage = async (req, res) => {
   }
 };
 
-/**
- * Books the time the agent agreed, for the buyer named in the form. The buyer
- * becomes a lead — an existing one when their email or phone is already on
- * file, so a returning buyer does not end up twice in Leads.
- */
 export const bookVisit = async (req, res) => {
   try {
     const companyId = req.user.companyId;
@@ -193,8 +174,6 @@ export const bookVisit = async (req, res) => {
       return res.status(400).json({ message: "Enter a valid phone number, or leave it blank" });
     }
 
-    // The slot must still be one this company offers — the client only echoes
-    // back what the agent chose, and it may have been taken since.
     const { slots } = await openSlots(companyId);
     const slot = slots.find((s) => s.iso === b.slotIso);
     if (!slot) {

@@ -17,7 +17,7 @@ function anthropicHeaders(cfg) {
   };
 }
 
-async function callAnthropic({ cfg, companyId, system, user, maxTokens }) {
+async function callAnthropic({ cfg, companyId, system, user, messages, maxTokens }) {
   const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
     headers: anthropicHeaders(cfg),
@@ -25,7 +25,7 @@ async function callAnthropic({ cfg, companyId, system, user, maxTokens }) {
       model: cfg.model,
       max_tokens: maxTokens,
       system,
-      messages: [{ role: "user", content: user }],
+      messages: messages || [{ role: "user", content: user }],
     }),
   });
   if (!response.ok) {
@@ -45,14 +45,14 @@ async function callAnthropic({ cfg, companyId, system, user, maxTokens }) {
   return text;
 }
 
-export async function chat({ companyId, system, user, maxTokens = 700, json = false }) {
+export async function chat({ companyId, system, user, messages, maxTokens = 700, json = false }) {
   const cfg = resolveAiConfig();
   if (!cfg.provider) {
     console.warn(`[LLM] No AI provider available for company=${companyId} (${cfg.reason}).`);
     return null;
   }
   try {
-    return await callAnthropic({ cfg, companyId, system, user, maxTokens });
+    return await callAnthropic({ cfg, companyId, system, user, messages, maxTokens });
   } catch (err) {
     console.error("[LLM] Anthropic exception:", err.message);
     return null;

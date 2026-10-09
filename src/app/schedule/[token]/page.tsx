@@ -16,10 +16,6 @@ type BookingData = {
   slots: Slot[];
 };
 
-/**
- * Where a dispatched ticket's booking link lands. No account, no session — the
- * token in the URL is the whole of the authorisation.
- */
 export default function TicketBookingPage({
   params,
 }: {

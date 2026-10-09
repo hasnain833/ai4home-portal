@@ -12,12 +12,6 @@ export interface ChatPhoto {
 const MAX_EDGE = 2000;
 const JPEG_QUALITY = 0.85;
 
-/**
- * Shrinks a phone photo to at most MAX_EDGE px as a JPEG, so a 6–8 MB camera
- * shot uploads fast and fits the server's image limit. Anything the browser
- * cannot decode (some HEIC files outside Safari) is sent as-is and the server
- * says plainly if it cannot take it.
- */
 async function shrink(file: File): Promise<File> {
   if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
   try {
@@ -37,10 +31,6 @@ async function shrink(file: File): Promise<File> {
   }
 }
 
-/**
- * Shown when the warranty agent is ready to file a ticket: the homeowner adds
- * photos of the issue, then Done (or Skip) files it.
- */
 export default function PhotoRequestCard({
   companyId,
   conversationId,

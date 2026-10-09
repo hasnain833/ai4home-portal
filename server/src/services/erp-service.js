@@ -1,10 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { decryptSafe } from "../lib/crypto.js";
 
-// The lowest band was renamed LOW -> NORMAL internally. Builders' ERPs were
-// integrated against "LOW" and may key or report on it, so the outbound payload
-// keeps the old word: the rename is ours, not theirs. Drop this mapping only
-// once every connected ERP has confirmed it accepts NORMAL.
 const ERP_PRIORITY_ALIASES = { NORMAL: "LOW" };
 const toErpPriority = (priority) => ERP_PRIORITY_ALIASES[priority] || priority;
 
@@ -181,9 +177,6 @@ export async function testERPConnection(companyId, platform) {
   }
 }
 
-// None of the clients above were built against the vendor's real API docs, so
-// they cannot reach a real account (Buildertrend's API is partner-only). They
-// stay out of sync until each is built for real; drop a platform from here then.
 export const COMING_SOON_PLATFORMS = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
 
 // What can actually sync. Empty means ERP is off everywhere: the dashboard and

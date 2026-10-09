@@ -29,10 +29,6 @@ type Community = { id: string; name: string };
 const OTHER = "other";
 const today = () => new Date().toISOString().slice(0, 10);
 
-/**
- * The sales-to-warranty hand-off: marks the lead Closed Won, makes the buyer a
- * Warranty homeowner with their property, and marks the home SOLD.
- */
 export default function CloseWonDialog({
   open,
   onOpenChange,

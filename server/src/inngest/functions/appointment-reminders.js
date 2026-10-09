@@ -30,8 +30,6 @@ export function dueWindow(appointment, now = Date.now()) {
   return null;
 }
 
-export const windowLabelFor = (window) => window?.label ?? "soon";
-
 export async function sendDueAppointmentReminders({
   db = prisma,
   notify = notifyAppointmentReminder,

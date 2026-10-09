@@ -61,15 +61,6 @@ export async function deleteDocument(companyId, documentId) {
   await prisma.warrantyKBChunk.deleteMany({ where: { documentId } });
 }
 
-/**
- * `includeSandbox` defaults to false, and that default is the safety property.
- *
- * Documents uploaded from the Prompt Lab to test community retrieval are marked
- * `isSandbox` and must never reach a homeowner. Because the gate is opt-in, any
- * caller that forgets about it — including one written later by someone who has
- * never heard of sandbox documents — fails closed and hides them. Only the lab
- * passes true.
- */
 export async function queryDetailed(companyId, text, k = 5, categories = null, communityId = null, includeSandbox = false) {
   const q = (text || "").trim();
   if (!q) return { method: "empty", results: [] };

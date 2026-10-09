@@ -126,9 +126,6 @@ const FIXTURE_ROOMS = {
   refrigerator: "kitchen",
 };
 
-// Stated as a bare fact on file, not as a sentence to the homeowner. The agent
-// must not volunteer the end date, so this deliberately avoids handing it a
-// ready-made line to recite.
 function coverageSummary(issueState) {
   const coverage = issueState?.coverage;
   if (!coverage || !coverage.status || coverage.status === "UNKNOWN")

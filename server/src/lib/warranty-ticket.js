@@ -166,9 +166,6 @@ export async function createWarrantyTicket({
     return 0;
   });
 
-  // Agent-filed tickets notify exactly like portal-filed ones — except one the
-  // homeowner already fixed, which would only be a "new ticket" alert with
-  // nothing to do.
   if (!resolvedInChat) await notifyTicketCreated(ticket.id);
 
   console.log(

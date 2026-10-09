@@ -12,11 +12,6 @@ export function activeLeadFilter() {
   };
 }
 
-// A complete tenant-scoped `where` for active leads.
-export function activeLeadWhere(companyId) {
-  return { companyId, ...activeLeadFilter() };
-}
-
 export function withActiveLeadFilter(where) {
   return { ...where, ...activeLeadFilter() };
 }

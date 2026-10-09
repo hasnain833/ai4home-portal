@@ -609,9 +609,6 @@ export default function AnnouncementsPage() {
                       Formatting is used for email. SMS recipients receive a plain-text version automatically.
                     </p>
                     {(form.channel === "SMS" || form.channel === "BOTH") && (() => {
-                      // Carriers bill per segment, and the company-name prefix
-                      // and opt-out suffix are both added after this editor —
-                      // so the true cost is invisible here without this.
                       const plain = form.body
                         .replace(/<[^>]*>/g, "")
                         .replace(/&nbsp;/gi, " ")

@@ -36,10 +36,6 @@ function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups) {
 
 const PERIOD_DAYS = { "7d": 7, "30d": 30, "90d": 90 };
 
-/**
- * The Sales Agent metrics the onboarding SOP reports on (Part C): interactions,
- * nurtured touches, booked appointments and leads-to-booked success rate.
- */
 export const getAgentPerformance = async (req, res) => {
   try {
     const companyId = req.user.companyId;
@@ -75,9 +71,6 @@ export const getDashboardStats = async (req, res) => {
     const companyId = req.user.companyId;
     const now = new Date();
 
-    // A homeowner sees only their own leads (SRS 4.12), so every lead figure on
-    // this dashboard is narrowed to the ones they own. Without this they would
-    // read the whole tenant lead count.
     const isHomeowner = String(req.user.role || "").toUpperCase() === "HOMEOWNER";
     const leadWhere = isHomeowner
       ? { companyId, ownerId: req.user.id }

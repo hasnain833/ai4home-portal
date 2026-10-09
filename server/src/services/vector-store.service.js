@@ -26,11 +26,11 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 
   // scope is denormalised onto every chunk so retrieval filters without a join.
-  const scope = meta.scope === "PLATFORM" ? "PLATFORM" : "COMPANY";
+  const scope = ["PLATFORM", "HELP"].includes(meta.scope) ? meta.scope : "COMPANY";
 
   await prisma.salesKBChunk.createMany({
     data: chunks.map((content, i) => ({
-      companyId: scope === "PLATFORM" ? null : companyId,
+      companyId: scope === "COMPANY" ? companyId : null,
       scope,
       documentId,
       chunkIndex: i,
@@ -263,4 +263,51 @@ export async function backfillEmbeddings(companyId, batchSize = 50) {
   );
 
   return { processed: updated, remaining: remaining[0]?.count || 0 };
+}
+
+// Help Agent docs live in their own scope, so no Sales/Warranty query can reach them.
+export async function queryHelp(text, limit = 6) {
+  const q = (text || "").trim();
+  if (!q) return { method: "empty", results: [] };
+  const toResult = (r) => ({
+    documentId: r.documentId, name: r.name || "", category: r.category || "General",
+    scope: "HELP", text: r.content || "", score: Number(r.score) || 0,
+  });
+  try {
+    const emb = await embedText(q);
+    if (emb) {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT "documentId", name, category, content, 1 - (embedding <=> $1::vector) AS score
+           FROM "SalesKBChunk" WHERE scope = 'HELP' AND embedding IS NOT NULL
+           ORDER BY embedding <=> $1::vector LIMIT $2`,
+        `[${emb.join(",")}]`, limit,
+      );
+      const hits = rows.filter((r) => Number(r.score) >= 0.3).map(toResult);
+      if (hits.length) return { method: "semantic", results: hits };
+    }
+    const rows = await prisma.$queryRaw`
+      SELECT "documentId", name, category, content,
+             ts_rank(to_tsvector(${FTS_LANG}::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${q})::text, '&', '|')::tsquery) AS score
+      FROM "SalesKBChunk"
+      WHERE scope = 'HELP'
+        AND to_tsvector(${FTS_LANG}::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${q})::text, '&', '|')::tsquery
+      ORDER BY score DESC LIMIT ${limit}`;
+    return { method: "fts", results: rows.map(toResult) };
+  } catch (err) {
+    console.error("[Vector Store] Help query failed:", err.message);
+    return { method: "unavailable", results: [] };
+  }
+}
+
+export async function getHelpRetrievalStatus() {
+  try {
+    const [row] = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS total, COUNT(embedding)::int AS embedded FROM "SalesKBChunk" WHERE scope = 'HELP'`,
+    );
+    const { total, embedded } = row;
+    const status = total === 0 ? "EMPTY" : embedded === 0 ? "UNAVAILABLE" : embedded < total ? "PARTIAL" : "SEMANTIC";
+    return { status, pgvectorReady: true, totalChunks: total, embeddedChunks: embedded, coverage: total ? Math.round((embedded / total) * 100) : 0, detail: null };
+  } catch (err) {
+    return { status: "UNAVAILABLE", pgvectorReady: false, totalChunks: 0, embeddedChunks: 0, coverage: 0, detail: err.message };
+  }
 }

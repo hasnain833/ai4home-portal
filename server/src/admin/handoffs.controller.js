@@ -2,16 +2,10 @@ import prisma from "../lib/prisma.js";
 import { HANDOFF_CHANNEL, resolveHandoffFailures } from "../lib/dead-letter.js";
 import { runCloseWon, sendHomeownerWelcome } from "../controllers/leads.controller.js";
 import { writeAuditLog } from "../lib/audit.js";
+import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
 
 // Admin > Hand-off Issues: failed sales-to-warranty hand-offs across all builders.
 
-function denyUnlessSuperAdmin(req, res) {
-  if (!req.user?.isSuperAdmin) {
-    res.status(403).json({ message: "Unauthorized" });
-    return true;
-  }
-  return false;
-}
 
 export const listHandoffIssues = async (req, res) => {
   try {

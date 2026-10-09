@@ -1,18 +1,5 @@
 "use client";
 
-/**
- * Knowledge Base management inside the Prompt Lab.
- *
- * Manages the PLATFORM tier: the shared documents every company's agent
- * retrieves. A single builder's own documents live on that company's own KB
- * screen, not here — except the community under test, which is listed read-only
- * so community-scoped retrieval can be seen working.
- *
- * The probe box runs retrieval with no model call, which is the fast loop for
- * tuning KB content: ask the question, see which passages come back and at what
- * score, adjust the document, reindex, ask again.
- */
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,13 +69,6 @@ type RetrievalStatus = {
 
 type Props = {
   agent: string;
-  /**
-   * Community being tested against, or "platform" for the shared default.
-   *
-   * Owned by the page rather than this panel because the test conversation
-   * grounds on the same choice — a community picked here that the chat ignored
-   * would be worse than no picker at all.
-   */
   communityId?: string;
   onCommunityChange?: (id: string, name: string | null) => void;
 };
@@ -543,9 +523,6 @@ export default function KnowledgeBasePanel({
                 icon={<Home className="h-3.5 w-3.5" />}
                 docs={communityDocs}
                 onOpen={openDocument}
-                // Only the lab's own test documents can be changed from here;
-                // DocGroup hides the controls per row on the same rule the
-                // server enforces.
                 onDelete={remove}
                 onReindex={reindex}
                 mutableOnly="sandbox"

@@ -365,11 +365,6 @@ function BookingForm({
   );
 }
 
-/**
- * The Sales workspace's AI Assistant: the same agent the SMS / email flow runs,
- * talking here as a web chat. The whole transcript goes up with every turn —
- * the server keeps no conversation, so a reload starts fresh.
- */
 export default function SalesChat({
   themeColor = "#0F3B3D",
   botName = "Sales Assistant",

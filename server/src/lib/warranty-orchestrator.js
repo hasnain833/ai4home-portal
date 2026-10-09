@@ -309,9 +309,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   const said = homeownerText(convo.transcript || [], newMsg);
   absorbIssueDetails(issueState, said);
 
-  // The issue, captured on whichever turn it arrives. It used to be recorded
-  // only while the phase was INTAKE, which a message carrying both the problem
-  // and an email address now skips past.
   if (!issueState.issueSummary) {
     const candidate = String(newMsg || "").replace(EMAIL_RE, "").trim();
     if (candidate.length > 12) issueState.issueSummary = candidate.slice(0, 600);
@@ -436,10 +433,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     }
   }
 
-  // A signed-in homeowner's property is found before the model is even called.
-  // Once it is known and the problem has been described, identification is
-  // done: go straight to diagnosis, which is where the KB is read. Leaving it
-  // to the IDENTIFY tool stalled here, because that tool cannot move on.
   if (propertyId && issueState.issueSummary && (currentPhase === "INTAKE" || currentPhase === "IDENTIFY")) {
     currentPhase = "DIAGNOSE";
   }
@@ -583,9 +576,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     tool,
     maxTokens: 900,
     temperature: 0.2,
-    // Without this the model deliberates at its "high" default on every single
-    // homeowner message, and they wait through it. Intake and identification are
-    // straightforward; coverage calls keep more room. See PHASE_EFFORT.
     effort: effortForPhase(currentPhase),
   });
 
@@ -625,9 +615,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       if (properties.length === 1) {
         await adoptProperty(properties[0]);
         issueState.justIdentified = true;
-        // The coverage end date is deliberately NOT volunteered here. It stays in
-        // the model's known-details context so it can answer if the homeowner
-        // asks, but confirming the property should not announce their expiry.
         replyText =
           input.message ||
           `Thanks — I've got your home at ${properties[0].address}.`;
@@ -707,10 +694,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       }
     } else if (input.transition_phase === "RESOLVE") {
       nextPhase = "RESOLVE";
-      // Diagnosis is done and the claim is ready. The diagnose tool cannot
-      // file, so the agent's reply here used to announce a submission that had
-      // not happened — and a homeowner who left then had no ticket. Go straight
-      // to the filing step instead: the photo card, whose Done/Skip files it.
       if (!ticketId && !sandboxMode && propertyId && !issueState.photoStep) {
         issueState.photoStep = "REQUESTED";
         delete issueState.pendingSummary;
@@ -733,9 +716,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
           newMsg.trim();
 
         if (!issueState.photoStep && propertyId) {
-          // First time the agent is ready to file: ask for photos instead.
-          // Done or Skip on the card files it; a typed reply that brings the
-          // agent back here files it too, because the step is then "REQUESTED".
           issueState.photoStep = "REQUESTED";
           issueState.pendingSummary = description;
           photoRequest = { max: MAX_PHOTOS_PER_CLAIM };

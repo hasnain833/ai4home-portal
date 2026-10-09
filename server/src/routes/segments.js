@@ -9,9 +9,6 @@ import {
 
 const router = Router();
 
-// Segments are tenant-wide audiences, and their evaluated counts reveal how
-// many leads the whole company holds. A homeowner only ever sees their own
-// leads, so segments are builder-only.
 const builderOnly = requireRoles(["ADMIN", "STAFF"]);
 
 router.get("/", requireAuth, builderOnly, getSegments);

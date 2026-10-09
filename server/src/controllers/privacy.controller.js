@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { createHash } from "crypto";
+import { normalizePhone } from "../services/sms.service.js";
 
 const MAX_RESULTS = 25;
 
@@ -8,9 +9,6 @@ function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function normalizePhone(value) {
-  return String(value || "").replace(/\D/g, "");
-}
 
 function hashContact(value) {
   return `erased:${createHash("sha256").update(String(value)).digest("hex").slice(0, 32)}`;

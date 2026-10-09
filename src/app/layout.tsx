@@ -6,9 +6,6 @@ import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "sonner";
 import "./globals.css";
 
-// Both families are referenced by globals.css. Loading them here is what makes
-// the reference resolve — self-hosted by next/font, so no render-blocking
-// request to Google and no flash of fallback text.
 const dmSans = DM_Sans({
   subsets: ["latin"],
   display: "swap",

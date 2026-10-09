@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: { proxyTimeout: 120_000 },
   async rewrites() {
     return process.env.NODE_ENV === "development" && process.env.BACKEND_URL
       ? [

@@ -47,14 +47,6 @@ const toLocalInput = (iso: string) => {
 
 const localNow = () => toLocalInput(new Date().toISOString());
 
-/**
- * Repair visits for one ticket. Visits are booked by dispatching the ticket from
- * the tickets list, so this card only moves or calls off what is already booked.
- * Everyone else sees the schedule read-only.
- *
- * `ticketClosed` freezes the card: once the claim is resolved the work is done,
- * so there is nothing left to move or call off.
- */
 export function TicketAppointments({
   ticketId,
   canSchedule,

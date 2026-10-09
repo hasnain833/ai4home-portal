@@ -111,9 +111,6 @@ export function NotificationBell({
     }
   }, [apiBase]);
 
-  // Poll for the badge only. The list is fetched when the panel opens, so a
-  // closed bell costs one small request a minute. The fetch is kicked off
-  // asynchronously so the effect body never sets state synchronously.
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {

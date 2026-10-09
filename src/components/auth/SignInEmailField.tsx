@@ -8,12 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Mail, Loader2, Clock, X } from "lucide-react";
 import { motion } from "framer-motion";
 
-/**
- * The address the signed-in user actually signs in with (User.email), not the
- * company contact address. Changing it never takes effect inline: the server
- * mails a confirmation link to the new address and the change lands only when
- * that link is opened.
- */
 export function SignInEmailField({
   onNotify,
 }: {

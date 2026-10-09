@@ -2,19 +2,10 @@ import prisma from "./prisma.js";
 
 export const PRICING_SETTING_KEY = "messaging.pricing";
 
-// Per-unit rates in millionths of a dollar, so the ledger stays integer-only.
-// A superadmin edits these at /admin/messaging; these are only the starting
-// point before anyone has.
 export const DEFAULT_PRICING = {
-  // Brevo bills by plan, not per email, so there is no per-email rate to look
-  // up: divide your monthly plan cost by the emails it includes. 1250 is the
-  // Starter plan ($25 / 20,000 emails); higher tiers work out cheaper.
   EMAIL: 1250,
   // Telnyx US outbound long-code, list price $0.004 per segment.
   TELNYX_SMS: 4000,
-  // A send the provider rejected never reached a carrier, so it costs nothing.
-  // Delivery failures after acceptance can be billed, but those arrive later
-  // via status callback, not here.
   FAILED_SEND: 0,
 };
 
@@ -89,9 +80,6 @@ export function aiCostMicros(model, inputTokens, outputTokens) {
   return Math.round(inputTokens * rate.in + outputTokens * rate.out);
 }
 
-// Metering must never break a send: a failed ledger write is logged, not thrown.
-// The cost is derived here so no caller has to know the rates — pass costMicros
-// only when the price is not per-unit, as with AI tokens.
 export async function recordUsage({
   companyId = null,
   channel,

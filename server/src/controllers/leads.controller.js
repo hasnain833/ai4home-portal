@@ -266,7 +266,6 @@ export const createLead = async (req, res) => {
   }
 };
 
-/** Campaign exit + STATUS_CHANGE automation for a lead whose status just changed. */
 async function afterStatusChange(companyId, leadId, status, previousStatus) {
   try {
     const { inngest } = await import("../lib/inngest.js");
@@ -290,13 +289,6 @@ async function afterStatusChange(companyId, leadId, status, previousStatus) {
   }
 }
 
-/**
- * Closed Won: the sales-to-warranty hand-off. The buyer becomes a Warranty
- * homeowner with their property (1-year coverage from closing), the home they
- * bought is marked SOLD so the Sales Agent stops offering it, and the lead is
- * set to Closed Won. The homeowner is emailed a link to set their password.
- */
-/** Emails a new homeowner their set-password link. Throws when it does not send. */
 export async function sendHomeownerWelcome(companyId, homeownerId) {
   const [company, homeowner] = await Promise.all([
     prisma.company.findUnique({ where: { id: companyId }, select: { name: true, email: true } }),

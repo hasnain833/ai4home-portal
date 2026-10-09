@@ -16,11 +16,6 @@ import {
   CalendlyBookingError,
 } from "../services/calendly.service.js";
 
-// ---------------------------------------------------------------------------
-// Builder side: a company's list of trades. One TRADE login can sit on many
-// companies' lists (CompanyTrade); each company owns only its own row.
-// ---------------------------------------------------------------------------
-
 const TRADE_SELECT = {
   id: true,
   tradeType: true,
@@ -111,7 +106,6 @@ export const createTrade = async (req, res) => {
   }
 };
 
-/** Open jobs block removal: the homeowner is waiting on that trade. */
 async function openJobCount(companyId, userId) {
   return prisma.ticket.count({
     where: { companyId, assignedStaffId: userId, status: "DISPATCHED" },
@@ -125,10 +119,6 @@ async function findOwnTrade(req) {
   });
 }
 
-/**
- * The company's own fields only. Name and phone belong to the trade's login,
- * shared with other builders, so the trade edits those from their profile.
- */
 export const updateTrade = async (req, res) => {
   try {
     if (!isAdmin(req)) return res.status(403).json({ message: "Only admins can edit trades" });
@@ -200,12 +190,6 @@ export const resendTradeInvite = async (req, res) => {
     return res.status(500).json({ message: "Failed to send invite" });
   }
 };
-
-// ---------------------------------------------------------------------------
-// Trade side: the logged-in trade's own jobs, across every builder they work
-// for. requireAuth fences TRADE users to these routes only.
-// ---------------------------------------------------------------------------
-
 const requireTrade = (req, res) => {
   if (req.user?.role !== "TRADE") {
     res.status(403).json({ message: "Forbidden" });
@@ -214,7 +198,6 @@ const requireTrade = (req, res) => {
   return true;
 };
 
-/** Only jobs from builders that still have this trade on an active list. */
 const myJobsWhere = (userId) => ({
   assignedStaffId: userId,
   status: { in: ["DISPATCHED", "RESOLVED"] },
@@ -323,10 +306,6 @@ export const markWorkDone = async (req, res) => {
   }
 };
 
-// ---------------------------------------------------------------------------
-// Calendly: the trade links their account so homeowners can't book over it.
-// ---------------------------------------------------------------------------
-
 export const getCalendly = async (req, res) => {
   try {
     return res.json(await calendlyStatus(req.user.id));
@@ -343,10 +322,6 @@ export const startCalendlyConnect = (req, res) => {
   return res.json({ url: authorizeUrl(req.user.id) });
 };
 
-/**
- * Calendly sends the browser back here. Not behind requireAuth: the signed
- * `state` says whose account this is, and the trade lands back in their portal.
- */
 export const calendlyCallback = async (req, res) => {
   const back = (result) => res.redirect(`${process.env.NEXT_PUBLIC_URL || ""}/trade/settings?calendly=${result}`);
   const userId = verifyState(req.query.state);

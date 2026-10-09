@@ -79,9 +79,6 @@ export function toE164(value) {
   return undefined;
 }
 
-// Company names are read on every send, including bulk announcements, so they
-// are cached briefly. Looked up here rather than via getSenderIdentity because
-// messaging-config imports this module.
 const NAME_TTL_MS = 60_000;
 const nameCache = new Map();
 
@@ -106,9 +103,6 @@ async function companyName(companyId) {
   return name;
 }
 
-// A shared sending number tells the recipient nothing about who is texting, so
-// the tenant's name leads the message. Skipped when the copy already opens with
-// it, to avoid "Olson Homes: Olson Homes here — ...".
 export function brandSmsBody(body, name) {
   const text = String(body || "");
   if (!name) return text;
@@ -128,9 +122,6 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
   const finalBody = brand ? brandSmsBody(body, await companyName(companyId)) : String(body || "");
   const recipient = normalizePhone(to);
 
-  // Recorded against the normalised number: on a shared sending number this is
-  // the only trace of which tenant last spoke to someone, and an inbound reply
-  // is attributed back through it.
   const segments = countSegments(finalBody);
   const meter = (outcome) =>
     recordUsage({

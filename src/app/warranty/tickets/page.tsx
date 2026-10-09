@@ -94,9 +94,6 @@ interface PropertyOption {
   homeownerId: string;
 }
 
-// Mirrors the categories the classifier assigns to AI-created tickets
-// (server/src/lib/warranty-classify.js) so manual and automatic tickets stay in
-// the same taxonomy and the Issue filter keeps working across both.
 const ISSUE_TYPES = [
   "Appliances",
   "Cabinets & Trim",
@@ -287,9 +284,6 @@ function TicketsPageInner() {
     [allProperties, createForm.homeownerId],
   );
 
-  // The Properties link carries the address so the chip can name the home even
-  // when it has no tickets to read one from; the ticket data is the fallback if
-  // someone hand-writes the URL with just an id.
   const scopedPropertyLabel =
     searchParams.get("address") ||
     tickets.find((t) => t.property?.address)?.property?.address ||

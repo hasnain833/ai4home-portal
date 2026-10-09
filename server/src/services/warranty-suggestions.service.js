@@ -2,11 +2,6 @@ import prisma from "../lib/prisma.js";
 import { chat } from "../lib/llm.js";
 import { parseLlmJson } from "../lib/sales-ai.js";
 
-// Starter bubbles for the warranty chat. They are written from what the
-// company's warranty KB actually covers — the AI turns the diagnostic matrix
-// (and any other indexed documents) into things a homeowner would really type.
-// When no AI is available they fall back to the matrix's own labels.
-
 const SUGGESTION_COUNT = 6;
 const TARGET_CHARS = 55;
 const MAX_CHARS = 90;

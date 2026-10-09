@@ -43,11 +43,13 @@ import {
   Globe,
   Building2,
   ShieldCheck,
+  LifeBuoy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
+import HelpAgentLab from "@/components/admin/prompt-lab/HelpAgentLab";
 
 type Draft = {
   systemTemplate: string;
@@ -132,7 +134,7 @@ type WarrantyChatMessage = {
   options?: string[];
 };
 
-type AgentTab = "sales" | "warranty";
+type AgentTab = "sales" | "warranty" | "help";
 
 const PHASE_LABELS: Record<WarrantyPhaseKey, string> = {
   INTAKE: "Intake",
@@ -203,9 +205,6 @@ export default function PromptLabPage() {
   const [wInput, setWInput] = useState("");
   const [wSending, setWSending] = useState(false);
   const [wChatPhase, setWChatPhase] = useState("INTAKE");
-  // The sandbox keeps no conversation row, so what the agent worked out last
-  // turn — the property, the safety step it already gave — only survives if
-  // the client hands it back.
   const [wIssueState, setWIssueState] = useState<Record<string, unknown>>({});
   const wChatEndRef = useRef<HTMLDivElement>(null);
 
@@ -712,6 +711,12 @@ export default function PromptLabPage() {
             }`}>
             <ShieldCheck className="h-3.5 w-3.5" /> Warranty Agent
           </button>
+          <button type="button" onClick={() => setAgentTab("help")}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+              agentTab === "help" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            <LifeBuoy className="h-3.5 w-3.5" /> Help Agent
+          </button>
         </div>
         <div className="flex items-center gap-2">
           {agentTab === "sales" ? (
@@ -726,7 +731,7 @@ export default function PromptLabPage() {
                 {versions.length > 0 && <span className="text-muted-foreground">({versions.length})</span>}
               </Button>
             </>
-          ) : (
+          ) : agentTab === "warranty" ? (
             <>
               <Badge variant="secondary">
                 {wLive?.source === "live-version" ? "Custom prompt live" : "Matches shipped prompt"}
@@ -736,12 +741,14 @@ export default function PromptLabPage() {
                 {wVersions.length > 0 && <span className="text-muted-foreground">({wVersions.length})</span>}
               </Button>
             </>
-          )}
+          ) : null}
         </div>
         <p className="w-full text-xs text-muted-foreground">
           {agentTab === "sales"
             ? <>Edit the prompt, add knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> puts a prompt in front of real leads.</>
-            : <>Edit the four phase prompts the warranty agent uses, add platform knowledge-base documents, and test both in sandbox mode. No tickets or emails are sent during testing.</>}
+            : agentTab === "warranty"
+            ? <>Edit the four phase prompts the warranty agent uses, add platform knowledge-base documents, and test both in sandbox mode. No tickets or emails are sent during testing.</>
+            : <>The assistant builder staff open from <strong>Help</strong> in the sidebar. It already knows the whole portal; add docs for anything else. <strong>Save &amp; go live</strong> applies to their next question.</>}
         </p>
       </div>
 
@@ -1122,6 +1129,8 @@ export default function PromptLabPage() {
       </div>
       </>
       )}
+
+      {agentTab === "help" && <HelpAgentLab />}
 
       {agentTab === "warranty" && (
         <>

@@ -37,12 +37,3 @@ export function formatCoverageDate(date) {
   });
 }
 
-export function describeCoverage(coverage) {
-  if (!coverage || coverage.status === COVERAGE.UNKNOWN) return "";
-
-  const when = formatCoverageDate(coverage.endDate);
-  if (coverage.status === COVERAGE.EXPIRED) {
-    return `Your warranty coverage on this home ended on ${when}. I can still answer questions and log a request for the warranty team to review, though coverage decisions will be up to them.`;
-  }
-  return `Your warranty coverage on this home runs through ${when}.`;
-}

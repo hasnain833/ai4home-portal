@@ -642,10 +642,6 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
     return { complianceReply: result.replyText };
   }
 
-  // Warranty texts are one-way. All SMS share one number, so a reply is judged
-  // by what we last sent this number: after a warranty text it is dropped (a
-  // homeowner who is also a lead must not reach the Sales AI); after a sales
-  // text it is routed as usual. STOP/START were already handled above.
   const lastOutbound = await prisma.messageUsage
     .findFirst({
       where: { channel: "SMS", recipient: normalizePhone(sender), outcome: "sent" },

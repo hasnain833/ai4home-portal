@@ -195,9 +195,6 @@ export const updateHomeowner = async (req, res) => {
       }
     }
 
-    // 1. Sign-in credentials live in Supabase; everything else is ours alone.
-    // Editing only a phone number or a display detail must not depend on
-    // Supabase being reachable, and must not pay for a full listUsers() scan.
     const emailChanging = Boolean(email && email !== existingHomeowner.email);
     const touchesAuth = emailChanging || Boolean(password) || Boolean(name);
 

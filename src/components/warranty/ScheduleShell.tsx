@@ -11,10 +11,6 @@ export function splitLabel(label: string) {
   return { day: label.slice(0, idx), time: label.slice(idx + 4) };
 }
 
-/**
- * The frame for the two pages a homeowner reaches from an email. They have no
- * account and no portal chrome, so this carries the whole page on its own.
- */
 export function ScheduleShell({
   children,
   companyName,

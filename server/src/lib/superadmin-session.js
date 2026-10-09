@@ -6,7 +6,6 @@ const MAX_AGE_DAYS = Number(process.env.SESSION_MAX_AGE_DAYS || 90);
 const DEFAULT_MAX_AGE = 60 * 60 * 24 * MAX_AGE_DAYS;
 const RENEW_AFTER_RATIO = 0.5;
 
-export const SESSION_MAX_AGE_SECONDS = DEFAULT_MAX_AGE;
 export const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",

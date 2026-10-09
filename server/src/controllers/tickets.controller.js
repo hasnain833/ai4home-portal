@@ -16,19 +16,9 @@ import {
 } from "../lib/warranty-classify.js";
 
 const TICKET_STATUSES = ["OPEN", "DISPATCHED", "RESOLVED"];
-
-// Dispatch is the normal way out of OPEN, because it is the only thing that
-// names an assignee and sends the booking link. Staff can still move a ticket by
-// hand to correct a mistake — the rules in updateTicket keep the row coherent
-// when they do, rather than forbidding it outright.
-
 const ASSIGNED_STAFF_SELECT = { select: { id: true, name: true, email: true, role: true } };
 const WORK_DONE_BY_SELECT = { select: { id: true, name: true } };
-// A new dispatch or a reopen starts the work over.
 const CLEAR_WORK_DONE = { workDoneAt: null, workDoneById: null, workDoneNotes: null };
-
-// The soonest still-standing visit, so the list can tell a dispatched ticket
-// that has been booked from one still waiting on the homeowner.
 const NEXT_VISIT_SELECT = {
   where: { status: "SCHEDULED" },
   orderBy: { scheduledAt: "asc" },
@@ -36,7 +26,6 @@ const NEXT_VISIT_SELECT = {
   select: { scheduledAt: true },
 };
 
-/** Flattens the one-row appointment include into a plain field for the client. */
 const withNextVisit = (ticket) => {
   const { appointments, ...rest } = ticket;
   return { ...rest, nextVisitAt: appointments?.[0]?.scheduledAt ?? null };
@@ -70,23 +59,14 @@ export const getTickets = async (req, res) => {
         orderBy: { createdAt: "desc" },
       });
     } else {
-      // Staff and Admin see company-wide tickets
       const homeownerId = req.query.homeownerId;
       const propertyId = req.query.propertyId;
-
-      // Scoping to one home is not just propertyId: a ticket the warranty agent
-      // could not tie to a home is stored with propertyId null against its
-      // homeowner, and those belong in the home's list too. Property.homeownerId
-      // is unique — one home per owner — so that fallback is exact, never a
-      // ticket from some other house.
       let propertyScope = {};
       if (propertyId) {
         const property = await prisma.property.findFirst({
           where: { id: propertyId, homeowner: { companyId: session.companyId } },
           select: { homeownerId: true },
         });
-        // Unknown id, or one belonging to another company: no tickets, and no
-        // signal about whether the property exists.
         if (!property) return res.json([]);
         propertyScope = {
           OR: [
@@ -280,7 +260,6 @@ export const updateTicket = async (req, res) => {
     const { id } = req.params;
     const { status, priority, draftResponse, action } = req.body;
 
-    // Get old ticket to check if status changed and verify company
     const oldTicket = await prisma.ticket.findUnique({
       where: { id },
       include: {
@@ -296,7 +275,6 @@ export const updateTicket = async (req, res) => {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
-    // Admins/Staff can only update tickets of homeowners within their company
     if (oldTicket.homeowner.companyId !== session.companyId) {
       return res.status(403).json({ message: "Forbidden" });
     }
@@ -306,7 +284,6 @@ export const updateTicket = async (req, res) => {
         message: `Invalid status. Expected one of: ${TICKET_STATUSES.join(", ")}`,
       });
     }
-    // Setting DISPATCHED by hand would leave the homeowner with no booking link.
     if (status === "DISPATCHED" && status !== oldTicket.status && !oldTicket.assignedStaffId) {
       return res.status(400).json({
         message: "Use Dispatch to send the homeowner a booking link.",
@@ -329,8 +306,6 @@ export const updateTicket = async (req, res) => {
     if (priority) updatedData.priority = priority;
 
     if (statusChanged && status === "OPEN") {
-      // Reopening has to undo the dispatch, or the ticket keeps an assignee and
-      // a booking link for work that is no longer assigned to them.
       updatedData.assignedStaffId = null;
       updatedData.bookingToken = null;
       updatedData.dispatchNotes = null;
@@ -342,13 +317,10 @@ export const updateTicket = async (req, res) => {
       if (!approvedText || !approvedText.trim()) {
         return res.status(400).json({ message: "Cannot approve an empty draft response" });
       }
-      // Clear the draft from ticket on approval
       updatedData.draftResponse = null;
     } else if (action === "reject") {
-      // Clear the draft from ticket
       updatedData.draftResponse = null;
     } else if (draftResponse !== undefined && draftResponse !== null) {
-      // Standard draft update (e.g. auto-save or manual edit)
       updatedData.draftResponse = draftResponse;
     }
 
@@ -359,8 +331,6 @@ export const updateTicket = async (req, res) => {
     });
 
     let notice = null;
-
-    // If status changed, sync to ERP (escalation/resolution — SRS §4.2.7) and email the homeowner
     if (status && status !== oldTicket.status) {
       try {
         const reason =
@@ -383,15 +353,12 @@ export const updateTicket = async (req, res) => {
           .catch((err) =>
             console.error(`[Ticket API] Could not clear visits for #${ticket.id}:`, err.message),
           );
-        // After the save, so the cancellation echoing back by webhook matches nothing.
         for (const v of calendlyVisits) {
           await cancelCalendlyVisit(oldTicket.assignedStaffId, v.calendlyEventUri, "Claim reopened by the builder");
         }
       }
 
       if (status === "RESOLVED") {
-        // A resolved ticket has no visit left to keep. Closing out the schedule
-        // here is what stops reminders going out for a job that is already done.
         await prisma.ticketAppointment
           .updateMany({
             where: { ticketId: ticket.id, status: "SCHEDULED" },
@@ -438,9 +405,6 @@ export const updateTicket = async (req, res) => {
                 `[Ticket API] Resolved email suppressed for ${oldTicket.homeowner.email}: ${mailResult.reason}`,
               );
             } else if (mailResult.outcome === MAIL_OUTCOME.NOT_CONFIGURED) {
-              // The ticket is resolved either way — only the thank-you did not
-              // go out. Surfaced so staff know to follow up rather than assuming
-              // the homeowner was told.
               notice =
                 "Ticket resolved, but the homeowner was not emailed: email delivery is " +
                 "temporarily unavailable. Please contact support if this continues.";
@@ -461,15 +425,6 @@ export const updateTicket = async (req, res) => {
   }
 };
 
-/**
- * Dispatch: the one door out of OPEN. Optionally names the staff member who owns
- * the fix, and sends the homeowner a link to pick a time from that person's
- * availability (or the company's hours when no one is assigned).
- *
- * No time is chosen here on purpose — the homeowner picks it. So a dispatched
- * ticket may sit with no visit booked yet, which the tickets list surfaces as
- * "awaiting booking" rather than letting it go quiet.
- */
 export const dispatchTicket = async (req, res) => {
   try {
     const session = req.user;

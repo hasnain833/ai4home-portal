@@ -8,15 +8,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { statusColor } from "@/lib/lead-statuses";
 import { Users, CalendarDays, Plus, ArrowRight, Sparkles } from "lucide-react";
 
-/**
- * The homeowner's view of the Sales workspace.
- *
- * Deliberately not the builder dashboard with the numbers filtered out: a
- * homeowner has no CRM, no campaigns and no appointments, so cards like "Model
- * Home Bookings" or "Avg Lead Conversion" would sit at zero forever and read as
- * broken rather than empty. This shows only what they actually own.
- */
-
 type RecentLead = {
   id: string;
   name: string;

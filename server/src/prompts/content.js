@@ -115,4 +115,3 @@ export const EMAIL_LENGTH_RULE = "Provide a Subject Line and Email Body.";
 
 export const DEFAULT_BRAND_VOICE = "Professional, warm, and helpful.";
 export const DEFAULT_AUDIENCE = "Homebuyers or existing homeowners";
-export const NO_KB_CONTEXT = "No knowledge-base context available.";

@@ -129,11 +129,6 @@ async function getSuggestions(req, res) {
   }
 }
 
-/**
- * The conversation a photo belongs to. The widget is anonymous, so the
- * unguessable conversation id is the credential — scoped to its company, still
- * open, and not yet turned into a ticket.
- */
 async function photoConversation(req) {
   const conversationId = req.body?.conversationId || req.query?.conversationId || null;
   const companyId = resolveActor(req).companyId || req.query?.companyId || null;
@@ -173,9 +168,6 @@ async function deletePhoto(req, res) {
   }
 }
 
-// Phone photos are resized in the browser first; 8 MB leaves room for one that
-// could not be (e.g. an unconverted HEIC), which the image check then rejects
-// with a clear message rather than a size error.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024, files: MAX_PHOTOS_PER_CLAIM },

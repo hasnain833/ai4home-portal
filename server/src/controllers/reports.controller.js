@@ -6,37 +6,26 @@ const ENGAGEMENT_TARGET = 98;
 
 const pct = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : null);
 
-/**
- * The Warranty Agent metrics the onboarding SOP reports on (Part C), for one
- * builder and period. Rates are null when there is nothing to divide by yet.
- */
+
 async function warrantyAgentMetrics(companyId, since, until) {
   const inPeriod = { gte: since, lte: until };
 
   const [inquiries, diagnosed, resolvedByAi, visits, resolvedWithVisits] = await Promise.all([
-    // Every warranty chat the agent took.
     prisma.warrantyConversation.count({ where: { companyId, createdAt: inPeriod } }),
-    // The agent worked out the issue and wrote it up as a ticket.
     prisma.warrantyConversation.count({ where: { companyId, createdAt: inPeriod, ticketId: { not: null } } }),
-    // Fixed in the chat, no visit needed.
     prisma.ticket.count({ where: { homeowner: { companyId }, createdAt: inPeriod, ticketType: AUTO_RESOLVED_TYPE } }),
-    // Visits that fell in the period.
     prisma.ticketAppointment.findMany({
       where: { companyId, scheduledAt: inPeriod },
       select: { status: true, scheduledAt: true, remindersSent: true, rescheduleCount: true, tradeEmail: true },
     }),
-    // Resolved claims that needed a visit, with how many visits it took.
     prisma.ticket.findMany({
       where: { homeowner: { companyId }, status: "RESOLVED", updatedAt: inPeriod, appointments: { some: { status: "COMPLETED" } } },
       select: { appointments: { where: { status: { not: "CANCELLED" } }, select: { id: true } } },
     }),
   ]);
 
-  // Each reminder window goes to the homeowner, and to the trade when one is named.
   const homeownerReminders = visits.reduce((n, v) => n + v.remindersSent.length, 0);
   const tradeReminders = visits.reduce((n, v) => n + (v.tradeEmail ? v.remindersSent.length : 0), 0);
-
-  // Kept = the visit happened (completed) out of visits whose time has come.
   const now = Date.now();
   const due = visits.filter((v) => v.scheduledAt.getTime() <= now && v.status !== "SCHEDULED");
   const kept = due.filter((v) => v.status === "COMPLETED").length;
@@ -175,9 +164,11 @@ export const getAnalytics = async (req, res) => {
       { label: "Escalated", value: escalatedToTeamRate }
     ];
 
-    // Dispatch is the only thing that sets assignedStaffId, and only a reopen
-    // clears it, so it marks every claim that went out to a trade.
-    const dispatched = tickets.filter(t => t.assignedStaffId);
+    // Dispatch may go to no trade, so assignedStaffId alone misses those claims.
+    // Visits only exist after a dispatch, and a reopen clears both.
+    // ponytail: misses a no-trade dispatch resolved before any visit was booked; add Ticket.dispatchedAt if that matters.
+    const wasDispatched = (t) => t.status === "DISPATCHED" || !!t.assignedStaffId || t.appointments.length > 0;
+    const dispatched = tickets.filter(wasDispatched);
     const tradeResolved = dispatched.filter(t => t.status === "RESOLVED").length;
     const tradeResolutionRate = dispatched.length > 0 ? Math.round((tradeResolved / dispatched.length) * 100) : 0;
 
@@ -208,7 +199,7 @@ export const getAnalytics = async (req, res) => {
       erpFailureLog,
       agentMetrics: {
         ...agentMetrics,
-        claimsDispatched: tickets.filter(t => t.assignedStaffId).length,
+        claimsDispatched: dispatched.length,
         ticketsWrittenToErp: erpSyncedCount,
       },
     });
