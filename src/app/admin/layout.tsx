@@ -26,7 +26,6 @@ import {
   FlaskConical,
   Send,
   ArrowRightLeft,
-  KanbanSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -48,7 +47,6 @@ const adminNavItems = [
   },
   { name: "Messaging", href: "/admin/messaging", icon: Send },
   { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical },
-  { name: "Tickets", href: "/admin/tickets", icon: KanbanSquare },
 ];
 
 const subscribeToHydration = () => () => {};
