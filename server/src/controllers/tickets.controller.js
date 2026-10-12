@@ -1,6 +1,5 @@
 import prisma from "../lib/prisma.js";
 import { listTicketPhotos } from "../services/warranty-photos.service.js";
-import { calculateWarrantyYear } from "../lib/utils.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { MAIL_OUTCOME } from "../services/mail-service.js";
 import { Templates, SmsTemplates } from "../services/templates.js";
@@ -151,8 +150,6 @@ export const createTicket = async (req, res) => {
       return res.status(403).json({ message: "Property does not belong to specified homeowner" });
     }
 
-    const warrantyYear = calculateWarrantyYear(property.coeDate);
-
     const companyId = property.homeowner?.companyId ?? null;
     const ticket = await prisma.$transaction(async (tx) => tx.ticket.create({
       data: {
@@ -169,7 +166,6 @@ export const createTicket = async (req, res) => {
           text: `${issueType || ""} ${ticketType || ""}`,
         }),
         isEmergency: !!isEmergency,
-        warrantyYear,
         status: "OPEN",
       },
     }));

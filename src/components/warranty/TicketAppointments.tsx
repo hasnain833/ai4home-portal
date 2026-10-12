@@ -294,4 +294,3 @@ export function TicketAppointments({
   );
 }
 
-export default TicketAppointments;

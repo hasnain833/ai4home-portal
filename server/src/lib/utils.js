@@ -1,16 +1,3 @@
-export function calculateWarrantyYear(coeDate) {
-  if (!coeDate) return 1;
-  const coe = new Date(coeDate);
-  const now = new Date();
-  const diffTime = now.getTime() - coe.getTime();
-  const diffYears = diffTime / (1000 * 60 * 60 * 24 * 365.25);
-  
-  if (diffYears < 0) return 0;
-  if (diffYears <= 1) return 1;
-  if (diffYears <= 2) return 2;
-  return 10;
-}
-
 export async function mapWithConcurrency(items, limit, worker) {
   const list = Array.isArray(items) ? items : [];
   if (list.length === 0) return [];

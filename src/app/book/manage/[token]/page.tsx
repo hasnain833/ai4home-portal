@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
+import { splitLabel } from "@/components/warranty/ScheduleShell";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { CalendarDays, CheckCircle2, XCircle } from "lucide-react";
 
@@ -11,12 +12,6 @@ type ManageData = {
   timezone: string;
   slots: Slot[];
 };
-
-function splitLabel(label: string) {
-  const idx = label.indexOf(" at ");
-  if (idx === -1) return { day: label, time: label };
-  return { day: label.slice(0, idx), time: label.slice(idx + 4) };
-}
 
 export default function ManageBookingPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);

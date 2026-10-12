@@ -16,7 +16,6 @@ const publicRoutes = [
   "/terms",
   "/privacy",
   "/blog",
-  "/work", // DEMO work-management board, remove with the demo
 ];
 
 const EXPECTED_AUTH_ERRORS = new Set([

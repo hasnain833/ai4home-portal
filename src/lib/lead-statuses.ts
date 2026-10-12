@@ -37,8 +37,3 @@ export function statusColor(status: string, index?: number): string {
   const idx = index !== undefined ? index : hash;
   return FALLBACK_PALETTE[idx % FALLBACK_PALETTE.length];
 }
-
-export function resolveLeadStatuses(raw: unknown): string[] {
-  void raw;
-  return DEFAULT_LEAD_STATUSES;
-}

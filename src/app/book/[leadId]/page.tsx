@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
+import { splitLabel } from "@/components/warranty/ScheduleShell";
 import { CalendarDays, Clock, CheckCircle2 } from "lucide-react";
 
 type Slot = { iso: string; label: string };
@@ -13,12 +14,6 @@ type BookingData = {
 };
 
 // "Mon, Jul 7 at 2:00 PM EDT" -> { day: "Mon, Jul 7", time: "2:00 PM EDT" }
-function splitLabel(label: string) {
-  const idx = label.indexOf(" at ");
-  if (idx === -1) return { day: label, time: label };
-  return { day: label.slice(0, idx), time: label.slice(idx + 4) };
-}
-
 export default function PublicBookingPage({ params }: { params: Promise<{ leadId: string }> }) {
   const { leadId: bookingToken } = use(params);
   const [data, setData] = useState<BookingData | null>(null);
