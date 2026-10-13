@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { parseCsv } from "@/lib/csv";
 
 export type CommunityType = "UNIT_HOMES" | "SHARED_HOMES";
 
@@ -48,47 +49,6 @@ const COLUMN_ALIASES: Record<string, string> = {
   communityname: "community",
 };
 
-function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) return [];
-
-  const splitLine = (line: string) => {
-    const out: string[] = [];
-    let cur = "";
-    let quoted = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (quoted && line[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else {
-          quoted = !quoted;
-        }
-      } else if (ch === "," && !quoted) {
-        out.push(cur);
-        cur = "";
-      } else {
-        cur += ch;
-      }
-    }
-    out.push(cur);
-    return out.map((v) => v.trim());
-  };
-
-  const headers = splitLine(lines[0]).map((h) => h.replace(/[\s_-]+/g, "").toLowerCase());
-
-  return lines.slice(1).map((line) => {
-    const cells = splitLine(line);
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => {
-      const field = COLUMN_ALIASES[h];
-      if (field) row[field] = cells[i] ?? "";
-    });
-    return row;
-  });
-}
-
 export function HomesCsvImport({
   disabled,
   onImported,
@@ -108,7 +68,7 @@ export function HomesCsvImport({
     setImporting(true);
     setImportErrors([]);
     try {
-      const rows = parseCsv(await file.text());
+      const rows = parseCsv(await file.text(), COLUMN_ALIASES);
       if (rows.length === 0) {
         showToast("That file has no rows.");
         return;

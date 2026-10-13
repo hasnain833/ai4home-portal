@@ -81,7 +81,7 @@ function ago(iso: string | null) {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
-export default function AdminCrmHealthPage() {
+export default function CrmHealthCard() {
   const { user } = useAuth();
   const [connections, setConnections] = useState<ConnectionHealth[]>([]);
   const [loading, setLoading] = useState(true);

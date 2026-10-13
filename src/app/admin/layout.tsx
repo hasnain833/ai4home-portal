@@ -9,8 +9,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
   Building2,
-  Users,
-  ShieldCheck,
   LogOut,
   Sun,
   Moon,
@@ -18,13 +16,14 @@ import {
   X,
   Loader2,
   PlugZap,
-  Newspaper,
   LifeBuoy,
   CalendarRange,
   PanelLeftClose,
   PanelLeftOpen,
   FlaskConical,
-  Send,
+  Receipt,
+  Target,
+  Megaphone,
   ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,18 +33,17 @@ import { BrandLogo } from "@/components/BrandLogo";
 const adminNavItems = [
   { name: "Overview", href: "/admin", icon: LayoutDashboard },
   { name: "Companies", href: "/admin/companies", icon: Building2 },
-  { name: "Verifications", href: "/admin/verifications", icon: ShieldCheck },
-  { name: "Users & Access", href: "/admin/users", icon: Users },
-  { name: "CRM Health", href: "/admin/crm-health", icon: PlugZap },
+  { name: "Business Leads", href: "/admin/leads", icon: Target },
+  { name: "Campaigns", href: "/admin/campaigns", icon: Megaphone },
+  { name: "CRM & News", href: "/admin/integrations", icon: PlugZap },
   { name: "Hand-off Issues", href: "/admin/handoffs", icon: ArrowRightLeft },
-  { name: "News Defaults", href: "/admin/news-defaults", icon: Newspaper },
   { name: "Support Access", href: "/admin/support", icon: LifeBuoy },
   {
     name: "Appointments",
     href: "/admin/sales-agent-appointments",
     icon: CalendarRange,
   },
-  { name: "Messaging", href: "/admin/messaging", icon: Send },
+  { name: "Usage & Costs", href: "/admin/costs", icon: Receipt },
   { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical },
 ];
 

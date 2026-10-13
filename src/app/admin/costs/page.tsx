@@ -122,7 +122,7 @@ const UNIT_LABEL: Record<string, string> = {
   AI: "tokens",
 };
 
-export default function AdminMessagingPage() {
+export default function AdminCostsPage() {
   const [data, setData] = useState<SpendData | null>(null);
   const [loading, setLoading] = useState(true);
   const [rates, setRates] = useState<Pricing | null>(null);
@@ -197,7 +197,7 @@ export default function AdminMessagingPage() {
     <div className="space-y-6 p-4 md:p-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Platform Messaging</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Usage &amp; Costs</h1>
           <p className="text-muted-foreground text-sm mt-1">
             What the platform is spending on email, SMS and AI across every tenant.
           </p>

@@ -11,7 +11,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Building2 } from "lucide-react";
+import { Loader2, Building2, FileImage, ExternalLink, CheckCircle2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 // SOP: a new builder goes live within 30 days of signing.
@@ -41,6 +50,10 @@ interface CompanyRecord {
   warrantyEnabled: boolean;
   salesEnabled: boolean;
   verificationStatus: string;
+  verificationDocUrl: string | null;
+  verificationSubmittedAt: string | null;
+  agreementDocUrl: string | null;
+  agreementVersion: string | null;
   createdAt: string;
   contractSignedAt: string | null;
   goLiveAt: string | null;
@@ -81,6 +94,51 @@ export default function AdminCompaniesPage() {
     if (user?.isSuperAdmin) fetchCompanies();
   }, [user]);
 
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  // Looked up live so the dialog reflects the refetch after Verify / Reject.
+  const reviewing = companies.find((c) => c.id === reviewingId) ?? null;
+
+  const verify = async (id: string, action: "approve" | "reject") => {
+    setActingId(id);
+    try {
+      const res = await fetch(`/api/admin/companies/${id}/verify`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Could not update verification");
+      await fetchCompanies();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update verification");
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const toggleWorkspace = async (company: CompanyRecord, field: "warrantyEnabled" | "salesEnabled") => {
+    const previous = companies;
+    const next = { warrantyEnabled: company.warrantyEnabled, salesEnabled: company.salesEnabled, [field]: !company[field] };
+    setCompanies((list) => list.map((c) => (c.id === company.id ? { ...c, ...next } : c)));
+    try {
+      const res = await fetch(`/api/admin/companies/${company.id}/workspaces`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Could not save");
+    } catch (e) {
+      setCompanies(previous);
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    }
+  };
+
+  // Submissions awaiting review float to the top.
+  const sorted = [...companies].sort(
+    (a, b) => Number(b.verificationStatus === "SUBMITTED") - Number(a.verificationStatus === "SUBMITTED"),
+  );
+  const pendingCount = companies.filter((c) => c.verificationStatus === "SUBMITTED").length;
+
   const saveOnboarding = async (id: string, field: "contractSignedAt" | "goLiveAt", value: string) => {
     const previous = companies;
     setCompanies((list) => list.map((c) => (c.id === id ? { ...c, [field]: value || null } : c)));
@@ -107,7 +165,12 @@ export default function AdminCompaniesPage() {
             </div>
             <div>
               <CardTitle className="text-xl text-foreground">Tenant Companies</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">Details for every registered tenant. Manage workspace access from Users &amp; Access.</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Every registered tenant: review verification documents and switch workspaces on or off.
+                {pendingCount > 0 && (
+                  <span className="ml-1 font-medium text-amber-600 dark:text-amber-400">{pendingCount} awaiting review.</span>
+                )}
+              </p>
             </div>
           </div>
         </CardHeader>
@@ -139,7 +202,7 @@ export default function AdminCompaniesPage() {
                     <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">No companies found.</TableCell>
                   </TableRow>
                 ) : (
-                  companies.map((company) => (
+                  sorted.map((company) => (
                     <TableRow key={company.id} className="hover:bg-muted/40">
                       <TableCell className="pl-6 font-medium text-foreground">{company.name}</TableCell>
                       <TableCell>
@@ -152,18 +215,33 @@ export default function AdminCompaniesPage() {
                         {company.address || "—"}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`border-0 uppercase text-[10px] tracking-wider font-bold ${verificationBadge(company.verificationStatus)}`}>
-                          {company.verificationStatus || "PENDING"}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={`border-0 uppercase text-[10px] tracking-wider font-bold ${verificationBadge(company.verificationStatus)}`}>
+                            {company.verificationStatus || "PENDING"}
+                          </Badge>
+                          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-[#b48c3c]" onClick={() => setReviewingId(company.id)}>
+                            <FileImage className="h-3.5 w-3.5" /> Review
+                          </Button>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1.5">
-                          <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ${company.warrantyEnabled ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-zinc-500/10 text-muted-foreground line-through"}`}>
+                          <button
+                            type="button"
+                            title={company.warrantyEnabled ? "Click to disable" : "Click to enable"}
+                            onClick={() => toggleWorkspace(company, "warrantyEnabled")}
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium transition hover:ring-1 hover:ring-[#b48c3c] ${company.warrantyEnabled ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-zinc-500/10 text-muted-foreground line-through"}`}
+                          >
                             Warranty
-                          </span>
-                          <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ${company.salesEnabled ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-zinc-500/10 text-muted-foreground line-through"}`}>
+                          </button>
+                          <button
+                            type="button"
+                            title={company.salesEnabled ? "Click to disable" : "Click to enable"}
+                            onClick={() => toggleWorkspace(company, "salesEnabled")}
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium transition hover:ring-1 hover:ring-[#b48c3c] ${company.salesEnabled ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-zinc-500/10 text-muted-foreground line-through"}`}
+                          >
                             Sales
-                          </span>
+                          </button>
                         </div>
                       </TableCell>
                       <TableCell className="text-center text-sm text-foreground/80">
@@ -210,6 +288,87 @@ export default function AdminCompaniesPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!reviewing} onOpenChange={(open) => !open && setReviewingId(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          {reviewing && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  {reviewing.name}
+                  <Badge variant="outline" className={`border-0 uppercase text-[10px] tracking-wider font-bold ${verificationBadge(reviewing.verificationStatus)}`}>
+                    {reviewing.verificationStatus || "PENDING"}
+                  </Badge>
+                </DialogTitle>
+                <DialogDescription>
+                  {reviewing.verificationSubmittedAt
+                    ? `Submitted ${new Date(reviewing.verificationSubmittedAt).toLocaleString()}`
+                    : "Nothing submitted yet."}{" "}
+                  Both documents are needed before the company can be verified.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                {(
+                  [
+                    ["Signed agreement", reviewing.agreementDocUrl, reviewing.agreementVersion ? `Version ${reviewing.agreementVersion}` : "Platform Services Agreement"],
+                    ["Business document", reviewing.verificationDocUrl, "Invoice or proof of business"],
+                  ] as const
+                ).map(([label, url, hint]) => (
+                  <div key={label} className="flex flex-col gap-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold">{label}</p>
+                        <p className="text-[11px] text-muted-foreground">{hint}</p>
+                      </div>
+                      {url && (
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex shrink-0 items-center gap-1 text-xs text-[#b48c3c] hover:underline">
+                          Open <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
+                    {url ? (
+                      /\.pdf($|\?)/i.test(url) ? (
+                        <iframe src={url} title={label} className="h-80 w-full rounded-lg border border-border bg-muted" />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element -- arbitrary uploaded document URL
+                        <img src={url} alt={label} className="h-80 w-full rounded-lg border border-border bg-muted object-contain" />
+                      )
+                    ) : (
+                      <div className="flex h-80 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-muted/40 text-sm text-muted-foreground">
+                        <FileImage className="h-6 w-6" /> Not uploaded yet
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <DialogFooter>
+                {reviewing.verificationStatus === "VERIFIED" ? (
+                  <Button variant="outline" className="text-red-600 hover:text-red-700" disabled={actingId === reviewing.id} onClick={() => verify(reviewing.id, "reject")}>
+                    {actingId === reviewing.id ? "Working…" : "Revoke verification"}
+                  </Button>
+                ) : (
+                  <>
+                    {reviewing.verificationStatus === "SUBMITTED" && (
+                      <Button variant="outline" className="text-red-600 hover:text-red-700" disabled={actingId === reviewing.id} onClick={() => verify(reviewing.id, "reject")}>
+                        Reject
+                      </Button>
+                    )}
+                    <Button
+                      className="bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90"
+                      disabled={actingId === reviewing.id || !reviewing.verificationDocUrl || !reviewing.agreementDocUrl}
+                      onClick={() => verify(reviewing.id, "approve")}
+                    >
+                      {actingId === reviewing.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle2 className="mr-1.5 h-4 w-4" /> Verify</>}
+                    </Button>
+                  </>
+                )}
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

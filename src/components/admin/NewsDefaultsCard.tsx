@@ -31,7 +31,7 @@ function isHttpUrl(value: string) {
   }
 }
 
-export default function AdminNewsDefaultsPage() {
+export default function NewsDefaultsCard() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
