@@ -10,6 +10,7 @@ const publicRoutes = [
   "/widget.js",
   "/bp-config",
   "/book",
+  "/meet",
   "/schedule",
   "/unsubscribe",
   "/lead-form",

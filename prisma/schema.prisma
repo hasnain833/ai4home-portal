@@ -897,14 +897,76 @@ model ScrapedNews {
 }
 
 model SalesAgentAppointment {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   name          String
   email         String
   phone         String
   preferredTime String
-  status        String   @default("CONFIRMED")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  status        String    @default("CONFIRMED")
+  source        String    @default("BOTPRESS")
+  campaignName  String?
+  startTime     DateTime?
+  b2bLeadId     String?
+  b2bLead       B2BLead?  @relation(fields: [b2bLeadId], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([startTime])
+}
+
+
+model B2BLead {
+  id           String                  @id @default(cuid())
+  companyName  String
+  contactName  String                  @default("")
+  email        String                  @unique
+  phone        String?
+  website      String?
+  city         String?
+  notes        String?                 @db.Text
+  status       String                  @default("NEW") 
+  source       String                  @default("MANUAL") 
+  bookingToken String                  @unique @default(uuid())
+  emailOptOut  Boolean                 @default(false)
+  smsOptOut    Boolean                 @default(false)
+  enrollments  B2BEnrollment[]
+  appointments SalesAgentAppointment[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  @@index([status])
+}
+
+model B2BCampaign {
+  id          String          @id @default(cuid())
+  name        String
+  steps       Json            @default("[]")
+  status      String          @default("DRAFT")
+  enrollments B2BEnrollment[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model B2BEnrollment {
+  id           String      @id @default(cuid())
+  leadId       String
+  lead         B2BLead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaignId   String
+  campaign     B2BCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  status       String      @default("ACTIVE") 
+  exitedReason String? 
+  currentStep  Int         @default(0)
+  nextRunAt    DateTime?
+  sentCount    Int         @default(0)
+  failedCount  Int         @default(0)
+  lastError    String?
+  lastSentAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@unique([leadId, campaignId])
+  @@index([status, nextRunAt])
+  @@index([campaignId, status])
 }
 
 model SalesAgentPromptVersion {

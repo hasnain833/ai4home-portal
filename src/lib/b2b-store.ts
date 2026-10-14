@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api";
 
 // Platform-level (B2B) prospecting: builders the platform wants to sign up as tenants.
 
@@ -12,16 +13,21 @@ export interface B2BLead {
   companyName: string;
   contactName: string;
   email: string;
-  phone: string;
-  website: string;
-  city: string;
-  notes: string;
+  phone: string | null;
+  website: string | null;
+  city: string | null;
+  notes: string | null;
   status: B2BLeadStatus;
   source: "MANUAL" | "CSV";
+  emailOptOut: boolean;
+  smsOptOut: boolean;
   createdAt: string;
+  activeCampaigns: { id: string; name: string }[];
+  nextAppointment: string | null;
 }
 
 export interface CampaignStep {
+  channel: "EMAIL" | "SMS";
   delayDays: number;
   subject: string;
   body: string;
@@ -30,41 +36,60 @@ export interface CampaignStep {
 export interface B2BCampaign {
   id: string;
   name: string;
-  channel: "EMAIL" | "SMS";
-  /** Lead statuses this campaign targets. */
-  audience: B2BLeadStatus[];
   steps: CampaignStep[];
-  status: "DRAFT" | "ACTIVE" | "PAUSED";
+  status: "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED";
   createdAt: string;
+  stats: {
+    enrolled: number;
+    active: number;
+    completed: number;
+    booked: number;
+    replied: number;
+    unsubscribed: number;
+    withIssues: number;
+  };
 }
 
-// ponytail: browser-only storage until the backend lands — swap this hook for
-// fetches to /api/admin/b2b-leads and /api/admin/b2b-campaigns; the pages only use it.
-function useStoredList<T>(key: string) {
+export interface B2BEnrollment {
+  id: string;
+  status: "ACTIVE" | "COMPLETED" | "EXITED";
+  exitedReason: string | null;
+  currentStep: number;
+  nextRunAt: string | null;
+  sentCount: number;
+  failedCount: number;
+  lastError: string | null;
+  lastSentAt: string | null;
+  lead: Pick<B2BLead, "id" | "companyName" | "contactName" | "email" | "phone" | "status">;
+}
+
+export const B2B_API = "/api/admin/b2b";
+
+export const sendJson = <T = unknown>(url: string, method: string, body?: unknown) =>
+  apiFetch<T>(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+/** GETs a list and exposes a reload; pages call reload() after every write. */
+export function useApiList<T>(url: string) {
   const [items, setItems] = useState<T[]>([]);
-
-  useEffect(() => {
+  const [loading, setLoading] = useState(true);
+  const reload = useCallback(async () => {
     try {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate from storage after mount
-      setItems(JSON.parse(localStorage.getItem(key) || "[]"));
-    } catch {
-      /* storage unavailable — start empty */
+      setItems(await apiFetch<T[]>(url));
+    } finally {
+      setLoading(false);
     }
-  }, [key]);
-
-  const save = (next: T[] | ((prev: T[]) => T[])) =>
-    setItems((prev) => {
-      const value = typeof next === "function" ? next(prev) : next;
-      try {
-        localStorage.setItem(key, JSON.stringify(value));
-      } catch {
-        /* storage unavailable — keep in memory */
-      }
-      return value;
-    });
-
-  return [items, save] as const;
+  }, [url]);
+  useEffect(() => {
+    reload().catch(() => {});
+  }, [reload]);
+  return { items, loading, reload };
 }
 
-export const useB2BLeads = () => useStoredList<B2BLead>("admin-b2b-leads");
-export const useB2BCampaigns = () => useStoredList<B2BCampaign>("admin-b2b-campaigns");
+export const useB2BLeads = () => useApiList<B2BLead>(`${B2B_API}/leads`);
+export const useB2BCampaigns = () => useApiList<B2BCampaign>(`${B2B_API}/campaigns`);
+
+export const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");

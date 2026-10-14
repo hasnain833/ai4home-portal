@@ -28,6 +28,7 @@ import {
   updateSupportContact,
 } from "../admin/platform.controller.js";
 import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
+import * as b2b from "../admin/b2b.controller.js";
 import { listHandoffIssues, retryHandoffIssue, resolveHandoffIssue } from "../admin/handoffs.controller.js";
 import {
   getPromptLab,
@@ -94,6 +95,24 @@ router.post("/staff", requireAuth, createStaff);
 router.put("/staff", requireAuth, updateStaff);
 router.delete("/staff", requireAuth, deleteStaff);
 router.get("/sales-agent-appointments", requireAuth, getSalesAgentAppointments);
+router.patch("/sales-agent-appointments/:id/status", requireAuth, b2b.updateAppointmentStatus);
+
+// B2B prospecting: business leads, campaigns, platform availability.
+router.get("/b2b/leads", requireAuth, b2b.listLeads);
+router.post("/b2b/leads", requireAuth, b2b.createLead);
+router.post("/b2b/leads/import", requireAuth, b2b.importLeads);
+router.patch("/b2b/leads/:id", requireAuth, b2b.updateLead);
+router.delete("/b2b/leads/:id", requireAuth, b2b.deleteLead);
+router.get("/b2b/campaigns", requireAuth, b2b.listCampaigns);
+router.post("/b2b/campaigns", requireAuth, b2b.createCampaign);
+router.put("/b2b/campaigns/:id", requireAuth, b2b.updateCampaign);
+router.patch("/b2b/campaigns/:id/status", requireAuth, b2b.setCampaignStatus);
+router.delete("/b2b/campaigns/:id", requireAuth, b2b.deleteCampaign);
+router.get("/b2b/campaigns/:id/enrollments", requireAuth, b2b.listEnrollments);
+router.post("/b2b/campaigns/:id/enroll", requireAuth, b2b.enrollLeads);
+router.post("/b2b/campaigns/:id/unenroll", requireAuth, b2b.unenrollLeads);
+router.get("/b2b/availability", requireAuth, b2b.getAvailability);
+router.put("/b2b/availability", requireAuth, b2b.updateAvailability);
 const promptLabUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },

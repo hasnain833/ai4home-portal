@@ -23,10 +23,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Search, Target, Trash2, UploadCloud } from "lucide-react";
+import { CalendarCheck, Loader2, Pencil, Plus, Search, Target, Trash2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { parseCsv } from "@/lib/csv";
-import { B2B_LEAD_STATUSES, type B2BLead, type B2BLeadStatus, useB2BLeads } from "@/lib/b2b-store";
+import {
+  B2B_API,
+  B2B_LEAD_STATUSES,
+  type B2BLead,
+  type B2BLeadStatus,
+  sendJson,
+  titleCase,
+  useB2BLeads,
+} from "@/lib/b2b-store";
 
 const STATUS_STYLES: Record<B2BLeadStatus, string> = {
   NEW: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
@@ -55,60 +64,78 @@ const COLUMN_ALIASES: Record<string, string> = {
 };
 
 const EMPTY_FORM = { companyName: "", contactName: "", email: "", phone: "", website: "", city: "", notes: "" };
+type LeadForm = typeof EMPTY_FORM;
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-
-function toLead(row: Partial<typeof EMPTY_FORM>, source: B2BLead["source"]): B2BLead {
-  return {
-    ...EMPTY_FORM,
-    ...Object.fromEntries(Object.entries(row).map(([k, v]) => [k, (v ?? "").trim()])),
-    email: (row.email ?? "").trim().toLowerCase(),
-    id: crypto.randomUUID(),
-    status: "NEW",
-    source,
-    createdAt: new Date().toISOString(),
-  };
-}
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 
 export default function AdminLeadsPage() {
-  const [leads, setLeads] = useB2BLeads();
+  const confirm = useConfirm();
+  const { items: leads, loading, reload } = useB2BLeads();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<B2BLeadStatus | "ALL">("ALL");
-  const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
+  // null = closed, "" = adding, otherwise the id of the lead being edited.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [form, setForm] = useState<LeadForm>(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [preview, setPreview] = useState<{ valid: B2BLead[]; skipped: number } | null>(null);
+  const [preview, setPreview] = useState<{ rows: Partial<LeadForm>[]; skipped: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const existingEmails = new Set(leads.map((l) => l.email));
+  const openForm = (lead?: B2BLead) => {
+    setForm(
+      lead
+        ? Object.fromEntries(Object.keys(EMPTY_FORM).map((k) => [k, (lead[k as keyof LeadForm] as string) || ""])) as LeadForm
+        : EMPTY_FORM,
+    );
+    setEditing(lead?.id ?? "");
+  };
 
-  const addLead = () => {
+  const saveLead = async () => {
     if (!form.companyName.trim()) return toast.error("Company name is required.");
     if (!isEmail(form.email.trim())) return toast.error("Enter a valid email.");
-    if (existingEmails.has(form.email.trim().toLowerCase())) return toast.error("A lead with that email already exists.");
-    setLeads((prev) => [toLead(form, "MANUAL"), ...prev]);
-    setForm(EMPTY_FORM);
-    setAddOpen(false);
-    toast.success("Lead added.");
+    setSaving(true);
+    try {
+      if (editing) await sendJson(`${B2B_API}/leads/${editing}`, "PATCH", form);
+      else await sendJson(`${B2B_API}/leads`, "POST", form);
+      toast.success(editing ? "Lead updated." : "Lead added.");
+      setEditing(null);
+      await reload();
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const readCsv = async (file: File) => {
-    const rows = parseCsv(await file.text(), COLUMN_ALIASES);
-    const seen = new Set(existingEmails);
-    const valid: B2BLead[] = [];
-    for (const row of rows) {
+    const rows = parseCsv(await file.text(), COLUMN_ALIASES) as Partial<LeadForm>[];
+    const existing = new Set(leads.map((l) => l.email));
+    const seen = new Set<string>();
+    const valid = rows.filter((row) => {
       const email = (row.email ?? "").trim().toLowerCase();
-      if (!row.companyName?.trim() || !isEmail(email) || seen.has(email)) continue;
+      if (!row.companyName?.trim() || !isEmail(email) || existing.has(email) || seen.has(email)) return false;
       seen.add(email);
-      valid.push(toLead(row, "CSV"));
-    }
-    setPreview({ valid, skipped: rows.length - valid.length });
+      return true;
+    });
+    setPreview({ rows: valid, skipped: rows.length - valid.length });
   };
 
-  const confirmImport = () => {
-    if (!preview?.valid.length) return;
-    setLeads((prev) => [...preview.valid, ...prev]);
-    toast.success(`Imported ${preview.valid.length} lead${preview.valid.length === 1 ? "" : "s"}.`);
-    closeImport();
+  const confirmImport = async () => {
+    if (!preview?.rows.length) return;
+    setSaving(true);
+    try {
+      const r = await sendJson<{ imported: number; duplicates: number; invalid: number }>(`${B2B_API}/leads/import`, "POST", {
+        rows: preview.rows,
+      });
+      const extra = r.duplicates + r.invalid;
+      toast.success(`Imported ${r.imported} lead${r.imported === 1 ? "" : "s"}${extra ? ` · ${extra} skipped` : ""}.`);
+      closeImport();
+      await reload();
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeImport = () => {
@@ -117,14 +144,40 @@ export default function AdminLeadsPage() {
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const setStatus = (id: string, status: B2BLeadStatus) =>
-    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, status } : l)));
+  const setStatus = async (lead: B2BLead, status: B2BLeadStatus) => {
+    try {
+      await sendJson(`${B2B_API}/leads/${lead.id}`, "PATCH", { status });
+      if (["SIGNED", "LOST"].includes(status) && lead.activeCampaigns.length) {
+        toast.success(`Removed from ${lead.activeCampaigns.length} running campaign${lead.activeCampaigns.length === 1 ? "" : "s"}.`);
+      }
+      await reload();
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
+  const deleteLead = async (lead: B2BLead) => {
+    const ok = await confirm({
+      title: `Delete ${lead.companyName}?`,
+      description: lead.activeCampaigns.length
+        ? `They'll be removed from ${lead.activeCampaigns.map((c) => c.name).join(", ")} and stop receiving messages. This can't be undone.`
+        : "This lead and its campaign history will be removed. This can't be undone.",
+      confirmText: "Delete lead",
+    });
+    if (!ok) return;
+    try {
+      await sendJson(`${B2B_API}/leads/${lead.id}`, "DELETE");
+      await reload();
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
 
   const q = query.trim().toLowerCase();
   const visible = leads.filter(
     (l) =>
       (statusFilter === "ALL" || l.status === statusFilter) &&
-      (!q || [l.companyName, l.contactName, l.email, l.city].some((v) => v.toLowerCase().includes(q))),
+      (!q || [l.companyName, l.contactName, l.email, l.city || ""].some((v) => v.toLowerCase().includes(q))),
   );
   const counts = leads.reduce<Record<string, number>>((acc, l) => ({ ...acc, [l.status]: (acc[l.status] || 0) + 1 }), {});
 
@@ -148,7 +201,7 @@ export default function AdminLeadsPage() {
               <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setImportOpen(true)}>
                 <UploadCloud className="h-3.5 w-3.5" /> Import CSV
               </Button>
-              <Button size="sm" className="gap-1.5 bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" onClick={() => setAddOpen(true)}>
+              <Button size="sm" className="gap-1.5 bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" onClick={() => openForm()}>
                 <Plus className="h-3.5 w-3.5" /> Add lead
               </Button>
             </div>
@@ -168,7 +221,7 @@ export default function AdminLeadsPage() {
                   statusFilter === s ? "border-[#b48c3c] bg-[#b48c3c]/10 text-[#b48c3c]" : "border-border text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()} ({s === "ALL" ? leads.length : counts[s] || 0})
+                {s === "ALL" ? "All" : titleCase(s)} ({s === "ALL" ? leads.length : counts[s] || 0})
               </button>
             ))}
           </div>
@@ -182,14 +235,20 @@ export default function AdminLeadsPage() {
                   <TableHead className="pl-6">Company</TableHead>
                   <TableHead>Contact</TableHead>
                   <TableHead>Location</TableHead>
-                  <TableHead>Source</TableHead>
+                  <TableHead>Campaigns</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Added</TableHead>
                   <TableHead className="pr-6" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visible.length === 0 ? (
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-12 text-center">
+                      <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+                    </TableCell>
+                  </TableRow>
+                ) : visible.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
                       {leads.length === 0 ? "No leads yet. Add one or import a CSV." : "No leads match these filters."}
@@ -206,23 +265,37 @@ export default function AdminLeadsPage() {
                               {l.website}
                             </a>
                           )}
+                          {l.notes && <span className="text-xs text-muted-foreground truncate max-w-[220px]" title={l.notes}>{l.notes}</span>}
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col text-sm text-muted-foreground">
                           <span className="text-foreground/90">{l.contactName || "—"}</span>
-                          <span className="text-xs">{l.email}</span>
-                          {l.phone && <span className="text-xs">{l.phone}</span>}
+                          <span className="text-xs">
+                            {l.email}
+                            {l.emailOptOut && <Badge variant="outline" className="ml-1.5 border-red-500/40 text-[9px] text-red-500">Unsubscribed</Badge>}
+                          </span>
+                          {l.phone && (
+                            <span className="text-xs">
+                              {l.phone}
+                              {l.smsOptOut && <Badge variant="outline" className="ml-1.5 border-red-500/40 text-[9px] text-red-500">SMS opt-out</Badge>}
+                            </span>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{l.city || "—"}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[10px]">{l.source === "CSV" ? "CSV" : "Manual"}</Badge>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {l.nextAppointment && (
+                          <div className="mb-1 flex items-center gap-1 text-emerald-600">
+                            <CalendarCheck className="h-3.5 w-3.5" /> {new Date(l.nextAppointment).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                          </div>
+                        )}
+                        {l.activeCampaigns.length ? l.activeCampaigns.map((c) => c.name).join(", ") : !l.nextAppointment && "—"}
                       </TableCell>
                       <TableCell>
                         <select
                           value={l.status}
-                          onChange={(e) => setStatus(l.id, e.target.value as B2BLeadStatus)}
+                          onChange={(e) => setStatus(l, e.target.value as B2BLeadStatus)}
                           className={`rounded-md border-0 px-2 py-1 text-[11px] font-bold uppercase tracking-wider ${STATUS_STYLES[l.status]}`}
                         >
                           {B2B_LEAD_STATUSES.map((s) => (
@@ -234,15 +307,13 @@ export default function AdminLeadsPage() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {new Date(l.createdAt).toLocaleDateString()}
+                        <div className="text-[10px]">{l.source === "CSV" ? "CSV" : "Manual"}</div>
                       </TableCell>
-                      <TableCell className="pr-6 text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-red-500 hover:bg-red-500/10"
-                          title="Delete lead"
-                          onClick={() => setLeads((prev) => prev.filter((x) => x.id !== l.id))}
-                        >
+                      <TableCell className="pr-6 text-right whitespace-nowrap">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit lead" onClick={() => openForm(l)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:bg-red-500/10" title="Delete lead" onClick={() => deleteLead(l)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </TableCell>
@@ -255,11 +326,11 @@ export default function AdminLeadsPage() {
         </CardContent>
       </Card>
 
-      {/* Add lead */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      {/* Add / edit lead */}
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Add business lead</DialogTitle>
+            <DialogTitle>{editing ? "Edit business lead" : "Add business lead"}</DialogTitle>
             <DialogDescription>A builder or business we want to sign up.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -279,7 +350,7 @@ export default function AdminLeadsPage() {
                   value={form[key]}
                   onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                   placeholder={placeholder}
-                  type={key === "email" ? "email" : "text"}
+                  type={key === "email" ? "email" : key === "phone" ? "tel" : "text"}
                   className="h-9 text-sm"
                 />
               </div>
@@ -290,8 +361,10 @@ export default function AdminLeadsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" onClick={addLead}>Add lead</Button>
+            <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={saving} onClick={saveLead}>
+              {editing ? "Save" : "Add lead"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -314,13 +387,13 @@ export default function AdminLeadsPage() {
           {preview && (
             <div className="space-y-2 text-sm">
               <p>
-                <span className="font-semibold text-emerald-600">{preview.valid.length} ready to import</span>
+                <span className="font-semibold text-emerald-600">{preview.rows.length} ready to import</span>
                 {preview.skipped > 0 && <span className="text-muted-foreground"> · {preview.skipped} skipped (missing fields or duplicate)</span>}
               </p>
-              {preview.valid.length > 0 && (
+              {preview.rows.length > 0 && (
                 <ul className="max-h-40 overflow-y-auto rounded-md border border-border text-xs">
-                  {preview.valid.slice(0, 50).map((l) => (
-                    <li key={l.id} className="flex justify-between gap-2 border-b border-border px-3 py-1.5 last:border-0">
+                  {preview.rows.slice(0, 50).map((l) => (
+                    <li key={l.email} className="flex justify-between gap-2 border-b border-border px-3 py-1.5 last:border-0">
                       <span className="truncate font-medium">{l.companyName}</span>
                       <span className="truncate text-muted-foreground">{l.email}</span>
                     </li>
@@ -331,8 +404,8 @@ export default function AdminLeadsPage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={closeImport}>Cancel</Button>
-            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={!preview?.valid.length} onClick={confirmImport}>
-              Import {preview?.valid.length || ""}
+            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={!preview?.rows.length || saving} onClick={confirmImport}>
+              Import {preview?.rows.length || ""}
             </Button>
           </DialogFooter>
         </DialogContent>

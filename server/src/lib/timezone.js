@@ -1,3 +1,4 @@
+import { zonedTimeToUtc } from "./scheduling.js";
 const STATE_TIMEZONE_MAP = {
   PK: "Asia/Karachi",
   PAKISTAN: "Asia/Karachi",
@@ -303,11 +304,7 @@ export function getNextValidSendWindow(baseDate, timezone, sendWindowDays, sendW
   return baseDate;
 }
 
+// Wall-clock time in `tz` -> UTC instant. Independent of the server's own time zone.
 function createDateInTz(year, month, day, hour, min, sec, tz) {
-  const d = new Date(Date.UTC(year, month, day, hour, min, sec));
-  const str = d.toLocaleString("en-US", { timeZone: tz });
-  const localInTz = new Date(str);
-
-  const offsetMs = d.getTime() - localInTz.getTime();
-  return new Date(d.getTime() + offsetMs);
+  return zonedTimeToUtc(year, month + 1, day, hour, min, tz);
 }

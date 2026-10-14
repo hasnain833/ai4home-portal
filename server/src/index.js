@@ -52,6 +52,7 @@ import ticketSchedulingRouter from "./routes/ticket-scheduling.js";
 import deadLetterRouter from "./routes/dead-letter.js";
 import privacyRouter from "./routes/privacy.js";
 import salesAgentRouter from "./routes/sales-agent.js";
+import publicB2BRouter from "./routes/public-b2b.js";
 import warrantyChatRouter, {
   publicWarrantyChatRouter,
 } from "./routes/warranty-chat.js";
@@ -83,6 +84,7 @@ import { ticketReminders } from "./inngest/functions/ticket-reminders.js";
 import { warrantyConversationRetention } from "./inngest/functions/warranty-conversation-retention.js";
 import { ticketAppointmentReminders } from "./inngest/functions/appointment-reminders.js";
 import { bookingNudges } from "./inngest/functions/booking-nudges.js";
+import { runB2BCampaign, resumeStalledB2BEnrollments } from "./inngest/functions/b2b-campaign.js";
 
 assertEncryptionKeyOnBoot();
 assertWebhookSecretOnBoot();
@@ -162,6 +164,7 @@ app.use(
 app.use("/api/public/blog", publicBlogRouter);
 app.use("/api/public/lead-form", leadFormRouter);
 app.use("/api/public/sales-agent", salesAgentRouter);
+app.use("/api/public/b2b", publicB2BRouter);
 
 const warrantyChatLimiter = createRateLimiter({
   windowMs: 60_000,
@@ -228,6 +231,8 @@ app.use(
       ticketAppointmentReminders,
       bookingNudges,
       warrantyConversationRetention,
+      runB2BCampaign,
+      resumeStalledB2BEnrollments,
     ],
   }),
 );

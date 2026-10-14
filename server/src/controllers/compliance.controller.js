@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { handleB2BReply, B2B_REPLY_TAG } from "../lib/b2b.js";
 import { ComplianceService } from "../services/compliance-service.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
@@ -505,6 +506,13 @@ export const processBrevoInboundEmail = async (req, res) => {
 
       const normalizedEmail = fromEmail.trim().toLowerCase();
 
+      // Reply to a platform (B2B) campaign: no agent on that side, hand it to the super admin.
+      if (companyIdFromReplyAddress(item.To) === B2B_REPLY_TAG) {
+        await handleB2BReply({ channel: "EMAIL", sender: normalizedEmail, body: textBody || htmlBody, subject: item.Subject });
+        processedCount++;
+        continue;
+      }
+
       let companyId =
         companyIdFromReplyAddress(item.To) ||
         req.query.companyId ||
@@ -658,6 +666,11 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
   if (!resolvedCompanyId) {
     const resolution = await resolveInboundCompany(sender, "SMS");
     resolvedCompanyId = resolution.companyId;
+
+    if (!resolvedCompanyId && (await handleB2BReply({ channel: "SMS", sender, body }))) {
+      console.log(`[SMS IN] reply from ${sender} is a B2B lead — campaign stopped, forwarded to super admin.`);
+      return { b2b: true };
+    }
 
     if (!resolvedCompanyId) {
       console.warn(

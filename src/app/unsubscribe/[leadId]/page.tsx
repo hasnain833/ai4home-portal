@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 
 export default function UnsubscribePage() {
   const params = useParams();
   const leadId = Array.isArray(params.leadId) ? params.leadId[0] : params.leadId;
+  // Platform (B2B) campaign emails link here with ?type=b2b and the lead's booking token.
+  const isB2B = useSearchParams().get("type") === "b2b";
 
   const [state, setState] = useState<"loading" | "success" | "error">(
     leadId ? "loading" : "error",
@@ -22,7 +24,8 @@ export default function UnsubscribePage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/sales/compliance/unsubscribe-link/${leadId}`, { method: "POST" });
+        const url = isB2B ? `/api/public/b2b/unsubscribe/${leadId}` : `/api/sales/compliance/unsubscribe-link/${leadId}`;
+        const res = await fetch(url, { method: "POST" });
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (res.ok && data.success) {
@@ -43,7 +46,7 @@ export default function UnsubscribePage() {
     return () => {
       cancelled = true;
     };
-  }, [leadId]);
+  }, [leadId, isB2B]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
