@@ -78,14 +78,7 @@ cp server/.env.example server/.env # backend vars (fill in real values)
 
 # 3. Generate the Prisma client and push the schema
 npx prisma generate
-npx prisma db push                 # creates/updates tables (additive)
-
-# 4. (Sales KB only) enable pgvector semantic search — one time per DB
-#    Run prisma/pgvector-setup.sql via the Supabase SQL editor or psql,
-#    then POST /api/sales/kb/reindex until remaining=0.
-
-# 5. KB search indexes (HNSW + full-text) — re-run after any db push
-#    Run prisma/sql/kb-indexes.sql in the Supabase SQL editor.
+npx prisma db push 
 ```
 
 ---
