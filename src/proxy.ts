@@ -55,6 +55,15 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
+  // Public pages (widget, booking, blog…) never need the session, so skip the
+  // auth check for them entirely.
+  const isPublic = publicRoutes.some(
+    (route) => pathname === route || pathname.startsWith(route + "/"),
+  );
+  if (isPublic) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -77,23 +86,15 @@ export async function proxy(request: NextRequest) {
       },
     },
   );
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  // getClaims() refreshes the session cookie when needed and verifies the JWT
+  // locally, instead of a network round trip to Supabase on every page load.
+  const { data, error } = await supabase.auth.getClaims();
+  const user = data?.claims;
 
   if (error && !isExpectedAuthError(error)) {
     console.error("[proxy] Unexpected auth error:", error.code, error.message);
   }
 
-  const isPublic =
-    publicRoutes.some(
-      (route) => pathname === route || pathname.startsWith(route + "/"),
-    );
-
-  if (isPublic) {
-    return supabaseResponse;
-  }
   if (request.cookies.has("superadmin_session")) {
     return supabaseResponse;
   }

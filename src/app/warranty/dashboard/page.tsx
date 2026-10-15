@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import CountUp from "react-countup";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -288,10 +287,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
-                    <CountUp
-                      end={homeownerStats.totalProperties}
-                      duration={1.5}
-                    />
+                    {homeownerStats.totalProperties}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     Properties registered to your account
@@ -308,7 +304,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
-                    <CountUp end={tickets.length} duration={1.5} />
+                    {tickets.length}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     Claims submitted to builders
@@ -325,7 +321,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
-                    <CountUp end={homeownerStats.activeClaims} duration={1.5} />
+                    {homeownerStats.activeClaims}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     Pending maintenance issues
@@ -342,10 +338,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
-                    <CountUp
-                      end={homeownerStats.resolvedClaims}
-                      duration={1.5}
-                    />
+                    {homeownerStats.resolvedClaims}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     Fully resolved issues
@@ -525,12 +518,7 @@ export default function DashboardPage() {
                       </CardHeader>
                       <CardContent>
                         <div className="text-2xl font-bold">
-                          <CountUp
-                            key={`total-${period}`}
-                            end={kpis.totalTickets}
-                            duration={1.5}
-                            separator=","
-                          />
+                          {kpis.totalTickets.toLocaleString()}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                           +{kpis.resolvedThisPeriod} resolved this period
@@ -551,11 +539,7 @@ export default function DashboardPage() {
                       </CardHeader>
                       <CardContent>
                         <div className="text-2xl font-bold">
-                          <CountUp
-                            key={`open-${period}`}
-                            end={kpis.openTickets}
-                            duration={1.5}
-                          />
+                          {kpis.openTickets}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                           {kpis.escalatedTickets} escalated
@@ -576,12 +560,7 @@ export default function DashboardPage() {
                       </CardHeader>
                       <CardContent>
                         <div className="text-2xl font-bold">
-                          <CountUp
-                            key={`rate-${period}`}
-                            end={kpis.resolutionRate}
-                            duration={1.5}
-                            suffix="%"
-                          />
+                          {kpis.resolutionRate}%
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                           Resolved tickets in this period

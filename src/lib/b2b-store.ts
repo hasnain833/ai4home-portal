@@ -31,6 +31,8 @@ export interface CampaignStep {
   delayDays: number;
   subject: string;
   body: string;
+  /** Editor-only prompt for "Write with AI"; the server drops it on save. */
+  topic?: string;
 }
 
 export interface B2BCampaign {

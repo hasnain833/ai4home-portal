@@ -27,6 +27,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Sparkles,
   Trash2,
   UserPlus,
   X,
@@ -74,6 +75,7 @@ export default function AdminCampaignsPage() {
   const { items: leads, reload: reloadLeads } = useB2BLeads();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [writingStep, setWritingStep] = useState<number | null>(null);
   const [enrollFor, setEnrollFor] = useState<B2BCampaign | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [pickFilter, setPickFilter] = useState<B2BLeadStatus | "ALL">("NEW");
@@ -96,6 +98,36 @@ export default function AdminCampaignsPage() {
 
   const updateStep = (i: number, patch: Partial<CampaignStep>) =>
     setDraft((d) => d && { ...d, steps: d.steps.map((s, idx) => (idx === i ? { ...s, ...patch } : s)) });
+
+  // AI drafts one step into the editor; the admin reviews it and nothing is saved until Save.
+  const writeStep = async (i: number) => {
+    if (!draft) return;
+    const step = draft.steps[i];
+    setWritingStep(i);
+    try {
+      const out = await sendJson<{ subject: string; body: string; warning: string | null }>(
+        `${B2B_API}/campaigns/generate-step`,
+        "POST",
+        {
+          channel: step.channel,
+          topic: step.topic,
+          draft: step.body,
+          campaignName: draft.name,
+          stepNumber: i + 1,
+          otherSteps: draft.steps
+            .map((s, idx) => ({ stepNumber: idx + 1, channel: s.channel, subject: s.subject, body: s.body }))
+            .filter((s, idx) => idx !== i && s.body.trim()),
+        },
+      );
+      updateStep(i, { body: out.body, ...(step.channel === "EMAIL" ? { subject: out.subject } : {}) });
+      if (out.warning) toast.warning(out.warning);
+      else toast.success("Draft written. Review it before saving.");
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setWritingStep(null);
+    }
+  };
 
   const save = async () => {
     if (!draft) return;
@@ -358,6 +390,35 @@ export default function AdminCampaignsPage() {
                         )}
                       </div>
                     </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={step.topic ?? ""}
+                        onChange={(e) => updateStep(i, { topic: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && writingStep === null && (step.topic?.trim() || step.body.trim())) {
+                            e.preventDefault();
+                            void writeStep(i);
+                          }
+                        }}
+                        placeholder={
+                          step.body.trim()
+                            ? "Optional: how to change it, e.g. shorter, focus on after-hours bookings"
+                            : "What's this step about? e.g. cutting routine warranty calls"
+                        }
+                        className="h-9 text-sm"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 shrink-0 gap-1.5"
+                        disabled={writingStep !== null || (!step.topic?.trim() && !step.body.trim())}
+                        onClick={() => writeStep(i)}
+                      >
+                        {writingStep === i ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                        {step.body.trim() ? "Rewrite with AI" : "Write with AI"}
+                      </Button>
+                    </div>
                     {step.channel === "EMAIL" && (
                       <Input value={step.subject} onChange={(e) => updateStep(i, { subject: e.target.value })} placeholder="Subject" className="h-9 text-sm" />
                     )}
@@ -391,7 +452,7 @@ export default function AdminCampaignsPage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDraft(null)}>Cancel</Button>
-            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={busy} onClick={save}>Save campaign</Button>
+            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={busy || writingStep !== null} onClick={save}>Save campaign</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

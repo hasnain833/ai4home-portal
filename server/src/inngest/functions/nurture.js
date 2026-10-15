@@ -218,9 +218,11 @@ export const runNurtureCampaign = inngest.createFunction(
       const stillActive = await step.run(`still-active-${currentStep.position}`, async () => {
         const row = await prisma.campaignEnrollment.findUnique({
           where: { id: enrollment.id },
-          select: { status: true, campaign: { select: { status: true } } },
+          select: { status: true, campaign: { select: { status: true, company: { select: { suspendedAt: true } } } } },
         });
-        return row?.status === "ACTIVE" && row.campaign.status === "Active";
+        // A suspended company pauses like a paused campaign: the enrollment stays
+        // ACTIVE and the stalled-run sweep resumes it after reactivation.
+        return row?.status === "ACTIVE" && row.campaign.status === "Active" && !row.campaign.company?.suspendedAt;
       });
       if (!stillActive) {
         console.log(`[Nurture] Stopping before step ${currentStep.position}: enrollment exited or campaign paused.`);
@@ -414,7 +416,7 @@ export const resumeStalledEnrollments = inngest.createFunction(
           status: "ACTIVE",
           updatedAt: { lt: cutoff },
           OR: [{ nextRunAt: null }, { nextRunAt: { lt: cutoff } }],
-          campaign: { status: "Active" },
+          campaign: { status: "Active", company: { suspendedAt: null } },
         },
         select: {
           id: true,

@@ -4,7 +4,7 @@ import { calendlyAvailableTimes, calendlyBookingFor, calendlyBusyFor } from "./c
 
 export const BOOKING_HORIZON_DAYS = 21;
 export const MIN_LEAD_MINUTES = 120;
-export const MAX_SLOTS = 60;
+const MAX_SLOTS = 60;
 
 const COMPANY_DEFAULTS = {
   dayStart: "09:00",

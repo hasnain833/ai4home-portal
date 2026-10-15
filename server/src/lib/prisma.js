@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
-export function runtimeDatabaseUrl(rawUrl, serverless = Boolean(process.env.VERCEL)) {
+function runtimeDatabaseUrl(rawUrl, serverless = Boolean(process.env.VERCEL)) {
   if (!rawUrl) throw new Error("DATABASE_URL is required");
   if (!serverless) return rawUrl;
 
@@ -18,25 +18,22 @@ export function runtimeDatabaseUrl(rawUrl, serverless = Boolean(process.env.VERC
         url.searchParams.set("sslmode", "require");
       }
       if (url.searchParams.get("sslmode") === "require") {
-        // node-postgres otherwise treats `require` like certificate verification.
-        // libpq compatibility keeps TLS mandatory without requiring a CA file.
         url.searchParams.set("uselibpqcompat", "true");
       }
       return url.toString();
     }
   } catch {
-    // Let pg report malformed connection strings with its standard diagnostics.
   }
 
   return rawUrl;
 }
 
-export function databasePoolMax(value, serverless = Boolean(process.env.VERCEL)) {
+function databasePoolMax(value, serverless = Boolean(process.env.VERCEL)) {
   const configured = Number.parseInt(String(value || ""), 10);
   return Number.isInteger(configured) && configured > 0
     ? configured
     : serverless
-      ? 1
+      ? 4 
       : 6;
 }
 

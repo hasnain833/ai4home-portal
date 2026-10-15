@@ -3,7 +3,7 @@ export const SEVERITY = {
   CONTAINMENT: "CONTAINMENT",
 };
 
-export const HAZARD_ICON = {
+const HAZARD_ICON = {
   [SEVERITY.EMERGENCY]: "🚨",
   [SEVERITY.CONTAINMENT]: "⚠️",
 };

@@ -14,6 +14,7 @@ import {
   updateUserAccess,
   verifyCompany,
   updateCompanyOnboarding,
+  setCompanySuspension,
 } from "../admin/superadmin.controller.js";
 import {
   getCrmHealth,
@@ -76,6 +77,7 @@ router.patch(
 router.patch("/users/:userId/access", requireAuth, updateUserAccess);
 router.patch("/companies/:companyId/verify", requireAuth, verifyCompany);
 router.patch("/companies/:companyId/onboarding", requireAuth, updateCompanyOnboarding);
+router.patch("/companies/:companyId/suspension", requireAuth, setCompanySuspension);
 router.get("/crm-health", requireAuth, getCrmHealth);
 router.get("/news-defaults", requireAuth, getDefaultNewsSources);
 router.put("/news-defaults", requireAuth, updateDefaultNewsSources);
@@ -105,6 +107,7 @@ router.patch("/b2b/leads/:id", requireAuth, b2b.updateLead);
 router.delete("/b2b/leads/:id", requireAuth, b2b.deleteLead);
 router.get("/b2b/campaigns", requireAuth, b2b.listCampaigns);
 router.post("/b2b/campaigns", requireAuth, b2b.createCampaign);
+router.post("/b2b/campaigns/generate-step", requireAuth, b2b.generateStep);
 router.put("/b2b/campaigns/:id", requireAuth, b2b.updateCampaign);
 router.patch("/b2b/campaigns/:id/status", requireAuth, b2b.setCampaignStatus);
 router.delete("/b2b/campaigns/:id", requireAuth, b2b.deleteCampaign);

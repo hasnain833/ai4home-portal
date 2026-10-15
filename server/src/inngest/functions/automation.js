@@ -46,7 +46,6 @@ function evaluateCondition(lead, cond) {
       return actual === true;
     case "IS_FALSE":
       return actual === false;
-    // Date-based operators (SW-AMK date triggers). `value` = number of days.
     case "OLDER_THAN_DAYS": {
       const d = actual ? new Date(actual) : null;
       if (!d || isNaN(d.getTime())) return false;
@@ -62,7 +61,6 @@ function evaluateCondition(lead, cond) {
   }
 }
 
-// All conditions must pass (AND). Empty conditions = always match.
 export function evaluateConditions(lead, conditions) {
   if (!Array.isArray(conditions) || conditions.length === 0) return true;
   return conditions.every((c) => evaluateCondition(lead, c));
@@ -72,8 +70,6 @@ export async function executeAction(action, lead, ctx = {}) {
   const type = String(action?.type || "").toUpperCase();
   const params = action?.params || {};
   const budget = ctx.sendBudget;
-  // One credential read per run instead of one per action: this used to hit the
-  // database and decrypt on every single action for every single lead.
   const loadMessaging = ctx.loadMessaging || (() => getSenderIdentity(lead.companyId));
 
   switch (type) {
@@ -229,7 +225,7 @@ export async function executeAction(action, lead, ctx = {}) {
   }
 }
 
-export function countSentActions(runs) {
+function countSentActions(runs) {
   let n = 0;
   for (const r of runs || []) {
     const acts = Array.isArray(r.actionsTaken) ? r.actionsTaken : [];
@@ -346,35 +342,46 @@ export const runAutomationRules = inngest.createFunction(
   }
 );
 
+const DATE_RULE_PAGE_SIZE = 500;
+
 export const automationDateTriggers = inngest.createFunction(
   { id: "automation-date-based-triggers", triggers: [{ cron: "0 13 * * *" }] },
   async ({ step }) => {
-    return await step.run("scan-date-rules", async () => {
-      const rules = await prisma.marketingRule.findMany({
-        where: { triggerEvent: "DATE_BASED", isActive: true },
-      });
-      let enqueued = 0;
-      for (const rule of rules) {
-        const company = await prisma.company.findUnique({
-          where: { id: rule.companyId },
-          select: { automationsKillSwitch: true },
-        });
-        if (!company || company.automationsKillSwitch) continue;
+    const rules = await step.run("load-date-rules", () =>
+      prisma.marketingRule.findMany({
+        where: { triggerEvent: "DATE_BASED", isActive: true, company: { automationsKillSwitch: false } },
+        select: { id: true, companyId: true, conditions: true },
+      }),
+    );
 
-        const leads = await prisma.lead.findMany({
-          where: { companyId: rule.companyId, archived: false },
-          take: 2000,
-        });
-        for (const lead of leads) {
-          if (!evaluateConditions(lead, rule.conditions)) continue;
-          await inngest.send({
-            name: "automation.trigger",
-            data: { companyId: rule.companyId, leadId: lead.id, event: "DATE_BASED", context: { ruleId: rule.id } },
+    let enqueued = 0;
+    for (const rule of rules) {
+      let cursor = null;
+      for (let page = 0; ; page++) {
+        const result = await step.run(`rule-${rule.id}-page-${page}`, async () => {
+          const leads = await prisma.lead.findMany({
+            where: { companyId: rule.companyId, archived: false },
+            orderBy: { id: "asc" },
+            take: DATE_RULE_PAGE_SIZE,
+            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
           });
-          enqueued += 1;
-        }
+          const events = leads
+            .filter((lead) => evaluateConditions(lead, rule.conditions))
+            .map((lead) => ({
+              name: "automation.trigger",
+              data: { companyId: rule.companyId, leadId: lead.id, event: "DATE_BASED", context: { ruleId: rule.id } },
+            }));
+          if (events.length) await inngest.send(events);
+          return {
+            sent: events.length,
+            next: leads.length === DATE_RULE_PAGE_SIZE ? leads[leads.length - 1].id : null,
+          };
+        });
+        enqueued += result.sent;
+        if (!result.next) break;
+        cursor = result.next;
       }
-      return { status: "done", rules: rules.length, enqueued };
-    });
+    }
+    return { status: "done", rules: rules.length, enqueued };
   }
 );

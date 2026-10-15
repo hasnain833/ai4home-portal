@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
+import { useQuery, fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
 import {
   Table,
   TableBody,
@@ -75,6 +76,9 @@ interface Property {
   createdAt: string;
 }
 
+const NO_HOMEOWNERS: HomeownerSelect[] = [];
+const NO_COMMUNITIES: CommunityInfo[] = [];
+
 interface HomeownerSelect {
   id: string;
   name: string | null;
@@ -119,9 +123,15 @@ export default function PropertiesPage() {
   const canManage = user?.role === "admin" || user?.role === "staff";
 
   const [properties, setProperties] = useState<Property[]>([]);
-  const [homeowners, setHomeowners] = useState<HomeownerSelect[]>([]);
-  const [communities, setCommunities] = useState<CommunityInfo[]>([]);
-  const [maxHomes, setMaxHomes] = useState(50);
+  // Cached and shared with the tickets page's create-ticket form.
+  const { data: homeowners = NO_HOMEOWNERS } = useQuery<HomeownerSelect[]>(
+    canManage ? QUERY_KEYS.homeownerOptions : null,
+  );
+  const { data: communityData } = useQuery<{ communities?: CommunityInfo[]; maxHomes?: number }>(
+    canManage ? QUERY_KEYS.communities : null,
+  );
+  const communities = communityData?.communities ?? NO_COMMUNITIES;
+  const maxHomes = communityData?.maxHomes || 50;
   const [communityFilter, setCommunityFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -157,25 +167,11 @@ export default function PropertiesPage() {
     }
   };
 
-  const fetchCommunities = async () => {
-    try {
-      const res = await fetch("/api/communities");
-      if (!res.ok) return;
-      const payload = await res.json();
-      setCommunities(payload.communities ?? []);
-      if (payload.maxHomes) setMaxHomes(payload.maxHomes);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchHomeowners = async () => {
-    try {
-      const res = await fetch("/api/users?role=homeowner");
-      if (res.ok) setHomeowners(await res.json());
-    } catch (e) {
-      console.error(e);
-    }
+  // After a property changes: refresh the community counts shown here, and
+  // drop the cached property list the tickets page uses.
+  const afterPropertyChange = () => {
+    fetchKey(QUERY_KEYS.communities, { force: true }).catch(() => {});
+    invalidate(QUERY_KEYS.properties);
   };
 
   // Kicked off inside the effect and guarded, so the effect body never sets
@@ -183,9 +179,7 @@ export default function PropertiesPage() {
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      await fetchProperties();
-      if (cancelled || !canManage) return;
-      await Promise.all([fetchHomeowners(), fetchCommunities()]);
+      if (!cancelled) await fetchProperties();
     };
     void run();
     return () => {
@@ -284,7 +278,7 @@ export default function PropertiesPage() {
         }
         closeModal();
         // A home moving in or out changes the n/50 counts.
-        void fetchCommunities();
+        afterPropertyChange();
       } else {
         const err = await res.json();
         setFormError(err.message || "Failed to save property.");
@@ -305,7 +299,7 @@ export default function PropertiesPage() {
         setProperties((prev) => prev.filter((p) => p.id !== deleteTarget.id));
         showToast("Property deleted.");
         setDeleteTarget(null);
-        void fetchCommunities();
+        afterPropertyChange();
       }
     } catch (e) {
       console.error(e);
@@ -384,7 +378,7 @@ export default function PropertiesPage() {
                 disabled={communities.length === 0}
                 onImported={() => {
                   void fetchProperties();
-                  void fetchCommunities();
+                  afterPropertyChange();
                 }}
                 showToast={showToast}
               />

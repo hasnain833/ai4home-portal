@@ -141,7 +141,7 @@ export function normalizePriority(value, { isEmergency = false, text = "" } = {}
   return TICKET_PRIORITIES.includes(upper) ? upper : "MEDIUM";
 }
 
-export function classifyClaimHeuristic(description) {
+function classifyClaimHeuristic(description) {
   const text = String(description || "").trim();
   const isEmergency = matchesEmergencyPattern(text);
   return {

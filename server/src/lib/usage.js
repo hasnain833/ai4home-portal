@@ -53,15 +53,20 @@ const GSM7_EXTRA = new Set([
   0xdc, 0xa7, 0xbf, 0xe4, 0xf6, 0xf1, 0xfc, 0xe0,
 ]);
 
-function isGsm7(text) {
+// Extension-table characters are sent as ESC + char, so each costs two.
+const GSM7_EXTENSION = new Set([..."^{}\\[~]|€"].map((c) => c.codePointAt(0)));
+
+// Length in GSM-7 septets, or null when the text needs UCS-2. The backtick is
+// printable ASCII but not GSM-7, so it forces UCS-2 like any other outsider.
+function gsm7Length(text) {
+  let septets = 0;
   for (const ch of text) {
     const code = ch.codePointAt(0);
-    // Printable ASCII covers most of the alphabet; the set above is the rest.
-    if (code >= 0x20 && code <= 0x7e) continue;
-    if (GSM7_EXTRA.has(code)) continue;
-    return false;
+    if (GSM7_EXTENSION.has(code)) septets += 2;
+    else if ((code >= 0x20 && code <= 0x7e && code !== 0x60) || GSM7_EXTRA.has(code)) septets += 1;
+    else return null;
   }
-  return true;
+  return septets;
 }
 
 // A message longer than one segment is split and billed per part. Concatenated
@@ -69,10 +74,12 @@ function isGsm7(text) {
 export function countSegments(body) {
   const text = String(body || "");
   if (!text) return 0;
-  const unicode = !isGsm7(text);
+  const septets = gsm7Length(text);
+  const unicode = septets === null;
+  const length = unicode ? text.length : septets;
   const single = unicode ? 70 : 160;
   const multi = unicode ? 67 : 153;
-  return text.length <= single ? 1 : Math.ceil(text.length / multi);
+  return length <= single ? 1 : Math.ceil(length / multi);
 }
 
 export function aiCostMicros(model, inputTokens, outputTokens) {

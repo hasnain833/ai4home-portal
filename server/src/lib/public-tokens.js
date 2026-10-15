@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import prisma from "./prisma.js";
 
-export function createPublicToken() {
+function createPublicToken() {
   return crypto.randomBytes(32).toString("base64url");
 }
 

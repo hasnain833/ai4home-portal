@@ -7,7 +7,7 @@ export const B2B_CLOSED_STATUSES = ["SIGNED", "LOST"];
 export const B2B_REPLY_TAG = "b2b";
 
 const AVAILABILITY_KEY = "b2b.availability";
-export const B2B_AVAILABILITY_DEFAULTS = {
+const B2B_AVAILABILITY_DEFAULTS = {
   dayStart: "09:00",
   dayEnd: "17:00",
   slotDuration: 30,
@@ -35,6 +35,15 @@ export const bookingLinkFor = (lead, campaignId) =>
   `${appUrl()}/meet/${lead.bookingToken}${campaignId ? `?c=${campaignId}` : ""}`;
 export const unsubscribeLinkFor = (lead) => `${appUrl()}/unsubscribe/${lead.bookingToken}?type=b2b`;
 
+// The merge fields renderB2BStep fills. Anything else would reach the builder
+// as literal "{{…}}" text, so saving rejects it.
+export const B2B_PLACEHOLDERS = ["firstName", "contactName", "companyName", "city", "bookingLink"];
+
+export function unknownPlaceholders(text) {
+  const found = [...String(text || "").matchAll(/\{\{?\s*(\w+)\s*\}?\}/g)].map((m) => m[1]);
+  return [...new Set(found.filter((name) => !B2B_PLACEHOLDERS.includes(name)))];
+}
+
 export function validateSteps(steps) {
   if (!Array.isArray(steps) || steps.length === 0) return "Add at least one step.";
   if (steps.length > 20) return "A campaign can have at most 20 steps.";
@@ -42,6 +51,10 @@ export function validateSteps(steps) {
     if (!["EMAIL", "SMS"].includes(s?.channel)) return `Step ${i + 1} needs a channel (Email or SMS).`;
     if (!String(s.body || "").trim()) return `Step ${i + 1} needs a message.`;
     if (s.channel === "EMAIL" && !String(s.subject || "").trim()) return `Step ${i + 1} (email) needs a subject.`;
+    const unknown = unknownPlaceholders(`${s.channel === "EMAIL" ? s.subject || "" : ""} ${s.body}`);
+    if (unknown.length) {
+      return `Step ${i + 1} uses ${unknown.map((n) => `{{${n}}}`).join(", ")}, which isn't a placeholder. Use only ${B2B_PLACEHOLDERS.map((n) => `{{${n}}}`).join(" ")}.`;
+    }
   }
   return null;
 }

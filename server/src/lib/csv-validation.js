@@ -1,4 +1,4 @@
-export const CSV_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CSV_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function validateLeadRow(lead) {
   const firstName = (lead?.firstName || "").trim();

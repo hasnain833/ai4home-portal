@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { parseAsync } from "json2csv";
+import { csvLine } from "../lib/utils.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
 
 const DASHBOARD_LIST_LIMIT = 5;
@@ -43,9 +43,7 @@ export const getAgentPerformance = async (req, res) => {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     const [interactions, nurturedTouches, booked, newLeads, newLeadsBooked] = await Promise.all([
-      // Conversations the agent held with leads (email/SMS scheduling assistant).
       prisma.schedulingConversation.count({ where: { lead: { companyId }, createdAt: { gte: since } } }),
-      // Campaign / nurture messages that went out.
       prisma.messageUsage.count({ where: { companyId, source: "nurture", outcome: "sent", createdAt: { gte: since } } }),
       prisma.salesAppointment.count({ where: { lead: { companyId }, createdAt: { gte: since } } }),
       prisma.lead.count({ where: { companyId, createdAt: { gte: since } } }),
@@ -75,14 +73,8 @@ export const getDashboardStats = async (req, res) => {
     const leadWhere = isHomeowner
       ? { companyId, ownerId: req.user.id }
       : { companyId };
-
-    // Aggregate queries
     const [
-      totalLeads,
-      newLeads,
-      nurturingLeads,
-      appointmentSetLeads,
-      closedWonLeads,
+      leadStatusCounts,
       activeCampaignsCount,
       upcomingAppointments,
       salesforceConnection,
@@ -90,12 +82,8 @@ export const getDashboardStats = async (req, res) => {
       upcomingCalendarItems,
       totalEnrolled,
       upcomingCount,
-    ] = await prisma.$transaction([
-      prisma.lead.count({ where: leadWhere }),
-      prisma.lead.count({ where: { ...leadWhere, status: "New" } }),
-      prisma.lead.count({ where: { ...leadWhere, status: LEAD_STATUS.NURTURING } }),
-      prisma.lead.count({ where: { ...leadWhere, status: LEAD_STATUS.APPOINTMENT_SET } }),
-      prisma.lead.count({ where: { ...leadWhere, status: LEAD_STATUS.CLOSED_WON } }),
+    ] = await Promise.all([
+      prisma.lead.groupBy({ by: ["status"], where: leadWhere, _count: { _all: true } }),
       prisma.campaign.count({ where: { companyId, status: "Active" } }),
       prisma.salesAppointment.findMany({
         where: {
@@ -111,18 +99,15 @@ export const getDashboardStats = async (req, res) => {
         where: { companyId },
         select: { lastSyncAt: true, lastSyncStatus: true, isActive: true },
       }),
-      // SW-DSH-001: the active campaigns themselves, not just how many there are.
       prisma.campaign.findMany({
         where: { companyId, status: "Active" },
         take: DASHBOARD_LIST_LIMIT,
         orderBy: { updatedAt: "desc" },
         select: { id: true, name: true, channel: true, status: true },
       }),
-      // SW-DSH-001: upcoming calendar items.
       prisma.contentCalendar.findMany({
         where: {
           companyId,
-          // Homeowners see only their own calendar items.
           ...(isHomeowner ? { ownerId: req.user.id } : {}),
           scheduledAt: { gte: now },
           status: { in: UPCOMING_CALENDAR_STATUSES },
@@ -139,9 +124,17 @@ export const getDashboardStats = async (req, res) => {
         },
       }),
       prisma.campaignEnrollment.count({ where: { campaign: { companyId } } }),
-      // The list above stops at 5; the card needs the real number.
       prisma.salesAppointment.count({ where: { lead: leadWhere, time: { gte: now }, status: "CONFIRMED" } }),
     ]);
+
+    const leadsByStatus = Object.fromEntries(
+      leadStatusCounts.map((r) => [r.status, r._count._all]),
+    );
+    const totalLeads = leadStatusCounts.reduce((n, r) => n + r._count._all, 0);
+    const newLeads = leadsByStatus.New || 0;
+    const nurturingLeads = leadsByStatus[LEAD_STATUS.NURTURING] || 0;
+    const appointmentSetLeads = leadsByStatus[LEAD_STATUS.APPOINTMENT_SET] || 0;
+    const closedWonLeads = leadsByStatus[LEAD_STATUS.CLOSED_WON] || 0;
 
     const campaignIds = activeCampaigns.map((c) => c.id);
     const [enrollmentGroups, convertedGroups] = campaignIds.length
@@ -191,15 +184,36 @@ export const getDashboardStats = async (req, res) => {
   }
 };
 
-const EXPORTERS = {
-  leads: async (companyId) => {
-    const leads = await prisma.lead.findMany({
-      where: { companyId },
-      include: { owner: { select: { name: true, email: true } } },
-      orderBy: { createdAt: "desc" },
-    });
+const EXPORT_PAGE_SIZE = 1000;
 
-    return leads.map((l) => ({
+// Yields one page of rows at a time (keyset on id), so an export never holds
+// the whole table in memory.
+async function* pages(findPage) {
+  let cursor = null;
+  for (;;) {
+    const rows = await findPage({
+      take: EXPORT_PAGE_SIZE,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    if (rows.length) yield rows;
+    if (rows.length < EXPORT_PAGE_SIZE) return;
+    cursor = rows[rows.length - 1].id;
+  }
+}
+
+// Each exporter returns rows, or an async iterable of row batches for tables
+// that can grow without bound.
+const EXPORTERS = {
+  leads: async function* (companyId) {
+    const batches = pages((page) =>
+      prisma.lead.findMany({
+        where: { companyId },
+        include: { owner: { select: { name: true, email: true } } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        ...page,
+      }),
+    );
+    for await (const leads of batches) yield leads.map((l) => ({
       ID: l.id,
       FirstName: l.firstName,
       LastName: l.lastName,
@@ -216,31 +230,45 @@ const EXPORTERS = {
   },
 
   campaigns: async (companyId) => {
-    const campaigns = await prisma.campaign.findMany({
-      where: { companyId },
-      orderBy: { createdAt: "desc" },
-      include: {
-        steps: { select: { id: true } },
-        enrollments: { select: { status: true, exitedReason: true } },
-      },
-    });
+    // Enrollment counts come from groupBy, not by loading every enrollment row.
+    const [campaigns, byStatus, convertedGroups] = await Promise.all([
+      prisma.campaign.findMany({
+        where: { companyId },
+        orderBy: { createdAt: "desc" },
+        include: { _count: { select: { steps: true } } },
+      }),
+      prisma.campaignEnrollment.groupBy({
+        by: ["campaignId", "status"],
+        where: { campaign: { companyId } },
+        _count: { _all: true },
+      }),
+      prisma.campaignEnrollment.groupBy({
+        by: ["campaignId"],
+        where: { campaign: { companyId }, status: "EXITED", exitedReason: { in: CONVERSION_EXIT_REASONS } },
+        _count: { _all: true },
+      }),
+    ]);
 
     return campaigns.map((c) => {
-      const enrolled = c.enrollments.length;
-      const converted = c.enrollments.filter(
-        (e) => e.status === "EXITED" && CONVERSION_EXIT_REASONS.includes(e.exitedReason),
-      ).length;
+      const count = (statuses) =>
+        byStatus
+          .filter((g) => g.campaignId === c.id && statuses.includes(g.status))
+          .reduce((n, g) => n + g._count._all, 0);
+      const enrolled = byStatus
+        .filter((g) => g.campaignId === c.id)
+        .reduce((n, g) => n + g._count._all, 0);
+      const converted = convertedGroups.find((g) => g.campaignId === c.id)?._count._all || 0;
 
       return {
         CampaignID: c.id,
         Name: c.name,
         Status: c.status,
         Channel: c.channel,
-        Steps: c.steps.length,
+        Steps: c._count.steps,
         Enrolled: enrolled,
-        Active: c.enrollments.filter((e) => ["ACTIVE", "PAUSED"].includes(e.status)).length,
-        Completed: c.enrollments.filter((e) => e.status === "COMPLETED").length,
-        Exited: c.enrollments.filter((e) => e.status === "EXITED").length,
+        Active: count(["ACTIVE", "PAUSED"]),
+        Completed: count(["COMPLETED"]),
+        Exited: count(["EXITED"]),
         Converted: converted,
         ConversionRatePct: enrolled > 0 ? round1((converted / enrolled) * 100) : 0,
         CreatedAt: c.createdAt.toISOString(),
@@ -319,13 +347,15 @@ const EXPORTERS = {
       };
     });
   },
-  "failed-sends": async (companyId) => {
-    const rows = await prisma.deadLetter.findMany({
-      where: { companyId },
-      orderBy: { createdAt: "desc" },
-    });
-
-    return rows.map((d) => ({
+  "failed-sends": async function* (companyId) {
+    const batches = pages((page) =>
+      prisma.deadLetter.findMany({
+        where: { companyId },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        ...page,
+      }),
+    );
+    for await (const rows of batches) yield rows.map((d) => ({
       ID: d.id,
       Source: d.source,
       Channel: d.channel,
@@ -352,11 +382,8 @@ export const exportDashboardCsv = async (req, res) => {
       });
     }
 
-    const rows = await build(req.user.companyId);
-
-    const csv = rows.length
-      ? await parseAsync(rows)
-      : await parseAsync([], { fields: ["No data"] });
+    const result = build(req.user.companyId);
+    const batches = result[Symbol.asyncIterator] ? result : [await result];
 
     const stamp = new Date().toISOString().slice(0, 10);
     res.setHeader("Content-Type", "text/csv");
@@ -364,9 +391,23 @@ export const exportDashboardCsv = async (req, res) => {
       "Content-Disposition",
       `attachment; filename=${type}-export-${stamp}.csv`,
     );
-    return res.send(csv);
+
+    let header = null;
+    for await (const rows of batches) {
+      if (!rows.length) continue;
+      if (!header) {
+        header = Object.keys(rows[0]);
+        res.write(csvLine(header));
+      }
+      res.write("\n" + rows.map((row) => csvLine(header.map((key) => row[key]))).join("\n"));
+    }
+    if (!header) res.write(csvLine(["No data"]));
+    return res.end();
   } catch (error) {
     console.error("Sales dashboard export error:", error);
+    // Mid-stream failure: the status is already sent, so cut the download
+    // short rather than let a truncated file look complete.
+    if (res.headersSent) return res.destroy(error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };

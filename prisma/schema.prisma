@@ -99,6 +99,8 @@ model Company {
   salesEnabled            Boolean                 @default(false)
   warrantyEnabled         Boolean                 @default(true)
   verificationStatus      String                  @default("PENDING")
+  // Set by Super Admin → Companies. Blocks logins, public entry points and all outbound messages; data is kept.
+  suspendedAt             DateTime?
   verificationDocUrl      String?
   verificationSubmittedAt DateTime?
   verifiedAt              DateTime?
@@ -822,6 +824,14 @@ model PlatformSetting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+model RateLimit {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
 }
 
 model AuditLog {

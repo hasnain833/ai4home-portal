@@ -20,7 +20,8 @@ const checked = (v) => v === true || ["true", "on", "1", "yes"].includes(String(
 
 async function findCompany(companyId) {
   return prisma.company
-    .findUnique({ where: { id: String(companyId || "") }, select: { id: true, name: true, logo: true, botColor: true } })
+    // A suspended company's form reads as unavailable.
+    .findFirst({ where: { id: String(companyId || ""), suspendedAt: null }, select: { id: true, name: true, logo: true, botColor: true } })
     .catch(() => null);
 }
 

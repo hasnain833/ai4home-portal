@@ -16,7 +16,7 @@ export const DEFAULT_SIGNED_URL_TTL = 300;
 
 let cachedClient = null;
 
-export class StorageNotConfigured extends Error {
+class StorageNotConfigured extends Error {
   constructor() {
     super("Server storage is not configured");
     this.name = "StorageNotConfigured";

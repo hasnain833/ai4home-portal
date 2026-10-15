@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -114,7 +113,7 @@ export default function SalesAgentAppointmentsPage() {
                   {appointments.map((apt) => (
                     <tr key={apt.id} className="hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {format(new Date(apt.createdAt), "MMM d, yyyy h:mm a")}
+                        {new Date(apt.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
                       </td>
                       <td className="px-4 py-3 font-medium">{apt.name}</td>
                       <td className="px-4 py-3 text-muted-foreground">
@@ -134,7 +133,7 @@ export default function SalesAgentAppointmentsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center px-2 py-1 rounded-md bg-[#b48c3c]/10 text-[#b48c3c] text-xs font-medium whitespace-nowrap">
-                          {apt.startTime ? format(new Date(apt.startTime), "EEE, MMM d · h:mm a") : apt.preferredTime}
+                          {apt.startTime ? new Date(apt.startTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : apt.preferredTime}
                         </span>
                       </td>
                       <td className="px-4 py-3">

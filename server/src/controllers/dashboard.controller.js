@@ -20,17 +20,10 @@ export const getDashboardStats = async (req, res) => {
     const sinceDate = new Date();
     sinceDate.setDate(sinceDate.getDate() - days);
     const periodCreatedAt = { createdAt: { gte: sinceDate } };
-
-    // Scope all queries to the admin/staff's companyId
-    const companyScope = { homeowner: { companyId: session.companyId } };
+    const companyScope = { companyId: session.companyId };
     const periodScope = { ...companyScope, ...periodCreatedAt };
-
-    // Fetch stats in parallel
     const [
-      totalTickets,
-      openTickets,
-      inProgressTickets,
-      resolvedTickets,
+      statusCounts,
       escalatedTickets,
       resolvedThisPeriod,
       resolvedTicketsData,
@@ -39,11 +32,8 @@ export const getDashboardStats = async (req, res) => {
       kbDocsCount,
       lastEscalationTicket,
       lastErpSync,
-    ] = await prisma.$transaction([
-      prisma.ticket.count({ where: periodScope }),
-      prisma.ticket.count({ where: { status: "OPEN", ...periodScope } }),
-      prisma.ticket.count({ where: { status: "DISPATCHED", ...periodScope } }),
-      prisma.ticket.count({ where: { status: "RESOLVED", ...periodScope } }),
+    ] = await Promise.all([
+      prisma.ticket.groupBy({ by: ["status"], where: periodScope, _count: { _all: true } }),
       prisma.ticket.count({ where: { isEmergency: true, ...periodScope } }),
       prisma.ticket.count({
         where: {
@@ -79,7 +69,7 @@ export const getDashboardStats = async (req, res) => {
       prisma.ticket.findFirst({
         where: {
           isEmergency: true,
-          homeowner: { companyId: session.companyId },
+          companyId: session.companyId,
         },
         orderBy: { updatedAt: "desc" },
       }),
@@ -93,7 +83,13 @@ export const getDashboardStats = async (req, res) => {
       }),
     ]);
 
-    // Calculate avg resolution time dynamically based on duration
+    const countByStatus = Object.fromEntries(
+      statusCounts.map((r) => [r.status, r._count._all]),
+    );
+    const totalTickets = statusCounts.reduce((n, r) => n + r._count._all, 0);
+    const openTickets = countByStatus.OPEN || 0;
+    const inProgressTickets = countByStatus.DISPATCHED || 0;
+    const resolvedTickets = countByStatus.RESOLVED || 0;
     let avgResolutionTimeStr = "0.0";
     if (resolvedTicketsData.length > 0) {
       const totalTime = resolvedTicketsData.reduce((acc, t) => {
@@ -131,7 +127,6 @@ export const getDashboardStats = async (req, res) => {
     const erpName = activeIntegration
       ? ERP_LABELS[activeIntegration.platform] || activeIntegration.platform
       : null;
-    // null = neutral: no platform can sync yet, so neither OK nor a failure.
     const erpLive = ERP_LIVE_PLATFORMS.length > 0;
     const erpHealthy = erpLive ? lastErpSync?.status === "SUCCESS" : null;
     const erpSync = !erpLive

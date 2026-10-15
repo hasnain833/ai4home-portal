@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCheck, MailWarning, Trash2, Inbox } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
+import { timeAgo } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -285,7 +285,7 @@ export function NotificationBell({
                     <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
                     <span className="flex-1 text-sm font-semibold">{n.title}</span>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true })}
+                      {timeAgo(n.createdAt)}
                     </span>
                   </div>
                   <div className="pl-4">{renderMeta(n)}</div>
@@ -343,7 +343,7 @@ export function NotificationBell({
                           {n.title}
                         </span>
                         <span className="shrink-0 text-[11px] text-muted-foreground">
-                          {formatDistanceToNow(new Date(n.createdAt), { addSuffix: true })}
+                          {timeAgo(n.createdAt)}
                         </span>
                       </div>
                       <div className={n.isRead ? "" : "pl-4"}>{renderMeta(n)}</div>

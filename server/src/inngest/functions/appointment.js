@@ -223,7 +223,7 @@ function renderAgentPrompt({
 
 
 
-export async function buildAgentPrompt(args) {
+async function buildAgentPrompt(args) {
   const live = await getLivePrompts(AGENT_TYPES.SALES);
   const rendered = renderAgentPrompt(args, live);
   return { ...rendered, promptSource: live.meta };

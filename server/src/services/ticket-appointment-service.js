@@ -9,7 +9,7 @@ const portalUrl = () => process.env.NEXT_PUBLIC_URL || "";
 
 const DEFAULT_TZ = "America/New_York";
 
-export async function companyTimezone(companyId) {
+async function companyTimezone(companyId) {
   if (!companyId) return DEFAULT_TZ;
   const setting = await prisma.availabilitySetting
     .findUnique({ where: { companyId }, select: { timezone: true } })
@@ -62,7 +62,7 @@ function detailsFor(appointment, whenLabel) {
   };
 }
 
-export function appointmentWithContext(id) {
+function appointmentWithContext(id) {
   return prisma.ticketAppointment.findUnique({
     where: { id },
     include: {

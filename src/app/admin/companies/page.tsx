@@ -11,7 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Building2, FileImage, ExternalLink, CheckCircle2 } from "lucide-react";
+import { Loader2, Building2, FileImage, ExternalLink, CheckCircle2, Ban, RotateCcw } from "lucide-react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -57,10 +58,7 @@ interface CompanyRecord {
   createdAt: string;
   contractSignedAt: string | null;
   goLiveAt: string | null;
-  _count?: {
-    users: number;
-    integrations: number;
-  };
+  suspendedAt: string | null;
 }
 
 const verificationBadge = (status: string) => {
@@ -76,6 +74,7 @@ const verificationBadge = (status: string) => {
 
 export default function AdminCompaniesPage() {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -139,6 +138,35 @@ export default function AdminCompaniesPage() {
   );
   const pendingCount = companies.filter((c) => c.verificationStatus === "SUBMITTED").length;
 
+  const setSuspended = async (company: CompanyRecord, suspended: boolean) => {
+    if (suspended) {
+      const ok = await confirm({
+        title: `Suspend ${company.name}?`,
+        description:
+          "Their users can't sign in, their website chat and lead form stop working, and no emails or texts go out. Nothing is deleted, and you can reactivate at any time.",
+        confirmText: "Suspend",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    setActingId(company.id);
+    try {
+      const res = await fetch(`/api/admin/companies/${company.id}/suspension`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suspended }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Could not update the company");
+      const { suspendedAt } = await res.json();
+      setCompanies((list) => list.map((c) => (c.id === company.id ? { ...c, suspendedAt } : c)));
+      toast.success(suspended ? `${company.name} suspended.` : `${company.name} reactivated.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not update the company");
+    } finally {
+      setActingId(null);
+    }
+  };
+
   const saveOnboarding = async (id: string, field: "contractSignedAt" | "goLiveAt", value: string) => {
     const previous = companies;
     setCompanies((list) => list.map((c) => (c.id === id ? { ...c, [field]: value || null } : c)));
@@ -166,7 +194,7 @@ export default function AdminCompaniesPage() {
             <div>
               <CardTitle className="text-xl text-foreground">Tenant Companies</CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
-                Every registered tenant: review verification documents and switch workspaces on or off.
+                Every registered tenant: review verification documents, switch workspaces on or off, or suspend an account.
                 {pendingCount > 0 && (
                   <span className="ml-1 font-medium text-amber-600 dark:text-amber-400">{pendingCount} awaiting review.</span>
                 )}
@@ -184,27 +212,35 @@ export default function AdminCompaniesPage() {
                   <TableHead>Address</TableHead>
                   <TableHead>Verification</TableHead>
                   <TableHead>Workspaces</TableHead>
-                  <TableHead className="text-center">Users</TableHead>
                   <TableHead>Onboarding</TableHead>
-                  <TableHead className="pr-6">Joined</TableHead>
+                  <TableHead className="pr-6 text-right">Account</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
                       <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
                       Loading companies...
                     </TableCell>
                   </TableRow>
                 ) : companies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">No companies found.</TableCell>
+                    <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">No companies found.</TableCell>
                   </TableRow>
                 ) : (
                   sorted.map((company) => (
-                    <TableRow key={company.id} className="hover:bg-muted/40">
-                      <TableCell className="pl-6 font-medium text-foreground">{company.name}</TableCell>
+                    <TableRow key={company.id} className={`hover:bg-muted/40 ${company.suspendedAt ? "opacity-60" : ""}`}>
+                      <TableCell className="pl-6 font-medium text-foreground">
+                        <div className="flex flex-col items-start gap-1">
+                          {company.name}
+                          {company.suspendedAt && (
+                            <Badge variant="outline" className="border-0 bg-rose-500/15 text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                              Suspended
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-col text-sm text-muted-foreground">
                           <span>{company.email || "—"}</span>
@@ -244,9 +280,6 @@ export default function AdminCompaniesPage() {
                           </button>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center text-sm text-foreground/80">
-                        {company._count?.users ?? "—"}
-                      </TableCell>
                       <TableCell>
                         <div className="flex min-w-[170px] flex-col gap-1 text-[11px] text-muted-foreground">
                           <label className="flex items-center justify-between gap-2">
@@ -277,8 +310,16 @@ export default function AdminCompaniesPage() {
                           })()}
                         </div>
                       </TableCell>
-                      <TableCell className="pr-6 text-sm text-muted-foreground whitespace-nowrap">
-                        {company.createdAt ? new Date(company.createdAt).toLocaleDateString() : "—"}
+                      <TableCell className="pr-6 text-right">
+                        {company.suspendedAt ? (
+                          <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" disabled={actingId === company.id} onClick={() => setSuspended(company, false)}>
+                            {actingId === company.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Reactivate
+                          </Button>
+                        ) : (
+                          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-red-600 hover:bg-red-500/10 hover:text-red-700" disabled={actingId === company.id} onClick={() => setSuspended(company, true)}>
+                            {actingId === company.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Suspend
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))

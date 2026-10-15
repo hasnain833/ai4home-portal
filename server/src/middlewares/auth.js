@@ -8,8 +8,41 @@ import {
 } from "../lib/superadmin-session.js";
 import { hasSalesPermission, SALES_PERMISSIONS } from "../lib/permissions.js";
 import { withDbRetry } from "../lib/utils.js";
+import { SUSPENDED_MESSAGE } from "../lib/company-suspension.js";
 
 const TRADE_API_PREFIXES = ["/api/trade/", "/api/auth/"];
+const AUTH_USER_TTL_MS = 30_000;
+const AUTH_USER_CACHE_MAX = 5_000;
+const authUserCache = new Map();
+
+async function loadAuthUser(email) {
+  const hit = authUserCache.get(email);
+  if (hit && hit.expires > Date.now()) return hit.user;
+
+  const user = await withDbRetry(
+    () =>
+      prisma.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          companyId: true,
+          hasWarrantyAccess: true,
+          hasSalesAccess: true,
+          salesPermissions: true,
+          company: { select: { salesEnabled: true, warrantyEnabled: true, suspendedAt: true } },
+        },
+      }),
+    { label: "auth user lookup" },
+  );
+  if (user) {
+    if (authUserCache.size >= AUTH_USER_CACHE_MAX) authUserCache.clear();
+    authUserCache.set(email, { user, expires: Date.now() + AUTH_USER_TTL_MS });
+  }
+  return user;
+}
 
 export async function requireAuth(req, res, next) {
   try {
@@ -69,13 +102,6 @@ export async function requireAuth(req, res, next) {
     }
 
     if (!token && req.headers.cookie) {
-      const cookies = Object.fromEntries(
-        req.headers.cookie.split(";").map((c) => {
-          const parts = c.trim().split("=");
-          return [parts[0], parts.slice(1).join("=")];
-        }),
-      );
-
       let tokenKeys = Object.keys(cookies).filter(
         (k) => k.includes("auth-token") || k.includes("access-token"),
       );
@@ -144,11 +170,8 @@ export async function requireAuth(req, res, next) {
         .json({ message: "Unauthorized: Missing authentication token" });
     }
 
-    // Verify token with Supabase
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser(token);
+    const { data, error } = await supabase.auth.getClaims(token);
+    const user = data?.claims;
 
     if (error || !user || !user.email) {
       console.error(
@@ -161,19 +184,16 @@ export async function requireAuth(req, res, next) {
         .json({ message: "Unauthorized: Invalid token session" });
     }
 
-    const dbUser = await withDbRetry(
-      () =>
-        prisma.user.findUnique({
-          where: { email: user.email },
-          include: { company: true },
-        }),
-      { label: "auth user lookup" },
-    );
+    const dbUser = await loadAuthUser(user.email);
 
     if (!dbUser) {
       return res
         .status(404)
         .json({ message: "User profile not found in local database." });
+    }
+
+    if (dbUser.company?.suspendedAt && dbUser.role !== "SUPER_ADMIN") {
+      return res.status(403).json({ message: SUSPENDED_MESSAGE, code: "COMPANY_SUSPENDED" });
     }
 
     if (dbUser.role === "TRADE" && !TRADE_API_PREFIXES.some((p) => req.originalUrl.startsWith(p))) {

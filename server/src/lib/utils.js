@@ -64,6 +64,15 @@ export async function withDbRetry(fn, { retries = 2, baseDelayMs = 50, label = "
 }
 
 
+// RFC 4180: every cell quoted, embedded quotes doubled.
+export function csvLine(cells) {
+  return cells.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",");
+}
+
+export function toCsv(rows, header = Object.keys(rows[0] || {})) {
+  return [header, ...rows.map((row) => header.map((key) => row[key]))].map(csvLine).join("\n");
+}
+
 export function escapeHtml(value) {
   return String(value).replace(
     /[&<>"']/g,

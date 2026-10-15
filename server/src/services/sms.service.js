@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { recordUsage, countSegments } from "../lib/usage.js";
+import { isCompanySuspended } from "../lib/company-suspension.js";
 
 const TELNYX_API_BASE = "https://api.telnyx.com/v2";
 const TELNYX_PROVIDER = "TELNYX_SMS";
@@ -22,6 +23,7 @@ export const SMS_OUTCOME = {
   SENT: "sent",
   FAILED: "failed",
   NOT_CONFIGURED: "not_configured",
+  SUSPENDED: "suspended",
 };
 
 export const smsSent = (result) => result?.outcome === SMS_OUTCOME.SENT;
@@ -111,6 +113,9 @@ export function brandSmsBody(body, name) {
 }
 
 export const sendSms = async ({ to, body, tag, companyId = null, source = null, brand = true }) => {
+  if (await isCompanySuspended(companyId)) {
+    return { outcome: SMS_OUTCOME.SUSPENDED, to, body, provider: null, error: "Company is suspended." };
+  }
   const cfg = resolveSystemConfig();
 
   if (!cfg) {

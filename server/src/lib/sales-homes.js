@@ -2,7 +2,7 @@ import prisma from "./prisma.js";
 
 export const SALES_HOME_STATUSES = ["AVAILABLE", "COMING_SOON", "UNDER_CONTRACT", "SOLD"];
 
-export const SALES_HOME_STATUS_LABELS = {
+const SALES_HOME_STATUS_LABELS = {
   AVAILABLE: "Available",
   COMING_SOON: "Coming soon",
   UNDER_CONTRACT: "Under contract",

@@ -7,7 +7,7 @@ const PLAIN_RETENTION_DAYS = Number(process.env.WARRANTY_CONVERSATION_RETENTION_
 const TICKETED_RETENTION_DAYS = Number(process.env.WARRANTY_TICKETED_RETENTION_DAYS || 180);
 const BATCH_SIZE = 500;
 
-export function cutoffFor(days, now = Date.now()) {
+function cutoffFor(days, now = Date.now()) {
   return new Date(now - days * DAY);
 }
 

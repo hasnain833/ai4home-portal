@@ -69,23 +69,23 @@ prisma/
 **Prerequisites:** Node.js 20+, PostgreSQL database (Supabase recommended), Supabase Auth project. Optional integrations: Anthropic/OpenAI/Groq API key, Salesforce app, Telnyx, Brevo, Inngest.
 
 ```bash
-# 1. Install frontend deps (repo root)
+# 1. Install deps (one package.json for frontend + backend, as on Vercel)
 npm install
 
-# 2. Install backend deps
-cd server && npm install && cd ..
-
-# 3. Configure environment
+# 2. Configure environment
 cp .env.example .env               # frontend / build vars
 cp server/.env.example server/.env # backend vars (fill in real values)
 
-# 4. Generate the Prisma client and push the schema
+# 3. Generate the Prisma client and push the schema
 npx prisma generate
 npx prisma db push                 # creates/updates tables (additive)
 
-# 5. (Sales KB only) enable pgvector semantic search — one time per DB
+# 4. (Sales KB only) enable pgvector semantic search — one time per DB
 #    Run prisma/pgvector-setup.sql via the Supabase SQL editor or psql,
 #    then POST /api/sales/kb/reindex until remaining=0.
+
+# 5. KB search indexes (HNSW + full-text) — re-run after any db push
+#    Run prisma/sql/kb-indexes.sql in the Supabase SQL editor.
 ```
 
 ---
@@ -95,8 +95,8 @@ npx prisma db push                 # creates/updates tables (additive)
 The system requires both the Next.js frontend and Express backend running concurrently in development.
 
 ```bash
-# Terminal 1 — backend on :5000
-cd server && npm run dev
+# Terminal 1 — backend on :5000 (reads server/.env)
+npm run dev:api
 
 # Terminal 2 — frontend on :3000 (proxies /api → :5000)
 npm run dev
@@ -164,12 +164,12 @@ environment fallback.
 | `npm run lint` | ESLint |
 | `npx tsc --noEmit` | Type-check |
 
-**Backend (`server/`):**
+**Backend (`server/`, run from the repo root):**
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Nodemon + Inngest dev mode |
-| `npm run start` | Start the Express server |
+| `npm run dev:api` | Nodemon + Inngest dev mode |
+| `npm run start:api` | Start the Express server |
 
 **Database:** 
 `npx prisma generate` (Creates client), `npx prisma db push` (Pushes schema), `npx prisma studio` (UI for viewing DB).

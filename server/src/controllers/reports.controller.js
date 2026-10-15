@@ -13,13 +13,13 @@ async function warrantyAgentMetrics(companyId, since, until) {
   const [inquiries, diagnosed, resolvedByAi, visits, resolvedWithVisits] = await Promise.all([
     prisma.warrantyConversation.count({ where: { companyId, createdAt: inPeriod } }),
     prisma.warrantyConversation.count({ where: { companyId, createdAt: inPeriod, ticketId: { not: null } } }),
-    prisma.ticket.count({ where: { homeowner: { companyId }, createdAt: inPeriod, ticketType: AUTO_RESOLVED_TYPE } }),
+    prisma.ticket.count({ where: { companyId, createdAt: inPeriod, ticketType: AUTO_RESOLVED_TYPE } }),
     prisma.ticketAppointment.findMany({
       where: { companyId, scheduledAt: inPeriod },
       select: { status: true, scheduledAt: true, remindersSent: true, rescheduleCount: true, tradeEmail: true },
     }),
     prisma.ticket.findMany({
-      where: { homeowner: { companyId }, status: "RESOLVED", updatedAt: inPeriod, appointments: { some: { status: "COMPLETED" } } },
+      where: { companyId, status: "RESOLVED", updatedAt: inPeriod, appointments: { some: { status: "COMPLETED" } } },
       select: { appointments: { where: { status: { not: "CANCELLED" } }, select: { id: true } } },
     }),
   ]);
@@ -70,7 +70,7 @@ export const getAnalytics = async (req, res) => {
       sinceDate.setDate(sinceDate.getDate() - days);
     }
 
-    const companyScope = { homeowner: { companyId: session.companyId } };
+    const companyScope = { companyId: session.companyId };
 
     const tickets = await prisma.ticket.findMany({
       where: {

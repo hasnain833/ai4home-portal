@@ -133,4 +133,8 @@ export const QUERY_KEYS = {
   segments: "/api/sales/segments",
   messagingCapabilities: "/api/sales/settings/messaging/capabilities",
   supportContact: "/api/admin/support-contact",
+  // Warranty form dropdowns, shared by the tickets and properties pages.
+  homeownerOptions: "/api/users?role=homeowner",
+  properties: "/api/properties",
+  communities: "/api/communities",
 } as const;

@@ -48,23 +48,18 @@ export async function embedText(text) {
   }
 }
 
-export async function embedBatch(texts, batchSize = 32) {
+export async function embedBatch(texts) {
   if (!texts || texts.length === 0) return [];
   const results = new Array(texts.length).fill(null);
 
   try {
     const pipe = await getPipeline();
-
-    for (let i = 0; i < texts.length; i += batchSize) {
-      const batch = texts.slice(i, i + batchSize);
-      for (let j = 0; j < batch.length; j++) {
-        try {
-          const output = await pipe(batch[j], { pooling: "mean", normalize: true });
-          results[i + j] = Array.from(output.data.slice(0, EMBEDDING_DIM));
-        } catch (err) {
-          console.error(`[Embedding] Failed to embed chunk ${i + j}:`, err.message);
-          results[i + j] = null;
-        }
+    for (let i = 0; i < texts.length; i++) {
+      try {
+        const output = await pipe(texts[i], { pooling: "mean", normalize: true });
+        results[i] = Array.from(output.data.slice(0, EMBEDDING_DIM));
+      } catch (err) {
+        console.error(`[Embedding] Failed to embed chunk ${i}:`, err.message);
       }
     }
   } catch (err) {

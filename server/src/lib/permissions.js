@@ -39,7 +39,7 @@ export const SALES_PERMISSIONS = {
   },
 };
 
-export const ALL_SALES_PERMISSIONS = Object.keys(SALES_PERMISSIONS);
+const ALL_SALES_PERMISSIONS = Object.keys(SALES_PERMISSIONS);
 
 export function normalizeSalesPermissions(input) {
   if (!Array.isArray(input)) return [];

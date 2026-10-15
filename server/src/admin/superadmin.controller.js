@@ -2,6 +2,8 @@ import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
 import { Templates } from "../services/templates.js";
+import { writeAuditLog } from "../lib/audit.js";
+import { forgetCompanySuspension } from "../lib/company-suspension.js";
 
 export const getCompanies = async (req, res) => {
   try {
@@ -12,14 +14,6 @@ export const getCompanies = async (req, res) => {
     }
 
     const companies = await prisma.company.findMany({
-      include: {
-        _count: {
-          select: {
-            users: true,
-            integrations: true,
-          },
-        },
-      },
       orderBy: {
         createdAt: "desc",
       },
@@ -236,6 +230,36 @@ export const updateUserAccess = async (req, res) => {
 };
 
 /** Onboarding dates; time to go-live is reported against the SOP's 30-day target. */
+// Suspend keeps every record; it blocks logins, public entry points and sends
+// until reactivated (see lib/company-suspension.js).
+export const setCompanySuspension = async (req, res) => {
+  try {
+    if (!req.user?.isSuperAdmin) return res.status(403).json({ message: "Unauthorized" });
+    if (typeof req.body?.suspended !== "boolean") {
+      return res.status(400).json({ message: "suspended must be true or false" });
+    }
+    const company = await prisma.company.update({
+      where: { id: req.params.companyId },
+      data: { suspendedAt: req.body.suspended ? new Date() : null },
+      select: { id: true, name: true, suspendedAt: true },
+    });
+    forgetCompanySuspension(company.id);
+    await writeAuditLog({
+      req,
+      action: req.body.suspended ? "COMPANY_SUSPENDED" : "COMPANY_REACTIVATED",
+      companyId: company.id,
+      targetType: "Company",
+      targetId: company.id,
+      metadata: { name: company.name },
+    });
+    return res.json(company);
+  } catch (error) {
+    if (error?.code === "P2025") return res.status(404).json({ message: "Company not found" });
+    console.error("Error updating company suspension:", error);
+    return res.status(500).json({ message: "Could not update the company." });
+  }
+};
+
 export const updateCompanyOnboarding = async (req, res) => {
   try {
     if (!req.user?.isSuperAdmin) return res.status(403).json({ message: "Unauthorized" });

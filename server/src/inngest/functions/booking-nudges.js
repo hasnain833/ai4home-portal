@@ -5,9 +5,9 @@ import { notifyTicketDispatched } from "../../services/ticket-appointment-servic
 const HOUR = 60 * 60 * 1000;
 const BATCH_SIZE = 100;
 
-export const NUDGE_AFTER_HOURS = 48;
-export const NUDGE_INTERVAL_HOURS = 72;
-export const MAX_NUDGES = 2;
+const NUDGE_AFTER_HOURS = 48;
+const NUDGE_INTERVAL_HOURS = 72;
+const MAX_NUDGES = 2;
 
 
 export function nudgeIsDue(ticket, now = Date.now()) {

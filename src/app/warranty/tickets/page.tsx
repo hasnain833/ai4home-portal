@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
 import { DispatchTicketDialog } from "@/components/warranty/DispatchTicketDialog";
 import { cn, ticketRef } from "@/lib/utils";
+import { useQuery, QUERY_KEYS } from "@/lib/use-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -191,6 +192,9 @@ const priorityStyles: Record<TicketPriority, { bg: string, text: string, border:
   },
 };
 
+const NO_HOMEOWNERS: HomeownerOption[] = [];
+const NO_PROPERTIES: PropertyOption[] = [];
+
 function TicketsPageInner() {
   const { user } = useAuth();
   const router = useRouter();
@@ -218,8 +222,6 @@ function TicketsPageInner() {
   const [createForm, setCreateForm] = useState(EMPTY_TICKET_FORM);
   const [createError, setCreateError] = useState("");
   const [creating, setCreating] = useState(false);
-  const [homeowners, setHomeowners] = useState<HomeownerOption[]>([]);
-  const [allProperties, setAllProperties] = useState<PropertyOption[]>([]);
   const [dispatchTarget, setDispatchTarget] = useState<Ticket | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const showToast = (type: "success" | "error", text: string) => {
@@ -256,28 +258,13 @@ function TicketsPageInner() {
     fetchTickets();
   }, [fetchTickets]);
 
-  useEffect(() => {
-    if (!canManage) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const [ownerRes, propertyRes] = await Promise.all([
-          fetch("/api/users?role=homeowner"),
-          fetch("/api/properties"),
-        ]);
-        if (cancelled) return;
-        if (ownerRes.ok) setHomeowners(await ownerRes.json());
-        if (propertyRes.ok) setAllProperties(await propertyRes.json());
-      } catch (error) {
-        console.error("Error loading ticket form options:", error);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canManage]);
+  // Create-ticket dropdowns: cached and shared with the properties page.
+  const { data: homeowners = NO_HOMEOWNERS } = useQuery<HomeownerOption[]>(
+    canManage ? QUERY_KEYS.homeownerOptions : null,
+  );
+  const { data: allProperties = NO_PROPERTIES } = useQuery<PropertyOption[]>(
+    canManage ? QUERY_KEYS.properties : null,
+  );
 
   const homeownerProperties = useMemo(
     () => allProperties.filter((p) => p.homeownerId === createForm.homeownerId),

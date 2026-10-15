@@ -6,8 +6,25 @@ const FTS_LANG = "english";
 const SCOPE_FILTER_SQL = `(scope = 'PLATFORM' OR "companyId" = $2)`;
 const MAX_CHUNK_CHARS = 8000;
 
-export function isKbConfigured() {
-  return true;
+const EMBEDDING_TABLES = new Set(["SalesKBChunk", "WarrantyKBChunk"]);
+const EMBEDDING_WRITE_BATCH = 200;
+
+// One UPDATE per 200 chunks instead of one round trip per chunk.
+// rows: [{ id, embedding: number[] | null }]; null embeddings are skipped.
+export async function saveEmbeddings(table, rows) {
+  if (!EMBEDDING_TABLES.has(table)) throw new Error(`saveEmbeddings: unknown table ${table}`);
+  const ready = rows.filter((r) => r.embedding);
+  for (let i = 0; i < ready.length; i += EMBEDDING_WRITE_BATCH) {
+    const batch = ready.slice(i, i + EMBEDDING_WRITE_BATCH);
+    await prisma.$executeRawUnsafe(
+      `UPDATE "${table}" AS c SET embedding = v.emb::vector
+         FROM unnest($1::text[], $2::text[]) AS v(id, emb)
+        WHERE c.id = v.id`,
+      batch.map((r) => r.id),
+      batch.map((r) => `[${r.embedding.join(",")}]`),
+    );
+  }
+  return ready.length;
 }
 
 export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
@@ -25,7 +42,6 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 
-  // scope is denormalised onto every chunk so retrieval filters without a join.
   const scope = ["PLATFORM", "HELP"].includes(meta.scope) ? meta.scope : "COMPANY";
 
   await prisma.salesKBChunk.createMany({
@@ -46,17 +62,10 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
     select: { id: true, chunkIndex: true },
   });
 
-  for (const row of inserted) {
-    const emb = embeddings[row.chunkIndex];
-    if (emb) {
-      const vecStr = `[${emb.join(",")}]`;
-      await prisma.$executeRawUnsafe(
-        `UPDATE "SalesKBChunk" SET embedding = $1::vector WHERE id = $2`,
-        vecStr,
-        row.id,
-      );
-    }
-  }
+  await saveEmbeddings(
+    "SalesKBChunk",
+    inserted.map((row) => ({ id: row.id, embedding: embeddings[row.chunkIndex] })),
+  );
 
   return chunks.length;
 }
@@ -202,19 +211,19 @@ async function ftsQuery(companyId, text, limit, categories) {
   const rows = hasCats
     ? await prisma.$queryRaw`
         SELECT id, "documentId", name, category, content, scope,
-               ts_rank(to_tsvector(${FTS_LANG}::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
+               ts_rank(to_tsvector('english'::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
         FROM "SalesKBChunk"
         WHERE (scope = 'PLATFORM' OR "companyId" = ${companyId})
           AND category = ANY(${categories})
-          AND to_tsvector(${FTS_LANG}::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
+          AND to_tsvector('english'::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
         ORDER BY score DESC
         LIMIT ${limit}`
     : await prisma.$queryRaw`
         SELECT id, "documentId", name, category, content, scope,
-               ts_rank(to_tsvector(${FTS_LANG}::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
+               ts_rank(to_tsvector('english'::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery) AS score
         FROM "SalesKBChunk"
         WHERE (scope = 'PLATFORM' OR "companyId" = ${companyId})
-          AND to_tsvector(${FTS_LANG}::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
+          AND to_tsvector('english'::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${text})::text, '&', '|')::tsquery
         ORDER BY score DESC
         LIMIT ${limit}`;
 
@@ -242,19 +251,10 @@ export async function backfillEmbeddings(companyId, batchSize = 50) {
   const texts = chunks.map((c) => c.content);
   const embeddings = await embedBatch(texts);
 
-  let updated = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const emb = embeddings[i];
-    if (emb) {
-      const vecStr = `[${emb.join(",")}]`;
-      await prisma.$executeRawUnsafe(
-        `UPDATE "SalesKBChunk" SET embedding = $1::vector WHERE id = $2`,
-        vecStr,
-        chunks[i].id,
-      );
-      updated++;
-    }
-  }
+  const updated = await saveEmbeddings(
+    "SalesKBChunk",
+    chunks.map((c, i) => ({ id: c.id, embedding: embeddings[i] })),
+  );
 
   const remaining = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*)::int AS count FROM "SalesKBChunk"
@@ -287,10 +287,10 @@ export async function queryHelp(text, limit = 6) {
     }
     const rows = await prisma.$queryRaw`
       SELECT "documentId", name, category, content,
-             ts_rank(to_tsvector(${FTS_LANG}::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${q})::text, '&', '|')::tsquery) AS score
+             ts_rank(to_tsvector('english'::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${q})::text, '&', '|')::tsquery) AS score
       FROM "SalesKBChunk"
       WHERE scope = 'HELP'
-        AND to_tsvector(${FTS_LANG}::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${q})::text, '&', '|')::tsquery
+        AND to_tsvector('english'::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${q})::text, '&', '|')::tsquery
       ORDER BY score DESC LIMIT ${limit}`;
     return { method: "fts", results: rows.map(toResult) };
   } catch (err) {

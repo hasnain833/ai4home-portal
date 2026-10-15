@@ -5,6 +5,10 @@ import { MailService } from "../services/mail-service.js";
 import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
 import { computeAvailableSlots, formatSlotLabel } from "../lib/scheduling.js";
 import { escapeHtml } from "../lib/utils.js";
+import { toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
+import { renderTemplate } from "../prompts/template.js";
+import { B2B_STEP_SYSTEM, B2B_EMAIL_RULES, B2B_SMS_RULES } from "../prompts/content.js";
+import { PLATFORM_GUIDE } from "../prompts/help-agent.js";
 import {
   B2B_LEAD_STATUSES,
   B2B_CLOSED_STATUSES,
@@ -13,6 +17,7 @@ import {
   saveB2BAvailability,
   validateSteps,
   cleanSteps,
+  unknownPlaceholders,
   exitB2BEnrollments,
   completeFinishedCampaigns,
   notifySuperAdmin,
@@ -189,6 +194,66 @@ export const createCampaign = wrap("Campaign create", async (req, res) => {
   const invalid = validateSteps(steps);
   if (invalid) return res.status(400).json({ message: invalid });
   res.status(201).json(await prisma.b2BCampaign.create({ data: { name, steps: cleanSteps(steps) } }));
+});
+
+const STEP_TOOL = {
+  name: "write_campaign_step",
+  description: "Return the finished message for this campaign step.",
+  input_schema: {
+    type: "object",
+    properties: {
+      subject: { type: "string", description: "Email subject line; empty string for SMS." },
+      body: { type: "string", description: "The message body, plain text." },
+    },
+    required: ["subject", "body"],
+  },
+};
+const MAX_TOPIC_CHARS = 500;
+const clip = (text, n) => String(text || "").trim().slice(0, n);
+
+// Drafts one step for the Super Admin to review; nothing is saved or sent here.
+export const generateStep = wrap("Campaign step AI", async (req, res) => {
+  const { channel, topic, draft, campaignName, stepNumber, otherSteps } = req.body || {};
+  if (!["EMAIL", "SMS"].includes(channel)) return res.status(400).json({ message: "Pick Email or SMS first." });
+  const about = clip(topic, MAX_TOPIC_CHARS);
+  const current = clip(draft, 4000);
+  if (!about && !current) {
+    return res.status(400).json({ message: "Describe what this step should be about, or write a draft for AI to improve." });
+  }
+  if (!hasLLM()) return res.status(503).json({ message: aiUnavailableMessage() });
+
+  // The rest of the sequence, so this step adds something new instead of repeating it.
+  const others = (Array.isArray(otherSteps) ? otherSteps : [])
+    .slice(0, 20)
+    .map((o) => `- Step ${Number(o?.stepNumber) || "?"} (${o?.channel === "SMS" ? "SMS" : "email"}): ${clip(o?.subject, 120)} ${clip(o?.body, 300)}`.trim())
+    .filter((line) => line.length > 20)
+    .join("\n");
+
+  const user = [
+    clip(campaignName, 120) && `Campaign: ${clip(campaignName, 120)}`,
+    stepNumber && `This is step ${Number(stepNumber)} of the sequence.`,
+    about && `What this step should be about: ${about}`,
+    current && `Current draft to improve (keep its intent):
+${current}`,
+    others && `Other steps in this sequence (do not repeat their angle):
+${others}`,
+    channel === "EMAIL" ? B2B_EMAIL_RULES : B2B_SMS_RULES,
+  ].filter(Boolean).join("\n\n");
+
+  const out = await toolCall({
+    companyId: null,
+    system: renderTemplate(B2B_STEP_SYSTEM, { productGuide: PLATFORM_GUIDE }),
+    messages: [{ role: "user", content: user }],
+    tool: STEP_TOOL,
+    maxTokens: 900,
+  });
+  const body = String(out?.body || "").trim();
+  if (!body) return res.status(502).json({ message: "AI couldn't write this step. Try again or rephrase the topic." });
+
+  const subject = channel === "EMAIL" ? String(out?.subject || "").trim() : "";
+  // The model is told the allowed placeholders; this catches the times it ignores that.
+  const unknown = unknownPlaceholders(`${subject} ${body}`);
+  res.json({ subject, body, warning: unknown.length ? `Replace ${unknown.map((n) => `{{${n}}}`).join(", ")} before saving.` : null });
 });
 
 export const updateCampaign = wrap("Campaign update", async (req, res) => {

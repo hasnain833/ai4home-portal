@@ -5,13 +5,13 @@ import { notifyAppointmentReminder } from "../../services/ticket-appointment-ser
 const HOUR = 60 * 60 * 1000;
 const BATCH_SIZE = 200;
 
-export const REMINDER_WINDOWS = [
+const REMINDER_WINDOWS = [
   { tag: "48h", hours: 48, label: "within 2 days" },
   { tag: "24h", hours: 24, label: "within 24 hours" },
   { tag: "3h", hours: 3, label: "in a few hours" },
 ];
 
-export const LOOKAHEAD_HOURS = REMINDER_WINDOWS[0].hours;
+const LOOKAHEAD_HOURS = REMINDER_WINDOWS[0].hours;
 
 /** Return the current reminder window, unless it was already delivered. */
 export function dueWindow(appointment, now = Date.now()) {

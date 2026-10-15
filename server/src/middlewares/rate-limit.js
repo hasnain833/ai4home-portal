@@ -1,5 +1,6 @@
+import prisma from "../lib/prisma.js";
+
 const WINDOW_MS_DEFAULT = 60_000;
-const MAX_TRACKED_KEYS = 10_000;
 
 export function clientKey(req) {
   const forwarded = req.headers?.["x-forwarded-for"];
@@ -9,39 +10,50 @@ export function clientKey(req) {
   return req.ip || req.socket?.remoteAddress || "unknown";
 }
 
+// Counters live in Postgres, not process memory: on Vercel every instance had
+// its own Map, so the limit multiplied by the number of warm instances.
+// One atomic upsert per request; a new window starts once resetAt has passed.
+async function hit(key, windowMs) {
+  const [row] = await prisma.$queryRaw`
+    INSERT INTO "RateLimit" (key, count, "resetAt")
+    VALUES (${key}, 1, now() + make_interval(secs => ${windowMs / 1000}))
+    ON CONFLICT (key) DO UPDATE SET
+      count = CASE WHEN "RateLimit"."resetAt" <= now() THEN 1 ELSE "RateLimit".count + 1 END,
+      "resetAt" = CASE WHEN "RateLimit"."resetAt" <= now() THEN EXCLUDED."resetAt" ELSE "RateLimit"."resetAt" END
+    RETURNING count, "resetAt"`;
+  return row;
+}
+
+// ponytail: expired rows are swept on ~1% of hits; move to a cron if the table grows hot.
+function maybeSweep() {
+  if (Math.random() >= 0.01) return;
+  prisma.$executeRaw`DELETE FROM "RateLimit" WHERE "resetAt" < now() - interval '1 hour'`.catch(
+    (err) => console.warn("[Rate limit] Sweep failed:", err.message),
+  );
+}
+
 export function createRateLimiter({
   windowMs = WINDOW_MS_DEFAULT,
   max = 30,
   label = "Rate limit",
   keyFn = clientKey,
 } = {}) {
-  const buckets = new Map();
-
-  function sweep(now) {
-    for (const [key, bucket] of buckets) {
-      if (bucket.resetAt <= now) buckets.delete(key);
-    }
-  }
-
-  return function rateLimitGuard(req, res, next) {
-    const now = Date.now();
-
-    if (buckets.size >= MAX_TRACKED_KEYS) sweep(now);
-
+  return async function rateLimitGuard(req, res, next) {
     const key = `${req.baseUrl || ""}${req.path || ""}:${keyFn(req)}`;
-    let bucket = buckets.get(key);
 
-    if (!bucket || bucket.resetAt <= now) {
-      bucket = { count: 0, resetAt: now + windowMs };
-      if (buckets.size < MAX_TRACKED_KEYS) buckets.set(key, bucket);
+    let bucket;
+    try {
+      bucket = await hit(key, windowMs);
+    } catch (err) {
+      // Fail open: a DB blip must not take the public chat down with it.
+      console.error(`[${label}] Rate limit check failed, allowing request:`, err.message);
+      return next();
     }
+    maybeSweep();
 
-    bucket.count += 1;
-
-    const remaining = Math.max(0, max - bucket.count);
-    const resetSeconds = Math.ceil((bucket.resetAt - now) / 1000);
+    const resetSeconds = Math.max(0, Math.ceil((new Date(bucket.resetAt).getTime() - Date.now()) / 1000));
     res.setHeader("X-RateLimit-Limit", String(max));
-    res.setHeader("X-RateLimit-Remaining", String(remaining));
+    res.setHeader("X-RateLimit-Remaining", String(Math.max(0, max - bucket.count)));
     res.setHeader("X-RateLimit-Reset", String(resetSeconds));
 
     if (bucket.count > max) {

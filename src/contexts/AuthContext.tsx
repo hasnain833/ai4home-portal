@@ -237,6 +237,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) throw error;
 
+      // Valid password but a suspended company: sign straight back out and say why.
+      const me = await fetch("/api/auth/me");
+      if (me.status === 403) {
+        const body = await me.json().catch(() => ({}));
+        if (body?.code === "COMPANY_SUSPENDED") {
+          await supabaseRef.current.auth.signOut();
+          throw new Error(body.message);
+        }
+      }
+
       router.push(redirectPath || "/");
     } catch (err) {
       setIsLoading(false);

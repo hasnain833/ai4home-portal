@@ -77,7 +77,7 @@ export const getTickets = async (req, res) => {
 
       tickets = await prisma.ticket.findMany({
         where: {
-          homeowner: { companyId: session.companyId },
+          companyId: session.companyId,
           ...(homeownerId ? { homeownerId } : {}),
           ...propertyScope,
         },

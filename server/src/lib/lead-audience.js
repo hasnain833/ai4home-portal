@@ -1,11 +1,11 @@
 import { LEAD_STATUS } from "./lead-statuses.js";
 
-export const INACTIVE_LEAD_STATUSES = [
+const INACTIVE_LEAD_STATUSES = [
   LEAD_STATUS.CLOSED_WON,
   LEAD_STATUS.UNSUBSCRIBED,
 ];
 
-export function activeLeadFilter() {
+function activeLeadFilter() {
   return {
     archived: false,
     status: { notIn: INACTIVE_LEAD_STATUSES },

@@ -2,11 +2,14 @@ import nodemailer from "nodemailer";
 import { ticketRef } from "../lib/ticket-number.js";
 import { Templates } from "./templates.js";
 import { recordUsage } from "../lib/usage.js";
+import { isCompanySuspended } from "../lib/company-suspension.js";
 
 export const MAIL_OUTCOME = {
   SENT: "sent",
   FAILED: "failed",
   NOT_CONFIGURED: "not_configured",
+  // Tenant is suspended: nothing is sent, nothing is billed, nothing is parked for retry.
+  SUSPENDED: "suspended",
 };
 
 export const mailShouldPark = (result) => result?.outcome === MAIL_OUTCOME.FAILED;
@@ -47,6 +50,9 @@ export class MailService {
   }
 
   static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null, noReply = false }) {
+    if (await isCompanySuspended(companyId)) {
+      return { success: false, outcome: MAIL_OUTCOME.SUSPENDED, error: "Company is suspended." };
+    }
     if (!this.hasPlatformSender()) {
       console.warn(`[Mail Service] ⏭️ Platform SMTP credentials are not set — nothing sent to ${to}.`);
       return {

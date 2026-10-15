@@ -1,5 +1,13 @@
+import { waitUntil } from "@vercel/functions";
 import prisma from "./prisma.js";
-export async function writeAuditLog({
+
+export function writeAuditLog(entry = {}) {
+  const pending = persistAuditLog(entry);
+  waitUntil(pending);
+  return pending;
+}
+
+async function persistAuditLog({
   req,
   action,
   companyId,
@@ -8,9 +16,6 @@ export async function writeAuditLog({
   metadata,
 } = {}) {
   try {
-    if (!prisma.auditLog) {
-      return;
-    }
     const actor = req?.user || {};
     const ip =
       req?.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() ||

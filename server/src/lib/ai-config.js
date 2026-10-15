@@ -1,8 +1,8 @@
 import { recordUsage, aiCostMicros } from "./usage.js";
 
-export const AI_PROVIDER = "ANTHROPIC";
-export const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
-export const FAST_MODEL = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+const AI_PROVIDER = "ANTHROPIC";
+const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+const FAST_MODEL = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
 
 
 const EFFORT_UNSUPPORTED = ["haiku", "sonnet-4-5", "opus-4-5", "sonnet-3", "opus-3"];
@@ -14,7 +14,7 @@ export function supportsEffort(model) {
 }
 
 
-export const PHASE_EFFORT = {
+const PHASE_EFFORT = {
   INTAKE: "low",
   IDENTIFY: "low",
   DIAGNOSE: "medium",
@@ -31,7 +31,7 @@ export function toFastTier(cfg) {
   return { ...cfg, model: FAST_MODEL, tier: "fast" };
 }
 
-export const AI_UNAVAILABLE = {
+const AI_UNAVAILABLE = {
   PLATFORM_KEY_MISSING:
     "AI is temporarily unavailable. Please contact support if this continues.",
 };

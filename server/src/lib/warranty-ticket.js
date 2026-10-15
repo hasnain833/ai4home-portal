@@ -15,7 +15,7 @@ export function ticketUrlFor(ticketId) {
   return `${base}/warranty/tickets/${ticketId}`;
 }
 
-export function buildChatSummary(transcript, { maxTurns = MAX_SUMMARY_TURNS } = {}) {
+function buildChatSummary(transcript, { maxTurns = MAX_SUMMARY_TURNS } = {}) {
   const turns = Array.isArray(transcript) ? transcript : [];
   if (turns.length === 0) return null;
 
@@ -34,7 +34,7 @@ export function buildChatSummary(transcript, { maxTurns = MAX_SUMMARY_TURNS } = 
   return `${elided}${body}`.slice(0, MAX_SUMMARY_CHARS);
 }
 
-export function buildExtractedInfo({ classification, coverage, property }) {
+function buildExtractedInfo({ classification, coverage, property }) {
   const info = {
     location: classification?.location || null,
     symptom: classification?.symptom || null,

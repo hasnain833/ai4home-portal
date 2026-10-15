@@ -1,4 +1,4 @@
-export const KB_CATEGORIES = {
+const KB_CATEGORIES = {
   GENERAL: "General",
   BRAND_VOICE: "brand_voice",
   COMMUNITY: "community",

@@ -62,7 +62,7 @@ const TYPES = {
 };
 
 // Presets used by the upload routes.
-export const UPLOAD_PROFILES = {
+const UPLOAD_PROFILES = {
   kbDocument: {
     types: ["pdf", "docx", "xlsx", "txt", "csv"],
     maxBytes: 25 * MB,

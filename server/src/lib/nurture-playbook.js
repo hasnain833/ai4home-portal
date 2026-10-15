@@ -12,7 +12,7 @@ export const PHASES = [
 
 const touch = (key, phase, at, type, theme, goal, subject, body) => ({ key, phase, at, type, theme, goal, subject, body });
 
-export const TOUCHES = [
+const TOUCHES = [
   // Phase 1 — speed-to-lead
   touch("welcome-sms", 1, 0, "SMS", "Instant response", "Personal response and appointment invite",
     null,

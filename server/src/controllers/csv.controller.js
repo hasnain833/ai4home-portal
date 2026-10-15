@@ -1,6 +1,7 @@
 import { inngest } from "../lib/inngest.js";
 import prisma from "../lib/prisma.js";
 import { validateLeadRow, leadDedupKeys } from "../lib/csv-validation.js";
+import { toCsv } from "../lib/utils.js";
 
 export const uploadCsvMiddleware = (req, res, next) => next();
 export const validateCsvImport = async (req, res) => {
@@ -239,11 +240,7 @@ export const downloadCsvImportErrors = async (req, res) => {
 
     const errors = Array.isArray(job.errors) ? job.errors : [];
     const header = ["row", "reason", "firstName", "lastName", "email", "phone"];
-    const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-    const csv = [
-      header.join(","),
-      ...errors.map((row) => header.map((key) => escape(row[key])).join(",")),
-    ].join("\n");
+    const csv = toCsv(errors, header);
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename=csv-import-${job.id}-errors.csv`);

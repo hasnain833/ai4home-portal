@@ -39,6 +39,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { invalidate, QUERY_KEYS } from "@/lib/use-query";
 
 interface Homeowner {
   id: string;
@@ -146,6 +147,7 @@ export default function HomeownersManagementPage() {
       setNewHomeowner({ name: "", email: "", phone: "", password: "" });
       setIsDialogOpen(false);
       fetchHomeowners();
+      invalidate(QUERY_KEYS.homeownerOptions);
       setTimeout(() => setSuccess(""), 5000);
     } catch {
       setFormError("An unexpected error occurred.");
@@ -162,6 +164,7 @@ export default function HomeownersManagementPage() {
       if (!res.ok) throw new Error("Failed to remove homeowner");
       setSuccess(`${homeownerName} has been removed.`);
       fetchHomeowners();
+      invalidate(QUERY_KEYS.homeownerOptions);
       setTimeout(() => setSuccess(""), 4000);
     } catch {
       setError("Failed to remove homeowner.");

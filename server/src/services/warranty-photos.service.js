@@ -5,7 +5,7 @@ import { BUCKETS, uploadObject, resolveDownloadUrl, deleteObject } from "../lib/
 export const MAX_PHOTOS_PER_CLAIM = 6;
 const SIGNED_URL_TTL = 60 * 60;
 
-export class PhotoLimitReached extends Error {
+class PhotoLimitReached extends Error {
   constructor(count) {
     super(`You can add up to ${MAX_PHOTOS_PER_CLAIM} photos. This conversation already has ${count}.`);
     this.status = 400;

@@ -1,7 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { PLAYBOOK_NAME, playbookSteps } from "../lib/nurture-playbook.js";
 
-export const AUTO_KIND = "AUTO_180";
+const AUTO_KIND = "AUTO_180";
 
 // Lead-creation triggers that start the 180-day nurture. A returning web-form
 // submitter is already a lead, and a Salesforce sync is the CRM's lead, not ours.

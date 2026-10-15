@@ -63,7 +63,7 @@ function findHeaderRow(rows) {
   }
   return best;
 }
-export function chunkRows(rows, { label = null } = {}) {
+function chunkRows(rows, { label = null } = {}) {
   const headerIndex = findHeaderRow(rows);
   if (headerIndex < 0) return [];
 

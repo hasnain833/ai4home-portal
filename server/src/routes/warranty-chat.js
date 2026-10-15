@@ -60,6 +60,10 @@ async function postMessage(req, res) {
     if (!company) {
       return res.status(404).json({ error: "Company not found" });
     }
+    // Suspended tenants get no AI replies (each one is a paid model call).
+    if (company.suspendedAt) {
+      return res.status(403).json({ error: "This assistant is currently unavailable." });
+    }
 
     if (homeownerId && actor.viaSession) {
       const owner = await prisma.user.findUnique({
