@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { MailService, MAIL_OUTCOME, mailShouldPark } from "../../services/mail-service.js";
@@ -264,6 +265,7 @@ export const runNurtureCampaign = inngest.createFunction(
           const subject = renderText(currentStep.subject || "Outreach Update");
           const body = renderText(currentStep.body || "", true);
           console.log(`[Nurture] Sending EMAIL to ${lead.email}, subject="${subject}"`);
+          const trackId = randomUUID();
 
           const formattedHtml = Templates.getNurtureEmail(
             body.replace(/\n/g, "<br />"),
@@ -285,7 +287,10 @@ export const runNurtureCampaign = inngest.createFunction(
             replyTo,
             companyId: lead.companyId,
             source: "nurture",
-            headers: { "X-Mailin-Tag": currentStep.id },
+            // Brevo echoes X-Mailin-custom back on every webhook event; it is
+            // how an open or click finds this send's usage row.
+            headers: { "X-Mailin-Tag": currentStep.id, "X-Mailin-custom": trackId },
+            track: { leadId: lead.id, campaignId: campaign.id, stepId: currentStep.id, providerMessageId: trackId },
           });
           // Only a real failure is worth parking — a workspace with no SMTP
           // config has nothing to replay, so it is skipped with a reason.
@@ -321,7 +326,14 @@ export const runNurtureCampaign = inngest.createFunction(
           const finalBody = ComplianceService.addSmsOptOutSuffix(rawBody);
 
           console.log(`[Nurture] Step ${currentStep.position}: Triggering sendSms to ${lead.phone}...`);
-          const smsResult = await sendSms({ to: lead.phone, body: finalBody, tag: currentStep.id, companyId: lead.companyId, source: "nurture" });
+          const smsResult = await sendSms({
+            to: lead.phone,
+            body: finalBody,
+            tag: currentStep.id,
+            companyId: lead.companyId,
+            source: "nurture",
+            track: { leadId: lead.id, campaignId: campaign.id, stepId: currentStep.id },
+          });
 
           // SW-ANN-002: park the failed step SMS for inspection/replay.
           if (smsShouldPark(smsResult)) {
@@ -464,6 +476,22 @@ export const handleCampaignExit = inngest.createFunction(
   { id: "handle-campaign-exit", triggers: [{ event: "campaign.exit" }] },
   async ({ event, step }) => {
     const { leadId, reason, newStatus } = event.data;
+
+    // Last-touch attribution for analytics: the reply or booking is credited to
+    // the newest campaign message the lead received, whether or not they exit.
+    const creditField = reason === "REPLY" ? "repliedAt" : reason === "APPOINTMENT" ? "bookedAt" : null;
+    if (creditField) {
+      await step.run("credit-last-touch", async () => {
+        const last = await prisma.messageUsage.findFirst({
+          where: { leadId, campaignId: { not: null }, outcome: "sent" },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, repliedAt: true, bookedAt: true },
+        });
+        if (last && !last[creditField]) {
+          await prisma.messageUsage.update({ where: { id: last.id }, data: { [creditField]: new Date() } });
+        }
+      });
+    }
 
     const result = await step.run("update-enrollments-exited", async () => {
       const enrollments = await prisma.campaignEnrollment.findMany({

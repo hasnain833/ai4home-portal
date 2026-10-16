@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import HomeownerDashboard from "@/components/sales/HomeownerDashboard";
-import SalesAgentPerformance from "@/components/sales/SalesAgentPerformance";
+import { useQuery } from "@/lib/use-query";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -32,6 +32,8 @@ import {
   RefreshCw,
   CalendarClock,
   ChevronDown,
+  Target,
+  MessageSquare,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -80,6 +82,14 @@ type CampaignMetrics = {
   conversionRate: number;
 };
 
+type AgentPerformance = {
+  interactions: number;
+  nurturedTouches: number;
+  bookedAppointments: number;
+  newLeads: number;
+  successRate: number | null;
+};
+
 type CalendarItem = {
   id: string;
   title: string;
@@ -105,17 +115,6 @@ const CALENDAR_STATUS_COLORS: Record<string, string> = {
     "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
 };
 
-function formatRelative(iso: string | null): string {
-  if (!iso) return "Never synced";
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
 export default function SalesDashboardPage() {
   const { user } = useAuth();
   // SRS 4.12: a homeowner has no CRM rights and no company-wide reporting.
@@ -135,7 +134,10 @@ export default function SalesDashboardPage() {
     upcomingCount: 0,
   });
   const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [period, setPeriod] = useState<"7d" | "30d" | "90d">("30d");
+  const { data: perf } = useQuery<AgentPerformance>(
+    isHomeowner ? null : `/api/sales/dashboard/agent-performance?period=${period}`,
+  );
 
   async function fetchData() {
     try {
@@ -170,7 +172,6 @@ export default function SalesDashboardPage() {
             status: a.status,
           })),
         );
-        setLastSync(data.crmSyncHealth?.lastSyncAt || null);
       }
 
       if (leadsRes.ok) {
@@ -267,12 +268,20 @@ export default function SalesDashboardPage() {
                 prospects.
               </p>
             </div>
-            <div className="flex items-center gap-2.5">
-              {!isHomeowner && (
-                <span className="hidden sm:block text-[10px] text-muted-foreground">
-                  Last sync: {formatRelative(lastSync)}
-                </span>
-              )}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex gap-1 rounded-lg bg-muted p-0.5">
+                {(["7d", "30d", "90d"] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPeriod(p)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
+                      period === p ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                    }`}>
+                    {p.replace("d", " days")}
+                  </button>
+                ))}
+              </div>
               {!isHomeowner && (<Button
                 variant="outline"
                 size="sm"
@@ -310,100 +319,73 @@ export default function SalesDashboardPage() {
             </div>
           </motion.div>
 
-          {/* Quick Metrics */}
+          {/* Key numbers: one row, one period (set in the header). Closed Won has
+              no won-on date, so it is all-time and says so. */}
           <motion.div
             variants={fadeInUp}
-            className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-            {loading ? (
-              Array(4)
-                .fill(0)
-                .map((_, i) => (
-                  <Card key={i}>
-                    <CardHeader className="pb-2">
-                      <Skeleton className="h-4 w-24" />
-                    </CardHeader>
-                    <CardContent>
+            className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+            {[
+              {
+                label: "New leads",
+                icon: <Users className="h-4 w-4 text-[#b48c3c]" />,
+                value: perf?.newLeads,
+                hint: `${stats.totalLeads} total`,
+              },
+              {
+                label: "Booked appointments",
+                icon: <Calendar className="h-4 w-4 text-green-500" />,
+                value: perf?.bookedAppointments,
+                hint:
+                  appointments.length > 0
+                    ? `${stats.upcomingCount} upcoming · next ${new Date(appointments[0].time).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+                    : "None upcoming",
+              },
+              {
+                label: "Success rate",
+                icon: <Target className="h-4 w-4 text-[#0F3B3D]" />,
+                value: perf ? (perf.successRate === null ? "—" : `${perf.successRate}%`) : undefined,
+                hint: "New leads that booked",
+              },
+              {
+                label: "Messages sent",
+                icon: <MessageSquare className="h-4 w-4 text-[#b48c3c]" />,
+                value: perf?.nurturedTouches,
+                hint: perf
+                  ? `${perf.interactions} conversation${perf.interactions === 1 ? "" : "s"} with the AI`
+                  : "",
+              },
+              {
+                label: "Closed Won",
+                icon: <TrendingUp className="h-4 w-4 text-emerald-500" />,
+                value: loading ? undefined : stats.closedWon,
+                hint: "All time · handed to Warranty",
+              },
+            ].map((tile) => (
+              <Card key={tile.label} className="hover:shadow-md transition-all">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">
+                    {tile.label}
+                  </CardTitle>
+                  {tile.icon}
+                </CardHeader>
+                <CardContent>
+                  {tile.value === undefined ? (
+                    <>
                       <Skeleton className="h-8 w-16" />
-                      <Skeleton className="h-3 w-32 mt-2" />
-                    </CardContent>
-                  </Card>
-                ))
-            ) : (
-              <>
-                <Card className="hover:shadow-md transition-all">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">
-                      Total Leads Ingested
-                    </CardTitle>
-                    <Users className="h-4 w-4 text-[#b48c3c]" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-                      {stats.totalLeads}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Combined Salesforce + CSV rows
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="hover:shadow-md transition-all">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">
-                      Active Campaigns
-                    </CardTitle>
-                    <Layers className="h-4 w-4 text-[#0F3B3D]" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-                      {stats.activeCampaigns}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {stats.totalEnrolled} enrolled recipients
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="hover:shadow-md transition-all">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">
-                      Upcoming Bookings
-                    </CardTitle>
-                    <Calendar className="h-4 w-4 text-green-500" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-                      {stats.upcomingCount}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {appointments.length > 0
-                        ? `Next booking: ${new Date(appointments[0].time).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                        : "No upcoming bookings"}
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="hover:shadow-md transition-all">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-gray-500 dark:text-slate-400">
-                      Closed Won
-                    </CardTitle>
-                    <TrendingUp className="h-4 w-4 text-emerald-500" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-                      {stats.closedWon}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Homes sold, handed to Warranty
-                    </p>
-                  </CardContent>
-                </Card>
-              </>
-            )}
+                      <Skeleton className="h-3 w-28 mt-2" />
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+                        {tile.value}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{tile.hint}</p>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
           </motion.div>
-
-          <SalesAgentPerformance />
 
           {/* Main Dashboard Grid */}
           <motion.div
@@ -562,11 +544,12 @@ export default function SalesDashboardPage() {
                     campaigns.map((seq) => (
                       <div key={seq.id} className="space-y-1.5">
                         <div className="flex justify-between text-xs gap-2">
-                          <span
-                            className="font-semibold truncate"
-                            title={seq.name}>
+                          <Link
+                            href={`/sales/campaigns/${seq.id}/analytics`}
+                            className="font-semibold truncate hover:underline"
+                            title={`${seq.name}: view analytics`}>
                             {seq.name}
-                          </span>
+                          </Link>
                           <span className="text-[10px] font-mono text-muted-foreground shrink-0">
                             {seq.channel}
                           </span>

@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -100,7 +101,7 @@ export default function CrmHealthCard() {
   }, []);
 
   useEffect(() => {
-    if (user?.isSuperAdmin) load();
+    if (isPlatformUser(user)) load();
   }, [user, load]);
 
   const counts = connections.reduce<Record<string, number>>((acc, c) => {

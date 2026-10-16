@@ -7,6 +7,7 @@ import { LEAD_STATUS } from "../lib/lead-statuses.js";
 import { normalizePhone } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { escapeHtml } from "../lib/utils.js";
+import { recordTelnyxStatus } from "./message-events.controller.js";
 
 async function markLeadEngaged(leadId) {
   await prisma.lead.updateMany({
@@ -719,6 +720,11 @@ export const processTelnyxInboundSms = async (req, res) => {
 
     const event = req.body?.data;
     const eventType = event?.event_type;
+    // Delivery report for an SMS we sent; feeds campaign analytics.
+    if (eventType === "message.finalized") {
+      await recordTelnyxStatus(event.payload);
+      return res.status(200).json({ received: true });
+    }
     if (eventType !== "message.received") {
       console.log(`[SMS IN] Telnyx event "${eventType || "unknown"}" ignored.`);
       return res.status(200).json({ received: true });

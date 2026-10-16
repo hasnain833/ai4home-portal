@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -122,7 +123,7 @@ export default function AdminSupportPage() {
   const [log, setLog] = useState<AccessEntry[]>([]);
 
   useEffect(() => {
-    if (!user?.isSuperAdmin) return;
+    if (!isPlatformUser(user)) return;
     (async () => {
       const res = await fetch("/api/admin/companies");
       if (res.ok) {
@@ -140,7 +141,7 @@ export default function AdminSupportPage() {
   }, []);
 
   useEffect(() => {
-    if (user?.isSuperAdmin) loadLog();
+    if (isPlatformUser(user)) loadLog();
   }, [user, loadLog]);
 
   const openLeads = async () => {
@@ -176,7 +177,7 @@ export default function AdminSupportPage() {
 
   return (
     <div className="space-y-6">
-      {user?.isSuperAdmin && <SupportContactCard />}
+      {isPlatformUser(user) && <SupportContactCard />}
       <Card className="border-border bg-card shadow-sm">
         <CardHeader className="border-b border-border pb-4">
           <div className="flex items-center gap-3">

@@ -112,7 +112,7 @@ export function brandSmsBody(body, name) {
   return `${name}: ${text}`;
 }
 
-export const sendSms = async ({ to, body, tag, companyId = null, source = null, brand = true }) => {
+export const sendSms = async ({ to, body, tag, companyId = null, source = null, brand = true, track = null }) => {
   if (await isCompanySuspended(companyId)) {
     return { outcome: SMS_OUTCOME.SUSPENDED, to, body, provider: null, error: "Company is suspended." };
   }
@@ -128,7 +128,7 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
   const recipient = normalizePhone(to);
 
   const segments = countSegments(finalBody);
-  const meter = (outcome) =>
+  const meter = (outcome, providerMessageId = null) =>
     recordUsage({
       companyId,
       channel: "SMS",
@@ -137,6 +137,7 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
       outcome,
       source,
       recipient,
+      track: track && { ...track, providerMessageId },
     });
 
   try {
@@ -149,7 +150,7 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
     }
 
     console.log(`[SMS] ✅ Sent via ${cfg.provider} to ${result.to} (${segments} segment(s), ID: ${result.messageId})`);
-    await meter("sent");
+    await meter("sent", result.messageId);
     return { outcome: SMS_OUTCOME.SENT, segments, ...result };
   } catch (error) {
     console.error(`[SMS] ❌ Failed to send to ${to} via ${cfg.provider}: ${error.message}`);

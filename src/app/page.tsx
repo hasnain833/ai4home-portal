@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,7 +12,7 @@ export default function Home() {
   useEffect(() => {
     if (!isLoading) {
       if (user) {
-        if (user.isSuperAdmin) {
+        if (isPlatformUser(user)) {
           router.push("/admin");
           return;
         }

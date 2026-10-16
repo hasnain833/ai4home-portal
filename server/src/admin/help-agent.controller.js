@@ -1,7 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { chat, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
-import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
+import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 import { renderTemplate, checkTokens } from "../prompts/template.js";
 import { HELP_AGENT_DEFAULT_PROMPT, HELP_PLACEHOLDERS, PLATFORM_GUIDE } from "../prompts/help-agent.js";
 import { queryHelp } from "../services/vector-store.service.js";
@@ -21,7 +21,7 @@ async function livePrompt() {
 
 export const getHelpAgent = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const saved = (await setting(PROMPT_KEY))?.prompt || null;
     return res.json({
       prompt: saved || HELP_AGENT_DEFAULT_PROMPT,
@@ -38,7 +38,7 @@ export const getHelpAgent = async (req, res) => {
 // An empty prompt, or the default itself, resets to the built-in default.
 export const saveHelpAgent = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
 
     if (!prompt || prompt === HELP_AGENT_DEFAULT_PROMPT.trim()) {

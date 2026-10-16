@@ -44,7 +44,9 @@ import {
   RefreshCw,
   AlertTriangle,
   Zap,
+  BarChart3,
 } from "lucide-react";
+import Link from "next/link";
 import AutoNurtureWorkflow from "@/components/sales/AutoNurtureWorkflow";
 import { toast } from "sonner";
 import { describeSmsCost } from "@/lib/sms-segments";
@@ -597,6 +599,11 @@ export default function CampaignsPage() {
                       <CardDescription className="text-xs mt-1">Multi-step drip campaign flow settings.</CardDescription>
                     </div>
                     <div className="flex gap-2">
+                      <Button asChild variant="outline" size="sm" className="h-8 text-xs font-semibold">
+                        <Link href={`/sales/campaigns/${activeSeq.id}/analytics`}>
+                          <BarChart3 className="h-3.5 w-3.5 mr-1" /> Analytics
+                        </Link>
+                      </Button>
                       {activeSeq.status === "Completed" ? (
                         // A completed campaign is terminal — no re-enroll / re-launch.
                         <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/40">

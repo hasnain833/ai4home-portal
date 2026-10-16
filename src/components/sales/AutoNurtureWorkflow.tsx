@@ -13,7 +13,9 @@ import {
   UserPlus,
   Bot,
   ShieldCheck,
+  BarChart3,
 } from "lucide-react";
+import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +50,7 @@ type Touch = {
 type Phase = { id: number; name: string; range: string; goal: string; activeLeads: number };
 
 type Workflow = {
+  id: string;
   active: boolean;
   phases: Phase[];
   touches: Touch[];
@@ -266,6 +269,11 @@ export default function AutoNurtureWorkflow() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" className="gap-2 h-9">
+            <Link href={`/sales/campaigns/${wf.id}/analytics`}>
+              <BarChart3 className="h-4 w-4" /> Analytics
+            </Link>
+          </Button>
           <Button variant="outline" onClick={personalizeAll} disabled={!!bulk} className="gap-2 h-9">
             {bulk ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {bulk ? `Personalizing ${bulk.done}/${bulk.total}` : "Personalize with AI"}

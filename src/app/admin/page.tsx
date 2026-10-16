@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -53,11 +54,11 @@ export default function SuperAdminOverviewPage() {
       router.push("/login");
       return;
     }
-    if (!isLoading && user && !user.isSuperAdmin) router.push("/");
+    if (!isLoading && user && !isPlatformUser(user)) router.push("/");
   }, [user, isLoading, router]);
 
   useEffect(() => {
-    if (!user?.isSuperAdmin) return;
+    if (!isPlatformUser(user)) return;
 
     const fetchOverview = async () => {
       setLoading(true);

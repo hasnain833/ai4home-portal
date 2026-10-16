@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useCallback, useEffect, useState } from "react";
 import {
   Card,
@@ -64,7 +65,7 @@ export default function NewsDefaultsCard() {
   }, []);
 
   useEffect(() => {
-    if (user?.isSuperAdmin) load();
+    if (isPlatformUser(user)) load();
   }, [user, load]);
 
   const addSource = () => {

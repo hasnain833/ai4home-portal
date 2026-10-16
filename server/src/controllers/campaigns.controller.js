@@ -5,6 +5,7 @@ import { withActiveLeadFilter, isActiveLead } from "../lib/lead-audience.js";
 import { query as kbQuery } from "../services/vector-store.service.js";
 import { KB_SCOPES, buildBrandContext, dedupeKbCitations, parseLlmJson } from "../lib/sales-ai.js";
 import { LEAD_STATUS } from "../lib/lead-statuses.js";
+import { summarizeCampaign } from "../lib/campaign-analytics.js";
 import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
 import {
   renderTemplate,
@@ -85,6 +86,68 @@ export const getCampaigns = async (req, res) => {
   } catch (error) {
     console.error("[Campaigns List] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const ANALYTICS_DAYS = { "7d": 7, "30d": 30, "90d": 90, "180d": 180 };
+
+export const getCampaignAnalytics = async (req, res) => {
+  try {
+    const companyId = req.user.companyId;
+    const days = ANALYTICS_DAYS[req.query.period] || 30;
+    const campaign = await prisma.campaign.findFirst({
+      where: { id: req.params.id, companyId },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        kind: true,
+        steps: {
+          orderBy: { position: "asc" },
+          select: { id: true, position: true, type: true, subject: true, body: true, enabled: true },
+        },
+      },
+    });
+    if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const rows = await prisma.messageUsage.findMany({
+      where: { companyId, campaignId: campaign.id, createdAt: { gte: since } },
+      select: {
+        leadId: true,
+        stepId: true,
+        channel: true,
+        outcome: true,
+        createdAt: true,
+        deliveredAt: true,
+        openedAt: true,
+        clickedAt: true,
+        failedAt: true,
+        repliedAt: true,
+        bookedAt: true,
+      },
+    });
+    const bookedLeads = [...new Set(rows.filter((r) => r.bookedAt).map((r) => r.leadId))];
+    const enrollments = bookedLeads.length
+      ? await prisma.campaignEnrollment.findMany({
+          where: { campaignId: campaign.id, leadId: { in: bookedLeads } },
+          select: { leadId: true, createdAt: true },
+        })
+      : [];
+
+    return res.json({
+      campaign: { id: campaign.id, name: campaign.name, status: campaign.status, kind: campaign.kind },
+      days,
+      ...summarizeCampaign({
+        rows,
+        steps: campaign.steps,
+        enrolledAt: Object.fromEntries(enrollments.map((e) => [e.leadId, e.createdAt])),
+        days,
+      }),
+    });
+  } catch (error) {
+    console.error("Campaign analytics error:", error);
+    return res.status(500).json({ message: "Failed to load campaign analytics" });
   }
 };
 

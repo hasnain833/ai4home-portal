@@ -49,7 +49,7 @@ export class MailService {
     return !!(this.SMTP_USER && this.SMTP_PASS);
   }
 
-  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null, noReply = false }) {
+  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null, noReply = false, track = null }) {
     if (await isCompanySuspended(companyId)) {
       return { success: false, outcome: MAIL_OUTCOME.SUSPENDED, error: "Company is suspended." };
     }
@@ -80,6 +80,7 @@ export class MailService {
         outcome,
         source,
         recipient: String(to || "").trim().toLowerCase(),
+        track,
       });
 
     try {

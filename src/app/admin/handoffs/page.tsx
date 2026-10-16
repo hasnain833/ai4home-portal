@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,7 +63,7 @@ export default function HandoffIssuesPage() {
   }, [fetchIssues]);
 
   useEffect(() => {
-    if (!user?.isSuperAdmin) return;
+    if (!isPlatformUser(user)) return;
     let cancelled = false;
     fetchIssues()
       .then((data) => {

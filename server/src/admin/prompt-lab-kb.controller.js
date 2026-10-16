@@ -21,7 +21,7 @@ import {
   getRetrievalStatus as warrantyRetrievalStatus,
 } from "../services/warranty-vector.service.js";
 import { KB_SCOPES } from "../lib/sales-ai.js";
-import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
+import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 
 
 const KB_BACKENDS = {
@@ -113,7 +113,7 @@ function toSafeDoc(doc) {
 
 export const listKbDocuments = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const backend = backendFor(req, res);
     if (!backend) return;
 
@@ -182,7 +182,7 @@ export const listKbDocuments = async (req, res) => {
 
 export const uploadKbDocument = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const backend = backendFor(req, res);
     if (!backend) return;
 
@@ -290,7 +290,7 @@ function mayMutate(doc) {
 
 export const deleteKbDocument = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const backend = backendFor(req, res);
     if (!backend) return;
     const { documentId } = req.params;
@@ -324,7 +324,7 @@ export const deleteKbDocument = async (req, res) => {
 
 export const reindexKbDocument = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const backend = backendFor(req, res);
     if (!backend) return;
     const { documentId } = req.params;
@@ -361,7 +361,7 @@ export const reindexKbDocument = async (req, res) => {
 
 export const getKbDocumentUrl = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const backend = backendFor(req, res);
     if (!backend) return;
     const { documentId } = req.params;
@@ -410,7 +410,7 @@ export const getKbDocumentUrl = async (req, res) => {
 
 export const probeKb = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const backend = backendFor(req, res);
     if (!backend) return;
 

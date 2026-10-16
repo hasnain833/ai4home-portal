@@ -13,13 +13,13 @@ import {
   getPricing,
   invalidatePricingCache,
 } from "../lib/usage.js";
-import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
+import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 
 
 const SYNC_WINDOW_HOURS = 24;
 export const getCrmHealth = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const connections = await prisma.salesforceConnection.findMany({
       select: {
@@ -136,7 +136,7 @@ function safeHost(url) {
 
 export const getDefaultNewsSources = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     if (!prisma.platformSetting) {
       return res.status(503).json({
         message:
@@ -174,7 +174,7 @@ export const getDefaultNewsSources = async (req, res) => {
 
 export const updateDefaultNewsSources = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     if (!prisma.platformSetting) {
       return res.status(503).json({
         message:
@@ -228,7 +228,7 @@ const SUPPORT_LEAD_LIMIT = 100;
 
 export const getSupportLeads = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const { companyId } = req.params;
     const search = String(req.query.search ?? "");
@@ -300,7 +300,7 @@ export const getSupportLeads = async (req, res) => {
 
 export const getSupportAccessLog = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     if (!prisma.auditLog) {
       return res.status(503).json({
         message:
@@ -336,7 +336,7 @@ const SECRET_COLUMNS = [
 
 export const getSecurityPosture = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const breakdown = [];
     let plaintext = 0;
@@ -394,7 +394,7 @@ const MONTHS_BACK = 6;
 
 export const getMessagingSpend = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const since = new Date();
     since.setMonth(since.getMonth() - MONTHS_BACK);
@@ -531,7 +531,7 @@ export const getMessagingSpend = async (req, res) => {
 
 export const setMessagingPricing = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const incoming = req.body?.pricing;
     if (!incoming || typeof incoming !== "object") {
@@ -589,7 +589,7 @@ export const getSupportContact = async (req, res) => {
 
 export const updateSupportContact = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const phone = String(req.body?.phone || "").trim().slice(0, 40);
     if (!phone) return res.status(400).json({ message: "Phone number is required." });
 

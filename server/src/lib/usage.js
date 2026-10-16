@@ -96,6 +96,7 @@ export async function recordUsage({
   outcome = "sent",
   source = null,
   recipient = null,
+  track = null,
 }) {
   try {
     let cost = costMicros;
@@ -116,6 +117,12 @@ export async function recordUsage({
         outcome,
         source,
         recipient,
+        ...(track && {
+          leadId: track.leadId || null,
+          campaignId: track.campaignId || null,
+          stepId: track.stepId || null,
+          providerMessageId: track.providerMessageId || null,
+        }),
       },
     });
   } catch (error) {

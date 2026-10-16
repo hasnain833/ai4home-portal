@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser, canAdmin } from "@/lib/admin-permissions";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +75,8 @@ const verificationBadge = (status: string) => {
 
 export default function AdminCompaniesPage() {
   const { user } = useAuth();
+  // View-only staff see the list; the server rejects changes regardless.
+  const canManage = canAdmin(user, "companies.manage");
   const confirm = useConfirm();
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,7 +93,7 @@ export default function AdminCompaniesPage() {
   };
 
   useEffect(() => {
-    if (user?.isSuperAdmin) fetchCompanies();
+    if (isPlatformUser(user)) fetchCompanies();
   }, [user]);
 
   const [actingId, setActingId] = useState<string | null>(null);
@@ -264,6 +267,7 @@ export default function AdminCompaniesPage() {
                         <div className="flex flex-wrap gap-1.5">
                           <button
                             type="button"
+                            disabled={!canManage}
                             title={company.warrantyEnabled ? "Click to disable" : "Click to enable"}
                             onClick={() => toggleWorkspace(company, "warrantyEnabled")}
                             className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium transition hover:ring-1 hover:ring-[#b48c3c] ${company.warrantyEnabled ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-zinc-500/10 text-muted-foreground line-through"}`}
@@ -272,6 +276,7 @@ export default function AdminCompaniesPage() {
                           </button>
                           <button
                             type="button"
+                            disabled={!canManage}
                             title={company.salesEnabled ? "Click to disable" : "Click to enable"}
                             onClick={() => toggleWorkspace(company, "salesEnabled")}
                             className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium transition hover:ring-1 hover:ring-[#b48c3c] ${company.salesEnabled ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-zinc-500/10 text-muted-foreground line-through"}`}
@@ -286,6 +291,7 @@ export default function AdminCompaniesPage() {
                             Signed
                             <input
                               type="date"
+                              disabled={!canManage}
                               className="rounded border border-border bg-background px-1 py-0.5 text-foreground"
                               value={dateInput(company.contractSignedAt)}
                               onChange={(e) => saveOnboarding(company.id, "contractSignedAt", e.target.value)}
@@ -295,6 +301,7 @@ export default function AdminCompaniesPage() {
                             Live
                             <input
                               type="date"
+                              disabled={!canManage}
                               className="rounded border border-border bg-background px-1 py-0.5 text-foreground"
                               value={dateInput(company.goLiveAt)}
                               onChange={(e) => saveOnboarding(company.id, "goLiveAt", e.target.value)}
@@ -311,7 +318,7 @@ export default function AdminCompaniesPage() {
                         </div>
                       </TableCell>
                       <TableCell className="pr-6 text-right">
-                        {company.suspendedAt ? (
+                        {!canManage ? null : company.suspendedAt ? (
                           <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" disabled={actingId === company.id} onClick={() => setSuspended(company, false)}>
                             {actingId === company.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Reactivate
                           </Button>
@@ -386,19 +393,19 @@ export default function AdminCompaniesPage() {
 
               <DialogFooter>
                 {reviewing.verificationStatus === "VERIFIED" ? (
-                  <Button variant="outline" className="text-red-600 hover:text-red-700" disabled={actingId === reviewing.id} onClick={() => verify(reviewing.id, "reject")}>
+                  <Button variant="outline" className="text-red-600 hover:text-red-700" disabled={!canManage || actingId === reviewing.id} onClick={() => verify(reviewing.id, "reject")}>
                     {actingId === reviewing.id ? "Working…" : "Revoke verification"}
                   </Button>
                 ) : (
                   <>
                     {reviewing.verificationStatus === "SUBMITTED" && (
-                      <Button variant="outline" className="text-red-600 hover:text-red-700" disabled={actingId === reviewing.id} onClick={() => verify(reviewing.id, "reject")}>
+                      <Button variant="outline" className="text-red-600 hover:text-red-700" disabled={!canManage || actingId === reviewing.id} onClick={() => verify(reviewing.id, "reject")}>
                         Reject
                       </Button>
                     )}
                     <Button
                       className="bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90"
-                      disabled={actingId === reviewing.id || !reviewing.verificationDocUrl || !reviewing.agreementDocUrl}
+                      disabled={!canManage || actingId === reviewing.id || !reviewing.verificationDocUrl || !reviewing.agreementDocUrl}
                       onClick={() => verify(reviewing.id, "approve")}
                     >
                       {actingId === reviewing.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <><CheckCircle2 className="mr-1.5 h-4 w-4" /> Verify</>}

@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,7 +26,7 @@ export default function HubPage() {
     if (!isLoading) {
       if (!user) {
         router.push("/login");
-      } else if (user.isSuperAdmin) {
+      } else if (isPlatformUser(user)) {
         router.push("/admin");
       }
     }

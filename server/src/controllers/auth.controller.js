@@ -12,6 +12,7 @@ import { sendSms, smsSent, toE164 } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { Templates, SmsTemplates } from "../services/templates.js";
 import { effectiveSalesPermissions } from "../lib/permissions.js";
+import { effectiveAdminPermissions } from "../lib/admin-permissions.js";
 import { passwordSetupLink, getSupabaseAdmin } from "../lib/homeowner-account.js";
 
 const safeEqual = (a, b) => {
@@ -36,6 +37,7 @@ export const getMe = async (req, res) => {
         name: req.user.name || "Super Admin",
         role: "admin",
         isSuperAdmin: true,
+        adminPermissions: effectiveAdminPermissions({ isSuperAdmin: true }),
         salesPermissions: effectiveSalesPermissions({ role: "ADMIN", isSuperAdmin: true }),
         hasWarrantyAccess: true,
         hasSalesAccess: true,
@@ -57,6 +59,26 @@ export const getMe = async (req, res) => {
       return res
         .status(404)
         .json({ message: "User profile not found in local database." });
+    }
+
+    if (dbUser.role === "SUPER_STAFF") {
+      return res.json({
+        id: dbUser.id,
+        email: dbUser.email,
+        name: dbUser.name,
+        phone: dbUser.phone,
+        role: "super_staff",
+        isSuperAdmin: false,
+        isSuperStaff: true,
+        adminPermissions: effectiveAdminPermissions({ isSuperStaff: true, adminPermissions: dbUser.adminPermissions }),
+        salesPermissions: [],
+        hasWarrantyAccess: false,
+        hasSalesAccess: false,
+        verificationStatus: "VERIFIED",
+        companyName: "Aiforhomebuilder",
+        avatar: dbUser.avatar || null,
+        online: true,
+      });
     }
 
     const isAdmin = dbUser.role === "ADMIN" || dbUser.role === "SUPER_ADMIN";
@@ -112,6 +134,7 @@ export const getMe = async (req, res) => {
       companyName: dbUser.company?.name || null,
       role: isSuperAdmin ? "admin" : dbUser.role.toLowerCase(),
       isSuperAdmin,
+      adminPermissions: effectiveAdminPermissions({ isSuperAdmin }),
       online: true,
     });
   } catch (error) {

@@ -17,7 +17,7 @@ import {
   AGENT_TYPES,
 } from "../prompts/index.js";
 import { getLivePrompts, invalidateLivePrompts } from "../prompts/live.js";
-import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
+import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 
 
 const MAX_TRANSCRIPT_TURNS = 40;
@@ -33,7 +33,7 @@ function normalizeDraft(body = {}) {
 
 export const getPromptLab = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     let versions = [];
     let tableReady = true;
@@ -72,7 +72,7 @@ export const getPromptLab = async (req, res) => {
 
 export const savePromptVersion = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const draft = normalizeDraft(req.body);
     const { errors, warnings } = validatePromptDraft(draft);
@@ -118,7 +118,7 @@ export const savePromptVersion = async (req, res) => {
 
 export const setCurrentPromptVersion = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const { versionId } = req.params;
 
     const exists = await prisma.salesAgentPromptVersion.findUnique({ where: { id: versionId } });
@@ -153,7 +153,7 @@ export const setCurrentPromptVersion = async (req, res) => {
 
 export const setPromptVersionLive = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const { versionId } = req.params;
 
     const target = await prisma.salesAgentPromptVersion.findUnique({ where: { id: versionId } });
@@ -221,7 +221,7 @@ export const setPromptVersionLive = async (req, res) => {
 
 export const revertToCodeDefaults = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const previous = await prisma.salesAgentPromptVersion.findFirst({ where: { isLive: true } });
     if (!previous) {
@@ -252,7 +252,7 @@ export const revertToCodeDefaults = async (req, res) => {
 
 export const deletePromptVersion = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const { versionId } = req.params;
 
     const existing = await prisma.salesAgentPromptVersion.findUnique({ where: { id: versionId } });
@@ -356,7 +356,7 @@ function mockLead(company, firstName) {
 
 export const previewPrompt = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const draft = normalizeDraft(req.body?.draft || req.body);
     const ctx = await resolveTestContext({ question: req.body?.question || "" });
@@ -399,7 +399,7 @@ export const previewPrompt = async (req, res) => {
 
 export const promptLabChat = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const messages = Array.isArray(req.body?.messages) ? req.body.messages.slice(-MAX_TRANSCRIPT_TURNS) : [];
     if (!messages.length) {

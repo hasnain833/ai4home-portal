@@ -12,7 +12,7 @@ import { AGENT_TYPES } from "../prompts/registry.js";
 import { getLivePrompts, invalidateLivePrompts } from "../prompts/live.js";
 import { detectHazard, hazardNotice } from "../lib/warranty-hazards.js";
 import { describeKnown } from "../lib/warranty-known.js";
-import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
+import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 
 /** Fixed so the preview renders the same text every time it is opened. */
 const SAMPLE_COVERAGE_END = "2029-01-09T00:00:00.000Z";
@@ -45,7 +45,7 @@ function normalizeDraft(body = {}) {
 
 export const getWarrantyPromptLab = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     let versions = [];
     let tableReady = true;
@@ -83,7 +83,7 @@ export const getWarrantyPromptLab = async (req, res) => {
 
 export const saveWarrantyPromptVersion = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const draft = normalizeDraft(req.body);
     const { errors, warnings } = validateWarrantyDraft(draft);
@@ -125,7 +125,7 @@ export const saveWarrantyPromptVersion = async (req, res) => {
 
 export const setCurrentWarrantyVersion = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const { versionId } = req.params;
 
     const exists = await prisma.warrantyAgentPromptVersion.findUnique({ where: { id: versionId } });
@@ -149,7 +149,7 @@ export const setCurrentWarrantyVersion = async (req, res) => {
 
 export const setWarrantyVersionLive = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const { versionId } = req.params;
 
     const target = await prisma.warrantyAgentPromptVersion.findUnique({ where: { id: versionId } });
@@ -189,7 +189,7 @@ export const setWarrantyVersionLive = async (req, res) => {
 
 export const revertWarrantyToDefaults = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const previous = await prisma.warrantyAgentPromptVersion.findFirst({ where: { isLive: true } });
     if (!previous) return res.json({ message: "Already running the code defaults.", changed: false });
@@ -210,7 +210,7 @@ export const revertWarrantyToDefaults = async (req, res) => {
 
 export const deleteWarrantyVersion = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const { versionId } = req.params;
 
     const existing = await prisma.warrantyAgentPromptVersion.findUnique({ where: { id: versionId } });
@@ -234,7 +234,7 @@ export const deleteWarrantyVersion = async (req, res) => {
 
 export const warrantyPromptLabChat = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const messages = Array.isArray(req.body?.messages)
       ? req.body.messages.slice(-MAX_TRANSCRIPT_TURNS) : [];
@@ -303,7 +303,7 @@ export const warrantyPromptLabChat = async (req, res) => {
 
 export const previewWarrantyPrompt = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
 
     const draft = normalizeDraft(req.body?.draft || req.body);
     const phase = String(req.body?.phase || "INTAKE").toUpperCase();

@@ -8,6 +8,7 @@ datasource db {
 
 enum Role {
   SUPER_ADMIN
+  SUPER_STAFF
   ADMIN
   STAFF
   HOMEOWNER
@@ -43,6 +44,7 @@ model User {
   hasWarrantyAccess     Boolean                @default(true)
   hasSalesAccess        Boolean                @default(false)
   salesPermissions      String[]               @default([])
+  adminPermissions      String[]               @default([])
   lastActiveWorkspace   String?                @default("warranty")
    pendingEmail          String?
   emailChangeTokenHash  String?
@@ -814,10 +816,23 @@ model MessageUsage {
   source     String?
   recipient  String?
   createdAt  DateTime @default(now())
+  leadId            String?
+  campaignId        String?
+  stepId            String?
+  providerMessageId String?
+  deliveredAt       DateTime?
+  openedAt          DateTime?
+  clickedAt         DateTime?
+  failedAt          DateTime?
+  repliedAt         DateTime?
+  bookedAt          DateTime?
 
   @@index([companyId, createdAt])
   @@index([channel, createdAt])
   @@index([channel, recipient, createdAt])
+  @@index([campaignId, createdAt])
+  @@index([providerMessageId])
+  @@index([leadId, createdAt])
 }
 
 model PlatformSetting {

@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
+import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 import { toE164 } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
@@ -31,7 +31,7 @@ const BOOKING_HORIZON_DAYS = 21;
 
 const wrap = (label, fn, { admin = true } = {}) => async (req, res) => {
   try {
-    if (admin && denyUnlessSuperAdmin(req, res)) return;
+    if (admin && denyUnlessAdminAccess(req, res)) return;
     await fn(req, res);
   } catch (error) {
     console.error(`[B2B ${label}] Error:`, error);

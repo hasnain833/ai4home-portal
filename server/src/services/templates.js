@@ -419,6 +419,17 @@ export const Templates = {
     return wrapEmail(content, "You've been invited", companyName, COLORS.primary);
   },
 
+  getSuperStaffInviteEmail: (name, actionLink) => {
+    const content = `
+      <p style="margin-top: 0;">Hello <strong>${escapeHtml(name)}</strong>,</p>
+      <p>You've been added to the Aiforhomebuilder admin team. Set your password, then sign in on the normal sign-in page.</p>
+      ${emailButton(actionLink, "Set your password")}
+      <p style="font-size: 14px; color: ${COLORS.textMuted};">This link expires after a short time. If it has,
+      use "Forgot password" on the sign-in page with this email address.</p>
+    `;
+    return wrapEmail(content, "You've been invited");
+  },
+
   getForgotPasswordEmail: (actionLink) => {
     const content = `
       <p style="margin-top: 0;">Hi,</p>

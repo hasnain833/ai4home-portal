@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -261,7 +262,7 @@ export default function PromptLabPage() {
   }, []);
 
   useEffect(() => {
-    if (user?.isSuperAdmin) { load(); loadWarranty(); }
+    if (isPlatformUser(user)) { load(); loadWarranty(); }
   }, [user, load, loadWarranty]);
 
   useEffect(() => {
@@ -673,7 +674,7 @@ export default function PromptLabPage() {
     await loadWarranty();
   };
 
-  if (!user?.isSuperAdmin) {
+  if (!isPlatformUser(user)) {
     return (
       <div className="p-8 text-sm text-muted-foreground">
         This page is restricted to platform super admins.

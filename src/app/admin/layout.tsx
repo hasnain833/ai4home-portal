@@ -25,27 +25,38 @@ import {
   Target,
   Megaphone,
   ArrowRightLeft,
+  UserCog,
+  ShieldAlert,
+  type LucideIcon,
 } from "lucide-react";
+import { canAdmin, isPlatformUser, type AdminPermission } from "@/lib/admin-permissions";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { BrandLogo } from "@/components/BrandLogo";
 
-const adminNavItems = [
-  { name: "Overview", href: "/admin", icon: LayoutDashboard },
-  { name: "Companies", href: "/admin/companies", icon: Building2 },
-  { name: "Business Leads", href: "/admin/leads", icon: Target },
-  { name: "Campaigns", href: "/admin/campaigns", icon: Megaphone },
-  { name: "CRM & News", href: "/admin/integrations", icon: PlugZap },
-  { name: "Hand-off Issues", href: "/admin/handoffs", icon: ArrowRightLeft },
-  { name: "Support Access", href: "/admin/support", icon: LifeBuoy },
+// `perm`: the Super Staff areas that open the page (any one is enough);
+// null means Super Admin only. The server enforces the same areas.
+const adminNavItems: { name: string; href: string; icon: LucideIcon; perm: AdminPermission[] | null }[] = [
+  { name: "Overview", href: "/admin", icon: LayoutDashboard, perm: ["companies.view"] },
+  { name: "Companies", href: "/admin/companies", icon: Building2, perm: ["companies.view"] },
+  { name: "Business Leads", href: "/admin/leads", icon: Target, perm: ["b2b"] },
+  { name: "Campaigns", href: "/admin/campaigns", icon: Megaphone, perm: ["b2b"] },
+  { name: "CRM & News", href: "/admin/integrations", icon: PlugZap, perm: ["integrations"] },
+  { name: "Hand-off Issues", href: "/admin/handoffs", icon: ArrowRightLeft, perm: ["handoffs"] },
+  { name: "Support Access", href: "/admin/support", icon: LifeBuoy, perm: ["support"] },
   {
     name: "Appointments",
     href: "/admin/sales-agent-appointments",
     icon: CalendarRange,
+    perm: ["appointments"],
   },
-  { name: "Usage & Costs", href: "/admin/costs", icon: Receipt },
-  { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical },
+  { name: "Usage & Costs", href: "/admin/costs", icon: Receipt, perm: ["costs"] },
+  { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical, perm: ["prompt-lab"] },
+  { name: "Staff", href: "/admin/staff", icon: UserCog, perm: null },
 ];
+
+const navItemFor = (pathname: string) =>
+  adminNavItems.find((i) => (i.href === "/admin" ? pathname === "/admin" : pathname.startsWith(i.href)));
 
 const subscribeToHydration = () => () => {};
 
@@ -68,16 +79,24 @@ export default function AdminLayout({
   const router = useRouter();
   const { user, logout, isLoading } = useAuth();
   const { theme, setTheme } = useTheme();
+  const allowed = (item: (typeof adminNavItems)[number]) =>
+    item.perm === null ? !!user?.isSuperAdmin : canAdmin(user, ...item.perm);
+  const navItems = adminNavItems.filter(allowed);
+  const current = navItemFor(pathname);
+  const pageAllowed = !current || allowed(current);
 
   useEffect(() => {
     if (!isLoading && mounted) {
       if (!user) {
         router.push("/login");
-      } else if (!user.isSuperAdmin) {
+      } else if (!isPlatformUser(user)) {
         router.push("/");
+      } else if (pathname === "/admin" && !pageAllowed && navItems[0]) {
+        // Staff without the Overview land on their first page instead.
+        router.replace(navItems[0].href);
       }
     }
-  }, [user, isLoading, mounted, router]);
+  }, [user, isLoading, mounted, router, pathname, pageAllowed, navItems]);
 
   const toggleSidebar = () => {
     const newVal = !sidebarExpanded;
@@ -163,7 +182,7 @@ export default function AdminLayout({
 
           {/* Navigation */}
           <nav className="flex-1 space-y-2 p-3 overflow-y-auto no-scrollbar">
-            {adminNavItems.map((item) => {
+            {navItems.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <Link key={item.name} href={item.href}>
@@ -219,7 +238,7 @@ export default function AdminLayout({
                       {user?.name || "System Admin"}
                     </p>
                     <p className="text-[10px] text-white/60 uppercase tracking-wider">
-                      Root Access
+                      {user?.isSuperAdmin ? "Root Access" : "Staff"}
                     </p>
                   </div>
                 )}
@@ -304,7 +323,7 @@ export default function AdminLayout({
                   </div>
 
                   <nav className="flex-1 space-y-2 p-3">
-                    {adminNavItems.map((item) => {
+                    {navItems.map((item) => {
                       const isActive = pathname === item.href;
                       return (
                         <Link
@@ -355,7 +374,17 @@ export default function AdminLayout({
 
         {/* Page Content */}
         <div className="flex-1 overflow-auto p-4 md:p-8">
-          <div className="mx-auto max-w-7xl h-full">{children}</div>
+          <div className="mx-auto max-w-7xl h-full">
+            {pageAllowed ? (
+              children
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                <ShieldAlert className="h-8 w-8" />
+                <p className="font-medium text-foreground">You don&apos;t have access to this page.</p>
+                <p className="text-sm">Ask the Super Admin to give you access.</p>
+              </div>
+            )}
+          </div>
         </div>
       </main>
     </div>

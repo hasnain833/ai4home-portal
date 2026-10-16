@@ -9,7 +9,7 @@ export const getCompanies = async (req, res) => {
   try {
     const session = req.user;
 
-    if (!session || !session.isSuperAdmin) {
+    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
@@ -40,7 +40,7 @@ export const getCompanies = async (req, res) => {
 export const getUsers = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || !session.isSuperAdmin) {
+    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
@@ -96,7 +96,7 @@ export const getUsers = async (req, res) => {
 export const updateCompanyWorkspaces = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || !session.isSuperAdmin) {
+    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
@@ -132,7 +132,7 @@ export const updateCompanyWorkspaces = async (req, res) => {
 export const verifyCompany = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || !session.isSuperAdmin) {
+    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
@@ -196,7 +196,7 @@ export const verifyCompany = async (req, res) => {
 export const updateUserAccess = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || !session.isSuperAdmin) {
+    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
@@ -234,7 +234,7 @@ export const updateUserAccess = async (req, res) => {
 // until reactivated (see lib/company-suspension.js).
 export const setCompanySuspension = async (req, res) => {
   try {
-    if (!req.user?.isSuperAdmin) return res.status(403).json({ message: "Unauthorized" });
+    if (!req.user?.isSuperAdmin && req.adminAccess !== true) return res.status(403).json({ message: "Unauthorized" });
     if (typeof req.body?.suspended !== "boolean") {
       return res.status(400).json({ message: "suspended must be true or false" });
     }
@@ -262,7 +262,7 @@ export const setCompanySuspension = async (req, res) => {
 
 export const updateCompanyOnboarding = async (req, res) => {
   try {
-    if (!req.user?.isSuperAdmin) return res.status(403).json({ message: "Unauthorized" });
+    if (!req.user?.isSuperAdmin && req.adminAccess !== true) return res.status(403).json({ message: "Unauthorized" });
 
     const data = {};
     for (const field of ["contractSignedAt", "goLiveAt"]) {

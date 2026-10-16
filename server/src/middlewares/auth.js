@@ -7,6 +7,7 @@ import {
   SESSION_COOKIE_OPTIONS,
 } from "../lib/superadmin-session.js";
 import { hasSalesPermission, SALES_PERMISSIONS } from "../lib/permissions.js";
+import { hasAnyAdminPermission, normalizeAdminPermissions } from "../lib/admin-permissions.js";
 import { withDbRetry } from "../lib/utils.js";
 import { SUSPENDED_MESSAGE } from "../lib/company-suspension.js";
 
@@ -32,6 +33,7 @@ async function loadAuthUser(email) {
           hasWarrantyAccess: true,
           hasSalesAccess: true,
           salesPermissions: true,
+          adminPermissions: true,
           company: { select: { salesEnabled: true, warrantyEnabled: true, suspendedAt: true } },
         },
       }),
@@ -200,6 +202,25 @@ export async function requireAuth(req, res, next) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
+    // Super Staff work only in the Super Admin portal: no company, no tenant
+    // workspace, and each admin area is checked per route by requireAdmin().
+    if (dbUser.role === "SUPER_STAFF") {
+      req.user = {
+        id: dbUser.id,
+        email: dbUser.email,
+        name: dbUser.name,
+        role: "SUPER_STAFF",
+        companyId: null,
+        hasWarrantyAccess: false,
+        hasSalesAccess: false,
+        isSuperAdmin: false,
+        isSuperStaff: true,
+        adminPermissions: normalizeAdminPermissions(dbUser.adminPermissions),
+        salesPermissions: [],
+      };
+      return next();
+    }
+
     const isSuperAdmin = dbUser.role === "SUPER_ADMIN";
     const isAdmin = dbUser.role === "ADMIN" || isSuperAdmin;
     const isStaff = dbUser.role === "STAFF";
@@ -306,8 +327,23 @@ export function requirePermission(permission) {
   };
 }
 
-export function denyUnlessSuperAdmin(req, res) {
-  if (!req.user?.isSuperAdmin) {
+// Route guard for the Super Admin portal: the Super Admin, or Super Staff
+// holding at least one of the given areas.
+export function requireAdmin(...permissions) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+    if (req.user.isSuperAdmin || hasAnyAdminPermission(req.user, permissions)) {
+      req.adminAccess = true;
+      return next();
+    }
+    return res.status(403).json({ message: "You don't have access to this area." });
+  };
+}
+
+// In-handler check. Fails closed: Super Staff pass only on a route whose
+// requireAdmin() guard already approved them; anything unguarded stays Super Admin-only.
+export function denyUnlessAdminAccess(req, res) {
+  if (!req.user?.isSuperAdmin && req.adminAccess !== true) {
     res.status(403).json({ message: "Unauthorized" });
     return true;
   }

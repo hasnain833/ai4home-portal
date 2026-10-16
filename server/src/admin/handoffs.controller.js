@@ -2,14 +2,14 @@ import prisma from "../lib/prisma.js";
 import { HANDOFF_CHANNEL, resolveHandoffFailures } from "../lib/dead-letter.js";
 import { runCloseWon, sendHomeownerWelcome } from "../controllers/leads.controller.js";
 import { writeAuditLog } from "../lib/audit.js";
-import { denyUnlessSuperAdmin } from "../middlewares/auth.js";
+import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 
 // Admin > Hand-off Issues: failed sales-to-warranty hand-offs across all builders.
 
 
 export const listHandoffIssues = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const status = req.query.status === "RESOLVED" ? "RESOLVED" : "PENDING";
     const rows = await prisma.deadLetter.findMany({
       where: { channel: HANDOFF_CHANNEL, status },
@@ -50,7 +50,7 @@ export const listHandoffIssues = async (req, res) => {
 /** Runs the hand-off again with the builder's original choices. */
 export const retryHandoffIssue = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const row = await prisma.deadLetter.findFirst({
       where: { id: req.params.id, channel: HANDOFF_CHANNEL, status: "PENDING" },
     });
@@ -93,7 +93,7 @@ export const retryHandoffIssue = async (req, res) => {
 /** Marks an issue resolved after it was fixed by hand. */
 export const resolveHandoffIssue = async (req, res) => {
   try {
-    if (denyUnlessSuperAdmin(req, res)) return;
+    if (denyUnlessAdminAccess(req, res)) return;
     const row = await prisma.deadLetter.findFirst({
       where: { id: req.params.id, channel: HANDOFF_CHANNEL },
       select: { id: true, leadId: true, companyId: true },

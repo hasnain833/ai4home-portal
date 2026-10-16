@@ -3,6 +3,7 @@ import { requireAuth, requirePermission } from "../middlewares/auth.js";
 import {
   getCampaigns,
   getCampaignDetail,
+  getCampaignAnalytics,
   createCampaign,
   updateCampaign,
   updateCampaignSteps,
@@ -28,6 +29,7 @@ router.get("/auto", requireAuth, getAutoNurture);
 router.put("/auto", requireAuth, canManage, setAutoNurtureActive);
 router.patch("/auto/steps/:stepId", requireAuth, canManage, updateAutoNurtureStep);
 router.get("/:id", requireAuth, getCampaignDetail);
+router.get("/:id/analytics", requireAuth, getCampaignAnalytics);
 
 router.post("/generate-copy", requireAuth, canManage, generateCampaignCopy);
 router.post("/from-news", requireAuth, canManage, createCampaignFromNews);

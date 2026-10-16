@@ -13,6 +13,7 @@ import {
   processBrevoInboundEmail,
   processTelnyxInboundSms,
 } from "../controllers/compliance.controller.js";
+import { processBrevoEmailEvents } from "../controllers/message-events.controller.js";
 
 const router = Router();
 
@@ -22,6 +23,7 @@ router.delete("/suppression", requireAuth, requireRoles(["ADMIN", "STAFF"]), del
 router.post("/inbound", requireWebhookSecret("Compliance Inbound"), processInbound);
 router.post("/unsubscribe", requireWebhookSecret("Compliance Unsubscribe"), unsubscribeWebhook);
 router.post("/inbound/email", requireWebhookSecret("Brevo Inbound"), processBrevoInboundEmail);
+router.post("/events/email", requireWebhookSecret("Brevo Events"), processBrevoEmailEvents);
 
 router.post(
   "/unsubscribe-link/:leadId",

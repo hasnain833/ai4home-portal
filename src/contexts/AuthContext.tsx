@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { AuthChangeEvent } from "@supabase/supabase-js";
 
-export type UserRole = "admin" | "staff" | "homeowner" | "trade";
+export type UserRole = "admin" | "staff" | "homeowner" | "trade" | "super_staff";
 
 export interface Property {
   id: string;
@@ -30,6 +30,8 @@ export interface User {
   phone?: string | null;
   role: UserRole;
   isSuperAdmin?: boolean;
+  isSuperStaff?: boolean;
+  adminPermissions?: string[];
   avatar?: string;
   companyId?: string;
   companyName?: string;

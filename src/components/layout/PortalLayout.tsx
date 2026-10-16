@@ -1,5 +1,6 @@
 "use client";
 
+import { isPlatformUser } from "@/lib/admin-permissions";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -149,7 +150,7 @@ export default function PortalLayout({
   }, [mounted, user]);
 
   useEffect(() => {
-    if (mounted && user?.isSuperAdmin) {
+    if (mounted && isPlatformUser(user)) {
       router.push("/admin");
     }
     // Trades have their own portal. Ticket links in their emails point here,

@@ -1,5 +1,5 @@
 import express from "express";
-import { requireAuth } from "../middlewares/auth.js";
+import { requireAuth, requireAdmin } from "../middlewares/auth.js";
 import { getHelpAgent, saveHelpAgent, helpChat } from "../admin/help-agent.controller.js";
 import {
   getStaff,
@@ -30,6 +30,13 @@ import {
 } from "../admin/platform.controller.js";
 import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
 import * as b2b from "../admin/b2b.controller.js";
+import {
+  listSuperStaff,
+  inviteSuperStaff,
+  updateSuperStaff,
+  resendSuperStaffInvite,
+  removeSuperStaff,
+} from "../admin/super-staff.controller.js";
 import { listHandoffIssues, retryHandoffIssue, resolveHandoffIssue } from "../admin/handoffs.controller.js";
 import {
   getPromptLab,
@@ -64,112 +71,118 @@ import { handleUploadErrors } from "../middlewares/upload.js";
 
 const router = express.Router();
 
-router.get("/messaging/spend", requireAuth, getMessagingSpend);
-router.patch("/messaging/pricing", requireAuth, setMessagingPricing);
+router.get("/messaging/spend", requireAuth, requireAdmin("costs"), getMessagingSpend);
+router.patch("/messaging/pricing", requireAuth, requireAdmin("costs"), setMessagingPricing);
 
-router.get("/companies", requireAuth, getCompanies);
-router.get("/users", requireAuth, getUsers);
+router.get("/companies", requireAuth, requireAdmin("companies.view", "support"), getCompanies);
+router.get("/users", requireAuth, requireAdmin("companies.view"), getUsers);
 router.patch(
   "/companies/:companyId/workspaces",
-  requireAuth,
+  requireAuth, requireAdmin("companies.manage"),
   updateCompanyWorkspaces,
 );
-router.patch("/users/:userId/access", requireAuth, updateUserAccess);
-router.patch("/companies/:companyId/verify", requireAuth, verifyCompany);
-router.patch("/companies/:companyId/onboarding", requireAuth, updateCompanyOnboarding);
-router.patch("/companies/:companyId/suspension", requireAuth, setCompanySuspension);
-router.get("/crm-health", requireAuth, getCrmHealth);
-router.get("/news-defaults", requireAuth, getDefaultNewsSources);
-router.put("/news-defaults", requireAuth, updateDefaultNewsSources);
-router.get("/support/leads/:companyId", requireAuth, getSupportLeads);
-router.get("/support/access-log", requireAuth, getSupportAccessLog);
-router.get("/handoff-issues", requireAuth, listHandoffIssues);
-router.post("/handoff-issues/:id/retry", requireAuth, retryHandoffIssue);
-router.post("/handoff-issues/:id/resolve", requireAuth, resolveHandoffIssue);
+router.patch("/users/:userId/access", requireAuth, requireAdmin("companies.manage"), updateUserAccess);
+router.patch("/companies/:companyId/verify", requireAuth, requireAdmin("companies.manage"), verifyCompany);
+router.patch("/companies/:companyId/onboarding", requireAuth, requireAdmin("companies.manage"), updateCompanyOnboarding);
+router.patch("/companies/:companyId/suspension", requireAuth, requireAdmin("companies.manage"), setCompanySuspension);
+router.get("/crm-health", requireAuth, requireAdmin("integrations"), getCrmHealth);
+router.get("/news-defaults", requireAuth, requireAdmin("integrations"), getDefaultNewsSources);
+router.put("/news-defaults", requireAuth, requireAdmin("integrations"), updateDefaultNewsSources);
+router.get("/support/leads/:companyId", requireAuth, requireAdmin("support"), getSupportLeads);
+router.get("/support/access-log", requireAuth, requireAdmin("support"), getSupportAccessLog);
+router.get("/handoff-issues", requireAuth, requireAdmin("handoffs"), listHandoffIssues);
+router.post("/handoff-issues/:id/retry", requireAuth, requireAdmin("handoffs"), retryHandoffIssue);
+router.post("/handoff-issues/:id/resolve", requireAuth, requireAdmin("handoffs"), resolveHandoffIssue);
 router.get("/support-contact", requireAuth, getSupportContact);
-router.put("/support-contact", requireAuth, updateSupportContact);
-router.get("/help-agent", requireAuth, getHelpAgent);
-router.put("/help-agent", requireAuth, saveHelpAgent);
+router.put("/support-contact", requireAuth, requireAdmin("support"), updateSupportContact);
+router.get("/help-agent", requireAuth, requireAdmin("prompt-lab"), getHelpAgent);
+router.put("/help-agent", requireAuth, requireAdmin("prompt-lab"), saveHelpAgent);
 router.post("/help-agent/chat", requireAuth, helpChat);
-router.get("/security-posture", requireAuth, getSecurityPosture);
+router.get("/security-posture", requireAuth, requireAdmin("integrations"), getSecurityPosture);
 router.get("/staff", requireAuth, getStaff);
 router.post("/staff", requireAuth, createStaff);
 router.put("/staff", requireAuth, updateStaff);
 router.delete("/staff", requireAuth, deleteStaff);
-router.get("/sales-agent-appointments", requireAuth, getSalesAgentAppointments);
-router.patch("/sales-agent-appointments/:id/status", requireAuth, b2b.updateAppointmentStatus);
+// Super Staff (AI4HB team): Super Admin only, enforced in the controller.
+router.get("/super-staff", requireAuth, listSuperStaff);
+router.post("/super-staff", requireAuth, inviteSuperStaff);
+router.patch("/super-staff/:id", requireAuth, updateSuperStaff);
+router.post("/super-staff/:id/invite", requireAuth, resendSuperStaffInvite);
+router.delete("/super-staff/:id", requireAuth, removeSuperStaff);
+router.get("/sales-agent-appointments", requireAuth, requireAdmin("appointments"), getSalesAgentAppointments);
+router.patch("/sales-agent-appointments/:id/status", requireAuth, requireAdmin("appointments"), b2b.updateAppointmentStatus);
 
 // B2B prospecting: business leads, campaigns, platform availability.
-router.get("/b2b/leads", requireAuth, b2b.listLeads);
-router.post("/b2b/leads", requireAuth, b2b.createLead);
-router.post("/b2b/leads/import", requireAuth, b2b.importLeads);
-router.patch("/b2b/leads/:id", requireAuth, b2b.updateLead);
-router.delete("/b2b/leads/:id", requireAuth, b2b.deleteLead);
-router.get("/b2b/campaigns", requireAuth, b2b.listCampaigns);
-router.post("/b2b/campaigns", requireAuth, b2b.createCampaign);
-router.post("/b2b/campaigns/generate-step", requireAuth, b2b.generateStep);
-router.put("/b2b/campaigns/:id", requireAuth, b2b.updateCampaign);
-router.patch("/b2b/campaigns/:id/status", requireAuth, b2b.setCampaignStatus);
-router.delete("/b2b/campaigns/:id", requireAuth, b2b.deleteCampaign);
-router.get("/b2b/campaigns/:id/enrollments", requireAuth, b2b.listEnrollments);
-router.post("/b2b/campaigns/:id/enroll", requireAuth, b2b.enrollLeads);
-router.post("/b2b/campaigns/:id/unenroll", requireAuth, b2b.unenrollLeads);
-router.get("/b2b/availability", requireAuth, b2b.getAvailability);
-router.put("/b2b/availability", requireAuth, b2b.updateAvailability);
+router.get("/b2b/leads", requireAuth, requireAdmin("b2b"), b2b.listLeads);
+router.post("/b2b/leads", requireAuth, requireAdmin("b2b"), b2b.createLead);
+router.post("/b2b/leads/import", requireAuth, requireAdmin("b2b"), b2b.importLeads);
+router.patch("/b2b/leads/:id", requireAuth, requireAdmin("b2b"), b2b.updateLead);
+router.delete("/b2b/leads/:id", requireAuth, requireAdmin("b2b"), b2b.deleteLead);
+router.get("/b2b/campaigns", requireAuth, requireAdmin("b2b"), b2b.listCampaigns);
+router.post("/b2b/campaigns", requireAuth, requireAdmin("b2b"), b2b.createCampaign);
+router.post("/b2b/campaigns/generate-step", requireAuth, requireAdmin("b2b"), b2b.generateStep);
+router.put("/b2b/campaigns/:id", requireAuth, requireAdmin("b2b"), b2b.updateCampaign);
+router.patch("/b2b/campaigns/:id/status", requireAuth, requireAdmin("b2b"), b2b.setCampaignStatus);
+router.delete("/b2b/campaigns/:id", requireAuth, requireAdmin("b2b"), b2b.deleteCampaign);
+router.get("/b2b/campaigns/:id/enrollments", requireAuth, requireAdmin("b2b"), b2b.listEnrollments);
+router.post("/b2b/campaigns/:id/enroll", requireAuth, requireAdmin("b2b"), b2b.enrollLeads);
+router.post("/b2b/campaigns/:id/unenroll", requireAuth, requireAdmin("b2b"), b2b.unenrollLeads);
+router.get("/b2b/availability", requireAuth, requireAdmin("appointments", "b2b"), b2b.getAvailability);
+router.put("/b2b/availability", requireAuth, requireAdmin("appointments", "b2b"), b2b.updateAvailability);
 const promptLabUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 const uploadKbFile = handleUploadErrors(promptLabUpload.single("file"));
 
-router.get("/prompt-lab", requireAuth, getPromptLab);
-router.post("/prompt-lab/versions", requireAuth, savePromptVersion);
+router.get("/prompt-lab", requireAuth, requireAdmin("prompt-lab"), getPromptLab);
+router.post("/prompt-lab/versions", requireAuth, requireAdmin("prompt-lab"), savePromptVersion);
 router.post(
   "/prompt-lab/versions/:versionId/set-current",
-  requireAuth,
+  requireAuth, requireAdmin("prompt-lab"),
   setCurrentPromptVersion,
 );
 router.post(
   "/prompt-lab/versions/:versionId/set-live",
-  requireAuth,
+  requireAuth, requireAdmin("prompt-lab"),
   setPromptVersionLive,
 );
 router.post(
   "/prompt-lab/revert-to-defaults",
-  requireAuth,
+  requireAuth, requireAdmin("prompt-lab"),
   revertToCodeDefaults,
 );
 router.delete(
   "/prompt-lab/versions/:versionId",
-  requireAuth,
+  requireAuth, requireAdmin("prompt-lab"),
   deletePromptVersion,
 );
-router.post("/prompt-lab/preview", requireAuth, previewPrompt);
-router.post("/prompt-lab/chat", requireAuth, promptLabChat);
-router.get("/prompt-lab/kb", requireAuth, listKbDocuments);
+router.post("/prompt-lab/preview", requireAuth, requireAdmin("prompt-lab"), previewPrompt);
+router.post("/prompt-lab/chat", requireAuth, requireAdmin("prompt-lab"), promptLabChat);
+router.get("/prompt-lab/kb", requireAuth, requireAdmin("prompt-lab"), listKbDocuments);
 router.post(
   "/prompt-lab/kb/upload",
-  requireAuth,
+  requireAuth, requireAdmin("prompt-lab"),
   uploadKbFile,
   uploadKbDocument,
 );
-router.post("/prompt-lab/kb/probe", requireAuth, probeKb);
-router.get("/prompt-lab/kb/:documentId/url", requireAuth, getKbDocumentUrl);
+router.post("/prompt-lab/kb/probe", requireAuth, requireAdmin("prompt-lab"), probeKb);
+router.get("/prompt-lab/kb/:documentId/url", requireAuth, requireAdmin("prompt-lab"), getKbDocumentUrl);
 router.post(
   "/prompt-lab/kb/:documentId/reindex",
-  requireAuth,
+  requireAuth, requireAdmin("prompt-lab"),
   reindexKbDocument,
 );
-router.delete("/prompt-lab/kb/:documentId", requireAuth, deleteKbDocument);
+router.delete("/prompt-lab/kb/:documentId", requireAuth, requireAdmin("prompt-lab"), deleteKbDocument);
 
 // Warranty Prompt Lab
-router.get("/warranty-prompt-lab", requireAuth, getWarrantyPromptLab);
-router.post("/warranty-prompt-lab/versions", requireAuth, saveWarrantyPromptVersion);
-router.post("/warranty-prompt-lab/versions/:versionId/set-current", requireAuth, setCurrentWarrantyVersion);
-router.post("/warranty-prompt-lab/versions/:versionId/set-live", requireAuth, setWarrantyVersionLive);
-router.post("/warranty-prompt-lab/revert-to-defaults", requireAuth, revertWarrantyToDefaults);
-router.delete("/warranty-prompt-lab/versions/:versionId", requireAuth, deleteWarrantyVersion);
-router.post("/warranty-prompt-lab/preview", requireAuth, previewWarrantyPrompt);
-router.post("/warranty-prompt-lab/chat", requireAuth, warrantyPromptLabChat);
+router.get("/warranty-prompt-lab", requireAuth, requireAdmin("prompt-lab"), getWarrantyPromptLab);
+router.post("/warranty-prompt-lab/versions", requireAuth, requireAdmin("prompt-lab"), saveWarrantyPromptVersion);
+router.post("/warranty-prompt-lab/versions/:versionId/set-current", requireAuth, requireAdmin("prompt-lab"), setCurrentWarrantyVersion);
+router.post("/warranty-prompt-lab/versions/:versionId/set-live", requireAuth, requireAdmin("prompt-lab"), setWarrantyVersionLive);
+router.post("/warranty-prompt-lab/revert-to-defaults", requireAuth, requireAdmin("prompt-lab"), revertWarrantyToDefaults);
+router.delete("/warranty-prompt-lab/versions/:versionId", requireAuth, requireAdmin("prompt-lab"), deleteWarrantyVersion);
+router.post("/warranty-prompt-lab/preview", requireAuth, requireAdmin("prompt-lab"), previewWarrantyPrompt);
+router.post("/warranty-prompt-lab/chat", requireAuth, requireAdmin("prompt-lab"), warrantyPromptLabChat);
 
 export default router;
