@@ -66,30 +66,11 @@ export default function WarrantyChat({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [options, setOptions] = useState<string[]>([]);
 
   const [conversationId, setConversationId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!companyId) return;
-    let cancelled = false;
-
-    fetch(`/api/public/warranty/chat/suggestions?companyId=${encodeURIComponent(companyId)}`)
-      .then((r) => (r.ok ? r.json() : { suggestions: [] }))
-      .then((d) => {
-        if (!cancelled) setSuggestions(Array.isArray(d.suggestions) ? d.suggestions : []);
-      })
-      .catch(() => {
-        // Cosmetic; the chat works without them.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId]);
 
   const hasUserMessages = messages.some((m) => m.role === "user");
 
@@ -296,28 +277,14 @@ export default function WarrantyChat({
 
       {/* Input Form */}
       <div className="p-3 bg-white dark:bg-[#020617] border-t border-slate-100 dark:border-slate-800 shrink-0">
-        {/*
-          One panel, two sources. Mid-conversation it carries the choices the agent
-          just offered; before the conversation starts it carries the KB-derived
-          openers. Starters stop once someone has spoken — the agent's own questions
-          do not, which is why options are checked first.
-        */}
-        {options.length > 0 ? (
+        {/* Only the choices the agent just offered — no starter prompts; homeowners know their problem. */}
+        {options.length > 0 && (
           <PromptSuggestions
             title="Choose one"
             items={options}
             onSelect={sendMessage}
             disabled={!companyId || isLoading}
           />
-        ) : (
-          messages.length === 0 && (
-            <PromptSuggestions
-              title="What can we help with?"
-              items={suggestions}
-              onSelect={sendMessage}
-              disabled={!companyId || isLoading}
-            />
-          )
         )}
         <form onSubmit={handleSubmit} className="flex gap-2">
           <input

@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import PromptSuggestions from "@/components/warranty/PromptSuggestions";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SlotPicker, type Slot } from "@/components/warranty/ScheduleShell";
 
 export interface HomeCard {
   id: string;
@@ -56,6 +57,8 @@ interface Message {
   homes?: HomeCard[];
   pendingBooking?: PendingBooking | null;
   booked?: Booked | null;
+  // Open times for the pop-up calendar, when the agent invited the visitor to pick one.
+  slots?: Slot[];
 }
 
 interface SalesChatProps {
@@ -291,6 +294,56 @@ function HomeDetails({
   );
 }
 
+/** "Pick a time" button and the pop-up calendar of open slots. Picking one opens the booking form. */
+function SlotDialog({
+  slots,
+  themeColor,
+  onPick,
+}: {
+  slots: Slot[];
+  themeColor: string;
+  onPick: (slot: Slot) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState("");
+  const chosen = slots.find((s) => s.iso === selected);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="ml-8 inline-flex w-fit items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white"
+        style={{ backgroundColor: themeColor }}
+      >
+        <CalendarPlus className="h-4 w-4" /> Pick a time
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Pick a time for your visit</DialogTitle>
+            <DialogDescription>Choose any open time below.</DialogDescription>
+          </DialogHeader>
+          <SlotPicker slots={slots} selected={selected} onSelect={setSelected} />
+          <button
+            type="button"
+            disabled={!chosen}
+            onClick={() => {
+              if (!chosen) return;
+              setOpen(false);
+              onPick(chosen);
+            }}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            style={{ backgroundColor: themeColor }}
+          >
+            {chosen ? `Continue with ${chosen.label}` : "Select a time"}
+          </button>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 /** Who the visit is for. Shown when the agent has agreed a time. */
 function BookingForm({
   pending,
@@ -445,6 +498,7 @@ export default function SalesChat({
       appendAgent(data.reply, {
         homes: Array.isArray(data.homes) ? data.homes : [],
         pendingBooking: data.pendingBooking || null,
+        slots: Array.isArray(data.slots) ? data.slots : [],
       });
     } catch (error) {
       console.error("Sales chat error:", error);
@@ -536,6 +590,22 @@ export default function SalesChat({
                   Visit booked{msg.booked.leadName ? ` for ${msg.booked.leadName}` : ""} — {msg.booked.when}
                   {msg.booked.locationType === "ONSITE" ? " (on site)" : " (virtual)"}
                 </div>
+              )}
+
+              {!msg.pendingBooking && !!msg.slots?.length && msg.id === lastAgentId && (
+                <SlotDialog
+                  slots={msg.slots}
+                  themeColor={themeColor}
+                  onPick={(slot) =>
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === msg.id
+                          ? { ...m, pendingBooking: { slotIso: slot.iso, label: slot.label, locationType: "ONSITE" } }
+                          : m,
+                      ),
+                    )
+                  }
+                />
               )}
 
               {msg.pendingBooking && msg.id === lastAgentId && (

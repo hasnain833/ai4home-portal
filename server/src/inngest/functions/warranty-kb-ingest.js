@@ -5,7 +5,6 @@ import { createRequire } from "module";
 import { upsertChunks } from "../../services/warranty-vector.service.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
 import { resolveDownloadUrl } from "../../lib/storage.js";
-import { invalidateSuggestions } from "../../services/warranty-suggestions.service.js";
 import { chunkText, chunkTable, chunkSheets } from "../../lib/kb-chunking.js";
 import {
   isSpreadsheetFile,
@@ -108,8 +107,6 @@ export async function runWarrantyKbIngestion(documentId, companyId) {
       where: { id: documentId },
       data: { status: "READY", chunkCount: count, error: null },
     });
-
-    invalidateSuggestions();
 
     return { status: "ready", chunks: count };
   } catch (err) {

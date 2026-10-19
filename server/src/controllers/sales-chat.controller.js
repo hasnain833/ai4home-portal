@@ -19,6 +19,7 @@ const MAX_MESSAGE_CHARS = 4000;
 const EMAIL_RE = /^[^\s@]+@([^\s@.,]+\.)+[^\s@.,]{2,}$/;
 const SLOT_DAYS = 14;
 const SLOT_LIMIT = 8;
+const PICKER_SLOT_LIMIT = 1000;
 
 function readTranscript(body) {
   const list = Array.isArray(body?.messages) ? body.messages.slice(-MAX_TURNS) : [];
@@ -55,12 +56,12 @@ function firstNameOf(name) {
   return String(name || "").trim().split(/\s+/)[0] || null;
 }
 
-async function openSlots(companyId) {
+async function openSlots(companyId, limit = SLOT_LIMIT) {
   const setting = await getAvailabilitySetting(companyId);
   const timezone = leadTimezone(null, setting);
   const agentId = await resolveAgentId({ companyId, ownerId: null });
   const slots = (
-    await getAvailableSlots({ companyId, agentId, days: SLOT_DAYS, limit: SLOT_LIMIT, displayTz: timezone }).catch(() => [])
+    await getAvailableSlots({ companyId, agentId, days: SLOT_DAYS, limit, displayTz: timezone }).catch(() => [])
   ).map((s) => ({ iso: s.iso, label: s.label }));
   return { slots, timezone };
 }
@@ -145,9 +146,15 @@ export const postMessage = async (req, res) => {
       }
     }
 
+    const pickerSlots =
+      decision.show_calendar && !pendingBooking && slots.length
+        ? (await openSlots(companyId, PICKER_SLOT_LIMIT)).slots
+        : [];
+
     return res.json({
       reply,
       action: decision.action || "reply",
+      slots: pickerSlots,
       homes: await homeCards(companyId, newHomeIds(decision.home_ids, shownHomeIds, question)),
       pendingBooking,
       contactPrefill: isHomeowner(req.user)
@@ -174,7 +181,7 @@ export const bookVisit = async (req, res) => {
       return res.status(400).json({ message: "Enter a valid phone number, or leave it blank" });
     }
 
-    const { slots } = await openSlots(companyId);
+    const { slots } = await openSlots(companyId, PICKER_SLOT_LIMIT);
     const slot = slots.find((s) => s.iso === b.slotIso);
     if (!slot) {
       return res.status(409).json({

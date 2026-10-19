@@ -144,6 +144,7 @@ const RESPOND_TOOL = {
       message: { type: "string", description: "The exact message text to send to the lead. On 'escalate' this is what the lead reads, so acknowledge their concern warmly and tell them a team member will reach out." },
       slot_iso: { type: "string", description: "Required when action is 'book': the chosen slot's ISO start time, copied verbatim from the available slots." },
       location_type: { type: "string", enum: ["ONSITE", "VIRTUAL"], description: "Visit type when booking. Default ONSITE." },
+      show_calendar: { type: "boolean", description: "Web chat only: true on the turn you invite the lead to pick a visit time. The chat then shows a calendar of every open time. Ignored on SMS and email." },
       used_kb: { type: "boolean", description: "True if your answer drew on the Company Knowledge Base context." },
       handoff_reason: { type: "string", description: "Required when action is 'escalate': a short internal note for the human team explaining what the lead needs and what you already know about them. The lead never sees this." },
       home_ids: {
@@ -185,7 +186,7 @@ function renderAgentPrompt({
     channel === "SMS"
       ? "This is an SMS conversation. Keep replies under 320 characters, plain text, no markdown."
       : channel === "WEBCHAT"
-        ? "This is a live web chat. Keep replies short and snappy — a couple of sentences, plain text, no markdown."
+        ? "This is a live web chat. Keep replies short and snappy — a couple of sentences, plain text, no markdown. When you offer visit times here, do NOT name two specific times: invite them to pick a time that suits them and set show_calendar to true — the chat shows a calendar of every open time and a booking form once they choose."
         : "This is an email conversation. Keep replies concise and friendly.";
 
   const pacingGuidance =

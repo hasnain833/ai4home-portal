@@ -10,7 +10,6 @@ import {
   MAX_PHOTOS_PER_CLAIM,
 } from "../services/warranty-photos.service.js";
 import { processWarrantyTurn } from "../lib/warranty-orchestrator.js";
-import { getWarrantySuggestions } from "../services/warranty-suggestions.service.js";
 
 const IDLE_MINUTES = Number(process.env.WARRANTY_SESSION_IDLE_MINUTES || 30);
 
@@ -123,15 +122,6 @@ async function postMessage(req, res) {
 
 
 
-async function getSuggestions(req, res) {
-  try {
-    const companyId = req.user?.companyId || req.query?.companyId || null;
-    return res.json({ suggestions: await getWarrantySuggestions(companyId) });
-  } catch (error) {
-    console.error("[Warranty chat] Suggestions failed:", error);
-    return res.json({ suggestions: [] });
-  }
-}
 
 async function photoConversation(req) {
   const conversationId = req.body?.conversationId || req.query?.conversationId || null;
@@ -181,12 +171,10 @@ const photoFiles = handleUploadErrors(upload.array("photos", MAX_PHOTOS_PER_CLAI
 export const publicWarrantyChatRouter = Router();
 publicWarrantyChatRouter.post("/photos", photoFiles, uploadPhotos);
 publicWarrantyChatRouter.delete("/photos/:photoId", deletePhoto);
-publicWarrantyChatRouter.get("/suggestions", getSuggestions);
 publicWarrantyChatRouter.post("/", postMessage);
 
 const router = Router();
 
-router.get("/suggestions", getSuggestions);
 router.post("/", postMessage);
 router.post("/photos", photoFiles, uploadPhotos);
 router.delete("/photos/:photoId", deletePhoto);
