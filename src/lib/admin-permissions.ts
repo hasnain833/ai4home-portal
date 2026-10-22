@@ -8,7 +8,8 @@ export type AdminPermission =
   | "handoffs"
   | "support"
   | "costs"
-  | "prompt-lab";
+  | "prompt-lab"
+  | "sales-coach";
 
 type AdminUser = {
   isSuperAdmin?: boolean;

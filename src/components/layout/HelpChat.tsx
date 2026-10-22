@@ -16,7 +16,7 @@ const SUGGESTIONS = [
 ];
 
 // **bold** only; everything else stays plain text with its line breaks.
-function Rich({ text }: { text: string }) {
+export function Rich({ text }: { text: string }) {
   return (
     <>
       {text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>

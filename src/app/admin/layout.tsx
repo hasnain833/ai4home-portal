@@ -27,6 +27,7 @@ import {
   ArrowRightLeft,
   UserCog,
   ShieldAlert,
+  GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 import { canAdmin, isPlatformUser, type AdminPermission } from "@/lib/admin-permissions";
@@ -52,6 +53,7 @@ const adminNavItems: { name: string; href: string; icon: LucideIcon; perm: Admin
   },
   { name: "Usage & Costs", href: "/admin/costs", icon: Receipt, perm: ["costs"] },
   { name: "Prompt Lab", href: "/admin/prompt-lab", icon: FlaskConical, perm: ["prompt-lab"] },
+  { name: "Sales Coach", href: "/admin/sales-coach", icon: GraduationCap, perm: ["sales-coach"] },
   { name: "Staff", href: "/admin/staff", icon: UserCog, perm: null },
 ];
 

@@ -65,8 +65,8 @@ Separate from the existing Sales Agent (which talks to home buyers).
 - [ ] What is the support phone number?
 - [ ] What counts as "closed" for the hand-off: a Salesforce Opportunity stage, or a home status?
 - [x] Nurture analytics: tenant nurture, B2B campaigns, or both? Tenant Sales workspace
-- [ ] Sales Coach: for builders' salespeople inside the portal (product feature), or for AI4Home's own team?
-- [ ] Sales Coach: role-play a buyer and score the salesperson, or a Q&A coach ("how do I handle this objection")?
+- [x] Sales Coach: for builders' salespeople inside the portal (product feature), or for AI4Home's own team? AI4Home's own team first; repurposing for builders is a stub (SRS v1.1, docs/AI4HB-Sales-Coach-SRS.pdf)
+- [x] Sales Coach: role-play a buyer and score the salesperson, or a Q&A coach ("how do I handle this objection")? Both, text only; training areas: products, AI, homebuilding business, executive sales
 - [ ] B2B: can you send 3–5 case studies or articles about AI4Home for the agent's knowledge base?
 - [x] Super Staff: what can they do? Built as a tick-box list per person (default; confirm with the client)
 - [ ] Super Staff: which actions stay Super Admin-only regardless (e.g. suspending companies, Prompt Lab "Set Live", messaging pricing)?
