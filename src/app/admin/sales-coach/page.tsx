@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Clock, Eye, GraduationCap, Loader2, Send, Shuffle, Users } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,27 +15,41 @@ import {
   AREAS,
   ASK_SUGGESTIONS,
   DIFFICULTIES,
-  MOCK_HISTORY,
-  MOCK_TEAM,
-  SCENARIOS,
   SKILLS,
   band,
-  mockAsk,
+  coachApi,
   type Area,
   type Difficulty,
   type Scenario,
   type Session,
+  type SessionSummary,
+  type TeamRow,
 } from "@/components/admin/sales-coach/coach";
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
+const errorText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+const spinner = <Loader2 className="mx-auto my-10 h-5 w-5 animate-spin text-muted-foreground" />;
 
 /** Sales Coach, Track B: AI4Home's own team practises selling the platform to builders. */
 export default function SalesCoachPage() {
   const { user } = useAuth();
   const [tab, setTab] = useState("practice");
+  const [scenarios, setScenarios] = useState<Scenario[] | null>(null);
   const [active, setActive] = useState<Scenario | null>(null);
   const [viewing, setViewing] = useState<Session | null>(null);
   const [askSeed, setAskSeed] = useState<string | null>(null);
+  const [member, setMember] = useState<TeamRow | null>(null);
+  const [scoring, setScoring] = useState(false);
+
+  useEffect(() => {
+    coachApi
+      .scenarios()
+      .then((r) => setScenarios(r.scenarios))
+      .catch((e) => {
+        setScenarios([]);
+        toast.error(errorText(e, "Couldn't load scenarios."));
+      });
+  }, []);
 
   const ask = (question: string) => {
     setActive(null);
@@ -43,10 +58,33 @@ export default function SalesCoachPage() {
     setTab("ask");
   };
 
+  const open = async (id: string) => {
+    try {
+      setViewing((await coachApi.session(id)).session);
+    } catch (e) {
+      toast.error(errorText(e, "Couldn't open that session."));
+    }
+  };
+
+  // NFR-10: a session left unscored can be scored later.
+  const scoreLater = async () => {
+    if (!viewing) return;
+    setScoring(true);
+    try {
+      const { scorecard } = await coachApi.score(viewing.id);
+      setViewing({ ...viewing, scorecard, status: "SCORED" });
+    } catch (e) {
+      toast.error(errorText(e, "The scorecard couldn't be prepared."));
+    } finally {
+      setScoring(false);
+    }
+  };
+
   if (active) return <RolePlay key={active.id} scenario={active} onExit={() => setActive(null)} onAsk={ask} />;
 
   if (viewing) {
-    const scenario = SCENARIOS.find((x) => x.id === viewing.scenarioId)!;
+    const scenario = scenarios?.find((x) => x.id === viewing.scenarioId);
+    if (!scenario) return null;
     return (
       <div className="space-y-4">
         <Button variant="ghost" size="sm" onClick={() => setViewing(null)} className="gap-1.5">
@@ -55,19 +93,44 @@ export default function SalesCoachPage() {
         <div>
           <h2 className="text-lg font-semibold text-foreground">{scenario.title}</h2>
           <p className="text-sm text-muted-foreground">
-            {viewing.trainee} · {day(viewing.date)}
+            {viewing.userName} · {day(viewing.startedAt)}
           </p>
         </div>
-        <ScorecardView
-          scenario={scenario}
-          scorecard={viewing.scorecard}
-          transcript={viewing.transcript}
-          onRetry={() => {
-            setViewing(null);
-            setActive(scenario);
-          }}
-          onAsk={ask}
-        />
+        {viewing.scorecard ? (
+          <ScorecardView
+            scenario={scenario}
+            scorecard={viewing.scorecard}
+            transcript={viewing.transcript}
+            onRetry={() => {
+              setViewing(null);
+              setActive(scenario);
+            }}
+            onAsk={ask}
+          />
+        ) : (
+          <Card className="border-border bg-card shadow-sm">
+            <CardContent className="space-y-3 p-4">
+              <p className="text-sm text-muted-foreground">
+                This session wasn&apos;t scored{viewing.status === "ABANDONED" ? " (no activity for 24 hours)" : ""}.
+              </p>
+              {viewing.userId === user?.id && (
+                <Button onClick={scoreLater} disabled={scoring} className="gap-1.5 bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90">
+                  {scoring && <Loader2 className="h-4 w-4 animate-spin" />} Score it now
+                </Button>
+              )}
+              <div className="space-y-2 border-t border-border pt-3 text-sm">
+                {viewing.transcript.map((m, i) => (
+                  <p key={i} className={m.role === "hint" ? "text-xs text-amber-700 dark:text-amber-300" : "text-foreground"}>
+                    <span className="font-semibold">
+                      {m.role === "trainee" ? "Trainee" : m.role === "buyer" ? scenario.persona.name : "Hint"}:
+                    </span>{" "}
+                    {m.content}
+                  </p>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     );
   }
@@ -103,17 +166,27 @@ export default function SalesCoachPage() {
         </TabsList>
 
         <TabsContent value="practice" className="mt-4">
-          <Library onStart={setActive} />
+          {scenarios ? <Library scenarios={scenarios} onStart={setActive} /> : spinner}
         </TabsContent>
         <TabsContent value="ask" className="mt-4">
           <AskCoach key={askSeed ?? ""} seed={askSeed} />
         </TabsContent>
         <TabsContent value="history" className="mt-4">
-          <History sessions={MOCK_HISTORY} onOpen={setViewing} />
+          <History scenarios={scenarios ?? []} onOpen={open} />
         </TabsContent>
         {user?.isSuperAdmin && (
           <TabsContent value="team" className="mt-4">
-            <Team />
+            {member ? (
+              <div className="space-y-3">
+                <Button variant="ghost" size="sm" onClick={() => setMember(null)} className="gap-1.5">
+                  <ArrowLeft className="h-4 w-4" /> Team
+                </Button>
+                <p className="text-sm font-semibold text-foreground">{member.name}</p>
+                <History key={member.userId} userId={member.userId} scenarios={scenarios ?? []} onOpen={open} />
+              </div>
+            ) : (
+              <Team onOpen={setMember} />
+            )}
           </TabsContent>
         )}
       </Tabs>
@@ -136,10 +209,10 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   );
 }
 
-function Library({ onStart }: { onStart: (s: Scenario) => void }) {
+function Library({ scenarios, onStart }: { scenarios: Scenario[]; onStart: (s: Scenario) => void }) {
   const [level, setLevel] = useState<Difficulty | null>(null);
   const [area, setArea] = useState<Area | null>(null);
-  const list = SCENARIOS.filter((s) => (!level || s.difficulty === level) && (!area || s.areas.includes(area)));
+  const list = scenarios.filter((s) => (!level || s.difficulty === level) && (!area || s.areas.includes(area)));
 
   return (
     <div className="space-y-4">
@@ -221,9 +294,16 @@ function AskCoach({ seed }: { seed: string | null }) {
     setMessages(next);
     setInput("");
     setBusy(true);
-    await new Promise((r) => setTimeout(r, 900)); // mock: POST /api/admin/sales-coach/ask
-    setMessages([...next, { role: "assistant", content: mockAsk(q) }]);
-    setBusy(false);
+    try {
+      const { reply } = await coachApi.ask(next);
+      setMessages([...next, { role: "assistant", content: reply }]);
+    } catch (e) {
+      setMessages(messages);
+      setInput(q);
+      toast.error(errorText(e, "The Coach couldn't answer just now."));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -303,42 +383,62 @@ function AskCoach({ seed }: { seed: string | null }) {
   );
 }
 
-function History({ sessions, onOpen }: { sessions: Session[]; onOpen: (s: Session) => void }) {
-  // FR-HI-03: average per skill, weakest highlighted.
-  const avg = SKILLS.map((sk) => ({
-    ...sk,
-    value: sessions.reduce((sum, s) => sum + (s.scorecard.skills.find((x) => x.key === sk.key)?.score || 0), 0) / (sessions.length || 1),
-  }));
-  const weakest = avg.reduce((a, b) => (b.value < a.value ? b : a), avg[0]);
+function History({ userId, scenarios, onOpen }: { userId?: string; scenarios: Scenario[]; onOpen: (id: string) => void }) {
+  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
+  const load = useCallback(() => {
+    coachApi
+      .sessions(userId)
+      .then((r) => setSessions(r.sessions))
+      .catch((e) => {
+        setSessions([]);
+        toast.error(errorText(e, "Couldn't load history."));
+      });
+  }, [userId]);
+  useEffect(load, [load]);
 
+  if (!sessions) return spinner;
   if (!sessions.length) {
     return <p className="py-10 text-center text-sm text-muted-foreground">No practice sessions yet. Start one from the library.</p>;
   }
+
+  // FR-HI-03: average per skill over scored sessions, weakest highlighted.
+  const scored = sessions.flatMap((s) => (s.scorecard ? [s.scorecard] : []));
+  const avg = SKILLS.map((sk) => ({
+    ...sk,
+    value: scored.reduce((sum, c) => sum + (c.skills.find((x) => x.key === sk.key)?.score || 0), 0) / (scored.length || 1),
+  }));
+  const weakest = avg.reduce((a, b) => (b.value < a.value ? b : a), avg[0]);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
       <Card className="border-border bg-card shadow-sm">
         <CardContent className="space-y-3 p-5">
-          <p className="text-sm font-semibold text-foreground">My progress</p>
-          {avg.map((sk) => (
-            <div key={sk.key}>
-              <div className="flex justify-between text-xs">
-                <span className={sk.key === weakest.key ? "font-semibold text-rose-600 dark:text-rose-400" : "text-muted-foreground"}>
-                  {sk.label}
-                </span>
-                <span className="tabular-nums text-muted-foreground">{sk.value.toFixed(1)}</span>
-              </div>
-              <div className="mt-1 h-1.5 rounded-full bg-muted">
-                <div
-                  className={`h-1.5 rounded-full ${sk.key === weakest.key ? "bg-rose-500" : "bg-[#0F3B3D] dark:bg-[#b48c3c]"}`}
-                  style={{ width: `${sk.value * 20}%` }}
-                />
-              </div>
-            </div>
-          ))}
-          <p className="rounded-lg bg-muted/60 p-2.5 text-xs text-muted-foreground">
-            Focus on <strong className="text-foreground">{weakest.label}</strong> next.
-          </p>
+          <p className="text-sm font-semibold text-foreground">{userId ? "Progress" : "My progress"}</p>
+          {!scored.length ? (
+            <p className="text-xs text-muted-foreground">Score a session to see progress.</p>
+          ) : (
+            <>
+              {avg.map((sk) => (
+                <div key={sk.key}>
+                  <div className="flex justify-between text-xs">
+                    <span className={sk.key === weakest.key ? "font-semibold text-rose-600 dark:text-rose-400" : "text-muted-foreground"}>
+                      {sk.label}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground">{sk.value.toFixed(1)}</span>
+                  </div>
+                  <div className="mt-1 h-1.5 rounded-full bg-muted">
+                    <div
+                      className={`h-1.5 rounded-full ${sk.key === weakest.key ? "bg-rose-500" : "bg-[#0F3B3D] dark:bg-[#b48c3c]"}`}
+                      style={{ width: `${sk.value * 20}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+              <p className="rounded-lg bg-muted/60 p-2.5 text-xs text-muted-foreground">
+                Focus on <strong className="text-foreground">{weakest.label}</strong> next.
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -354,31 +454,40 @@ function History({ sessions, onOpen }: { sessions: Session[]; onOpen: (s: Sessio
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sessions.map((s) => {
-                const scenario = SCENARIOS.find((x) => x.id === s.scenarioId)!;
-                const b = band(s.scorecard.overall);
-                return (
-                  <TableRow key={s.id} className="cursor-pointer" onClick={() => onOpen(s)}>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">{day(s.date)}</TableCell>
-                    <TableCell>
-                      <button type="button" className="text-left font-medium text-foreground hover:underline" onClick={() => onOpen(s)}>
-                        {scenario.title}
-                      </button>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      <span className="font-semibold">{s.scorecard.overall}</span>
-                      <span className="ml-1.5 text-xs text-muted-foreground">{b.label}</span>
-                    </TableCell>
-                    <TableCell>
-                      {s.scorecard.goalReached ? (
-                        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">Reached</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-muted-foreground">Not reached</Badge>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {sessions.map((s) => (
+                <TableRow key={s.id} className="cursor-pointer" onClick={() => onOpen(s.id)}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{day(s.startedAt)}</TableCell>
+                  <TableCell>
+                    <button
+                      type="button"
+                      className="text-left font-medium text-foreground hover:underline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpen(s.id);
+                      }}
+                    >
+                      {scenarios.find((x) => x.id === s.scenarioId)?.title ?? s.scenarioId}
+                    </button>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {s.scorecard ? (
+                      <>
+                        <span className="font-semibold">{s.scorecard.overall}</span>
+                        <span className="ml-1.5 text-xs text-muted-foreground">{band(s.scorecard.overall).label}</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{s.status === "IN_PROGRESS" ? "In progress" : "Not scored"}</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {s.scorecard?.goalReached ? (
+                      <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">Reached</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-muted-foreground">Not reached</Badge>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </CardContent>
@@ -387,7 +496,19 @@ function History({ sessions, onOpen }: { sessions: Session[]; onOpen: (s: Sessio
   );
 }
 
-function Team() {
+function Team({ onOpen }: { onOpen: (row: TeamRow) => void }) {
+  const [team, setTeam] = useState<TeamRow[] | null>(null);
+  useEffect(() => {
+    coachApi
+      .team()
+      .then((r) => setTeam(r.team))
+      .catch((e) => {
+        setTeam([]);
+        toast.error(errorText(e, "Couldn't load the team."));
+      });
+  }, []);
+
+  if (!team) return spinner;
   return (
     <Card className="border-border bg-card shadow-sm">
       <CardHeader className="border-b border-border pb-3">
@@ -407,13 +528,20 @@ function Team() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {MOCK_TEAM.map((t) => (
-              <TableRow key={t.name}>
+            {!team.length && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                  No one has Sales Coach access yet. Tick it for a Super Staff member under Staff.
+                </TableCell>
+              </TableRow>
+            )}
+            {team.map((t) => (
+              <TableRow key={t.userId} className="cursor-pointer" onClick={() => onOpen(t)}>
                 <TableCell className="font-medium text-foreground">{t.name}</TableCell>
                 <TableCell className="text-right tabular-nums">{t.sessions}</TableCell>
                 <TableCell className="text-right tabular-nums">{t.avg ?? "—"}</TableCell>
                 <TableCell className="text-muted-foreground">{t.last ? day(t.last) : "Never"}</TableCell>
-                <TableCell className="text-muted-foreground">{t.weakest}</TableCell>
+                <TableCell className="text-muted-foreground">{t.weakest ?? "—"}</TableCell>
               </TableRow>
             ))}
           </TableBody>

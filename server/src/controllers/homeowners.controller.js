@@ -3,6 +3,28 @@ import prisma from "../lib/prisma.js";
 import { createHomeownerAccount, getSupabaseAdmin } from "../lib/homeowner-account.js";
 import bcrypt from "bcryptjs";
 import { sendHomeownerWelcome } from "./leads.controller.js";
+import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
+import { BUCKETS, uploadObject, resolveDownloadUrl, deleteObject } from "../lib/storage.js";
+
+// Signed long enough to outlive a working session on the Homeowners page.
+const HOUSE_PHOTO_TTL = 60 * 60;
+
+const PROPERTY_SELECT = {
+  id: true,
+  address: true,
+  city: true,
+  state: true,
+  zipCode: true,
+  coeDate: true,
+  coverageTerm: true,
+  photoUrl: true,
+  community: { select: { name: true } },
+};
+
+async function withSignedPhoto(property) {
+  if (!property) return null;
+  return { ...property, photoUrl: await resolveDownloadUrl(property.photoUrl, { expiresIn: HOUSE_PHOTO_TTL }) };
+}
 
 export const getHomeowners = async (req, res) => {
   try {
@@ -24,11 +46,16 @@ export const getHomeowners = async (req, res) => {
         role: true,
         hasSalesAccess: true,
         createdAt: true,
+        properties: { select: PROPERTY_SELECT, take: 1 },
       },
       orderBy: { createdAt: "desc" },
     });
 
-    return res.json(homeowners);
+    // One home per homeowner, so flatten the list to a single `property`.
+    const result = await Promise.all(
+      homeowners.map(async ({ properties, ...h }) => ({ ...h, property: await withSignedPhoto(properties[0]) })),
+    );
+    return res.json(result);
   } catch {
     return res.status(500).json({ message: "Internal server error" });
   }
@@ -282,5 +309,60 @@ export const updateHomeowner = async (req, res) => {
   } catch (error) {
     console.error("Failed to update homeowner:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+async function findHomeownerProperty(session, homeownerId) {
+  return prisma.property.findFirst({
+    where: { homeownerId, homeowner: { companyId: session.companyId, role: "HOMEOWNER" } },
+    select: { id: true, photoUrl: true },
+  });
+}
+
+// One exterior photo per house. Kept private: a picture tied to a home address.
+export const uploadHousePhoto = async (req, res) => {
+  try {
+    const session = req.user;
+    if (!session || (session.role !== "ADMIN" && session.role !== "STAFF")) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (!req.file) return res.status(400).json({ message: "No photo provided" });
+
+    const property = await findHomeownerProperty(session, req.params.id);
+    if (!property) return res.status(404).json({ message: "This homeowner has no property yet. Add one in Properties first." });
+
+    await assertUploadSafe(req.file, "image");
+    const { ref } = await uploadObject({
+      bucket: BUCKETS.warrantyPhotos,
+      key: buildStorageKey(`${session.companyId}/houses/${property.id}`, req.file.originalname, "house.jpg"),
+      buffer: req.file.buffer,
+      contentType: req.file.mimetype,
+    });
+
+    const updated = await prisma.property.update({ where: { id: property.id }, data: { photoUrl: ref }, select: PROPERTY_SELECT });
+    if (property.photoUrl) await deleteObject(property.photoUrl);
+    return res.json(await withSignedPhoto(updated));
+  } catch (error) {
+    if (error instanceof UploadRejected) return res.status(error.status).json({ message: error.message, code: error.code });
+    console.error("Failed to upload house photo:", error);
+    return res.status(500).json({ message: "Could not upload the photo" });
+  }
+};
+
+export const deleteHousePhoto = async (req, res) => {
+  try {
+    const session = req.user;
+    if (!session || (session.role !== "ADMIN" && session.role !== "STAFF")) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const property = await findHomeownerProperty(session, req.params.id);
+    if (!property) return res.status(404).json({ message: "Property not found" });
+
+    const updated = await prisma.property.update({ where: { id: property.id }, data: { photoUrl: null }, select: PROPERTY_SELECT });
+    if (property.photoUrl) await deleteObject(property.photoUrl);
+    return res.json(updated);
+  } catch (error) {
+    console.error("Failed to remove house photo:", error);
+    return res.status(500).json({ message: "Could not remove the photo" });
   }
 };

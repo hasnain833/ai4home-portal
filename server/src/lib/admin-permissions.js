@@ -37,6 +37,10 @@ export const ADMIN_PERMISSIONS = {
     label: "Prompt Lab",
     description: "Edit and set live the Sales, Warranty and Help agent prompts and the platform KB.",
   },
+  "sales-coach": {
+    label: "Sales Coach",
+    description: "Practise selling AI4Home with the AI role-play partner and ask the Coach.",
+  },
 };
 
 const ALL = Object.keys(ADMIN_PERMISSIONS);

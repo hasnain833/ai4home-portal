@@ -210,6 +210,7 @@ model Property {
   units                 Int?
   coeDate               DateTime?
   coverageTerm          DateTime?
+  photoUrl              String?
   homeownerId           String                 @unique
   homeowner             User                   @relation(fields: [homeownerId], references: [id])
   companyId             String?

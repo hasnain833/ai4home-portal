@@ -21,6 +21,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle, Mail, Pencil, Phone, Plus, Send, Trash2, Wrench } from "lucide-react";
+import { TRADE_CATEGORIES } from "@/components/warranty/DispatchTicketDialog";
 
 interface Trade {
   id: string;
@@ -31,11 +32,8 @@ interface Trade {
   user: { id: string; name: string | null; email: string; phone: string | null };
 }
 
-// Suggestions only; builders can type any trade. Same wording the AI uses for issue types.
-const COMMON_TRADES = [
-  "Plumbing", "Electrical", "HVAC", "Roofing", "Drywall & Paint",
-  "Flooring", "Appliances", "Structural", "Carpentry", "Landscaping",
-];
+// Suggestions only; builders can type any trade. Same list the dispatch pop-up offers.
+const COMMON_TRADES = TRADE_CATEGORIES.filter((c) => c !== "General Warranty");
 
 const EMPTY_FORM = { name: "", email: "", phone: "", tradeType: "", businessName: "" };
 

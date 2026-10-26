@@ -183,6 +183,19 @@ function getDiagnosticValue(info: DiagnosticInfo | null, acceptedKeys: string[])
   return match?.[1] ?? null;
 }
 
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/;
+
+function formatDiagnosticValue(key: string, value: string) {
+  // Area of home holds lot size today; the box stays but shows nothing for now.
+  if (normalizeDiagnosticKey(key) === "areaofhome") return "";
+  // Stored as a full ISO timestamp (e.g. coverageEndDate); show the date only.
+  // Read in UTC so a midnight-UTC date doesn't show as the day before.
+  if (ISO_TIMESTAMP.test(value)) {
+    return new Date(value).toLocaleDateString(undefined, { dateStyle: "medium", timeZone: "UTC" });
+  }
+  return value;
+}
+
 function formatDiagnosticKey(key: string) {
   return key
     .replace(/([A-Z])/g, " $1")
@@ -418,7 +431,7 @@ export default function TicketDetail() {
         const normalizedKey = normalizeDiagnosticKey(key);
         const isDuration = ["duration", "timing", "timeframe", "time", "howlong"].includes(normalizedKey);
         return !isDuration && !isRedundantDiagnosticField(key, value, ticket);
-      })
+      }).map(([key, value]) => [key, formatDiagnosticValue(key, value)])
     : [];
 
   return (

@@ -17,13 +17,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { toast } from "sonner";
 import {
   SKILLS,
   TURN_LIMIT,
   band,
-  mockBuyerReply,
-  mockHint,
-  mockScorecard,
+  coachApi,
   type Difficulty,
   type Msg,
   type Scenario,
@@ -53,9 +52,6 @@ export function DifficultyBadge({ level }: { level: Difficulty }) {
   );
 }
 
-// mock: the API call replaces this delay.
-const think = () => new Promise((r) => setTimeout(r, 700 + Math.random() * 600));
-
 type Stage = "brief" | "chat" | "score";
 
 /** Brief → chat with the AI buyer → scorecard (SRS 2.2). */
@@ -69,24 +65,38 @@ export function RolePlay({
   onAsk: (question: string) => void;
 }) {
   const [stage, setStage] = useState<Stage>("brief");
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Msg[]>([]);
-  const [goalReached, setGoalReached] = useState(false);
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const start = () => {
-    setTranscript([{ role: "buyer", content: scenario.opener }]);
-    setGoalReached(false);
-    setScorecard(null);
-    setStage("chat");
+  const start = async () => {
+    setBusy(true);
+    try {
+      const { session } = await coachApi.start(scenario.id);
+      setSessionId(session.id);
+      setTranscript(session.transcript);
+      setScorecard(null);
+      setStage("chat");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't start the role-play.");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const endAndScore = async (final: Msg[] = transcript, reached = goalReached) => {
+  // On failure the transcript stays saved and the trainee can try again (NFR-10).
+  const endAndScore = async () => {
+    if (!sessionId) return;
     setBusy(true);
-    await think();
-    setScorecard(mockScorecard(scenario, final, reached));
-    setBusy(false);
-    setStage("score");
+    try {
+      setScorecard((await coachApi.score(sessionId)).scorecard);
+      setStage("score");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "The scorecard couldn't be prepared.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -99,19 +109,18 @@ export function RolePlay({
         <span className="text-sm font-medium text-foreground">{scenario.title}</span>
       </div>
 
-      {stage === "brief" && <Brief scenario={scenario} onStart={start} />}
+      {stage === "brief" && <Brief scenario={scenario} starting={busy} onStart={start} />}
 
-      {stage === "chat" && (
+      {stage === "chat" && sessionId && (
         <Chat
+          key={sessionId}
+          sessionId={sessionId}
           scenario={scenario}
           transcript={transcript}
           setTranscript={setTranscript}
           scoring={busy}
           onRestart={start}
-          onEnd={(final, reached) => {
-            setGoalReached(reached);
-            void endAndScore(final, reached);
-          }}
+          onEnd={endAndScore}
         />
       )}
 
@@ -128,7 +137,7 @@ export function RolePlay({
   );
 }
 
-function Brief({ scenario, onStart }: { scenario: Scenario; onStart: () => void }) {
+function Brief({ scenario, starting, onStart }: { scenario: Scenario; starting: boolean; onStart: () => void }) {
   return (
     <Card className="border-border bg-card shadow-sm">
       <CardContent className="space-y-5 p-5 md:p-6">
@@ -178,8 +187,8 @@ function Brief({ scenario, onStart }: { scenario: Scenario; onStart: () => void 
           <strong>End &amp; score</strong> whenever you&apos;re done.
         </p>
 
-        <Button onClick={onStart} className="bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90">
-          Start role-play
+        <Button onClick={onStart} disabled={starting} className="gap-1.5 bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90">
+          {starting && <Loader2 className="h-4 w-4 animate-spin" />} Start role-play
         </Button>
       </CardContent>
     </Card>
@@ -187,6 +196,7 @@ function Brief({ scenario, onStart }: { scenario: Scenario; onStart: () => void 
 }
 
 function Chat({
+  sessionId,
   scenario,
   transcript,
   setTranscript,
@@ -194,20 +204,21 @@ function Chat({
   onRestart,
   onEnd,
 }: {
+  sessionId: string;
   scenario: Scenario;
   transcript: Msg[];
   setTranscript: (t: Msg[]) => void;
   scoring: boolean;
   onRestart: () => void;
-  onEnd: (final: Msg[], goalReached: boolean) => void;
+  onEnd: () => void;
 }) {
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
-  const [reached, setReached] = useState(false);
+  const [ended, setEnded] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const turns = transcript.filter((m) => m.role === "trainee").length;
   const atLimit = turns >= TURN_LIMIT;
-  const locked = typing || scoring || reached || atLimit;
+  const locked = typing || scoring || ended || atLimit;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -220,19 +231,34 @@ function Chat({
     setTranscript(next);
     setInput("");
     setTyping(true);
-    await think();
-    const { reply, goalReached } = mockBuyerReply(scenario, next);
-    const final: Msg[] = [...next, { role: "buyer", content: reply }];
-    setTranscript(final);
-    setTyping(false);
-    // FR-RP-10: the session ends at the goal or the turn limit.
-    if (goalReached || final.filter((m) => m.role === "trainee").length >= TURN_LIMIT) {
-      setReached(goalReached);
-      onEnd(final, goalReached);
+    try {
+      const { reply, ended: over } = await coachApi.turn(sessionId, text);
+      setTranscript([...next, { role: "buyer", content: reply }]);
+      // FR-RP-10: the session ends when the goal is reached or lost, or at the turn limit.
+      if (over) {
+        setEnded(true);
+        onEnd();
+      }
+    } catch (e) {
+      setTranscript(transcript);
+      setInput(text);
+      toast.error(e instanceof Error ? e.message : "The buyer didn't answer. Send it again.");
+    } finally {
+      setTyping(false);
     }
   };
 
-  const hint = () => setTranscript([...transcript, { role: "hint", content: mockHint(transcript) }]);
+  const hint = async () => {
+    setTyping(true);
+    try {
+      const { hint: tip } = await coachApi.hint(sessionId);
+      setTranscript([...transcript, { role: "hint", content: tip }]);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No hint just now.");
+    } finally {
+      setTyping(false);
+    }
+  };
 
   return (
     <Card className="border-border bg-card shadow-sm">
@@ -258,7 +284,7 @@ function Chat({
           </Button>
           <Button
             size="sm"
-            onClick={() => onEnd(transcript, false)}
+            onClick={onEnd}
             disabled={scoring || typing || turns === 0}
             className="gap-1.5 bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90"
           >

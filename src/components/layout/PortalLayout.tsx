@@ -66,7 +66,7 @@ type NavItem = {
 const warrantyNavItems: NavItem[] = [
   { name: "Dashboard", href: "/warranty/dashboard", icon: LayoutDashboard, roles: ["admin", "staff", "homeowner"] },
   { name: "AI Assistant", href: "/warranty/chat", icon: Bot, roles: ["admin", "staff", "homeowner"] },
-  { name: "Properties", href: "/warranty/properties", icon: Building2, roles: ["admin", "staff", "homeowner"] },
+  { name: "Maintenance", href: "/warranty/properties", icon: Building2, roles: ["admin", "staff", "homeowner"] },
   { name: "Communities", href: "/warranty/communities", icon: MapPinned, roles: ["admin", "staff"] },
   { name: "Tickets", href: "/warranty/tickets", icon: Ticket, roles: ["admin", "staff", "homeowner"] },
   { name: "Team", href: "/warranty/team", icon: Users, roles: ["admin"] },

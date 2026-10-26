@@ -38,6 +38,8 @@ import {
   removeSuperStaff,
 } from "../admin/super-staff.controller.js";
 import { listHandoffIssues, retryHandoffIssue, resolveHandoffIssue } from "../admin/handoffs.controller.js";
+import * as coach from "../admin/sales-coach.controller.js";
+import { createRateLimiter } from "../middlewares/rate-limit.js";
 import {
   getPromptLab,
   savePromptVersion,
@@ -184,5 +186,21 @@ router.post("/warranty-prompt-lab/revert-to-defaults", requireAuth, requireAdmin
 router.delete("/warranty-prompt-lab/versions/:versionId", requireAuth, requireAdmin("prompt-lab"), deleteWarrantyVersion);
 router.post("/warranty-prompt-lab/preview", requireAuth, requireAdmin("prompt-lab"), previewWarrantyPrompt);
 router.post("/warranty-prompt-lab/chat", requireAuth, requireAdmin("prompt-lab"), warrantyPromptLabChat);
+
+// Sales Coach (Track B)
+const coachAccess = [requireAuth, requireAdmin("sales-coach")];
+const byUser = (req) => req.user.id;
+// NFR-06: 15 role-plays per trainee per day; Ask is capped per hour.
+const coachDailyCap = createRateLimiter({ windowMs: 24 * 60 * 60 * 1000, max: 15, label: "Sales Coach sessions", keyFn: byUser });
+const coachAskCap = createRateLimiter({ windowMs: 60 * 60 * 1000, max: 60, label: "Sales Coach ask", keyFn: byUser });
+router.get("/sales-coach/scenarios", ...coachAccess, coach.getScenarios);
+router.get("/sales-coach/sessions", ...coachAccess, coach.getSessions);
+router.post("/sales-coach/sessions", ...coachAccess, coachDailyCap, coach.startSession);
+router.get("/sales-coach/sessions/:id", ...coachAccess, coach.getSessionDetail);
+router.post("/sales-coach/sessions/:id/turn", ...coachAccess, coach.sendTurn);
+router.post("/sales-coach/sessions/:id/hint", ...coachAccess, coach.getHint);
+router.post("/sales-coach/sessions/:id/score", ...coachAccess, coach.scoreSession);
+router.get("/sales-coach/team", ...coachAccess, coach.getTeam);
+router.post("/sales-coach/ask", ...coachAccess, coachAskCap, coach.askCoach);
 
 export default router;

@@ -17,7 +17,7 @@ function anthropicHeaders(cfg) {
   };
 }
 
-async function callAnthropic({ cfg, companyId, system, user, messages, maxTokens }) {
+async function callAnthropic({ cfg, companyId, system, user, messages, maxTokens, source }) {
   const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
     headers: anthropicHeaders(cfg),
@@ -33,7 +33,7 @@ async function callAnthropic({ cfg, companyId, system, user, messages, maxTokens
     return null;
   }
   const data = await response.json();
-  recordAiUsage(companyId, cfg, data?.usage);
+  recordAiUsage(companyId, cfg, data?.usage, source);
   // The first text block, not simply the first block: a reply can open with a
   // non-text block, and reading [0] alone returned null for a good answer.
   const text = data?.content?.find((b) => b.type === "text" && b.text)?.text || null;
@@ -45,21 +45,21 @@ async function callAnthropic({ cfg, companyId, system, user, messages, maxTokens
   return text;
 }
 
-export async function chat({ companyId, system, user, messages, maxTokens = 700, json = false }) {
+export async function chat({ companyId, system, user, messages, maxTokens = 700, json = false, source = null }) {
   const cfg = resolveAiConfig();
   if (!cfg.provider) {
     console.warn(`[LLM] No AI provider available for company=${companyId} (${cfg.reason}).`);
     return null;
   }
   try {
-    return await callAnthropic({ cfg, companyId, system, user, messages, maxTokens });
+    return await callAnthropic({ cfg, companyId, system, user, messages, maxTokens, source });
   } catch (err) {
     console.error("[LLM] Anthropic exception:", err.message);
     return null;
   }
 }
 
-async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature, effort }) {
+async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature, effort, source }) {
   const outputConfig =
     effort && supportsEffort(cfg.model) ? { output_config: { effort } } : {};
 
@@ -81,7 +81,7 @@ async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTo
     return null;
   }
   const data = await response.json();
-  recordAiUsage(companyId, cfg, data?.usage);
+  recordAiUsage(companyId, cfg, data?.usage, source);
   if (data?.stop_reason === "max_tokens") {
     console.warn(
       `[LLM] Anthropic tool call "${tool.name}" hit max_tokens (${maxTokens}); arguments are truncated.`,
@@ -101,6 +101,7 @@ export async function toolCall({
   fast = false,
   temperature,
   effort,
+  source = null,
 }) {
   let cfg = resolveAiConfig();
   if (!cfg.provider) {
@@ -109,7 +110,7 @@ export async function toolCall({
   }
   if (fast) cfg = toFastTier(cfg);
   try {
-    return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature, effort });
+    return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature, effort, source });
   } catch (err) {
     console.error("[LLM] Anthropic tool exception:", err.message);
     return null;

@@ -37,11 +37,28 @@ const tradeMatches = (tradeType: string, issueType: string) => {
   return a.includes(b) || b.includes(a);
 };
 
+export const TRADE_CATEGORIES = [
+  "Plumbing",
+  "Electrical",
+  "Fit & Finish",
+  "HVAC",
+  "Roofing",
+  "Drywall & Paint",
+  "Flooring",
+  "Cabinets & Trim",
+  "Windows & Doors",
+  "Appliances",
+  "Structural",
+  "Landscaping",
+  "General Warranty",
+];
+
 // No date here: dispatch emails the homeowner a link to pick a time — from the
 // assignee's availability, or the company's hours when no one is assigned.
 const UNASSIGNED = "none";
 
 const EMPTY_DISPATCH_FORM = {
+  category: "",
   staffId: "",
   notes: "",
 };
@@ -70,7 +87,9 @@ export function DispatchTicketDialog({
       .catch(() => setTrades([]));
   }, [ticket]);
 
-  const matching = ticket ? trades.filter((t) => tradeMatches(t.tradeType, ticket.issueType)) : [];
+  // Starts on the ticket's own issue type; the trade list follows the category.
+  const category = form.category || ticket?.issueType || "";
+  const matching = ticket ? trades.filter((t) => tradeMatches(t.tradeType, category)) : [];
   const otherTrades = trades.filter((t) => !matching.includes(t));
   const pickedTrade = trades.find((t) => t.user.id === form.staffId);
   const tradeLabel = (t: TradeOption) =>
@@ -94,6 +113,7 @@ export function DispatchTicketDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           staffId: form.staffId && form.staffId !== UNASSIGNED ? form.staffId : null,
+          category: form.category || null,
           notes: form.notes.trim() || null,
         }),
       });
@@ -159,6 +179,23 @@ export function DispatchTicketDialog({
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
+                <Label className="font-semibold">Trade category</Label>
+                <Select
+                  value={TRADE_CATEGORIES.includes(category) ? category : ""}
+                  onValueChange={(val) => setForm((f) => ({ ...f, category: val, staffId: "" }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={ticket.issueType || "Pick a category"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TRADE_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
                 <Label className="font-semibold">
                   Assign a trade <span className="font-normal text-muted-foreground">(optional)</span>
                 </Label>
@@ -173,7 +210,7 @@ export function DispatchTicketDialog({
                     <SelectItem value={UNASSIGNED}>No one yet</SelectItem>
                     {matching.length > 0 && (
                       <SelectGroup>
-                        <SelectLabel>Trades for {ticket.issueType}</SelectLabel>
+                        <SelectLabel>Trades for {category}</SelectLabel>
                         {matching.map((t) => (
                           <SelectItem key={t.user.id} value={t.user.id}>{tradeLabel(t)}</SelectItem>
                         ))}

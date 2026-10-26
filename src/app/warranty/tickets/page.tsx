@@ -100,6 +100,7 @@ const ISSUE_TYPES = [
   "Cabinets & Trim",
   "Drywall & Paint",
   "Electrical",
+  "Fit & Finish",
   "Flooring",
   "General Warranty",
   "HVAC",

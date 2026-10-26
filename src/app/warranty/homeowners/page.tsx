@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -37,7 +37,11 @@ import {
   Home,
   Phone,
   Pencil,
+  Camera,
+  Loader2,
+  Ticket,
 } from "lucide-react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { invalidate, QUERY_KEYS } from "@/lib/use-query";
 
@@ -49,6 +53,35 @@ interface Homeowner {
   role: string;
   hasSalesAccess?: boolean;
   createdAt: string;
+  property?: {
+    id: string;
+    address: string;
+    city?: string | null;
+    state?: string | null;
+    coverageTerm?: string | null;
+    photoUrl?: string | null;
+    community?: { name: string } | null;
+  } | null;
+}
+
+type Tone = "ok" | "warn" | "off";
+
+const TONE_BADGE: Record<Tone, string> = {
+  ok: "bg-green-100 text-green-800",
+  warn: "bg-amber-100 text-amber-800",
+  off: "bg-gray-100 text-gray-700",
+};
+
+const DAY = 24 * 60 * 60 * 1000;
+
+// Coverage is always one year from closing; coverageTerm holds the end date.
+function warrantyState(property: Homeowner["property"]): { label: string; tone: Tone } {
+  if (!property) return { label: "No property", tone: "off" };
+  if (!property.coverageTerm) return { label: "No coverage", tone: "off" };
+  const left = new Date(property.coverageTerm).getTime() - Date.now();
+  if (left < 0) return { label: "Expired", tone: "off" };
+  if (left <= 30 * DAY) return { label: `Expires in ${Math.max(1, Math.ceil(left / DAY))} days`, tone: "warn" };
+  return { label: `Covered · ${Math.round(left / (30 * DAY))} mo left`, tone: "ok" };
 }
 
 export default function HomeownersManagementPage() {
@@ -207,6 +240,45 @@ export default function HomeownersManagementPage() {
     }
   };
 
+  // Details dialog, opened by clicking a row.
+  const [viewId, setViewId] = useState<string | null>(null);
+  const viewed = homeowners.find((h) => h.id === viewId) ?? null;
+  const viewedWarranty = warrantyState(viewed?.property);
+
+  // House photo: one exterior shot per property, shown only in the details dialog.
+  const photoInput = useRef<HTMLInputElement>(null);
+  const photoTarget = useRef<Homeowner | null>(null);
+  const [photoBusyId, setPhotoBusyId] = useState<string | null>(null);
+
+  const pickPhoto = (homeowner: Homeowner) => {
+    photoTarget.current = homeowner;
+    photoInput.current?.click();
+  };
+
+  const housePhotoRequest = async (homeowner: Homeowner, file?: File) => {
+    setError("");
+    setPhotoBusyId(homeowner.id);
+    try {
+      let body: FormData | undefined;
+      if (file) {
+        body = new FormData();
+        body.append("file", file);
+      }
+      const res = await fetch(`/api/homeowners/${homeowner.id}/house-photo`, { method: file ? "POST" : "DELETE", body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data.message || "Could not update the house photo."); return; }
+      setHomeowners((prev) => prev.map((h) => (h.id === homeowner.id ? { ...h, property: data } : h)));
+      if (file) {
+        setSuccess(`House photo saved for ${homeowner.name}.`);
+        setTimeout(() => setSuccess(""), 4000);
+      }
+    } catch {
+      setError("Could not update the house photo.");
+    } finally {
+      setPhotoBusyId(null);
+    }
+  };
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -353,7 +425,8 @@ export default function HomeownersManagementPage() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.05 }}
-                    className="flex items-center justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                    onClick={() => setViewId(homeowner.id)}
+                    className="flex items-center justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors cursor-pointer"
                   >
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-[#0F3B3D]/10 dark:bg-[#b48c3c]/10 flex items-center justify-center">
@@ -362,11 +435,14 @@ export default function HomeownersManagementPage() {
                         </span>
                       </div>
                       <div>
-                        <p className="font-medium text-foreground">{homeowner.name}</p>
+                        {/* The whole row opens the details; this button is the keyboard route in. */}
+                        <button type="button" className="font-medium text-foreground text-left hover:underline">
+                          {homeowner.name}
+                        </button>
                         <div className="flex items-center gap-2 mt-0.5">
                           <p className="text-sm text-muted-foreground">{homeowner.email}</p>
                           <button
-                            onClick={() => copyToClipboard(homeowner.email, homeowner.id)}
+                            onClick={(e) => { e.stopPropagation(); copyToClipboard(homeowner.email, homeowner.id); }}
                             className="text-muted-foreground hover:text-[#0F3B3D] transition-colors"
                           >
                             {copiedId === homeowner.id ? (
@@ -377,7 +453,7 @@ export default function HomeownersManagementPage() {
                           </button>
                         </div>
                         <button
-                          onClick={() => { setPhoneError(""); setPhoneEdit({ id: homeowner.id, name: homeowner.name, value: homeowner.phone || "" }); }}
+                          onClick={(e) => { e.stopPropagation(); setPhoneError(""); setPhoneEdit({ id: homeowner.id, name: homeowner.name, value: homeowner.phone || "" }); }}
                           className="flex items-center gap-1.5 mt-0.5 text-sm text-muted-foreground hover:text-[#0F3B3D] dark:hover:text-[#b48c3c] transition-colors"
                         >
                           <Phone className="h-3.5 w-3.5" />
@@ -386,7 +462,7 @@ export default function HomeownersManagementPage() {
                         </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
                       <Badge variant="secondary" className="bg-green-100 text-green-700">
                         Homeowner
                       </Badge>
@@ -426,8 +502,105 @@ export default function HomeownersManagementPage() {
             )}
           </CardContent>
         </Card>
+        <input
+          ref={photoInput}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file && photoTarget.current) housePhotoRequest(photoTarget.current, file);
+          }}
+        />
       </motion.div>
     </div>
+
+    {/* Homeowner Details Dialog — the only place the house photo shows */}
+    <Dialog open={viewed !== null} onOpenChange={(open) => { if (!open) setViewId(null); }}>
+      <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden">
+        {viewed && (
+          <>
+            <div className="relative h-52 bg-muted flex items-center justify-center">
+              {viewed.property?.photoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL
+                <img src={viewed.property.photoUrl} alt={`House at ${viewed.property.address}`} className="absolute inset-0 h-full w-full object-cover" />
+              ) : viewed.property ? (
+                <button
+                  type="button"
+                  onClick={() => pickPhoto(viewed)}
+                  disabled={photoBusyId === viewed.id}
+                  className="flex flex-col items-center gap-2 border-2 border-dashed border-muted-foreground/40 rounded-xl px-6 py-4 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors"
+                >
+                  <Camera className="h-6 w-6" />
+                  Add house photo
+                </button>
+              ) : (
+                <div className="text-center text-sm text-muted-foreground px-6">
+                  <Home className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                  No property assigned yet.{" "}
+                  <Link href="/warranty/properties" className="underline">Add one in Properties</Link>
+                </div>
+              )}
+              <span className={`absolute left-3 top-3 px-2.5 py-1 rounded-full text-xs font-semibold ${TONE_BADGE[viewedWarranty.tone]}`}>
+                {viewedWarranty.label}
+              </span>
+              {photoBusyId === viewed.id && (
+                <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-white" />
+                </div>
+              )}
+              {viewed.property?.photoUrl && photoBusyId !== viewed.id && (
+                <div className="absolute right-3 bottom-3 flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => housePhotoRequest(viewed)}>Remove</Button>
+                  <Button size="sm" className="gap-1.5 bg-[#0F3B3D]/90 hover:bg-[#0F3B3D] text-white" onClick={() => pickPhoto(viewed)}>
+                    <Camera className="h-4 w-4" /> Change
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <div className="p-5 space-y-4">
+              <DialogHeader className="text-left space-y-0.5">
+                <DialogTitle className="text-lg">{viewed.name}</DialogTitle>
+                <DialogDescription>
+                  {viewed.property
+                    ? [viewed.property.address, viewed.property.city, viewed.property.state].filter(Boolean).join(", ")
+                    : "No property assigned"}
+                </DialogDescription>
+                {viewed.property?.community?.name && (
+                  <p className="text-xs text-muted-foreground">{viewed.property.community.name}</p>
+                )}
+              </DialogHeader>
+
+              <div className="space-y-1.5 text-sm">
+                <p className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-muted-foreground" />{viewed.email}</p>
+                <p className="flex items-center gap-2">
+                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                  {viewed.phone || <span className="text-muted-foreground">No phone</span>}
+                </p>
+                {viewed.property?.coverageTerm && (
+                  <p className="flex items-center gap-2 text-muted-foreground">
+                    <CheckCircle className="h-3.5 w-3.5" />
+                    Warranty ends {new Date(viewed.property.coverageTerm).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                  </p>
+                )}
+              </div>
+
+              {viewed.property && (
+                <div className="border-t pt-3">
+                  <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                    <Link href={`/warranty/tickets?propertyId=${viewed.property.id}`}>
+                      <Ticket className="h-4 w-4" /> View tickets
+                    </Link>
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
 
     {/* Edit Phone Dialog */}
     <Dialog open={phoneEdit !== null} onOpenChange={(open) => { if (!open) setPhoneEdit(null); }}>

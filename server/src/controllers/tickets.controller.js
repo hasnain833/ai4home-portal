@@ -433,6 +433,8 @@ export const dispatchTicket = async (req, res) => {
 
     const { id } = req.params;
     const { staffId, notes } = req.body;
+    // The trade category picked at dispatch replaces the AI's issue type.
+    const category = String(req.body.category || "").trim().slice(0, 60);
 
     const ticket = await prisma.ticket.findUnique({
       where: { id },
@@ -477,6 +479,7 @@ export const dispatchTicket = async (req, res) => {
       where: { id },
       data: {
         status: "DISPATCHED",
+        ...(category && { issueType: category }),
         assignedStaffId: staff?.id ?? null,
         bookingToken: randomUUID(),
         dispatchNotes: String(notes || "").trim().slice(0, 2000) || null,
