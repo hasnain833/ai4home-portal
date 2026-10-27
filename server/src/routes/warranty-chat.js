@@ -67,9 +67,12 @@ async function postMessage(req, res) {
     if (homeownerId && actor.viaSession) {
       const owner = await prisma.user.findUnique({
         where: { id: homeownerId },
-        select: { companyId: true },
+        select: { companyId: true, role: true },
       });
-      if (!owner || owner.companyId !== companyId) homeownerId = null;
+      // Staff chatting from the portal send their own id; only a homeowner counts.
+      if (!owner || owner.companyId !== companyId || String(owner.role).toUpperCase() !== "HOMEOWNER") {
+        homeownerId = null;
+      }
     }
 
     let convo = null;

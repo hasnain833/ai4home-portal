@@ -127,7 +127,18 @@ export async function createWarrantyTicket({
   const issueType = String(classification?.issueType || "General Warranty").slice(0, 80);
 
   const ticketCompanyId = homeowner.companyId ?? companyId ?? null;
-  const ticket = await prisma.$transaction(async (tx) => tx.ticket.create({
+  // One ticket per conversation: the row lock makes a retry after a timeout, or
+  // a double submit, find the first ticket instead of filing a second.
+  let duplicateOf = null;
+  const ticket = await prisma.$transaction(async (tx) => {
+    if (conversationId) {
+      const [row] = await tx.$queryRaw`SELECT "ticketId" FROM "WarrantyConversation" WHERE id = ${conversationId} FOR UPDATE`;
+      if (row?.ticketId) {
+        duplicateOf = await tx.ticket.findUnique({ where: { id: row.ticketId } });
+        if (duplicateOf) return duplicateOf;
+      }
+    }
+    const created = await tx.ticket.create({
     data: {
       // id is omitted — Supabase/Prisma auto-assigns a cuid
       number: await nextTicketNumber(tx, ticketCompanyId),
@@ -146,7 +157,17 @@ export async function createWarrantyTicket({
       // A fixed issue must not open a work order in the builder's ERP.
       erpSyncStatus: resolvedInChat ? "SKIPPED" : "PENDING",
     },
-  }));
+    });
+    if (conversationId) {
+      await tx.warrantyConversation.update({ where: { id: conversationId }, data: { ticketId: created.id } });
+    }
+    return created;
+  });
+
+  if (duplicateOf) {
+    console.log(`[Warranty Ticket] Conversation ${conversationId} already has #${ticket.id} — not filing again.`);
+    return { ticket, ticketUrl: ticketUrlFor(ticket.id), duplicate: true };
+  }
 
   if (!resolvedInChat) {
     try {

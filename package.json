@@ -10,7 +10,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test \"server/src/**/*.test.js\""
+    "test": "node --test --experimental-test-module-mocks \"server/src/**/*.test.js\""
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

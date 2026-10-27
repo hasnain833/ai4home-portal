@@ -72,6 +72,10 @@ export default function WarrantyChat({
 
   const [conversationId, setConversationId] = useState<string | null>(null);
 
+  // The portal goes through the session so the server knows who is logged in;
+  // the embed has only a companyId and treats every visitor as a homeowner.
+  const chatEndpoint = isWidget ? "/api/public/warranty/chat" : "/api/warranty/chat";
+
   const hasUserMessages = messages.some((m) => m.role === "user");
 
   const scrollToBottom = () => {
@@ -103,7 +107,7 @@ export default function WarrantyChat({
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/public/warranty/chat", {
+      const response = await fetch(chatEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -243,6 +247,7 @@ export default function WarrantyChat({
             {msg.photoRequest && msg.id === messages[messages.length - 1]?.id && (
               <PhotoRequestCard
                 companyId={companyId}
+                endpoint={chatEndpoint}
                 conversationId={conversationId}
                 max={msg.photoRequest.max}
                 themeColor={themeColor}

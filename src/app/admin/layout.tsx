@@ -375,8 +375,11 @@ export default function AdminLayout({
         </AnimatePresence>
 
         {/* Page Content */}
-        <div className="flex-1 overflow-auto p-4 md:p-8">
-          <div className="mx-auto max-w-7xl h-full">
+        <div className="flex-1 overflow-auto no-scrollbar p-4 md:p-8">
+          {/* min-h-full, not h-full: a long page grows the box, so the scroll
+              area keeps its bottom padding. The grid keeps h-full pages (Prompt
+              Lab) filling the screen; minmax(0,1fr) stops wide tables widening it. */}
+          <div className="mx-auto grid min-h-full max-w-7xl grid-cols-[minmax(0,1fr)]">
             {pageAllowed ? (
               children
             ) : (

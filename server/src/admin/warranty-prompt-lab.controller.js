@@ -316,7 +316,7 @@ export const previewWarrantyPrompt = async (req, res) => {
     const rendered = renderTemplate(draft[phase] || "", {
       companyName: company.name,
       issueState: "{}",
-      kbContext: "[KB context would appear here]",
+      kbContext: "[What the document search found — the passages themselves go in the homeowner's turn]",
       coverageStatus: "UNKNOWN",
       knownDetails: describeKnown({
         homeowner: { name: "[Homeowner name]", email: "[homeowner@example.com]" },

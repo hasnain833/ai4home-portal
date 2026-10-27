@@ -33,6 +33,7 @@ async function shrink(file: File): Promise<File> {
 
 export default function PhotoRequestCard({
   companyId,
+  endpoint,
   conversationId,
   max,
   themeColor,
@@ -40,6 +41,7 @@ export default function PhotoRequestCard({
   onFinish,
 }: {
   companyId: string;
+  endpoint: string;
   conversationId: string | null;
   max: number;
   themeColor: string;
@@ -63,7 +65,7 @@ export default function PhotoRequestCard({
       body.append("companyId", companyId);
       body.append("conversationId", conversationId);
       for (const file of await Promise.all(picked.map(shrink))) body.append("photos", file);
-      const res = await fetch("/api/public/warranty/chat/photos", { method: "POST", body });
+      const res = await fetch(`${endpoint}/photos`,{ method: "POST", body });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not upload the photos");
       setPhotos(data.photos || []);
@@ -81,7 +83,7 @@ export default function PhotoRequestCard({
     setError("");
     try {
       const qs = new URLSearchParams({ companyId, conversationId });
-      const res = await fetch(`/api/public/warranty/chat/photos/${photo.id}?${qs}`, { method: "DELETE" });
+      const res = await fetch(`${endpoint}/photos/${photo.id}?${qs}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not remove the photo");
       setPhotos(data.photos || []);
