@@ -84,6 +84,8 @@ import { ticketAppointmentReminders } from "./inngest/functions/appointment-remi
 import { bookingNudges } from "./inngest/functions/booking-nudges.js";
 import { runB2BCampaign, resumeStalledB2BEnrollments } from "./inngest/functions/b2b-campaign.js";
 
+import { websiteInquiryDelivery } from "./inngest/functions/website-inquiry.js";
+
 assertEncryptionKeyOnBoot();
 assertWebhookSecretOnBoot();
 
@@ -224,6 +226,7 @@ app.use(
       warrantyConversationRetention,
       runB2BCampaign,
       resumeStalledB2BEnrollments,
+      websiteInquiryDelivery,
     ],
   }),
 );

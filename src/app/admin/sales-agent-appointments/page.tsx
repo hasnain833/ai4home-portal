@@ -17,7 +17,8 @@ type SalesAgentAppointment = {
   phone: string;
   preferredTime: string;
   status: string;
-  source: "BOTPRESS" | "CAMPAIGN";
+  source: "BOTPRESS" | "CAMPAIGN" | "WEBSITE_SALES";
+  notifications?: { adminSentAt: string | null; visitorSentAt: string | null; adminSmsSentAt: string | null; visitorSmsSentAt: string | null; lastError: string | null } | null;
   campaignName: string | null;
   startTime: string | null;
   createdAt: string;
@@ -75,7 +76,7 @@ export default function SalesAgentAppointmentsPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Appointments</h1>
         <p className="text-muted-foreground mt-2">
-          Meetings booked with the platform team, from the website Botpress agent or from a business-lead campaign.
+          Meetings booked with the platform team, from the website sales assistant, legacy Botpress agent, or a business-lead campaign.
         </p>
       </div>
 
@@ -84,7 +85,7 @@ export default function SalesAgentAppointmentsPage() {
       <Card className="border border-border/80 shadow-sm">
         <CardHeader>
           <CardTitle>Recent Bookings</CardTitle>
-          <CardDescription>Each booking is tagged with where it came from: Botpress or the campaign&apos;s name.</CardDescription>
+          <CardDescription>Each booking is tagged with where it came from: Website Sales, Botpress, or the campaign&apos;s name.</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -121,9 +122,9 @@ export default function SalesAgentAppointmentsPage() {
                         <div className="text-xs">{apt.phone}</div>
                       </td>
                       <td className="px-4 py-3">
-                        {apt.source === "CAMPAIGN" ? (
-                          <span className="inline-flex max-w-[180px] items-center truncate px-2 py-1 rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-medium" title={apt.campaignName || "Campaign"}>
-                            {apt.campaignName || "Campaign"}
+                        {apt.source !== "BOTPRESS" ? (
+                          <span className="inline-flex max-w-[180px] items-center truncate px-2 py-1 rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-medium" title={apt.source === "WEBSITE_SALES" ? "Website Sales" : apt.campaignName || "Campaign"}>
+                            {apt.source === "WEBSITE_SALES" ? "Website Sales" : apt.campaignName || "Campaign"}
                           </span>
                         ) : (
                           <span className="inline-flex items-center px-2 py-1 rounded-md bg-sky-500/10 text-sky-600 dark:text-sky-400 text-xs font-medium">
@@ -135,9 +136,13 @@ export default function SalesAgentAppointmentsPage() {
                         <span className="inline-flex items-center px-2 py-1 rounded-md bg-[#b48c3c]/10 text-[#b48c3c] text-xs font-medium whitespace-nowrap">
                           {apt.startTime ? new Date(apt.startTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : apt.preferredTime}
                         </span>
+                        {apt.notifications && <p className="mt-1 text-xs text-muted-foreground" title={apt.notifications.lastError || undefined}>
+                          Email: {apt.notifications.adminSentAt && apt.notifications.visitorSentAt ? "sent to both" : "pending"} · SMS: {apt.notifications.adminSmsSentAt && apt.notifications.visitorSmsSentAt ? "sent to both" : "pending"}
+                          {apt.notifications.lastError ? " (retry queued)" : ""}
+                        </p>}
                       </td>
                       <td className="px-4 py-3">
-                        {apt.source === "CAMPAIGN" ? (
+                        {apt.source !== "BOTPRESS" ? (
                           <select
                             value={apt.status}
                             onChange={(e) => setStatus(apt.id, e.target.value)}
@@ -202,7 +207,7 @@ function AvailabilityCard() {
           <Clock className="h-4 w-4 text-[#b48c3c]" /> Meeting availability
         </CardTitle>
         <CardDescription>
-          The times business leads can pick from the booking link in campaign emails and texts. Booked slots disappear automatically.
+          The times offered in the website sales chat and business-lead booking links. Booked slots disappear automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

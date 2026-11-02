@@ -94,6 +94,46 @@ export function detectTiming(text) {
   return TIMING_PATTERNS.some((re) => re.test(s));
 }
 
+// "I already did that", "it's off", "I reset it but it's still broken".
+const STEP_DONE_RE =
+  /\b(?:already\s+(?:did|done|tried|have|turned|shut|switched|checked|reset|cleaned|replaced|closed|unplugged)|i\s+(?:did|have|tried)\s+(?:that|it|this|already)|(?:did|done|tried)\s+(?:that|it|this)\s+already|i(?:'ve|\s+have)\s+(?:already\s+)?(?:done|tried|turned|shut|switched|reset|checked|closed)|(?:it'?s|it\s+is|water\s+is|valve\s+is|breaker\s+is)\s+(?:already\s+|now\s+)?(?:off|shut(?:\s*off)?|closed|turned\s*off)|i\s+(?:reset|replaced|cleaned|checked|unplugged|flipped|closed|turned|shut|switched|tightened)\s+(?:it|that|this|the|them)\b|yes,?\s+(?:i\s+)?(?:did|done|have)\b|as\s+i\s+(?:said|told\s+you|mentioned))/i;
+// "I can't find the valve", "I don't know where it is".
+const STEP_BLOCKED_RE =
+  /\b(?:i\s+(?:can'?t|cannot|couldn'?t)\s+(?:find|reach|do|get\s+to|turn|open|close|see|tell|access|locate)|(?:don'?t|do\s+not)\s+know\s+(?:how|where)|unable\s+to)\b/i;
+
+const normalizedReply = (text) => String(text || "").replace(/[\u2018\u2019]/g, "'").trim();
+
+export function reportsStepDone(text) {
+  const reply = normalizedReply(text);
+  // A question, intention or negative answer is not a completed action.
+  if (/\?\s*$/.test(reply) || /\b(?:haven't|have not|hasn't|has not|didn't|did not|not yet|never|will|going to)\b.{0,30}\b(?:done|did|tried|try|turn|turned|shut|switch|switched|check|checked|reset|close|closed|completed|finished)\b/i.test(reply)) return false;
+  if (/\b(?:already\s+(?:have|has))\b/i.test(reply) && !/\b(?:done|tried|turned|shut|switched|checked|reset|cleaned|replaced|closed|unplugged)\b/i.test(reply)) return false;
+  if (/\bas i (?:said|told you|mentioned)\b/i.test(reply) && !/\b(?:done|did|tried|turned|shut|switched|checked|reset|closed|off)\b/i.test(reply)) return false;
+  return STEP_DONE_RE.test(reply) || /\bi(?:'ve| have)? (?:already )?(?:completed|finished) (?:it|that|this|the step)\b/i.test(reply) || /^(?:done|already done|yes|yes,? i have)[.!]*$/i.test(reply);
+}
+
+export const reportsStepBlocked = (text) => STEP_BLOCKED_RE.test(normalizedReply(text));
+
+export function reportsProblemStillPresent(text) {
+  return /\b(?:still\s+(?:not\s+)?(?:leak\w*|drip\w*|broken|happening|there|the same|not working|working)|(?:didn't|did not|hasn't|has not)\s+(?:help|work|fix)|no\s+(?:change|difference)|not\s+(?:fixed|resolved)|problem\s+(?:remains|persists))\b/i.test(normalizedReply(text));
+}
+
+export function reportsProblemFixed(text) {
+  const reply = normalizedReply(text);
+  return !reportsProblemStillPresent(reply) && !/\b(?:not|isn't|is not|hasn't|has not|never)\b.{0,20}\b(?:fixed|resolved|working|stopped)\b/i.test(reply) && /\b(?:it's fixed|it is fixed|problem is fixed|issue is resolved|(?:it|everything) (?:is )?work(?:s|ing)(?: fine)? now|(?:leak|leaking|drip|dripping) (?:has )?stopped)\b/i.test(reply);
+}
+
+export function isPhotoStepReply(text) {
+  const reply = normalizedReply(text);
+  if (/\?\s*$/.test(reply)) return false;
+  if (/^(?:done|skip|skip (?:it|that|photos)|no photos|already done|i already did that)[.!]*$/i.test(reply)) return true;
+  if (reportsStepDone(reply) || reportsStepBlocked(reply)) return true;
+  if (/\bi(?:'ve| have)? (?:already )?(?:sent|submitted|provided) (?:them|those|it)\b/i.test(reply) && !/\b(?:not|never|haven't)\b/i.test(reply)) return true;
+  if (!/\b(?:photos?|pictures?|images?|upload\w*|attach\w*)\b/i.test(reply)) return false;
+  if (/\b(?:haven't|have not|not yet|will|going to)\b/i.test(reply)) return false;
+  return /\b(?:added|uploaded|attached|sent|already|skip|can't|cannot|unable|don't have|do not have|don't want|do not want|prefer not|no)\b/i.test(reply);
+}
+
 // `latest` is the homeowner's newest message: what it names replaces an earlier
 // answer, so "actually it's the upstairs bathroom" corrects the location.
 // ponytail: keyword match, so a message naming two rooms keeps the longer name, not the corrected one.
@@ -191,8 +231,11 @@ export function describeKnown({
     reported.push(`Fixture involved: ${issueState.fixtureHint}`);
   if (issueState.timingHint)
     reported.push("When it started: already described — do not ask again.");
-  if (issueState.safetyAdvised)
+  if (issueState.safetyAdvised) {
     lines.push(`Safety step for ${issueState.hazardKey || "the hazard"}: already given this conversation.`);
+    if (issueState.safetyDoneFor && issueState.safetyDoneFor === issueState.hazardKey)
+      reported.push("They report having completed the safety step. Do not ask them to repeat or confirm it again.");
+  }
 
   // What just happened to the lookup, in the same breath as the facts, because
   // the model writes the reply that has to account for it.
@@ -209,6 +252,17 @@ export function describeKnown({
       `JUST NOW: no property on file matches "${issueState.lookupFailed}". ` +
         "Say so plainly and ask them to check the email address they used with the builder. " +
         "A request cannot be logged without finding their file, so do not offer to. Do not guess at a property.",
+    );
+  }
+  if (issueState.stepDone) {
+    events.push(
+      `The homeowner has told you ${issueState.stepDone} time(s) that they already did what was asked. ` +
+        "Do not ask them to do it, try it, or confirm it again. If the problem is still there, move to logging it (transition_phase RESOLVE).",
+    );
+  }
+  if (issueState.stepBlocked) {
+    events.push(
+      "The homeowner said they cannot do a step you gave them. Do not ask them to try it again — move on, or log it for the warranty team.",
     );
   }
   if ((issueState.diagnoseTurns || 0) >= 3) {

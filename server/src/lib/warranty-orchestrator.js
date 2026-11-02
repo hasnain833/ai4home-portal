@@ -16,7 +16,7 @@ import {
   alreadyAdvised,
   hazardNotice,
 } from "./warranty-hazards.js";
-import { absorbIssueDetails, describeKnown } from "./warranty-known.js";
+import { absorbIssueDetails, describeKnown, reportsStepDone, reportsStepBlocked, reportsProblemStillPresent, reportsProblemFixed, isPhotoStepReply } from "./warranty-known.js";
 import {
   INTAKE_SYSTEM_PROMPT,
   IDENTIFY_SYSTEM_PROMPT,
@@ -33,6 +33,49 @@ import {
 import { getLivePrompts } from "../prompts/live.js";
 
 const MAX_TRACKED_KB_REFS = 12;
+
+// Diagnostic replies before the server moves to logging, whatever the model
+// says. The prompt asks for three questions; this is the enforcement.
+const MAX_DIAGNOSE_TURNS = 3;
+// "Already did that" / "can't do that" this many times means the chat is going
+// in circles: stop asking and hand it to the warranty team.
+const MAX_STUCK_REPLIES = 2;
+
+/** Counts the homeowner's "already done" / "can't do it" replies to the agent's last message. */
+export function trackStepReplies(issueState, priorTranscript, newMsg) {
+  const previous = (priorTranscript || []).findLast((t) => t?.role === "agent");
+  if (!previous || issueState.photoStep === "REQUESTED") return issueState;
+  const requested = /\b(?:please|try|check|reset|turn|shut|switch|close|unplug|clean|replace|tighten|did you|have you|were you able|managed|could you|can you)\b/i.test(previous.content || "");
+  if (!requested) return issueState;
+  const done = reportsStepDone(newMsg);
+  const blocked = reportsStepBlocked(newMsg);
+  if (done) {
+    issueState.stepDone = (issueState.stepDone || 0) + 1;
+    const hazard = issueState.hazardKey ? { key: issueState.hazardKey } : null;
+    if (issueState.safetyAdvised && hazard && mentionsSafetyAction(previous.content, hazard)) issueState.safetyDoneFor = issueState.hazardKey;
+  }
+  if (blocked) issueState.stepBlocked = (issueState.stepBlocked || 0) + 1;
+  if (done || blocked) {
+    // These are reported actions, not independently verified facts. Free text
+    // remains out of the privileged prompt (see promptState).
+    issueState.attemptedSteps = [...(issueState.attemptedSteps || []), {
+      request: String(previous.content || "").slice(0, 1000),
+      response: String(newMsg || "").slice(0, 1000),
+      status: blocked ? "UNABLE" : "COMPLETED",
+      outcome: reportsProblemStillPresent(newMsg) ? "UNRESOLVED" : reportsProblemFixed(newMsg) ? "RESOLVED" : "UNKNOWN",
+      at: new Date().toISOString(),
+    }].slice(-12);
+  }
+  return issueState;
+}
+
+export function diagnosisStuck(issueState) {
+  return (
+    (issueState.diagnoseTurns || 0) >= MAX_DIAGNOSE_TURNS ||
+    (issueState.stepDone || 0) >= MAX_STUCK_REPLIES ||
+    (issueState.stepBlocked || 0) >= MAX_STUCK_REPLIES
+  );
+}
 
 const KB_PASSAGES = 8;
 
@@ -217,7 +260,7 @@ function withReferences(messages, results) {
 }
 
 // Homeowner free text lives in the conversation, not the system prompt.
-const UNTRUSTED_STATE_KEYS = ["issueSummary", "pendingSummary", "symptom", "location", "lookupFailed", "kbRefs", "pendingFiling"];
+const UNTRUSTED_STATE_KEYS = ["issueSummary", "pendingSummary", "symptom", "location", "lookupFailed", "kbRefs", "pendingFiling", "attemptedSteps"];
 
 export function promptState(issueState = {}) {
   const safe = { ...issueState };
@@ -450,6 +493,9 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   const ownedBy = boundHomeownerId ? { homeownerId: boundHomeownerId } : {};
   let propertyId = convo.propertyId || null;
   const issueState = { ...(convo.issueState || {}) };
+  const waitingForOutcome = Boolean(issueState.awaitingStepOutcome);
+  const priorDone = issueState.stepDone || 0;
+  const priorBlocked = issueState.stepBlocked || 0;
   let filedThisTurn = false;
   let communityId = null;
   let property = null;
@@ -468,6 +514,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
 
   const said = homeownerText(convo.transcript || [], newMsg);
   absorbIssueDetails(issueState, said, newMsg);
+  if (currentPhase === "DIAGNOSE" || currentPhase === "RESOLVE") trackStepReplies(issueState, convo.transcript, newMsg);
 
   if (!issueState.issueSummary) {
     const candidate = String(newMsg || "").replace(EMAIL_RE, "").trim();
@@ -636,24 +683,36 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     currentPhase = "DIAGNOSE";
   }
 
-  // The homeowner finished the photo step (Done or Skip): file the ticket the
-  // agent had already decided on. No model call — the decision was made.
-  if (photoStepDone && issueState.photoStep === "REQUESTED" && !ticketId && !sandboxMode) {
+  // Both the photo card and a typed Done/Skip complete the optional step.
+  // A question about photos must keep the card available, not silently file.
+  if (issueState.photoStep === "REQUESTED" && !ticketId && !sandboxMode) {
+    const newEmergency = hazard?.severity === SEVERITY.EMERGENCY && !advisedFor(hazard);
+    if (!photoStepDone && !isPhotoStepReply(newMsg) && !newEmergency) {
+      photoRequest = { max: MAX_PHOTOS_PER_CLAIM };
+      return finish(`A close-up and a wider photo of the issue are helpful. Use the photo card below, or type "skip" to continue without photos.`, "RESOLVE");
+    }
     issueState.photoStep = "DONE";
     const photos = await countConversationPhotos(convo.id);
     const fromChat = !issueState.pendingSummary;
+    // A typed reply can raise a new hazard ("now it's sparking"); it still gets its step.
+    const safety = hazard && !advisedFor(hazard) ? `${safetyLine(hazard)}\n\n` : "";
+    if (safety) {
+      issueState.safetyAdvised = true;
+      issueState.hazardKey = hazard.key;
+    }
     const result = await file({
       // No agent-written summary when the hand-over came from diagnosis:
       // classify everything the homeowner said and describe it with that.
-      description: issueState.pendingSummary || said || newMsg.trim(),
+      description: issueState.pendingSummary ? `${issueState.pendingSummary}\n\n${said}` : said || newMsg.trim(),
       describeWithSummary: fromChat,
+      forceEmergency: hazard?.severity === SEVERITY.EMERGENCY,
     });
     delete issueState.pendingSummary;
     if (result.filed) {
       const thanks = photos ? `Thanks — I've attached your ${photos} photo${photos === 1 ? "" : "s"}. ` : "";
-      return finish(`${thanks}${result.line}`, "RESOLVE");
+      return finish(`${safety}${thanks}${result.line}`, "RESOLVE");
     }
-    return finish(notFiledLine(result), result.reason === "error" ? "RESOLVE" : "IDENTIFY");
+    return finish(`${safety}${notFiledLine(result)}`, result.reason === "error" ? "RESOLVE" : "IDENTIFY");
   }
 
   let systemPromptTemplate = "";
@@ -747,7 +806,7 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     }));
   }
 
-  const system = renderTemplate(systemPromptTemplate, {
+  let system = renderTemplate(systemPromptTemplate, {
     companyName: company.name,
     issueState: promptState(issueState),
     kbContext,
@@ -763,8 +822,16 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     hazardNotice: hazardNotice(hazard, {
       advised: advisedFor(hazard),
       identified: Boolean(propertyId),
+      done: Boolean(hazard && issueState.safetyDoneFor === hazard.key),
     }),
   });
+  // Append runtime progress even for older live prompt versions that omit the
+  // knownDetails placeholder. A saved prompt cannot disable the loop guard.
+  if ((issueState.stepDone || 0) || (issueState.stepBlocked || 0) || waitingForOutcome) {
+    system += "\n\nConversation progress: the homeowner has already reported completing or being unable to perform a requested step. " +
+      "Never request that action or its confirmation again. Completing a step does not prove the issue is fixed. " +
+      "If it is still happening or they cannot do the step, move to logging it. Only mark_resolved when they confirm the problem itself is fixed.";
+  }
   const unresolved = usedTokens(system);
   if (unresolved.length) {
     console.warn(`[Warranty Agent] ${currentPhase} prompt has unresolved placeholders: ${unresolved.join(", ")}`);
@@ -785,16 +852,48 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     const safety = hazard && !advisedFor(hazard) ? `${safetyLine(hazard)}
 
 ` : "";
-    return {
-      reply: `${safety}I'm having trouble connecting to my system. Please try again in a moment.`,
-      kbHits,
-      options: turnOptions,
-    };
+    if (safety) {
+      issueState.safetyAdvised = true;
+      issueState.hazardKey = hazard.key;
+    }
+    return finish(`${safety}I'm having trouble connecting to my system. Please try again in a moment.`, currentPhase);
   }
 
   let replyText = input.message || "";
   let nextPhase = currentPhase;
+  if (currentPhase === "DIAGNOSE" && hazard?.severity === SEVERITY.EMERGENCY && !advisedFor(hazard)) {
+    input.action = "escalate_emergency";
+    input.emergency_reason = `New life-safety hazard reported: ${hazard.label}.`;
+    replyText = safetyLine(hazard);
+  }
   if (currentPhase === "DIAGNOSE") issueState.diagnoseTurns = (issueState.diagnoseTurns || 0) + 1;
+  const stepCompleted = (issueState.stepDone || 0) > priorDone;
+  const stepBlocked = (issueState.stepBlocked || 0) > priorBlocked;
+  const problemStillPresent = reportsProblemStillPresent(newMsg);
+  const problemFixed = reportsProblemFixed(newMsg);
+  const forceHandoff = currentPhase === "DIAGNOSE" && (
+    diagnosisStuck(issueState) || stepBlocked ||
+    (stepCompleted && problemStillPresent) || (waitingForOutcome && !problemFixed)
+  );
+  let askOutcome = false;
+  if (currentPhase === "DIAGNOSE" && input.action !== "escalate_emergency") {
+    // Neither completing a step nor failing it is proof of a fixed problem.
+    if ((problemStillPresent || stepBlocked || ((stepCompleted || waitingForOutcome) && !problemFixed)) && input.action === "mark_resolved") input.action = "respond";
+    if (input.action !== "mark_resolved") {
+      if (forceHandoff) {
+        input.transition_phase = "RESOLVE";
+        delete issueState.awaitingStepOutcome;
+      } else if (stepCompleted && !problemFixed) {
+        askOutcome = true;
+        issueState.awaitingStepOutcome = true;
+        input.transition_phase = "STAY";
+        replyText = "Thanks for doing that. Is the problem fixed, or is it still happening?";
+      }
+    }
+  }
+  if (currentPhase === "RESOLVE" && !ticketId && propertyId && input.action === "respond" && (stepCompleted || stepBlocked || waitingForOutcome)) {
+    input.action = "create_ticket";
+  }
 
   if (currentPhase === "INTAKE") {
     const past = propertyId ? "DIAGNOSE" : "IDENTIFY";
@@ -872,14 +971,27 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
       replyText = await escalate(reason, input.message || "");
       if (ticketId || filedThisTurn) nextPhase = "RESOLVE";
       else if (!homeownerId) nextPhase = "IDENTIFY";
-    } else if (input.transition_phase === "RESOLVE") {
+    } else if (input.transition_phase === "RESOLVE" || diagnosisStuck(issueState)) {
+      // Server-enforced: past the question limit, or the homeowner keeps saying
+      // they already did it / can't, the chat moves to logging it.
       nextPhase = "RESOLVE";
       if (!ticketId && !sandboxMode && propertyId && !issueState.photoStep) {
         issueState.photoStep = "REQUESTED";
         delete issueState.pendingSummary;
         photoRequest = { max: MAX_PHOTOS_PER_CLAIM };
-        return finish(PHOTO_REQUEST, "RESOLVE");
+        const safety = hazard && !advisedFor(hazard) ? `${safetyLine(hazard)}\n\n` : "";
+        if (safety) {
+          issueState.safetyAdvised = true;
+          issueState.hazardKey = hazard.key;
+        }
+        const forced = forceHandoff ? "Thanks — I have enough to pass this to our warranty team. " : "";
+        return finish(`${safety}${forced}${PHOTO_REQUEST}`, "RESOLVE");
       }
+      if (forceHandoff) replyText = ticketId
+        ? "This issue is already on file with our warranty team. You don't need to repeat the troubleshooting step."
+        : sandboxMode
+          ? "[Sandbox] This preview would move to warranty-team review; no real ticket exists."
+          : "I have enough information about the issue. Before I can log it, I need to locate your property's warranty file.";
     }
   } else if (currentPhase === "RESOLVE") {
     if (input.action === "create_ticket" && ticketId) {
@@ -997,6 +1109,11 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     replyText = await escalate(safetyCheck.reason || "Emergency detected by safety review.", replyText);
     if (ticketId || filedThisTurn) nextPhase = "RESOLVE";
     else if (!homeownerId) nextPhase = "IDENTIFY";
+  }
+
+  // A compliance rewrite must not reintroduce the repeated action either.
+  if (!review.escalate && !safetyCheck?.is_emergency && askOutcome) {
+    replyText = "Thanks for doing that. Is the problem fixed, or is it still happening?";
   }
 
   if (hazard && !advisedFor(hazard)) {

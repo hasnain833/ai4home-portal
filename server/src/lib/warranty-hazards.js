@@ -173,7 +173,7 @@ export function alreadyAdvised(transcript, hazard) {
     .some((t) => mentionsSafetyAction(t.content, hazard));
 }
 
-export function hazardNotice(hazard, { advised = false, identified = false } = {}) {
+export function hazardNotice(hazard, { advised = false, identified = false, done = false } = {}) {
   if (!hazard) {
     return "No hazard detected in what the homeowner has described so far. Do not invent one.";
   }
@@ -184,9 +184,12 @@ export function hazardNotice(hazard, { advised = false, identified = false } = {
     : "Nobody is in danger, but the home is taking damage for as long as this continues.";
 
   let timing;
-  if (advised) {
+  if (advised && done) {
     timing =
-      "You have already given this instruction. Do not repeat it in full — a short check that they managed it is enough, then carry on.";
+      "The homeowner has confirmed they did the safety step. Do not repeat it, ask about it, or check on it again — carry on with the issue.";
+  } else if (advised) {
+    timing =
+      "You have already given this instruction. Do not repeat it. If they have not said whether they managed it, you may ask once; never ask twice.";
   } else if (emergency) {
     timing =
       `Give this NOW, at the top of your very next reply, opened with ${hazard.icon}. ` +
@@ -204,7 +207,9 @@ export function hazardNotice(hazard, { advised = false, identified = false } = {
 
   return [
     `HAZARD DETECTED: ${hazard.key} — ${hazard.label} (${hazard.severity}). ${urgency}`,
-    `Give the ${hazard.key} step from the safety playbook below, in your own words, fitted to what they actually described.`,
+    advised
+      ? `The ${hazard.key} step has already been given. A new or worsening hazard still requires appropriate safety guidance.`
+      : `Give the ${hazard.key} step from the safety playbook below, in your own words, fitted to what they actually described.`,
     timing,
   ].join("\n");
 }

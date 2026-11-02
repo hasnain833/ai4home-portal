@@ -1,9 +1,10 @@
+import { getPlatformSlots as openSlots, MEETING_SOURCES } from "../services/website-sales.js";
 import prisma from "../lib/prisma.js";
 import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 import { toE164 } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
-import { computeAvailableSlots, formatSlotLabel } from "../lib/scheduling.js";
+import { formatSlotLabel } from "../lib/scheduling.js";
 import { escapeHtml } from "../lib/utils.js";
 import { toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { renderTemplate } from "../prompts/template.js";
@@ -26,8 +27,7 @@ import {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TIME_RE = /^\d{1,2}:\d{2}$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MIN_NOTICE_MS = 60 * 60 * 1000;
-const BOOKING_HORIZON_DAYS = 21;
+
 
 const wrap = (label, fn, { admin = true } = {}) => async (req, res) => {
   try {
@@ -72,6 +72,7 @@ export const listLeads = wrap("Leads", async (req, res) => {
   const leads = await prisma.b2BLead.findMany({
     orderBy: { createdAt: "desc" },
     include: {
+      inquiries: { orderBy: { createdAt: "desc" }, take: 20 },
       enrollments: {
         where: { status: "ACTIVE" },
         select: { campaign: { select: { id: true, name: true } } },
@@ -394,26 +395,15 @@ export const updateAppointmentStatus = wrap("Appointment status", async (req, re
   }
   // Botpress bookings are left exactly as the website agent created them.
   const { count } = await prisma.salesAgentAppointment.updateMany({
-    where: { id: req.params.id, source: "CAMPAIGN" },
+    where: { id: req.params.id, source: { in: MEETING_SOURCES } },
     data: { status },
   });
-  if (!count) return res.status(404).json({ message: "Campaign appointment not found." });
+  if (!count) return res.status(404).json({ message: "Appointment not found." });
   res.json({ success: true });
 });
 
 // ---------- Public: booking page & unsubscribe ----------
 
-async function openSlots(setting) {
-  const from = new Date(Date.now() + MIN_NOTICE_MS);
-  const to = new Date(from.getTime() + BOOKING_HORIZON_DAYS * DAY_MS);
-  const taken = await prisma.salesAgentAppointment.findMany({
-    where: { source: "CAMPAIGN", status: { not: "CANCELLED" }, startTime: { gte: new Date(from.getTime() - DAY_MS), lte: to } },
-    select: { startTime: true },
-  });
-  const duration = setting.slotDuration * 60000;
-  const busy = taken.map((a) => ({ start: a.startTime, end: new Date(a.startTime.getTime() + duration) }));
-  return computeAvailableSlots({ setting, from, days: BOOKING_HORIZON_DAYS, busy, limit: 200 });
-}
 
 const findByToken = (token) => prisma.b2BLead.findUnique({ where: { bookingToken: String(token || "") } });
 
@@ -462,9 +452,8 @@ export const publicBook = wrap("Public book", async (req, res) => {
       async (tx) => {
         const clash = await tx.salesAgentAppointment.findFirst({
           where: {
-            source: "CAMPAIGN",
             status: { not: "CANCELLED" },
-            startTime: { gt: new Date(start.getTime() - setting.slotDuration * 60000), lt: end },
+            startTime: { gt: new Date(start.getTime() - (setting.slotDuration + setting.bufferMinutes) * 60000), lt: new Date(end.getTime() + setting.bufferMinutes * 60000) },
           },
         });
         if (clash) return null;

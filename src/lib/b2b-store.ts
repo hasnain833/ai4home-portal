@@ -18,7 +18,10 @@ export interface B2BLead {
   city: string | null;
   notes: string | null;
   status: B2BLeadStatus;
-  source: "MANUAL" | "CSV";
+  source: "MANUAL" | "CSV" | "WEBSITE_CONTACT" | "WEBSITE_EBOOK" | "WEBSITE_DEMO" | "WEBSITE_SALES";
+  marketingOptIn: boolean;
+  marketingConsentAt: string | null;
+  inquiries: { id: string; type: string; payload: Record<string, string | boolean | number>; marketingConsent: boolean; consentText: string; createdAt: string; adminSentAt: string | null; visitorSentAt: string | null; adminSmsSentAt: string | null; visitorSmsSentAt: string | null; lastError: string | null }[];
   emailOptOut: boolean;
   smsOptOut: boolean;
   createdAt: string;

@@ -70,6 +70,8 @@ const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Somethin
 
 export default function AdminLeadsPage() {
   const confirm = useConfirm();
+  const [nurtureOnly, setNurtureOnly] = useState(false);
+  const [history, setHistory] = useState<B2BLead | null>(null);
   const { items: leads, loading, reload } = useB2BLeads();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<B2BLeadStatus | "ALL">("ALL");
@@ -177,6 +179,7 @@ export default function AdminLeadsPage() {
   const visible = leads.filter(
     (l) =>
       (statusFilter === "ALL" || l.status === statusFilter) &&
+      (!nurtureOnly || (l.marketingOptIn && !l.emailOptOut)) &&
       (!q || [l.companyName, l.contactName, l.email, l.city || ""].some((v) => v.toLowerCase().includes(q))),
   );
   const counts = leads.reduce<Record<string, number>>((acc, l) => ({ ...acc, [l.status]: (acc[l.status] || 0) + 1 }), {});
@@ -193,7 +196,7 @@ export default function AdminLeadsPage() {
               <div>
                 <CardTitle className="text-xl text-foreground">Business Leads</CardTitle>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Builders and businesses we want to bring onto the platform. Add them by hand or import a CSV.
+                  Builders and businesses we want to bring onto the platform. Includes AI4HB website inquiries; tenant homebuyer leads stay separate.
                 </p>
               </div>
             </div>
@@ -212,6 +215,7 @@ export default function AdminLeadsPage() {
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
               <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search leads" className="h-9 pl-8 text-sm" />
             </div>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={nurtureOnly} onChange={(e) => setNurtureOnly(e.target.checked)} />Nurture opt-in only</label>
             {(["ALL", ...B2B_LEAD_STATUSES] as const).map((s) => (
               <button
                 key={s}
@@ -259,7 +263,8 @@ export default function AdminLeadsPage() {
                     <TableRow key={l.id} className="hover:bg-muted/40">
                       <TableCell className="pl-6">
                         <div className="flex flex-col">
-                          <span className="font-medium text-foreground">{l.companyName}</span>
+                          <span className="font-medium text-foreground">{l.companyName || "Company not provided"}</span>
+                          {l.marketingOptIn && !l.emailOptOut && <Badge variant="outline" className="w-fit text-[10px]">Nurture opt-in</Badge>}
                           {l.website && (
                             <a href={/^https?:\/\//.test(l.website) ? l.website : `https://${l.website}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#b48c3c] hover:underline truncate max-w-[200px]">
                               {l.website}
@@ -273,7 +278,7 @@ export default function AdminLeadsPage() {
                           <span className="text-foreground/90">{l.contactName || "—"}</span>
                           <span className="text-xs">
                             {l.email}
-                            {l.emailOptOut && <Badge variant="outline" className="ml-1.5 border-red-500/40 text-[9px] text-red-500">Unsubscribed</Badge>}
+                            {l.emailOptOut && <Badge variant="outline" className="ml-1.5 border-red-500/40 text-[9px] text-red-500">{l.source.startsWith("WEBSITE_") && !l.marketingOptIn ? "No marketing consent" : "Unsubscribed"}</Badge>}
                           </span>
                           {l.phone && (
                             <span className="text-xs">
@@ -307,9 +312,10 @@ export default function AdminLeadsPage() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {new Date(l.createdAt).toLocaleDateString()}
-                        <div className="text-[10px]">{l.source === "CSV" ? "CSV" : "Manual"}</div>
+                        <div className="text-[10px]">{l.source.replace(/_/g, " ")}</div>
                       </TableCell>
                       <TableCell className="pr-6 text-right whitespace-nowrap">
+                        {l.inquiries?.length > 0 && <Button variant="ghost" size="sm" onClick={() => setHistory(l)}>Inquiries ({l.inquiries.length})</Button>}
                         <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit lead" onClick={() => openForm(l)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -325,6 +331,21 @@ export default function AdminLeadsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={history !== null} onOpenChange={(open) => !open && setHistory(null)}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader><DialogTitle>Website inquiry history</DialogTitle><DialogDescription>{history?.email} - latest 20 submissions</DialogDescription></DialogHeader>
+          {history?.inquiries?.map((inquiry) => <div key={inquiry.id} className="space-y-2 rounded border p-4 text-sm">
+            <p className="font-semibold">{inquiry.type} - {new Date(inquiry.createdAt).toLocaleString()}</p>
+            {Object.entries(inquiry.payload).filter(([, value]) => typeof value === "string" && value).map(([key, value]) => <p key={key} className="whitespace-pre-wrap break-words"><strong>{key}:</strong> {String(value)}</p>)}
+            <p>Marketing consent: {inquiry.marketingConsent ? "Yes" : "No"}</p>
+            <p className="text-xs text-muted-foreground">{inquiry.consentText}</p>
+            <p>Team email: {inquiry.adminSentAt ? "Sent" : "Pending retry"}; visitor email: {inquiry.visitorSentAt ? "Sent" : "Pending retry"}</p>
+            {inquiry.type === "BOOKING" && <p>Team SMS: {inquiry.adminSmsSentAt ? "Sent" : "Pending retry"}; visitor SMS: {inquiry.visitorSmsSentAt ? "Sent" : "Pending retry"}</p>}
+            {inquiry.lastError && <p className="text-red-500">{inquiry.lastError}</p>}
+          </div>)}
+        </DialogContent>
+      </Dialog>
 
       {/* Add / edit lead */}
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>

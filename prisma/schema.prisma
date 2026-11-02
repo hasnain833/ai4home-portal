@@ -955,6 +955,9 @@ model B2BLead {
   bookingToken String                  @unique @default(uuid())
   emailOptOut  Boolean                 @default(false)
   smsOptOut    Boolean                 @default(false)
+  marketingOptIn Boolean               @default(false)
+  marketingConsentAt DateTime?
+  inquiries    B2BInquiry[]
   enrollments  B2BEnrollment[]
   appointments SalesAgentAppointment[]
   createdAt    DateTime                @default(now())
@@ -1229,4 +1232,27 @@ model TicketAttachment {
 
   @@index([conversationId])
   @@index([ticketId])
+}
+
+model B2BInquiry {
+  id String @id
+  leadId String
+  lead B2BLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type String
+  payload Json
+  payloadHash String
+  marketingConsent Boolean @default(false)
+  consentText String
+  adminSentAt DateTime?
+  adminSmsSentAt DateTime?
+  visitorSmsSentAt DateTime?
+  visitorSentAt DateTime?
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  processingUntil DateTime?
+  lastError String?
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([nextAttemptAt])
 }

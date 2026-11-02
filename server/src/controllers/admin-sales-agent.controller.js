@@ -7,7 +7,8 @@ export const getSalesAgentAppointments = async (req, res) => {
       orderBy: { createdAt: "desc" },
     });
 
-    return res.json(appointments);
+    const jobs = await prisma.b2BInquiry.findMany({ where: { id: { in: appointments.filter((a) => a.source === "WEBSITE_SALES").map((a) => a.id) }, type: "BOOKING" }, select: { id: true, adminSentAt: true, visitorSentAt: true, adminSmsSentAt: true, visitorSmsSentAt: true, lastError: true } });
+    return res.json(appointments.map((a) => ({ ...a, notifications: jobs.find((j) => j.id === a.id) || null })));
   } catch (error) {
     console.error("[Admin Sales Agent Appointments] Error:", error);
     return res.status(500).json({ message: "Internal server error" });
