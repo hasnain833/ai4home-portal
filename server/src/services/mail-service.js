@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
+import { fileURLToPath } from "node:url";
 import { ticketRef } from "../lib/ticket-number.js";
-import { Templates } from "./templates.js";
+import { Templates, prepareOutgoingEmail } from "./templates.js";
 import { recordUsage } from "../lib/usage.js";
 import { isCompanySuspended } from "../lib/company-suspension.js";
 
@@ -49,7 +50,7 @@ export class MailService {
     return !!(this.SMTP_USER && this.SMTP_PASS);
   }
 
-  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null, noReply = false, track = null }) {
+  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null, noReply = false, track = null, branding }) {
     if (await isCompanySuspended(companyId)) {
       return { success: false, outcome: MAIL_OUTCOME.SUSPENDED, error: "Company is suspended." };
     }
@@ -84,12 +85,27 @@ export class MailService {
       });
 
     try {
+      // Embed our own logo, so inboxes do not need access to localhost or a
+      // separately deployed frontend asset. Builder emails have no logo tag.
+      let emailHtml = prepareOutgoingEmail(html, { companyId, source, branding });
+      let hasLogo = false;
+      emailHtml = emailHtml.replace(/(<img\b[^>]*\bsrc\s*=\s*)(["'])(?:https?:\/\/[^"']*\/logo-email\.png(?:\?[^"']*)?|cid:ai4hb-logo)\2/gi, (_match, prefix, quote) => {
+        hasLogo = true;
+        return `${prefix}${quote}cid:ai4hb-logo${quote}`;
+      });
       const info = await this.getPlatformTransporter().sendMail({
         from: fromString,
         ...(replyToAddress ? { replyTo: replyToAddress } : {}),
         to,
         subject,
-        html,
+        html: emailHtml,
+        ...(hasLogo ? { attachments: [{
+          filename: "ai4hb-logo.png",
+          path: fileURLToPath(new URL("../../../public/logo-email.png", import.meta.url)),
+          cid: "ai4hb-logo",
+          contentType: "image/png",
+          contentDisposition: "inline",
+        }] } : {}),
         headers,
       });
 

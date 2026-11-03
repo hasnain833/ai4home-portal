@@ -1,15 +1,17 @@
-import { getPlatformSlots as openSlots, MEETING_SOURCES } from "../services/website-sales.js";
+import { getPlatformSlots as openSlots } from "../services/website-sales.js";
 import prisma from "../lib/prisma.js";
 import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 import { toE164 } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
 import { formatSlotLabel } from "../lib/scheduling.js";
+import { updatePlatformAppointment } from "../services/website-sales.js";
 import { escapeHtml } from "../lib/utils.js";
 import { toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { renderTemplate } from "../prompts/template.js";
 import { B2B_STEP_SYSTEM, B2B_EMAIL_RULES, B2B_SMS_RULES } from "../prompts/content.js";
 import { PLATFORM_GUIDE } from "../prompts/help-agent.js";
+import { randomUUID } from "node:crypto";
 import {
   B2B_LEAD_STATUSES,
   B2B_CLOSED_STATUSES,
@@ -67,6 +69,59 @@ function leadData(body, { partial = false } = {}) {
 }
 
 // ---------- Leads ----------
+
+const SEGMENT_PREFIX = "b2b.segment.";
+const DEFAULT_SEGMENTS = [
+  { id: "all", name: "All leads", filters: { status: "ALL", query: "", nurtureOnly: false }, builtIn: true },
+  { id: "pipeline", name: "Sales pipeline", filters: { status: "INTERESTED", query: "", nurtureOnly: false }, builtIn: true },
+];
+
+export function b2bSegmentWhere(filters) {
+  if (!filters || typeof filters !== "object" || Array.isArray(filters) ||
+      !["ALL", ...B2B_LEAD_STATUSES].includes(filters.status) ||
+      typeof filters.query !== "string" || filters.query.length > 200 ||
+      typeof filters.nurtureOnly !== "boolean" || Object.keys(filters).some((key) => !["status", "query", "nurtureOnly"].includes(key))) {
+    throw new Error("Invalid segment filters.");
+  }
+  const where = {};
+  if (filters.status !== "ALL") where.status = filters.status;
+  if (filters.nurtureOnly) Object.assign(where, { marketingOptIn: true, emailOptOut: false });
+  const query = filters.query.trim();
+  if (query) where.OR = ["companyName", "contactName", "email", "city"].map((field) => ({ [field]: { contains: query, mode: "insensitive" } }));
+  return where;
+}
+
+async function findSegment(id) {
+  const builtIn = DEFAULT_SEGMENTS.find((segment) => segment.id === id);
+  if (builtIn) return builtIn;
+  if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const row = await prisma.platformSetting.findUnique({ where: { key: SEGMENT_PREFIX + id } });
+  return row ? { id, ...row.value, builtIn: false } : null;
+}
+
+export const listSegments = wrap("Segments", async (_req, res) => {
+  const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: SEGMENT_PREFIX } }, orderBy: { updatedAt: "desc" } });
+  const segments = [...DEFAULT_SEGMENTS, ...rows.map((row) => ({ ...row.value, id: row.key.slice(SEGMENT_PREFIX.length), builtIn: false }))];
+  res.json(await Promise.all(segments.map(async (segment) => ({ ...segment, count: await prisma.b2BLead.count({ where: b2bSegmentWhere(segment.filters) }) }))));
+});
+
+export const createSegment = wrap("Segment create", async (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name || name.length > 80) return res.status(400).json({ message: "Enter a segment name of 1–80 characters." });
+  try { b2bSegmentWhere(req.body.filters); } catch (error) { return res.status(400).json({ message: error.message }); }
+  const filters = { ...req.body.filters, query: req.body.filters.query.trim() };
+  const id = randomUUID();
+  await prisma.platformSetting.create({ data: { key: SEGMENT_PREFIX + id, value: { name, filters } } });
+  res.status(201).json({ id, name, filters, builtIn: false });
+});
+
+export const deleteSegment = wrap("Segment delete", async (req, res) => {
+  const segment = await findSegment(req.params.id);
+  if (!segment) return res.status(404).json({ message: "Segment not found." });
+  if (segment.builtIn) return res.status(400).json({ message: "Built-in segments cannot be deleted." });
+  await prisma.platformSetting.delete({ where: { key: SEGMENT_PREFIX + segment.id } });
+  res.json({ success: true });
+});
 
 export const listLeads = wrap("Leads", async (req, res) => {
   const leads = await prisma.b2BLead.findMany({
@@ -158,6 +213,7 @@ async function startEnrollments(enrollmentIds) {
 }
 
 async function launchBlocker(steps) {
+  try { appUrl(); } catch (error) { return error.message; }
   const invalid = validateSteps(steps);
   if (invalid) return invalid;
   const missing = await missingChannelsForSteps(null, steps.map((s) => ({ type: s.channel })));
@@ -301,11 +357,27 @@ export const listEnrollments = wrap("Enrollments", async (req, res) => {
     orderBy: { createdAt: "desc" },
     include: { lead: { select: { id: true, companyName: true, contactName: true, email: true, phone: true, status: true } } },
   });
-  res.json(rows);
+  const latestSms = rows.length ? await prisma.messageUsage.findMany({
+    where: { campaignId: req.params.id, source: "b2b-campaign", channel: "SMS", leadId: { in: rows.map((row) => row.leadId) } },
+    orderBy: { createdAt: "desc" },
+    distinct: ["leadId"],
+    select: { leadId: true, outcome: true, deliveredAt: true, failedAt: true, providerMessageId: true },
+  }) : [];
+  const smsByLead = new Map(latestSms.map((sms) => [sms.leadId, {
+    status: sms.failedAt || sms.outcome !== "sent" ? "failed" : sms.deliveredAt ? "delivered" : "unconfirmed",
+    providerMessageId: sms.providerMessageId,
+  }]));
+  res.json(rows.map((row) => ({ ...row, smsDelivery: smsByLead.get(row.leadId) || null })));
 });
 
 export const enrollLeads = wrap("Enroll", async (req, res) => {
-  const leadIds = Array.isArray(req.body?.leadIds) ? [...new Set(req.body.leadIds)] : [];
+  let leadIds = Array.isArray(req.body?.leadIds) ? [...new Set(req.body.leadIds.filter((id) => typeof id === "string"))] : [];
+  if (req.body?.segmentId !== undefined) {
+    if (req.body.leadIds !== undefined) return res.status(400).json({ message: "Choose a segment or individual leads." });
+    const segment = await findSegment(req.body.segmentId);
+    if (!segment) return res.status(404).json({ message: "Segment not found. Refresh and select it again." });
+    leadIds = (await prisma.b2BLead.findMany({ where: b2bSegmentWhere(segment.filters), select: { id: true } })).map((lead) => lead.id);
+  }
   if (!leadIds.length) return res.status(400).json({ message: "Pick at least one lead." });
   const campaign = await prisma.b2BCampaign.findUnique({ where: { id: req.params.id } });
   if (!campaign) return res.status(404).json({ message: "Campaign not found." });
@@ -321,19 +393,26 @@ export const enrollLeads = wrap("Enroll", async (req, res) => {
   const channels = new Set(steps.map((s) => s.channel));
   const firstRunAt = new Date(Date.now() + (steps[0].delayDays || 0) * DAY_MS);
   const started = [];
+  const eligible = [];
 
   for (const lead of leads) {
     if (B2B_CLOSED_STATUSES.includes(lead.status)) { skipped.closed++; continue; }
     if (alreadyIn.has(lead.id)) { skipped.alreadyEnrolled++; continue; }
     const reachable = (channels.has("EMAIL") && !lead.emailOptOut) || (channels.has("SMS") && !lead.smsOptOut && lead.phone);
     if (!reachable) { skipped.optedOut++; continue; }
-    const reset = { status: "ACTIVE", exitedReason: null, currentStep: 0, nextRunAt: firstRunAt, lastError: null };
-    const enrollment = await prisma.b2BEnrollment.upsert({
-      where: { leadId_campaignId: { leadId: lead.id, campaignId: campaign.id } },
-      create: { leadId: lead.id, campaignId: campaign.id, ...reset },
-      update: reset,
-    });
-    started.push(enrollment.id);
+    eligible.push(lead.id);
+  }
+  // Large segments must not require thousands of individual database writes.
+  // Keep completed/exit history counters, just as individual re-enrollment did.
+  const reset = { status: "ACTIVE", exitedReason: null, currentStep: 0, nextRunAt: firstRunAt, lastError: null };
+  for (let offset = 0; offset < eligible.length; offset += 500) {
+    const batch = eligible.slice(offset, offset + 500);
+    const [, , enrolled] = await prisma.$transaction([
+      prisma.b2BEnrollment.createMany({ data: batch.map((leadId) => ({ leadId, campaignId: campaign.id, ...reset })), skipDuplicates: true }),
+      prisma.b2BEnrollment.updateMany({ where: { campaignId: campaign.id, leadId: { in: batch }, status: { not: "ACTIVE" } }, data: reset }),
+      prisma.b2BEnrollment.findMany({ where: { campaignId: campaign.id, leadId: { in: batch }, status: "ACTIVE" }, select: { id: true } }),
+    ]);
+    started.push(...enrolled.map((enrollment) => enrollment.id));
   }
 
   // Adding leads to a finished campaign brings it back to life.
@@ -390,15 +469,15 @@ export const updateAvailability = wrap("Availability update", async (req, res) =
 
 export const updateAppointmentStatus = wrap("Appointment status", async (req, res) => {
   const { status } = req.body || {};
-  if (!["CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"].includes(status)) {
+  if (!["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"].includes(status)) {
     return res.status(400).json({ message: "Unknown status." });
   }
-  // Botpress bookings are left exactly as the website agent created them.
-  const { count } = await prisma.salesAgentAppointment.updateMany({
-    where: { id: req.params.id, source: { in: MEETING_SOURCES } },
-    data: { status },
-  });
-  if (!count) return res.status(404).json({ message: "Appointment not found." });
+  try {
+    await updatePlatformAppointment(req.params.id, status, req.body.startTime, await getB2BAvailability());
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ message: error.message });
+    throw error;
+  }
   res.json({ success: true });
 });
 
@@ -486,7 +565,7 @@ export const publicBook = wrap("Public book", async (req, res) => {
   }
 
   const who = escapeHtml(lead.contactName || lead.companyName);
-  await MailService.sendEmail({
+  const confirmationEmail = await MailService.sendEmail({
     to: lead.email,
     subject: `Your meeting with ${MailService.SENDER_NAME} is confirmed`,
     html: `<p>Hi ${who},</p><p>Thanks for booking a time with us. You're confirmed for <strong>${escapeHtml(label)}</strong> (${setting.slotDuration} minutes).</p><p>We'll reach out at this email or phone number. Need to change it? Just reply to this email.</p>`,
@@ -501,7 +580,7 @@ export const publicBook = wrap("Public book", async (req, res) => {
       `<p><a href="${appUrl()}/admin/sales-agent-appointments">Open Appointments</a></p>`,
   );
 
-  res.status(201).json({ label });
+  res.status(201).json({ label, confirmationEmailSent: !!confirmationEmail?.success });
 }, { admin: false });
 
 export const publicUnsubscribe = wrap("Public unsubscribe", async (req, res) => {

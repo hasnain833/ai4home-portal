@@ -10,8 +10,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export function resolveSystemConfig() {
   const config = {
     provider: TELNYX_PROVIDER,
-    apiKey: process.env.TELNYX_API_KEY,
-    from: process.env.TELNYX_FROM_NUMBER || process.env.TELNYX_MESSAGING_PROFILE_ID,
+    apiKey: String(process.env.TELNYX_API_KEY || "").trim(),
+    from: String(process.env.TELNYX_FROM_NUMBER || process.env.TELNYX_MESSAGING_PROFILE_ID || "").trim(),
   };
   return isComplete(config) ? config : null;
 }
@@ -30,6 +30,14 @@ export const smsSent = (result) => result?.outcome === SMS_OUTCOME.SENT;
 
 export const smsShouldPark = (result) => result?.outcome === SMS_OUTCOME.FAILED;
 
+export function formatSmsError(errors, fallback = "Unknown SMS delivery error") {
+  const error = Array.isArray(errors) ? errors[0] : null;
+  if (!error) return fallback;
+  const detail = error.detail || error.title || fallback;
+  const hint = String(error.code) === "40306" ? " Configure an approved alphanumeric sender ID on the Telnyx messaging profile for this destination route." : "";
+  return `${detail}${error.code ? ` (code: ${error.code})` : ""}${hint}`;
+}
+
 async function sendViaTelnyx({ to, body, cfg }) {
   const payload = { to, text: body };
   if (UUID_RE.test(cfg.from)) {
@@ -44,16 +52,20 @@ async function sendViaTelnyx({ to, body, cfg }) {
       "Authorization": `Bearer ${cfg.apiKey}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(20000),
     body: JSON.stringify(payload),
   });
 
   const data = await response.json();
   if (!response.ok) {
-    const err = data?.errors?.[0];
-    return { error: `${err?.detail || err?.title || "unknown error"} (code: ${err?.code || response.status})` };
+    return { error: formatSmsError(data?.errors, `Telnyx rejected the message (HTTP ${response.status})`) };
   }
 
   const msg = data?.data || {};
+  if (!msg.id) return { error: "Telnyx returned no message ID; delivery could not be confirmed." };
+  if (["sending_failed", "delivery_failed"].includes(msg.to?.[0]?.status)) {
+    return { error: formatSmsError(msg.errors, `Telnyx reported ${msg.to[0].status}`), messageId: msg.id };
+  }
   return {
     messageId: msg.id,
     status: msg.to?.[0]?.status || "queued",
@@ -137,15 +149,22 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
       outcome,
       source,
       recipient,
-      track: track && { ...track, providerMessageId },
+      // Every SMS needs its provider ID, including website acknowledgments,
+      // so a later delivery receipt can find the send.
+      track: { ...track, providerMessageId },
     });
 
   try {
-    const result = await sendViaTelnyx({ to, body: finalBody, cfg, tag });
+    const destination = toE164(to);
+    if (!destination) {
+      await meter("failed");
+      return { outcome: SMS_OUTCOME.FAILED, to, body: finalBody, provider: cfg.provider, error: "Invalid destination phone number. Use E.164 format, including the country code." };
+    }
+    const result = await sendViaTelnyx({ to: destination, body: finalBody, cfg, tag });
 
     if (result.error) {
       console.error(`[SMS] ❌ Rejected by ${cfg.provider} to ${to}: ${result.error}`);
-      await meter("failed");
+      await meter("failed", result.messageId || null);
       return { outcome: SMS_OUTCOME.FAILED, to, body: finalBody, provider: cfg.provider, error: result.error };
     }
 

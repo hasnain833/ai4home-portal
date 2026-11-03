@@ -8,6 +8,25 @@ import { apiFetch } from "@/lib/api";
 export const B2B_LEAD_STATUSES = ["NEW", "CONTACTED", "INTERESTED", "SIGNED", "LOST"] as const;
 export type B2BLeadStatus = (typeof B2B_LEAD_STATUSES)[number];
 
+export interface B2BSegmentFilters {
+  status: B2BLeadStatus | "ALL";
+  query: string;
+  nurtureOnly: boolean;
+}
+export interface B2BSegment {
+  id: string;
+  name: string;
+  filters: B2BSegmentFilters;
+  builtIn: boolean;
+  count: number;
+}
+export function matchesB2BSegment(lead: B2BLead, filters: B2BSegmentFilters) {
+  const query = filters.query.trim().toLowerCase();
+  return (filters.status === "ALL" || lead.status === filters.status) &&
+    (!filters.nurtureOnly || (lead.marketingOptIn && !lead.emailOptOut)) &&
+    (!query || [lead.companyName, lead.contactName, lead.email, lead.city || ""].some((value) => value.toLowerCase().includes(query)));
+}
+
 export interface B2BLead {
   id: string;
   companyName: string;
@@ -65,6 +84,7 @@ export interface B2BEnrollment {
   failedCount: number;
   lastError: string | null;
   lastSentAt: string | null;
+  smsDelivery?: { status: "delivered" | "failed" | "unconfirmed"; providerMessageId: string | null } | null;
   lead: Pick<B2BLead, "id" | "companyName" | "contactName" | "email" | "phone" | "status">;
 }
 
@@ -96,5 +116,6 @@ export function useApiList<T>(url: string) {
 
 export const useB2BLeads = () => useApiList<B2BLead>(`${B2B_API}/leads`);
 export const useB2BCampaigns = () => useApiList<B2BCampaign>(`${B2B_API}/campaigns`);
+export const useB2BSegments = () => useApiList<B2BSegment>(`${B2B_API}/segments`);
 
 export const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");

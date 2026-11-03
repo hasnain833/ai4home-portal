@@ -13,10 +13,11 @@ import {
   unsubscribeLinkFor,
   exitB2BEnrollments,
   completeFinishedCampaigns,
+  appUrl,
 } from "../../lib/b2b.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const SENDER = MailService.SENDER_NAME;
+const SENDER = "AI for Homebuilders";
 // Hard stop for the loop below; a campaign is capped at 20 steps, each can wait several times.
 const MAX_ITERATIONS = 200;
 
@@ -32,7 +33,6 @@ export function renderB2BStep(step, lead, campaignId) {
     city: lead.city || "",
     bookingLink,
   };
-  const raw = new Set(["bookingLink"]);
   const hasLink = /\{\{?\s*bookingLink\s*\}?\}/.test(step.body || "");
 
   if (step.channel === "SMS") {
@@ -42,17 +42,14 @@ export function renderB2BStep(step, lead, campaignId) {
     return { body: ComplianceService.addSmsOptOutSuffix(brandSmsBody(text, SENDER)) };
   }
 
-  let html = renderMergeFields(step.body, vars, { html: true, raw }).replace(/\n/g, "<br />");
-  if (!hasLink) {
-    html += `<p style="margin-top:24px"><a href="${bookingLink}" style="background:#b48c3c;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block">Book a time with us</a></p>`;
-  }
+  // Keep the CTA where the author placed it; the email template turns it into
+  // a button. Add a default button only when the content omits the link.
+  const text = renderMergeFields(step.body, vars).trim();
+  const html = text.split(/\r?\n\s*\r?\n/).map((paragraph) => `<p style="margin:0 0 16px">${escapeHtml(paragraph).replace(/\r?\n/g, "<br />")}</p>`).join("");
+  const websiteUrl = new URL(process.env.WEBSITE_PUBLIC_URL || "https://www.aiforhomebuilders.com").origin;
   return {
     subject: renderMergeFields(step.subject, vars),
-    html: ComplianceService.addEmailUnsubscribeFooter(
-      Templates.getNurtureEmail(html, escapeHtml(SENDER)),
-      unsubscribeLinkFor(lead),
-      SENDER,
-    ),
+    html: Templates.getB2BCampaignEmail(html, { bookingLink, unsubscribeLink: unsubscribeLinkFor(lead), portalUrl: appUrl(), websiteUrl }),
   };
 }
 
@@ -75,10 +72,11 @@ async function blockReason(lead, channel) {
   return null;
 }
 
-async function sendStep(step, lead, campaignId) {
+async function sendStep(step, lead, campaignId, position) {
   const msg = renderB2BStep(step, lead, campaignId);
+  const track = { leadId: lead.id, campaignId, stepId: `b2b:${position + 1}` };
   if (step.channel === "SMS") {
-    const r = await sendSms({ to: lead.phone, body: msg.body, source: "b2b-campaign", brand: false });
+    const r = await sendSms({ to: lead.phone, body: msg.body, source: "b2b-campaign", brand: false, track });
     return { outcome: r.outcome, sent: smsSent(r), error: r.error || null };
   }
   const inbound = String(process.env.INBOUND_EMAIL_DOMAIN || "").trim();
@@ -86,6 +84,7 @@ async function sendStep(step, lead, campaignId) {
     to: lead.email,
     subject: msg.subject,
     html: msg.html,
+    fromName: SENDER,
     // Replies come back to the platform (inbound webhook) or straight to the super admin.
     replyTo: inbound ? `reply+${B2B_REPLY_TAG}@${inbound}` : process.env.SUPERADMIN_EMAIL || undefined,
     source: "b2b-campaign",
@@ -178,7 +177,7 @@ export const runB2BCampaign = inngest.createFunction(
           return { next: true };
         }
 
-        const sent = await sendStep(current, e.lead, e.campaignId);
+        const sent = await sendStep(current, e.lead, e.campaignId, state.stepIndex);
         if (sent.outcome === MAIL_OUTCOME.NOT_CONFIGURED || sent.outcome === SMS_OUTCOME.NOT_CONFIGURED) {
           await prisma.b2BEnrollment.update({
             where: { id: e.id },
@@ -190,7 +189,7 @@ export const runB2BCampaign = inngest.createFunction(
         await prisma.b2BEnrollment.update({
           where: { id: e.id },
           data: sent.sent
-            ? { sentCount: { increment: 1 }, lastSentAt: new Date(), lastError: null }
+            ? { sentCount: { increment: 1 }, lastSentAt: new Date(), ...(e.failedCount === 0 && !e.lastError ? { lastError: null } : {}) }
             : { failedCount: { increment: 1 }, lastError: `Step ${state.stepIndex + 1} (${current.channel}) failed: ${sent.error}` },
         });
         if (sent.sent && e.lead.status === "NEW") {

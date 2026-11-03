@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -46,6 +47,8 @@ import {
   titleCase,
   useB2BCampaigns,
   useB2BLeads,
+  useB2BSegments,
+  matchesB2BSegment,
 } from "@/lib/b2b-store";
 
 const STATUS_STYLES: Record<B2BCampaign["status"], string> = {
@@ -57,6 +60,7 @@ const STATUS_STYLES: Record<B2BCampaign["status"], string> = {
 
 const EXIT_LABELS: Record<string, string> = {
   APPOINTMENT: "Booked a meeting",
+  CONSULTATION_REQUEST: "Requested a consultation",
   REPLY: "Replied",
   UNSUBSCRIBE: "Unsubscribed",
   STATUS: "Marked signed/lost",
@@ -73,6 +77,9 @@ export default function AdminCampaignsPage() {
   const confirm = useConfirm();
   const { items: campaigns, loading, reload } = useB2BCampaigns();
   const { items: leads, reload: reloadLeads } = useB2BLeads();
+  const { items: segments, reload: reloadSegments } = useB2BSegments();
+  const [pickSegment, setPickSegment] = useState("all");
+  const [wholeSegment, setWholeSegment] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [writingStep, setWritingStep] = useState<number | null>(null);
@@ -173,19 +180,22 @@ export default function AdminCampaignsPage() {
 
   const openEnroll = async (c: B2BCampaign) => {
     setPicked(new Set());
+    setPickSegment("all");
+    setWholeSegment(false);
     setPickFilter("NEW");
     setEnrollFor(c);
-    await reloadLeads();
+    try { await Promise.all([reloadLeads(), reloadSegments()]); }
+    catch (error) { toast.error(errorMessage(error)); }
   };
 
   const enroll = async () => {
-    if (!enrollFor || !picked.size) return;
+    if (!enrollFor || (!wholeSegment && !picked.size)) return;
     await run(async () => {
       const r = await sendJson<{
         enrolled: number;
         skipped: { closed: number; alreadyEnrolled: number; optedOut: number };
         startsOnLaunch: boolean;
-      }>(`${B2B_API}/campaigns/${enrollFor.id}/enroll`, "POST", { leadIds: [...picked] });
+      }>(`${B2B_API}/campaigns/${enrollFor.id}/enroll`, "POST", wholeSegment ? { segmentId: pickSegment } : { leadIds: [...picked] });
       const skipped = r.skipped.closed + r.skipped.alreadyEnrolled + r.skipped.optedOut;
       toast.success(
         `Enrolled ${r.enrolled} lead${r.enrolled === 1 ? "" : "s"}` +
@@ -215,7 +225,9 @@ export default function AdminCampaignsPage() {
     }
   };
 
-  const pickable = leads.filter(
+  const selectedSegment = segments.find((segment) => segment.id === pickSegment);
+  const segmentLeads = selectedSegment ? leads.filter((lead) => matchesB2BSegment(lead, selectedSegment.filters)) : [];
+  const pickable = segmentLeads.filter(
     (l) => !["SIGNED", "LOST"].includes(l.status) && (pickFilter === "ALL" || l.status === pickFilter),
   );
   const allPicked = pickable.length > 0 && pickable.every((l) => picked.has(l.id));
@@ -469,6 +481,16 @@ export default function AdminCampaignsPage() {
               Signed and lost leads can&apos;t be enrolled.
             </DialogDescription>
           </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="campaign-segment">Lead segment</Label>
+            <Select value={pickSegment} onValueChange={(value) => { setPickSegment(value); setPicked(new Set()); setPickFilter("ALL"); setWholeSegment(true); }}>
+              <SelectTrigger id="campaign-segment" className="h-9"><SelectValue placeholder="Select a segment" /></SelectTrigger>
+              <SelectContent align="start">{segments.map((segment) => <SelectItem key={segment.id} value={segment.id}>{segment.name} ({segment.count})</SelectItem>)}</SelectContent>
+            </Select>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={wholeSegment} onChange={(event) => { setWholeSegment(event.target.checked); setPicked(new Set()); }} />Enroll the entire segment</label>
+            <p className="text-xs text-muted-foreground">Membership is evaluated when you enroll. Future matches are not added automatically. Existing opt-outs still apply.</p>
+          </div>
+          {!wholeSegment && <>
           <div className="flex flex-wrap gap-1.5">
             {(["ALL", ...B2B_LEAD_STATUSES.filter((s) => s !== "SIGNED" && s !== "LOST")] as const).map((s) => (
               <button
@@ -529,10 +551,11 @@ export default function AdminCampaignsPage() {
               })}
             </ul>
           </div>
+          </>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEnrollFor(null)}>Cancel</Button>
-            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={!picked.size || busy} onClick={enroll}>
-              Enroll {picked.size || ""}
+            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={busy || (wholeSegment ? !selectedSegment || !segmentLeads.length : !picked.size)} onClick={enroll}>
+              {wholeSegment ? `Enroll segment (${segmentLeads.length})` : `Enroll ${picked.size || ""}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -543,7 +566,7 @@ export default function AdminCampaignsPage() {
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{progressFor?.name}: lead progress</DialogTitle>
-            <DialogDescription>Where each enrolled lead is in the sequence, and anything that went wrong.</DialogDescription>
+            <DialogDescription>Lead progress and send issues. Accepted means the provider accepted a message; SMS delivery is confirmed separately by a delivery receipt. Refresh this view to see new receipts.</DialogDescription>
           </DialogHeader>
           {!enrollments ? (
             <Loader2 className="mx-auto my-8 h-5 w-5 animate-spin text-muted-foreground" />
@@ -558,7 +581,8 @@ export default function AdminCampaignsPage() {
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="px-3 py-2 font-medium">Step</th>
                     <th className="px-3 py-2 font-medium">Next send</th>
-                    <th className="px-3 py-2 font-medium">Sent</th>
+                    <th className="px-3 py-2 font-medium">Accepted</th>
+                    <th className="px-3 py-2 font-medium">Latest SMS delivery</th>
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
@@ -592,6 +616,11 @@ export default function AdminCampaignsPage() {
                       <td className="px-3 py-2 text-xs text-muted-foreground">
                         {e.sentCount}
                         {e.failedCount > 0 && <span className="text-red-500"> · {e.failedCount} failed</span>}
+                      </td>
+                      <td className="px-3 py-2 text-xs" title={e.smsDelivery?.providerMessageId ? `Telnyx message: ${e.smsDelivery.providerMessageId}` : undefined}>
+                        {e.smsDelivery?.status === "delivered" ? <span className="text-emerald-600">Delivered</span> :
+                          e.smsDelivery?.status === "failed" ? <span className="text-red-500">Failed</span> :
+                          e.smsDelivery ? "Not confirmed" : "Not tracked"}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {e.status === "ACTIVE" && (

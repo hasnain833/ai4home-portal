@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
-import nodemailer from "nodemailer";
 import crypto from "crypto";
 import prisma from "../lib/prisma.js";
 import {
@@ -673,23 +672,15 @@ export const forgotPassword = async (req, res) => {
         .json({ message: "Failed to generate action link" });
     }
 
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    await transporter.sendMail({
-      from: `"Aiforhomebuilder" <${process.env.SENDER_EMAIL}>`,
+    const result = await MailService.sendEmail({
       to: email,
       subject: "Password Reset Request",
-      text: `Please reset your password by clicking this link: ${actionLink}`,
       html: Templates.getForgotPasswordEmail(actionLink),
+      source: "password-reset",
+      noReply: true,
+      branding: "platform",
     });
+    if (!result.success) return res.status(502).json({ message: "Could not send the password reset email. Please try again." });
 
     return res.json({ message: "Password reset link sent successfully" });
   } catch (error) {

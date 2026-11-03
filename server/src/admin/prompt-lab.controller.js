@@ -1,3 +1,6 @@
+import { WEBSITE_PROMPT_KEY, WEBSITE_DEFAULT_PROMPT } from "../prompts/content.js";
+import { WEBSITE_PRODUCT_GUIDE } from "../prompts/help-agent.js";
+import { deliverWebsiteInquiry } from "../services/website-inquiry-mail.js";
 import prisma from "../lib/prisma.js";
 import { writeAuditLog } from "../lib/audit.js";
 import {
@@ -462,3 +465,45 @@ export const promptLabChat = async (req, res) => {
     return res.status(500).json({ message: "The agent could not complete this turn" });
   }
 };
+
+
+// Website Agent prompt and operational activity in Prompt Lab.
+export async function getWebsiteAgent(req, res) {
+  if (denyUnlessAdminAccess(req, res)) return;
+  try {
+    const [saved, conversations, inquiries, events] = await Promise.all([
+      prisma.platformSetting.findUnique({ where: { key: WEBSITE_PROMPT_KEY } }),
+      prisma.websiteConversation.findMany({ orderBy: { updatedAt: "desc" }, take: 40, select: { id: true, page: true, messages: true, draft: true, collecting: true, submittedAt: true, lastError: true, updatedAt: true } }),
+      prisma.b2BInquiry.findMany({ orderBy: { createdAt: "desc" }, take: 40, select: { id: true, type: true, adminSentAt: true, visitorSentAt: true, adminSmsSentAt: true, visitorSmsSentAt: true, attempts: true, nextAttemptAt: true, processingUntil: true, lastError: true, createdAt: true, payload: true } }),
+      prisma.auditLog.findMany({ where: { action: { startsWith: "website_agent." } }, orderBy: { createdAt: "desc" }, take: 60, select: { action: true, targetId: true, metadata: true, createdAt: true } }),
+    ]);
+    res.json({ prompt: saved?.value?.prompt || WEBSITE_DEFAULT_PROMPT, defaultPrompt: WEBSITE_DEFAULT_PROMPT, productGuide: WEBSITE_PRODUCT_GUIDE, conversations, inquiries, events, configuration: { ai: !!process.env.ANTHROPIC_API_KEY, smtp: !!(process.env.SMTP_USER && process.env.SMTP_PASS), sms: !!(process.env.TELNYX_API_KEY && (process.env.TELNYX_FROM_NUMBER || process.env.TELNYX_MESSAGING_PROFILE_ID)), teamEmail: !!process.env.SUPERADMIN_EMAIL, teamPhone: !!process.env.SUPERADMIN_PHONE, integration: (process.env.WEBSITE_B2B_INTAKE_SECRET || "").length >= 32, retryWorker: !!(process.env.INNGEST_EVENT_KEY && process.env.INNGEST_SIGNING_KEY) } });
+  } catch (error) {
+    console.error("[Website Agent Admin] Load failed", error.message);
+    res.status(503).json({ message: "Cannot load Website Agent activity. Check the WebsiteConversation migration and server database logs." });
+  }
+}
+
+export async function saveWebsiteAgent(req, res) {
+  if (denyUnlessAdminAccess(req, res)) return;
+  const prompt = req.body?.prompt;
+  if (typeof prompt !== "string" || prompt.length > 20000) return res.status(400).json({ message: "Prompt must be text, at most 20,000 characters." });
+  try {
+    await prisma.platformSetting.upsert({ where: { key: WEBSITE_PROMPT_KEY }, create: { key: WEBSITE_PROMPT_KEY, value: { prompt: prompt.trim() || WEBSITE_DEFAULT_PROMPT } }, update: { value: { prompt: prompt.trim() || WEBSITE_DEFAULT_PROMPT } } });
+    await writeAuditLog({ req, action: "website_agent.prompt_saved", targetType: "PlatformSetting", targetId: WEBSITE_PROMPT_KEY });
+    res.json({ success: true });
+  } catch { res.status(503).json({ message: "Unable to save the Website Agent prompt." }); }
+}
+
+export async function retryWebsiteNotification(req, res) {
+  if (denyUnlessAdminAccess(req, res)) return;
+  try {
+    const inquiry = await prisma.b2BInquiry.findUnique({ where: { id: req.params.id } });
+    if (!inquiry) return res.status(404).json({ message: "Inquiry not found." });
+    if (inquiry.processingUntil && inquiry.processingUntil > new Date()) return res.status(409).json({ message: "A delivery attempt is already running." });
+    await prisma.b2BInquiry.update({ where: { id: inquiry.id }, data: { nextAttemptAt: new Date() } });
+    const result = await deliverWebsiteInquiry(inquiry.id, { retrySms: true });
+    await writeAuditLog({ req, action: "website_agent.notification_retry", targetType: "B2BInquiry", targetId: inquiry.id, metadata: result });
+    res.json(result);
+  } catch { res.status(503).json({ message: "Retry failed. Check the inquiry error and server logs." }); }
+}

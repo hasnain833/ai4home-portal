@@ -9,13 +9,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -51,6 +44,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
 import HelpAgentLab from "@/components/admin/prompt-lab/HelpAgentLab";
+import WebsiteAgentLab from "@/components/admin/prompt-lab/WebsiteAgentLab";
 
 type Draft = {
   systemTemplate: string;
@@ -135,7 +129,7 @@ type WarrantyChatMessage = {
   options?: string[];
 };
 
-type AgentTab = "sales" | "warranty" | "help";
+type AgentTab = "sales" | "warranty" | "help" | "website";
 
 const PHASE_LABELS: Record<WarrantyPhaseKey, string> = {
   INTAKE: "Intake",
@@ -262,7 +256,11 @@ export default function PromptLabPage() {
   }, []);
 
   useEffect(() => {
-    if (isPlatformUser(user)) { load(); loadWarranty(); }
+    let active = true;
+    queueMicrotask(() => {
+      if (active && isPlatformUser(user)) { void load(); void loadWarranty(); }
+    });
+    return () => { active = false; };
   }, [user, load, loadWarranty]);
 
   useEffect(() => {
@@ -547,7 +545,7 @@ export default function PromptLabPage() {
     const text = (override ?? wInput).trim();
     if (!text || wSending) return;
 
-    const userMsg: WarrantyChatMessage = { id: `wu-${Date.now()}`, role: "user", content: text };
+    const userMsg: WarrantyChatMessage = { id: crypto.randomUUID(), role: "user", content: text };
     const transcript = [...wMessages, userMsg];
     setWMessages(transcript);
     setWInput("");
@@ -576,7 +574,7 @@ export default function PromptLabPage() {
       if (data.issueState) setWIssueState(data.issueState);
       setWMessages((prev) => [
         ...prev,
-        { id: `wa-${Date.now()}`, role: "agent", content: data.reply || "",
+        { id: crypto.randomUUID(), role: "agent", content: data.reply || "",
           phase: data.phase, latencyMs: data.latencyMs,
           retrieved: Array.isArray(data.retrieved) ? data.retrieved : [],
           options: Array.isArray(data.options) ? data.options : [] },
@@ -699,7 +697,7 @@ export default function PromptLabPage() {
           Prompt Lab
         </h1>
         {/* Agent switcher tabs */}
-        <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+        <div className="flex flex-wrap items-center gap-0.5 rounded-md bg-muted p-0.5">
           <button type="button" onClick={() => setAgentTab("sales")}
             className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
               agentTab === "sales" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -717,6 +715,12 @@ export default function PromptLabPage() {
               agentTab === "help" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
             }`}>
             <LifeBuoy className="h-3.5 w-3.5" /> Help Agent
+          </button>
+          <button type="button" onClick={() => setAgentTab("website")}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+              agentTab === "website" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            <Globe className="h-3.5 w-3.5" /> Website Agent
           </button>
         </div>
         <div className="flex items-center gap-2">
@@ -749,6 +753,8 @@ export default function PromptLabPage() {
             ? <>Edit the prompt, add knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> puts a prompt in front of real leads.</>
             : agentTab === "warranty"
             ? <>Edit the four phase prompts the warranty agent uses, add platform knowledge-base documents, and test both in sandbox mode. No tickets or emails are sent during testing.</>
+            : agentTab === "website"
+            ? <>Manage the public website assistant&apos;s prompt and review conversations and notification activity. <strong>Save &amp; go live</strong> applies to the next visitor message.</>
             : <>The assistant builder staff open from <strong>Help</strong> in the sidebar. It already knows the whole portal; add docs for anything else. <strong>Save &amp; go live</strong> applies to their next question.</>}
         </p>
       </div>
@@ -1132,6 +1138,7 @@ export default function PromptLabPage() {
       )}
 
       {agentTab === "help" && <HelpAgentLab />}
+      {agentTab === "website" && <WebsiteAgentLab />}
 
       {agentTab === "warranty" && (
         <>

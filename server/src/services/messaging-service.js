@@ -7,7 +7,7 @@ import { ticketRef } from "../lib/ticket-number.js";
 
 export class MessagingService {
 
-  static async sendEmail({ companyId, to, subject, html, fromName, fromEmail, replyTo, source }) {
+  static async sendEmail({ companyId, to, subject, html, fromName, fromEmail, replyTo, source, branding }) {
     if (companyId && to) {
       const { suppressed, reason } = await ComplianceService.checkSuppression(companyId, "EMAIL", to);
       if (suppressed) {
@@ -15,7 +15,7 @@ export class MessagingService {
         return { success: false, outcome: "blocked", blocked: true, reason: `Suppressed (${reason})` };
       }
     }
-    return MailService.sendEmail({ to, subject, html, fromName, fromEmail, replyTo, companyId, source });
+    return MailService.sendEmail({ to, subject, html, fromName, fromEmail, replyTo, companyId, source, branding });
   }
 
   static async sendSms({ companyId, to, body, addOptOut = true, tag, source }) {

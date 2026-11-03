@@ -35,6 +35,7 @@ function maybeSweep() {
 export function createRateLimiter({
   windowMs = WINDOW_MS_DEFAULT,
   max = 30,
+  failClosed = false,
   label = "Rate limit",
   keyFn = clientKey,
 } = {}) {
@@ -45,7 +46,8 @@ export function createRateLimiter({
     try {
       bucket = await hit(key, windowMs);
     } catch (err) {
-      // Fail open: a DB blip must not take the public chat down with it.
+      if (failClosed) return res.status(503).json({ message: "Submission protection is temporarily unavailable. Please try again shortly." });
+      // Other callers retain their existing availability policy.
       console.error(`[${label}] Rate limit check failed, allowing request:`, err.message);
       return next();
     }

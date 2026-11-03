@@ -42,6 +42,9 @@ import * as coach from "../admin/sales-coach.controller.js";
 import { createRateLimiter } from "../middlewares/rate-limit.js";
 import {
   getPromptLab,
+  getWebsiteAgent,
+  saveWebsiteAgent,
+  retryWebsiteNotification,
   savePromptVersion,
   setCurrentPromptVersion,
   deletePromptVersion,
@@ -115,6 +118,9 @@ router.get("/sales-agent-appointments", requireAuth, requireAdmin("appointments"
 router.patch("/sales-agent-appointments/:id/status", requireAuth, requireAdmin("appointments"), b2b.updateAppointmentStatus);
 
 // B2B prospecting: business leads, campaigns, platform availability.
+router.get("/b2b/segments", requireAuth, requireAdmin("b2b"), b2b.listSegments);
+router.post("/b2b/segments", requireAuth, requireAdmin("b2b"), b2b.createSegment);
+router.delete("/b2b/segments/:id", requireAuth, requireAdmin("b2b"), b2b.deleteSegment);
 router.get("/b2b/leads", requireAuth, requireAdmin("b2b"), b2b.listLeads);
 router.post("/b2b/leads", requireAuth, requireAdmin("b2b"), b2b.createLead);
 router.post("/b2b/leads/import", requireAuth, requireAdmin("b2b"), b2b.importLeads);
@@ -138,6 +144,9 @@ const promptLabUpload = multer({
 const uploadKbFile = handleUploadErrors(promptLabUpload.single("file"));
 
 router.get("/prompt-lab", requireAuth, requireAdmin("prompt-lab"), getPromptLab);
+router.get("/prompt-lab/website-agent", requireAuth, requireAdmin("prompt-lab"), getWebsiteAgent);
+router.put("/prompt-lab/website-agent", requireAuth, requireAdmin("prompt-lab"), saveWebsiteAgent);
+router.post("/prompt-lab/website-agent/inquiries/:id/retry", requireAuth, requireAdmin("prompt-lab"), retryWebsiteNotification);
 router.post("/prompt-lab/versions", requireAuth, requireAdmin("prompt-lab"), savePromptVersion);
 router.post(
   "/prompt-lab/versions/:versionId/set-current",

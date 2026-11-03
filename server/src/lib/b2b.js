@@ -30,10 +30,21 @@ export async function saveB2BAvailability(value) {
   return getB2BAvailability();
 }
 
-export const appUrl = () => process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+export function appUrl() {
+  const raw = String(process.env.NEXT_PUBLIC_URL || "").trim();
+  if (!raw && process.env.NODE_ENV === "production") throw new Error("Set NEXT_PUBLIC_URL to the public HTTPS portal address before sending campaign links.");
+  let url;
+  try { url = new URL(raw || "http://localhost:3000"); }
+  catch { throw new Error("NEXT_PUBLIC_URL must be a valid portal URL."); }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||
+      (process.env.NODE_ENV === "production" && (url.protocol !== "https:" || ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) {
+    throw new Error("NEXT_PUBLIC_URL must be the public HTTPS portal address in production.");
+  }
+  return url.origin;
+}
 export const bookingLinkFor = (lead, campaignId) =>
-  `${appUrl()}/meet/${lead.bookingToken}${campaignId ? `?c=${campaignId}` : ""}`;
-export const unsubscribeLinkFor = (lead) => `${appUrl()}/unsubscribe/${lead.bookingToken}?type=b2b`;
+  `${appUrl()}/meet/${encodeURIComponent(lead.bookingToken)}${campaignId ? `?c=${encodeURIComponent(campaignId)}` : ""}`;
+export const unsubscribeLinkFor = (lead) => `${appUrl()}/unsubscribe/${encodeURIComponent(lead.bookingToken)}?type=b2b`;
 
 // The merge fields renderB2BStep fills. Anything else would reach the builder
 // as literal "{{…}}" text, so saving rejects it.

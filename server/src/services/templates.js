@@ -12,6 +12,63 @@ const COLORS = {
   border: "#eaeaea"
 };
 
+// Platform security and operational notices may carry a tenant ID for metering.
+const PLATFORM_EMAIL_SOURCES = new Set([
+  "email-change", "email-change-notice", "signup-verification", "new-tenant-alert",
+  "verification-submitted", "workspace-activated", "sync-alert", "opt-out-confirmation",
+]);
+const decodeEmailUrl = (value) => String(value).replace(/&amp;/gi, "&").replace(/&#0*38;/g, "&").replace(/&#x0*26;/gi, "&");
+
+function bookingAction(value) {
+  try {
+    const url = new URL(decodeEmailUrl(value));
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return null;
+    if (/^\/(?:book|meet|schedule)\/[^/]+/i.test(url.pathname)) {
+      return /\/(?:book|schedule)\/manage\//i.test(url.pathname) ? "Change or cancel appointment" : "Book an appointment";
+    }
+    if (/(^|\.)calendly\.com$/i.test(url.hostname)) return "Book an appointment";
+  } catch { /* Not a booking URL. */ }
+  return null;
+}
+
+const bookingButtonStyle = "display:inline-block;background-color:#b48c3c;color:#ffffff;padding:14px 24px;text-decoration:none;border-radius:6px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:1.4;margin:8px 0;";
+
+// Keep text nodes separate from tags, styles and anchors to avoid nested links.
+export function bookingButtonsInEmail(html) {
+  return String(html || "").replace(/<!--[\s\S]*?-->|<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>|<a\b[^>]*>[\s\S]*?<\/a\s*>|<[^>]*>|[^<]+/gi, (part) => {
+    if (/^<a\b/i.test(part)) {
+      const href = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(part);
+      const target = href && (href[1] ?? href[2] ?? href[3]);
+      const label = target && bookingAction(target);
+      if (!label) return part;
+      const text = part.replace(/^<a\b[^>]*>/i, "").replace(/<\/a\s*>$/i, "");
+      const visible = text.replace(/<[^>]+>/g, "").trim();
+      if (/\bstyle\s*=\s*(["'])[^"']*(?:background|padding)/i.test(part) && !/^https?:\/\//i.test(visible)) return part;
+      return `<a href="${escapeHtml(decodeEmailUrl(target))}" style="${bookingButtonStyle}">${/^https?:\/\//i.test(visible) || !visible ? label : text}</a>`;
+    }
+    if (part.startsWith("<")) return part;
+    return part.replace(/https?:\/\/(?:(?!&(?:lt|gt|quot|apos|#0*39|#x0*27);)[^\s<>"'])+/gi, (match) => {
+      const url = match.replace(/[.,;!?)\]]+$/, "");
+      const label = bookingAction(url);
+      return label ? `<a href="${escapeHtml(decodeEmailUrl(url))}" style="${bookingButtonStyle}">${label}</a>${match.slice(url.length)}` : match;
+    });
+  });
+}
+
+export function prepareOutgoingEmail(html, { companyId = null, source = null, branding } = {}) {
+  const content = bookingButtonsInEmail(html);
+  const platform = branding ? branding === "platform" : !companyId || PLATFORM_EMAIL_SOURCES.has(source);
+  if (!platform) return content.replaceAll("<!--ai4hb-logo-->", "");
+  if (/<img\b[^>]*\bsrc\s*=\s*["'](?:[^"']*\/logo-email\.png(?:[?"'])|cid:ai4hb-logo["'])/i.test(content)) return content.replaceAll("<!--ai4hb-logo-->", "");
+  const origin = new URL(process.env.NEXT_PUBLIC_URL || "http://localhost:3000").origin;
+  const logo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-ai4hb-brand="platform"><tr><td align="center" style="padding:20px;background:#ffffff"><a href="https://www.aiforhomebuilders.com"><img src="${escapeHtml(origin)}/logo-email.png" width="210" height="162" alt="AI for Homebuilders" style="display:block;border:0;width:210px;max-width:100%;height:auto"></a></td></tr></table>`;
+  // Branded templates reserve a slot inside their card. Only untemplated
+  // platform messages need the generic prepend fallback.
+  if (content.includes("<!--ai4hb-logo-->")) return content.replace("<!--ai4hb-logo-->", logo).replaceAll("<!--ai4hb-logo-->", "");
+  if (/<body\b[^>]*>/i.test(content)) return content.replace(/<body\b[^>]*>/i, (body) => body + logo);
+  return logo + content;
+}
+
 function wrapEmail(content, title, companyName = "Aiforhomebuilder", headerColor = COLORS.primary, { replyable = false } = {}) {
   const currentYear = new Date().getFullYear();
   const footerNote = replyable
@@ -20,6 +77,7 @@ function wrapEmail(content, title, companyName = "Aiforhomebuilder", headerColor
 
   return `
     <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid ${COLORS.border};">
+      <!--ai4hb-logo-->
       <div style="background-color: ${headerColor}; padding: 30px 40px; text-align: center; border-bottom: 3px solid ${COLORS.accent};">
         <h1 style="margin: 0; font-size: 24px; color: white; font-weight: 600;">${title}</h1>
       </div>
@@ -52,7 +110,80 @@ function emailHighlightBox(content) {
   `;
 }
 
+// Table layout and inline styles support Gmail, Outlook, and small screens.
+function websiteEmail({ preheader, eyebrow, title, greeting, introduction, rows = [], status, nextSteps, action, website = "https://www.aiforhomebuilders.com" }) {
+  const escape = (value) => escapeHtml(value ?? "");
+  const safeWebsite = /^https?:\/\//i.test(website) ? website.replace(/\/$/, "") : "https://www.aiforhomebuilders.com";
+  const detailRows = rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([label, value]) => `<tr><td valign="top" style="padding:11px 12px;border-bottom:1px solid #e5e0d6;color:#586171;font-size:13px;width:36%;">${escape(label)}</td><td valign="top" style="padding:11px 12px;border-bottom:1px solid #e5e0d6;color:#142133;font-size:14px;font-weight:600;word-break:break-word;">${escape(value)}</td></tr>`).join("");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${escape(title)}</title></head>
+<body style="margin:0;padding:0;background:#f1f3f5;font-family:Arial,Helvetica,sans-serif;color:#142133;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${escape(preheader)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f3f5;"><tr><td align="center" style="padding:32px 12px;">
+<!--[if mso]><table role="presentation" width="600"><tr><td><![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border:1px solid #e0e4e8;border-radius:12px;overflow:hidden;">
+<tr><td style="background:#ffffff;border-top:4px solid #b9903d;border-bottom:1px solid #e5e8ec;"><!--ai4hb-logo--></td></tr>
+<tr><td style="padding:30px 28px 12px;"><p style="margin:0 0 10px;color:#89651f;font-size:11px;font-weight:bold;letter-spacing:1.4px;text-transform:uppercase;">${escape(eyebrow)}</p><h1 style="margin:0 0 22px;color:#142133;font-family:Georgia,serif;font-size:29px;font-weight:normal;line-height:1.25;">${escape(title)}</h1><p style="margin:0 0 14px;font-size:15px;line-height:1.7;">${escape(greeting)}</p><p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#485365;">${escape(introduction)}</p>
+${status ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="background:#f7f1e5;border-left:3px solid #b9903d;padding:14px 16px;color:#665126;font-size:14px;line-height:1.6;">${escape(status)}</td></tr></table>` : ""}
+${detailRows ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;background:#faf9f6;border:1px solid #e5e0d6;">${detailRows}</table>` : ""}
+<h2 style="margin:24px 0 9px;font-size:16px;line-height:1.4;">What happens next</h2><p style="margin:0 0 22px;font-size:14px;color:#485365;line-height:1.7;white-space:pre-line;">${escape(nextSteps)}</p>
+${action && /^(https?:\/\/|mailto:)/i.test(action.href) ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;"><tr><td bgcolor="#142133" style="border-radius:6px;mso-padding-alt:14px 22px;"><a href="${escape(action.href)}" style="display:inline-block;padding:14px 22px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:bold;line-height:1.4;">${escape(action.label)}</a></td></tr></table>` : ""}
+<p style="margin:0 0 18px;color:#485365;font-size:14px;line-height:1.7;">Warm regards,<br><strong style="color:#142133;">The AI for Homebuilders team</strong></p></td></tr>
+<tr><td style="padding:20px 28px;background:#f7f8fa;border-top:1px solid #e5e8ec;"><p style="margin:0 0 8px;font-size:12px;line-height:1.6;color:#697383;">This service message relates to your request. Please contact our team if you have any questions.</p><p style="margin:0;font-size:12px;line-height:1.7;"><a href="${escape(safeWebsite)}" style="color:#526174;">Visit our website</a>&nbsp; · &nbsp;<a href="${escape(safeWebsite)}/contact" style="color:#526174;">Contact</a>&nbsp; · &nbsp;<a href="${escape(safeWebsite)}/privacy" style="color:#526174;">Privacy</a>&nbsp; · &nbsp;<a href="${escape(safeWebsite)}/terms" style="color:#526174;">Terms</a></p></td></tr>
+</table><!--[if mso]></td></tr></table><![endif]-->
+</td></tr></table></body></html>`;
+}
+
+function websiteInquiryEmails(inquiry, { portalUrl, bookingLink }) {
+  const p = inquiry.payload;
+  const website = new URL(process.env.WEBSITE_PUBLIC_URL || "https://www.aiforhomebuilders.com").origin;
+  const isRequest = inquiry.type === "CONSULTATION";
+  const isBooking = inquiry.type === "BOOKING";
+  const isMeeting = isRequest || isBooking;
+  const label = isRequest ? "Product Consultation request" : isBooking ? "Product Consultation" : inquiry.type === "EBOOK" ? "Your AI for Homebuilders guide" : inquiry.type === "DEMO" ? "Product Consultation request" : "Your message to AI for Homebuilders";
+  const rows = [["Name", p.name], ["Company", p.company], ["Email", p.email], ["Phone", p.phone], ["Role", p.role], ["Annual closings", p.annualClosings || p.homesPerYear], [isRequest ? "Preferred time" : "Meeting time", p.label], ["Discussion", p.notes || p.message || p.painPoint]];
+  const status = isRequest ? "Pending team confirmation. Your preferred time has been recorded; an appointment has not yet been confirmed." : isBooking ? "Your appointment is confirmed for the time below." : null;
+  const adminHref = portalUrl + (isMeeting ? "/admin/sales-agent-appointments" : "/admin/leads");
+  const admin = {
+    to: process.env.SUPERADMIN_EMAIL, fromName: "AI for Homebuilders", replyTo: p.email,
+    subject: `${isRequest ? "New Product Consultation request" : isBooking ? "Product Consultation booked" : "New website " + inquiry.type.toLowerCase() + " inquiry"}: ${p.company || p.email}`,
+    html: websiteEmail({ website, preheader: `${label} from ${p.name || p.email}. ${isRequest ? "Review their preferred time and confirm availability." : "View the details in your CRM."}`, eyebrow: "Website inquiry - Team notification", title: isRequest ? "A new consultation request" : isBooking ? "A consultation is booked" : "A new website inquiry", greeting: "Hello AI4HB team,", introduction: `${p.name || p.email}${p.company ? " from " + p.company : ""} ${isRequest ? "has requested a Product Consultation" : isBooking ? "has booked a Product Consultation" : inquiry.type === "EBOOK" ? "has requested the AI for Homebuilders guide" : "has submitted a website inquiry"}.`, status, rows, nextSteps: isRequest ? "Review the visitor's preferred time and contact them to agree the appointment. This request has not reserved a calendar slot. You can review the conversation and notification status in the CRM." : "Review the details in the CRM and follow up with the visitor as appropriate.", action: { href: adminHref, label: isMeeting ? "Review consultation" : "View business lead" } }),
+  };
+  let intro = "Thank you for contacting AI for Homebuilders. Your message has been received, and our team will review the details.";
+  let next = "Our team will follow up using the contact details you provided. If you would like to add anything, simply reply to this email.";
+  let action;
+  if (isRequest) { intro = "Thank you for your interest in exploring how AI can support your building business. We have received your Product Consultation request."; next = "Our team will review your preferred time and contact you to confirm availability and arrange the conversation. If your plans change or you have more to share, reply to this email."; }
+  if (isBooking) { intro = "Thank you for arranging a Product Consultation with AI for Homebuilders. We look forward to learning about your business and discussing the workflows that matter to your team."; next = "Our team will contact you using the details you provided. Bring any questions about your sales or warranty operations. To request a change, reply to this email."; }
+  if (inquiry.type === "EBOOK") { intro = "Thank you for your interest in AI for Homebuilders. Your guide is ready to read."; next = "Use the button below to download your guide. If it raises questions about your own workflows, reply to this email and our team can help."; action = { href: new URL("/Website%20Assets/bookpdf/ai-for-homebuilders-guide.pdf", website).href, label: "Download your free guide" }; }
+  if (inquiry.type === "DEMO") { intro = "Thank you for your interest in a Product Consultation. Your request has been received."; next = "Use the link below to continue arranging a conversation with our team."; action = { href: bookingLink, label: "Arrange your consultation" }; }
+  action ||= { href: process.env.SUPERADMIN_EMAIL ? "mailto:" + process.env.SUPERADMIN_EMAIL : website + "/contact", label: "Contact our team" };
+  return { admin, visitor: {
+    to: p.email, fromName: "AI for Homebuilders", replyTo: process.env.SUPERADMIN_EMAIL,
+    subject: isRequest ? "Your Product Consultation request - AI for Homebuilders" : isBooking ? "Your Product Consultation is confirmed - AI for Homebuilders" : label,
+    html: websiteEmail({ website, preheader: isRequest ? "Your preferred time is recorded. Our team will confirm availability." : isBooking ? `Your consultation: ${p.label}. We look forward to speaking with you.` : label, eyebrow: "AI for Homebuilders - " + (isMeeting ? "Product Consultation" : "Resources & support"), title: isRequest ? "Let's explore what's possible." : isBooking ? "Your consultation is confirmed." : inquiry.type === "EBOOK" ? "Your guide is ready." : "Thank you for reaching out.", greeting: `Hello ${p.name || "there"},`, introduction: intro, status, rows: isMeeting ? rows.filter(([key, value]) => !["Role", "Annual closings"].includes(key) && value && !/^(?:not provided|n\/a|skipped)$/i.test(String(value).trim())) : [], nextSteps: next, action }),
+  } };
+}
+
+
 export const Templates = {
+  getWebsiteInquiryEmails: websiteInquiryEmails,
+
+  getB2BCampaignEmail: (bodyHtml, { bookingLink, unsubscribeLink, portalUrl, websiteUrl }) => {
+    const site = escapeHtml(websiteUrl);
+    const unsubscribe = escapeHtml(unsubscribeLink);
+    const logo = escapeHtml(`${portalUrl}/logo-email.png`);
+    const body = bookingButtonsInEmail(bodyHtml);
+    const fallbackButton = body.includes(`href="${escapeHtml(bookingLink)}"`) ? "" : emailButton(escapeHtml(bookingLink), "Book a Product Consultation");
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;background:#f1f3f5;font-family:Arial,Helvetica,sans-serif;color:#334155">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 12px">
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;background:#fff;border:1px solid #e5e7eb;border-radius:10px">
+<tr><td align="center" style="padding:20px;border-top:4px solid #b48c3c;border-bottom:1px solid #e5e7eb"><a href="${site}"><img src="${logo}" width="210" height="162" alt="AI for Homebuilders" style="display:block;border:0;width:210px;max-width:100%;height:auto"></a></td></tr>
+<tr><td style="padding:28px 32px;font-size:15px;line-height:1.7">${body}${fallbackButton}<p style="margin:20px 0 0;color:#64748b;font-size:13px">Questions? Reply to this email and our team will help.</p></td></tr>
+<tr><td align="center" style="padding:22px;background:#f8f9fa;border-top:1px solid #e5e7eb;font-size:12px;line-height:1.8;color:#64748b"><p style="margin:0"><strong>AI for Homebuilders</strong><br><a href="${site}" style="color:#0f3b3d">Visit our website</a> &middot; <a href="${unsubscribe}" style="color:#0f3b3d">Unsubscribe</a></p><p style="margin:8px 0 0">&copy; ${new Date().getFullYear()} AI for Homebuilders. All rights reserved.</p></td></tr>
+</table></td></tr></table></body></html>`;
+  },
+
   getEmailChangeVerifyEmail: (name, oldEmail, newEmail, confirmUrl, hoursValid) => {
     const content = `
       <p>Hi ${name || "there"},</p>
@@ -460,7 +591,7 @@ export const Templates = {
   },
 
   getNurtureEmail: (userHtml, companyName) => {
-    return wrapEmail(userHtml, "A message from " + companyName, companyName);
+    return wrapEmail(bookingButtonsInEmail(userHtml), "A message from " + companyName, companyName, COLORS.primary, { replyable: true });
   },
 
   getAnnouncementEmail: (bodyHtml, companyName, ctaHref) => {

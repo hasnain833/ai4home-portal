@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -23,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { CalendarCheck, Loader2, Pencil, Plus, Search, Target, Trash2, UploadCloud } from "lucide-react";
+import { Loader2, Pencil, Plus, Search, Target, Trash2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { parseCsv } from "@/lib/csv";
@@ -35,6 +36,9 @@ import {
   sendJson,
   titleCase,
   useB2BLeads,
+  useB2BSegments,
+  matchesB2BSegment,
+  type B2BSegment,
 } from "@/lib/b2b-store";
 
 const STATUS_STYLES: Record<B2BLeadStatus, string> = {
@@ -71,8 +75,13 @@ const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Somethin
 export default function AdminLeadsPage() {
   const confirm = useConfirm();
   const [nurtureOnly, setNurtureOnly] = useState(false);
-  const [history, setHistory] = useState<B2BLead | null>(null);
   const { items: leads, loading, reload } = useB2BLeads();
+  const { items: segments, reload: reloadSegments } = useB2BSegments();
+  const [segmentOpen, setSegmentOpen] = useState(false);
+  const [segmentName, setSegmentName] = useState("");
+  const [savingSegment, setSavingSegment] = useState(false);
+  const [activeSegment, setActiveSegment] = useState("all");
+  const [pagination, setPagination] = useState({ page: 1, filterKey: "" });
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<B2BLeadStatus | "ALL">("ALL");
   // null = closed, "" = adding, otherwise the id of the lead being edited.
@@ -175,13 +184,39 @@ export default function AdminLeadsPage() {
     }
   };
 
-  const q = query.trim().toLowerCase();
-  const visible = leads.filter(
-    (l) =>
-      (statusFilter === "ALL" || l.status === statusFilter) &&
-      (!nurtureOnly || (l.marketingOptIn && !l.emailOptOut)) &&
-      (!q || [l.companyName, l.contactName, l.email, l.city || ""].some((v) => v.toLowerCase().includes(q))),
-  );
+  const filters = { status: statusFilter, query, nurtureOnly };
+  const visible = leads.filter((lead) => matchesB2BSegment(lead, filters));
+  const filterKey = JSON.stringify(filters);
+  const totalPages = Math.max(1, Math.ceil(visible.length / 25));
+  const currentPage = Math.min(pagination.filterKey === filterKey ? pagination.page : 1, totalPages);
+  const pageLeads = visible.slice((currentPage - 1) * 25, currentPage * 25);
+  const applySegment = (segment: B2BSegment) => {
+    setActiveSegment(segment.id);
+    setStatusFilter(segment.filters.status);
+    setQuery(segment.filters.query);
+    setNurtureOnly(segment.filters.nurtureOnly);
+  };
+  const saveSegment = async () => {
+    if (!segmentName.trim()) return;
+    setSavingSegment(true);
+    try {
+      const segment = await sendJson<B2BSegment>(`${B2B_API}/segments`, "POST", { name: segmentName, filters });
+      await reloadSegments();
+      setActiveSegment(segment.id);
+      setSegmentOpen(false);
+      setSegmentName("");
+      toast.success("Segment saved. Membership updates as leads change.");
+    } catch (error) { toast.error(errorMessage(error)); }
+    finally { setSavingSegment(false); }
+  };
+  const deleteSegment = async (segment: B2BSegment) => {
+    if (!await confirm({ title: `Delete segment "${segment.name}"?`, description: "Leads and existing campaign enrollments will remain.", confirmText: "Delete segment" })) return;
+    try {
+      await sendJson(`${B2B_API}/segments/${segment.id}`, "DELETE");
+      if (activeSegment === segment.id && segments[0]) applySegment(segments[0]);
+      await reloadSegments();
+    } catch (error) { toast.error(errorMessage(error)); }
+  };
   const counts = leads.reduce<Record<string, number>>((acc, l) => ({ ...acc, [l.status]: (acc[l.status] || 0) + 1 }), {});
 
   return (
@@ -213,14 +248,14 @@ export default function AdminLeadsPage() {
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <div className="relative w-full sm:w-64">
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search leads" className="h-9 pl-8 text-sm" />
+              <Input value={query} maxLength={200} onChange={(e) => { setQuery(e.target.value); setActiveSegment(""); }} placeholder="Search leads" className="h-9 pl-8 text-sm" />
             </div>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={nurtureOnly} onChange={(e) => setNurtureOnly(e.target.checked)} />Nurture opt-in only</label>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={nurtureOnly} onChange={(e) => { setNurtureOnly(e.target.checked); setActiveSegment(""); }} />Nurture opt-in only</label>
             {(["ALL", ...B2B_LEAD_STATUSES] as const).map((s) => (
               <button
                 key={s}
                 type="button"
-                onClick={() => setStatusFilter(s)}
+                onClick={() => { setStatusFilter(s); setActiveSegment(""); }}
                 className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                   statusFilter === s ? "border-[#b48c3c] bg-[#b48c3c]/10 text-[#b48c3c]" : "border-border text-muted-foreground hover:text-foreground"
                 }`}
@@ -229,121 +264,84 @@ export default function AdminLeadsPage() {
               </button>
             ))}
           </div>
+          <div className="mt-4 space-y-3 border-t pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><p className="text-sm font-medium">Segments</p><p className="text-xs text-muted-foreground">Sales pipeline contains leads marked Interested. Save status, search and opt-in filters as reusable groups.</p></div>
+              <Button variant="outline" size="sm" onClick={() => setSegmentOpen(true)}>Save current filters</Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {segments.map((segment) => <div key={segment.id} className={`inline-flex items-center rounded-full border text-xs ${activeSegment === segment.id ? "border-[#b48c3c] bg-[#b48c3c]/10" : "border-border"}`}>
+                <button type="button" className="px-3 py-2" onClick={() => applySegment(segment)}>{segment.name} ({leads.filter((lead) => matchesB2BSegment(lead, segment.filters)).length})</button>
+                {!segment.builtIn && <button type="button" className="mr-2 p-1 text-muted-foreground hover:text-red-500" aria-label={`Delete segment ${segment.name}`} onClick={() => deleteSegment(segment)}><Trash2 className="h-3 w-3" /></button>}
+              </div>)}
+            </div>
+          </div>
         </CardHeader>
 
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <Table>
-              <TableHeader className="bg-muted/50">
+            <Table className="min-w-250">
+              <TableHeader className="bg-muted/15 border-b border-border/50">
                 <TableRow>
-                  <TableHead className="pl-6">Company</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Campaigns</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Added</TableHead>
-                  <TableHead className="pr-6" />
+                  {["Company / Contact", "Email", "Phone", "Status", "Opt-in Consent"].map((heading) => <TableHead key={heading} className="py-3.5 px-4 font-semibold text-xs text-muted-foreground text-left">{heading}</TableHead>)}
+                  <TableHead className="py-3.5 px-4 font-semibold text-xs text-muted-foreground text-right pr-6">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="py-12 text-center">
-                      <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
-                    </TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={6} className="py-12 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></TableCell></TableRow>
                 ) : visible.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
-                      {leads.length === 0 ? "No leads yet. Add one or import a CSV." : "No leads match these filters."}
+                  <TableRow><TableCell colSpan={6} className="py-20 text-center text-muted-foreground"><Target className="h-12 w-12 mx-auto opacity-20 text-[#b48c3c] mb-3" /><p className="font-semibold text-sm">{leads.length === 0 ? "No business leads yet." : "No leads match these filters."}</p><p className="text-xs mt-1">{leads.length === 0 ? "Add a lead or import a CSV to get started." : "Choose another segment or adjust your filters."}</p></TableCell></TableRow>
+                ) : pageLeads.map((lead) => (
+                  <TableRow key={lead.id} onClick={() => openForm(lead)} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition border-b border-border/30 cursor-pointer">
+                    <TableCell className="py-3 px-4 align-middle">
+                      <div className="flex flex-col gap-0.5 min-w-40 max-w-56">
+                        <button type="button" className="text-left text-sm font-semibold text-slate-800 dark:text-slate-200 hover:text-[#b48c3c]" onClick={(event) => { event.stopPropagation(); openForm(lead); }}>{lead.companyName || "Company not provided"}</button>
+                        <span className="text-xs text-slate-500 font-medium">{lead.contactName || "Contact not provided"}{lead.city ? " / " + lead.city : ""}</span>
+                        {lead.website && <a href={/^https?:\/\//.test(lead.website) ? lead.website : "https://" + lead.website} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()} className="text-[11px] text-[#b48c3c] hover:underline truncate">{lead.website}</a>}
+                        {lead.notes && <span className="text-[11px] text-muted-foreground truncate" title={lead.notes}>{lead.notes}</span>}
+                      </div>
+                    </TableCell>
+                    <TableCell className="py-3 px-4 text-xs font-semibold text-slate-800 dark:text-slate-200 align-middle">{lead.email}</TableCell>
+                    <TableCell className="py-3 px-4 text-xs text-slate-500 font-medium align-middle whitespace-nowrap">{lead.phone || "-"}</TableCell>
+                    <TableCell className="py-3 px-4 align-middle" onClick={(event) => event.stopPropagation()}>
+                      <Select value={lead.status} onValueChange={(status) => setStatus(lead, status as B2BLeadStatus)}>
+                        <SelectTrigger size="sm" aria-label={"Status for " + lead.companyName} className={"w-auto min-w-32 rounded-full border-transparent text-xs font-semibold " + STATUS_STYLES[lead.status]}><SelectValue /></SelectTrigger>
+                        <SelectContent align="start">
+                          {B2B_LEAD_STATUSES.map((status) => <SelectItem key={status} value={status}><span className={"inline-flex items-center gap-2 " + STATUS_STYLES[status].split(" ").filter((style) => !style.startsWith("bg-")).join(" ")}><span className="h-2 w-2 rounded-full bg-current" />{titleCase(status)}</span></SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell className="py-3 px-4 text-xs font-semibold align-middle whitespace-nowrap">
+                      <div className="space-y-0.5">
+                        <span className={lead.emailOptOut ? "text-slate-400 block" : "text-green-600 block"}>{lead.emailOptOut ? "Email opted out" : "Email eligible"}</span>
+                        <span className={lead.smsOptOut || !lead.phone ? "text-slate-400 block" : "text-green-600 block"}>{!lead.phone ? "No phone" : lead.smsOptOut ? "SMS opted out" : "SMS eligible"}</span>
+                        {lead.marketingOptIn && !lead.emailOptOut && <Badge variant="secondary" className="text-[9px] font-mono tracking-tight px-1.5 py-0">Nurture opt-in</Badge>}
+                        {lead.source.startsWith("WEBSITE_") && !lead.marketingOptIn && <span className="text-[10px] text-slate-400 block">No marketing consent</span>}
+                      </div>
+                    </TableCell>
+                    <TableCell className="py-3 px-4 text-right pr-6 space-x-1 align-middle whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
+                      <Button variant="ghost" size="sm" className="text-xs px-2" aria-label={"Edit " + lead.companyName} onClick={() => openForm(lead)}><Pencil className="h-3.5 w-3.5" /></Button>
+                      <Button variant="ghost" size="sm" className="text-red-500 hover:bg-red-500/10 text-xs px-2" aria-label={"Delete " + lead.companyName} onClick={() => deleteLead(lead)}><Trash2 className="h-3.5 w-3.5" /></Button>
                     </TableCell>
                   </TableRow>
-                ) : (
-                  visible.map((l) => (
-                    <TableRow key={l.id} className="hover:bg-muted/40">
-                      <TableCell className="pl-6">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-foreground">{l.companyName || "Company not provided"}</span>
-                          {l.marketingOptIn && !l.emailOptOut && <Badge variant="outline" className="w-fit text-[10px]">Nurture opt-in</Badge>}
-                          {l.website && (
-                            <a href={/^https?:\/\//.test(l.website) ? l.website : `https://${l.website}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#b48c3c] hover:underline truncate max-w-[200px]">
-                              {l.website}
-                            </a>
-                          )}
-                          {l.notes && <span className="text-xs text-muted-foreground truncate max-w-[220px]" title={l.notes}>{l.notes}</span>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col text-sm text-muted-foreground">
-                          <span className="text-foreground/90">{l.contactName || "—"}</span>
-                          <span className="text-xs">
-                            {l.email}
-                            {l.emailOptOut && <Badge variant="outline" className="ml-1.5 border-red-500/40 text-[9px] text-red-500">{l.source.startsWith("WEBSITE_") && !l.marketingOptIn ? "No marketing consent" : "Unsubscribed"}</Badge>}
-                          </span>
-                          {l.phone && (
-                            <span className="text-xs">
-                              {l.phone}
-                              {l.smsOptOut && <Badge variant="outline" className="ml-1.5 border-red-500/40 text-[9px] text-red-500">SMS opt-out</Badge>}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{l.city || "—"}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {l.nextAppointment && (
-                          <div className="mb-1 flex items-center gap-1 text-emerald-600">
-                            <CalendarCheck className="h-3.5 w-3.5" /> {new Date(l.nextAppointment).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
-                          </div>
-                        )}
-                        {l.activeCampaigns.length ? l.activeCampaigns.map((c) => c.name).join(", ") : !l.nextAppointment && "—"}
-                      </TableCell>
-                      <TableCell>
-                        <select
-                          value={l.status}
-                          onChange={(e) => setStatus(l, e.target.value as B2BLeadStatus)}
-                          className={`rounded-md border-0 px-2 py-1 text-[11px] font-bold uppercase tracking-wider ${STATUS_STYLES[l.status]}`}
-                        >
-                          {B2B_LEAD_STATUSES.map((s) => (
-                            <option key={s} value={s} className="bg-background text-foreground">
-                              {s}
-                            </option>
-                          ))}
-                        </select>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                        {new Date(l.createdAt).toLocaleDateString()}
-                        <div className="text-[10px]">{l.source.replace(/_/g, " ")}</div>
-                      </TableCell>
-                      <TableCell className="pr-6 text-right whitespace-nowrap">
-                        {l.inquiries?.length > 0 && <Button variant="ghost" size="sm" onClick={() => setHistory(l)}>Inquiries ({l.inquiries.length})</Button>}
-                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit lead" onClick={() => openForm(l)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:bg-red-500/10" title="Delete lead" onClick={() => deleteLead(l)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
+                ))}
               </TableBody>
             </Table>
           </div>
+          {!loading && visible.length > 0 && <div className="flex flex-col gap-3 px-6 py-4 border-t border-border/50 bg-slate-50/30 dark:bg-slate-900/10 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs text-muted-foreground">Showing {(currentPage - 1) * 25 + 1} to {Math.min(currentPage * 25, visible.length)} of {visible.length} business leads</div>
+            <div className="flex shrink-0 items-center gap-2"><span className="text-xs text-muted-foreground mr-1">Page {currentPage} of {totalPages}</span><Button variant="outline" size="sm" className="h-8 text-xs" disabled={currentPage === 1} onClick={() => setPagination({ page: currentPage - 1, filterKey })}>Previous</Button><Button variant="outline" size="sm" className="h-8 text-xs" disabled={currentPage >= totalPages} onClick={() => setPagination({ page: currentPage + 1, filterKey })}>Next</Button></div>
+          </div>}
         </CardContent>
       </Card>
 
-      <Dialog open={history !== null} onOpenChange={(open) => !open && setHistory(null)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader><DialogTitle>Website inquiry history</DialogTitle><DialogDescription>{history?.email} - latest 20 submissions</DialogDescription></DialogHeader>
-          {history?.inquiries?.map((inquiry) => <div key={inquiry.id} className="space-y-2 rounded border p-4 text-sm">
-            <p className="font-semibold">{inquiry.type} - {new Date(inquiry.createdAt).toLocaleString()}</p>
-            {Object.entries(inquiry.payload).filter(([, value]) => typeof value === "string" && value).map(([key, value]) => <p key={key} className="whitespace-pre-wrap break-words"><strong>{key}:</strong> {String(value)}</p>)}
-            <p>Marketing consent: {inquiry.marketingConsent ? "Yes" : "No"}</p>
-            <p className="text-xs text-muted-foreground">{inquiry.consentText}</p>
-            <p>Team email: {inquiry.adminSentAt ? "Sent" : "Pending retry"}; visitor email: {inquiry.visitorSentAt ? "Sent" : "Pending retry"}</p>
-            {inquiry.type === "BOOKING" && <p>Team SMS: {inquiry.adminSmsSentAt ? "Sent" : "Pending retry"}; visitor SMS: {inquiry.visitorSmsSentAt ? "Sent" : "Pending retry"}</p>}
-            {inquiry.lastError && <p className="text-red-500">{inquiry.lastError}</p>}
-          </div>)}
+      <Dialog open={segmentOpen} onOpenChange={setSegmentOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Save segment</DialogTitle><DialogDescription>Leads join or leave this group automatically as they match these filters. Campaign enrollment uses the matches at that moment.</DialogDescription></DialogHeader>
+          <div className="space-y-2"><Label htmlFor="segment-name">Segment name</Label><Input id="segment-name" maxLength={80} value={segmentName} onChange={(event) => setSegmentName(event.target.value)} placeholder="Builders considering our services" /></div>
+          <p className="text-sm text-muted-foreground">Status: {statusFilter === "ALL" ? "All" : titleCase(statusFilter)}; search: {query.trim() || "Any"}; nurture opt-in: {nurtureOnly ? "Required" : "Any"}. {visible.length} matching leads.</p>
+          <DialogFooter><Button variant="outline" onClick={() => setSegmentOpen(false)}>Cancel</Button><Button disabled={savingSegment || !segmentName.trim()} onClick={saveSegment}>{savingSegment ? "Saving…" : "Save segment"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

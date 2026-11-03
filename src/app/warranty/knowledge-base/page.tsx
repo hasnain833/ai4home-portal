@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -309,24 +310,18 @@ export default function KnowledgeBasePage() {
                 <CardContent>
                   <div className="mb-4">
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-sm font-medium">Select Community</label>
+                      <label htmlFor="kb-community" className="text-sm font-medium">Select Community</label>
                       <Link href="/warranty/communities" className="text-xs font-semibold text-[#b48c3c] hover:underline">
                         Manage communities
                       </Link>
                     </div>
-                    <select
-                      className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      value={selectedCommunityId}
-                      onChange={(e) => setSelectedCommunityId(e.target.value)}>
-                      <option value="">
-                        Shared / Common (All Communities)
-                      </option>
-                      {communities.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={selectedCommunityId || "__shared__"} onValueChange={(value) => setSelectedCommunityId(value === "__shared__" ? "" : value)}>
+                      <SelectTrigger id="kb-community" className="h-10"><SelectValue /></SelectTrigger>
+                      <SelectContent align="start">
+                        <SelectItem value="__shared__">Shared / Common (All Communities)</SelectItem>
+                        {communities.map((community) => <SelectItem key={community.id} value={community.id}>{community.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div

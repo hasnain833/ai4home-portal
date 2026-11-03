@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { formatSmsError } from "../services/sms.service.js";
 
 // Brevo transactional events -> the MessageUsage column they stamp. Unlisted
 // events are ignored: proxy_open is Apple Mail pre-loading the pixel (not a real
@@ -63,5 +64,19 @@ export const processBrevoEmailEvents = async (req, res) => {
 export async function recordTelnyxStatus(payload) {
   const field = TELNYX_FIELDS[payload?.to?.[0]?.status];
   const at = payload?.completed_at ? new Date(payload.completed_at) : new Date();
-  return stamp(payload?.id, field, at);
+  if (!Number.isFinite(at.getTime())) return 0;
+  const count = await stamp(payload?.id, field, at);
+  if (count && field === "failedAt") {
+    const usage = await prisma.messageUsage.findFirst({
+      where: { providerMessageId: payload.id, source: "b2b-campaign", outcome: "sent" },
+      select: { leadId: true, campaignId: true, stepId: true },
+    });
+    if (usage?.leadId && usage?.campaignId) {
+      await prisma.b2BEnrollment.updateMany({
+        where: { leadId: usage.leadId, campaignId: usage.campaignId },
+        data: { failedCount: { increment: 1 }, lastError: `SMS ${usage.stepId || ""} delivery failed: ${formatSmsError(payload.errors)}. Telnyx message: ${payload.id}`.slice(0, 1000) },
+      });
+    }
+  }
+  return count;
 }

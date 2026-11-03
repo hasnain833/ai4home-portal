@@ -24,6 +24,7 @@ export default function PlatformBookingPage({ params }: { params: Promise<{ toke
   const [selected, setSelected] = useState("");
   const [booking, setBooking] = useState(false);
   const [confirmed, setConfirmed] = useState("");
+  const [confirmationEmailSent, setConfirmationEmailSent] = useState<boolean | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -63,6 +64,7 @@ export default function PlatformBookingPage({ params }: { params: Promise<{ toke
         return;
       }
       setConfirmed(result.label);
+      setConfirmationEmailSent(typeof result.confirmationEmailSent === "boolean" ? result.confirmationEmailSent : null);
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -87,7 +89,11 @@ export default function PlatformBookingPage({ params }: { params: Promise<{ toke
           <CheckCircle2 className="h-14 w-14 text-green-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-[#0F3B3D] dark:text-white">{confirmed ? "You're booked!" : "You already have a meeting with us"}</h2>
           <p className="text-slate-600 dark:text-slate-300 mt-2">{done}</p>
-          <p className="text-xs text-slate-400 mt-6">A confirmation was sent to your email. Need to change it? Just reply to that email.</p>
+          <p className="text-xs text-slate-400 mt-6">
+            {confirmationEmailSent === true ? "A confirmation was sent to your email. " :
+              confirmationEmailSent === false ? "Your meeting is saved, but the confirmation email could not be sent. " : "Your meeting is saved. "}
+            Need to change it? Reply to the campaign email to contact our team.
+          </p>
         </div>
       </Shell>
     );

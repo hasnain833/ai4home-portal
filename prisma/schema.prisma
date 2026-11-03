@@ -1256,3 +1256,23 @@ model B2BInquiry {
   @@index([leadId, createdAt])
   @@index([nextAttemptAt])
 }
+
+// Platform website conversations; isolated from builder/tenant agent data.
+model WebsiteConversation {
+  id String @id
+  visitorKey String
+  page String
+  messages Json
+  draft Json
+  collecting Boolean @default(false)
+  waitingApproval Boolean @default(false)
+  submittedAt DateTime?
+  lastRequestId String?
+  lastRequestText String?
+  lastResponse Json?
+  lastError String?
+  processingUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([updatedAt])
+}

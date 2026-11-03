@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Loader2, Calendar, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
@@ -34,8 +36,9 @@ type Availability = {
 };
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const CAMPAIGN_STATUSES = ["CONFIRMED", "COMPLETED", "NO_SHOW", "CANCELLED"];
+const CAMPAIGN_STATUSES = ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW", "CANCELLED"];
 const STATUS_STYLES: Record<string, string> = {
+  PENDING: "bg-amber-500/10 text-amber-600",
   CONFIRMED: "bg-green-500/10 text-green-600",
   COMPLETED: "bg-sky-500/10 text-sky-600",
   NO_SHOW: "bg-amber-500/10 text-amber-600",
@@ -46,6 +49,9 @@ const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Somethin
 export default function SalesAgentAppointmentsPage() {
   const [appointments, setAppointments] = useState<SalesAgentAppointment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [confirming, setConfirming] = useState<SalesAgentAppointment | null>(null);
+  const [meetingTime, setMeetingTime] = useState("");
+  const [savingMeeting, setSavingMeeting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +69,12 @@ export default function SalesAgentAppointmentsPage() {
   }, [load]);
 
   const setStatus = async (id: string, status: string) => {
+    const appointment = appointments.find((item) => item.id === id);
+    if (status === "CONFIRMED" && appointment && !appointment.startTime) {
+      setMeetingTime("");
+      setConfirming(appointment);
+      return;
+    }
     try {
       await sendJson(`/api/admin/sales-agent-appointments/${id}/status`, "PATCH", { status });
       await load();
@@ -71,12 +83,25 @@ export default function SalesAgentAppointmentsPage() {
     }
   };
 
+  const confirmMeeting = async () => {
+    const start = new Date(meetingTime);
+    if (!confirming || !meetingTime || !Number.isFinite(start.getTime())) return;
+    setSavingMeeting(true);
+    try {
+      await sendJson(`/api/admin/sales-agent-appointments/${confirming.id}/status`, "PATCH", { status: "CONFIRMED", startTime: start.toISOString() });
+      setConfirming(null);
+      await load();
+      toast.success("Meeting confirmed and time reserved.");
+    } catch (error) { toast.error(errorMessage(error)); }
+    finally { setSavingMeeting(false); }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Appointments</h1>
         <p className="text-muted-foreground mt-2">
-          Meetings booked with the platform team, from the website sales assistant, legacy Botpress agent, or a business-lead campaign.
+          Consultation requests and meetings with the platform team, from the website sales assistant, legacy Botpress agent, or a business-lead campaign.
         </p>
       </div>
 
@@ -84,7 +109,7 @@ export default function SalesAgentAppointmentsPage() {
 
       <Card className="border border-border/80 shadow-sm">
         <CardHeader>
-          <CardTitle>Recent Bookings</CardTitle>
+          <CardTitle>Requests & Appointments</CardTitle>
           <CardDescription>Each booking is tagged with where it came from: Website Sales, Botpress, or the campaign&apos;s name.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -123,7 +148,7 @@ export default function SalesAgentAppointmentsPage() {
                       </td>
                       <td className="px-4 py-3">
                         {apt.source !== "BOTPRESS" ? (
-                          <span className="inline-flex max-w-[180px] items-center truncate px-2 py-1 rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-medium" title={apt.source === "WEBSITE_SALES" ? "Website Sales" : apt.campaignName || "Campaign"}>
+                          <span className="inline-flex max-w-45 items-center truncate px-2 py-1 rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400 text-xs font-medium" title={apt.source === "WEBSITE_SALES" ? "Website Sales" : apt.campaignName || "Campaign"}>
                             {apt.source === "WEBSITE_SALES" ? "Website Sales" : apt.campaignName || "Campaign"}
                           </span>
                         ) : (
@@ -143,17 +168,10 @@ export default function SalesAgentAppointmentsPage() {
                       </td>
                       <td className="px-4 py-3">
                         {apt.source !== "BOTPRESS" ? (
-                          <select
-                            value={apt.status}
-                            onChange={(e) => setStatus(apt.id, e.target.value)}
-                            className={`rounded-full border-0 px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${STATUS_STYLES[apt.status] || ""}`}
-                          >
-                            {CAMPAIGN_STATUSES.map((s) => (
-                              <option key={s} value={s} className="bg-background text-foreground">
-                                {s.replace("_", " ")}
-                              </option>
-                            ))}
-                          </select>
+                          <Select value={apt.status} onValueChange={(status) => setStatus(apt.id, status)}>
+                            <SelectTrigger size="sm" aria-label={`Appointment status for ${apt.name}`} className={`w-auto min-w-36 rounded-full border-transparent text-xs font-semibold ${STATUS_STYLES[apt.status] || ""}`}><SelectValue /></SelectTrigger>
+                            <SelectContent align="start">{CAMPAIGN_STATUSES.map((status) => <SelectItem key={status} value={status}>{status.replace(/_/g, " ")}</SelectItem>)}</SelectContent>
+                          </Select>
                         ) : (
                           <span className="inline-flex items-center px-2 py-1 rounded-full bg-green-500/10 text-green-500 text-[10px] font-bold uppercase tracking-wider">
                             {apt.status}
@@ -168,6 +186,21 @@ export default function SalesAgentAppointmentsPage() {
           )}
         </CardContent>
       </Card>
+      <Dialog open={!!confirming} onOpenChange={(open) => { if (!open && !savingMeeting) setConfirming(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm consultation</DialogTitle>
+            <DialogDescription>Choose the time agreed with {confirming?.name}. This reserves the time in the platform calendar. Contact the visitor directly to confirm the arrangements.</DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">Requested: {confirming?.preferredTime}</p>
+          <Label htmlFor="consultation-time">Agreed time ({Intl.DateTimeFormat().resolvedOptions().timeZone})</Label>
+          <Input id="consultation-time" type="datetime-local" value={meetingTime} onChange={(event) => setMeetingTime(event.target.value)} disabled={savingMeeting} />
+          <DialogFooter>
+            <Button variant="outline" disabled={savingMeeting} onClick={() => setConfirming(null)}>Cancel</Button>
+            <Button disabled={!meetingTime || savingMeeting} onClick={() => void confirmMeeting()}>Confirm and reserve time</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -207,7 +240,7 @@ function AvailabilityCard() {
           <Clock className="h-4 w-4 text-[#b48c3c]" /> Meeting availability
         </CardTitle>
         <CardDescription>
-          The times offered in the website sales chat and business-lead booking links. Booked slots disappear automatically.
+          The times offered through business-lead booking links. Website chat collects preferred times for the team to confirm. Scheduled meetings reserve their slots automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -243,16 +276,11 @@ function AvailabilityCard() {
             <Input type="number" min={0} max={120} value={form.bufferMinutes} onChange={(e) => setForm({ ...form, bufferMinutes: Number(e.target.value) })} className="h-9 text-sm" />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs">Time zone</Label>
-            <select
-              value={form.timezone}
-              onChange={(e) => setForm({ ...form, timezone: e.target.value })}
-              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              {Intl.supportedValuesOf("timeZone").map((tz) => (
-                <option key={tz} value={tz}>{tz}</option>
-              ))}
-            </select>
+            <Label htmlFor="availability-timezone" className="text-xs">Time zone</Label>
+            <Select value={form.timezone} onValueChange={(timezone) => setForm({ ...form, timezone })}>
+              <SelectTrigger id="availability-timezone" className="h-9"><SelectValue placeholder="Select a time zone" /></SelectTrigger>
+              <SelectContent align="start">{[...new Set([form.timezone, ...Intl.supportedValuesOf("timeZone")])].filter(Boolean).map((timezone) => <SelectItem key={timezone} value={timezone}>{timezone.replace(/_/g, " ")}</SelectItem>)}</SelectContent>
+            </Select>
           </div>
         </div>
         <Button size="sm" className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={saving} onClick={save}>

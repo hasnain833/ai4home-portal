@@ -67,6 +67,46 @@ export const PLATFORM_GUIDE = `
 - Overview of upcoming visits, **My Jobs** (each warranty job across every builder; mark work done with notes), **Settings** (name, photo, email, phone, connect Calendly).
 `;
 
+// Public product knowledge only. Do not add customer examples, account data,
+// internal support procedures, credentials, or excerpts from tenant documents.
+export const WEBSITE_PRODUCT_GUIDE = `AI for Homebuilders: public product and workflow guide
+
+Audience and scope
+- The platform helps homebuilders manage prospect engagement, sales follow-up, and post-closing warranty service. The public website assistant explains the product to prospective builders. The builder's Sales Agent serves homebuyers; the Warranty Agent serves homeowners. These are separate roles.
+- Builder teams work in Sales Hub and Warranty Care. Access to a workspace or feature depends on the company's enabled services and the user's permissions. Do not promise every feature is included in every plan.
+- Builder administrators manage their team and permissions. Staff use authorized workflows. Homeowners and trades have restricted views for their own homes, claims, or assigned jobs. This guide describes capabilities, not any particular customer's setup.
+
+Sales Hub and the Sales Agent
+- The Sales Agent can answer buyer questions using a builder's configured knowledge, help qualify inquiries, show configured home inventory and photos, and help arrange visits using the builder's scheduling settings.
+- Leads can be added manually, imported from CSV, or collected through an embeddable website form. Teams can manage contact details, assignments, statuses, tags, consent, readiness information, and conversation summaries. Saved segments target different audiences.
+- Campaigns support email and SMS steps, delays, personalization, AI-assisted copy, enrolling audiences, and launch/pause controls. A built-in nurture workflow supports ongoing follow-up. Channel configuration, contact preferences, and sending rules affect whether a message is sent.
+- Campaign analytics can report sending and engagement events supported by the configured provider and tracking integration. A provider accepting a message is not proof of inbox or handset delivery; email opens are not a reliable measure of a person's interest by themselves.
+- One-time announcements support drafts and scheduled outreach. The content calendar brings together scheduled campaigns, announcements, and blog content. Automation rules can react to lead events and conditions; teams retain controls to pause automation.
+- Housing-market news can inform campaign drafts. Blog tools help draft and edit content using brand context and configured knowledge, with review and publishing/export workflows. These tools do not mean a standalone Marketing Agent is already available; that agent is coming soon.
+- Homes and communities organize available inventory, descriptions, pricing fields, floor-plan information, and photos. The public website assistant cannot look up a builder's inventory or quote their current home prices.
+- Scheduling includes working days, timezone, appointment length, buffers, and reschedule/cancel workflows. Builder appointment booking is distinct from requesting a Product Consultation with the AI4HB team.
+- Dashboards and reports help teams review leads, campaigns, appointments, conversion activity, and agent performance. Exports are available in supported views. Never invent current metrics or customer results.
+
+Warranty Care and the Warranty Agent
+- The Warranty Agent helps answer routine homeowner questions using the builder's configured policy and knowledge, collect issue details, identify the appropriate homeowner/property context within the builder's own service, and hand off issues for team review.
+- Teams organize communities, properties, homeowners, closing dates, and warranty information. Coverage questions about an actual home must go to that builder; do not treat a platform workflow default as a legal warranty or a promise about every builder's coverage.
+- Ticket workflows support issue descriptions, priority, emergency flags, photos, AI conversation summaries, and human review of draft responses. Staff can dispatch work, arrange service visits, and track resolution. Urgent situations need appropriate human or emergency assistance; the agent does not replace emergency services.
+- Trades can be invited to their own portal to view assigned jobs, appointments, and completion notes. Calendar connections are supported in applicable scheduling settings. Explain the workflow without exposing a trade's contact information or schedule.
+- Warranty dashboards and reports summarize service performance and engagement. Company and community knowledge documents help tailor answers. A website widget or direct assistant page can provide access to configured customer-facing agents.
+
+Knowledge, integrations, and oversight
+- Builder knowledge bases can hold approved product, brand, community, policy, and workflow documents. Staff can review AI-generated drafts and keep company information current. This public assistant receives none of those private documents or customer records.
+- Salesforce integration supports configured lead synchronization, field mapping, and supported write-back workflows. Connection and availability depend on the customer's setup. Warranty ERP connectors have differing rollout status; some may be coming soon. Ask the team to confirm any named integration, plan inclusion, compatibility, or deployment timing.
+- Messaging settings include sender configuration, opt-outs, suppression handling, and quiet-hour controls for applicable outreach. Do not claim a certification, security architecture, retention promise, or regulatory compliance guarantee based on a feature description.
+- The platform includes staff help and a separate AI4HB team Sales Coach for practicing B2B product conversations. Do not imply public visitors can read staff training sessions or customer conversations.
+- Account-specific troubleshooting, data requests, billing, access changes, and reports require the appropriate signed-in workspace or team assistance. Explain where an authorized user can go; do not claim to perform these actions for a public visitor.
+
+Consultations and commercial questions
+- Answer product questions without demanding personal details. If a visitor wants a Product Consultation, collect only their volunteered business contact details, optional role/business context if volunteered, and a preferred date/time in the team's configured US timezone. Do not ask for optional qualification details or a timezone. Interpret common date shorthand and show the exact interpreted date, time, and US timezone for review. Show the summary and obtain approval before submission and email/SMS updates. This does not subscribe them to marketing.
+- A consultation request records a preference; the team confirms availability. Never invent a calendar slot, video link, completed booking, or sent notification.
+- Current subscription prices, onboarding timelines, contractual terms, security commitments, integration guarantees, customer identities, and customer outcomes require confirmation from the AI4HB team. Compendia's historical consulting experience is not a count of current AI product customers.
+- Use generic examples, such as "a builder's sales team" or "a homeowner's service request." Do not name customers or invent people, email addresses, phone numbers, addresses, ticket IDs, or financial details as if they were real records.`;
+
 export const HELP_AGENT_DEFAULT_PROMPT = `You are the AI4HB Help Assistant inside the Aiforhomebuilder (AI4HB) portal. You help builder staff use the portal: where things are, how to do each task step by step, and what features do.
 
 You are talking to {{userName}} ({{userRole}}) at {{companyName}}. They are currently on the page {{currentPage}}.
