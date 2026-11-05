@@ -97,7 +97,7 @@ export default function LeadFormPage() {
               <Input id="email" name="email" type="email" autoComplete="email" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="phone">Phone</Label>
+              <Label htmlFor="phone">Phone (+1)</Label>
               <Input id="phone" name="phone" type="tel" autoComplete="tel" />
             </div>
             <div className="space-y-1.5">

@@ -1,25 +1,26 @@
+import { randomUUID } from "node:crypto";
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { MailService, MAIL_OUTCOME } from "../../services/mail-service.js";
-import { sendSms, smsSent, brandSmsBody, SMS_OUTCOME } from "../../services/sms.service.js";
+import { sendSms, smsSent, brandSmsBody, toE164, SMS_OUTCOME } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
-import { Templates } from "../../services/templates.js";
-import { getLeadTimezone, getNextValidSendWindow } from "../../lib/timezone.js";
-import { renderMergeFields, escapeHtml } from "../../lib/utils.js";
+import { b2bLeadTimezone, getNextValidSendWindow, nextLocalSendTime, safeSendTime, sendHoursFor } from "../../lib/timezone.js";
+import { renderMergeFields } from "../../lib/utils.js";
 import {
   B2B_CLOSED_STATUSES,
   B2B_REPLY_TAG,
+  b2bEmailHtml,
   bookingLinkFor,
-  unsubscribeLinkFor,
   exitB2BEnrollments,
   completeFinishedCampaigns,
-  appUrl,
 } from "../../lib/b2b.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SENDER = "AI for Homebuilders";
 // Hard stop for the loop below; a campaign is capped at 20 steps, each can wait several times.
 const MAX_ITERATIONS = 200;
+// A failed send gets two more tries before the lead moves on to the next step.
+const RETRY_DELAYS_MS = [15 * 60 * 1000, 60 * 60 * 1000];
 
 /** First word of the contact name, for "Hi {{firstName}}". */
 const firstNameOf = (lead) => (lead.contactName || "").trim().split(/\s+/)[0] || "there";
@@ -39,22 +40,21 @@ export function renderB2BStep(step, lead, campaignId) {
     let text = renderMergeFields(step.body, vars);
     // Every message carries the booking link, even if the template forgot it.
     if (!hasLink) text = `${text.trim()} Book a time: ${bookingLink}`;
-    return { body: ComplianceService.addSmsOptOutSuffix(brandSmsBody(text, SENDER)) };
+    return { text, body: ComplianceService.addSmsOptOutSuffix(brandSmsBody(text, SENDER)) };
   }
 
   // Keep the CTA where the author placed it; the email template turns it into
   // a button. Add a default button only when the content omits the link.
   const text = renderMergeFields(step.body, vars).trim();
-  const html = text.split(/\r?\n\s*\r?\n/).map((paragraph) => `<p style="margin:0 0 16px">${escapeHtml(paragraph).replace(/\r?\n/g, "<br />")}</p>`).join("");
-  const websiteUrl = new URL(process.env.WEBSITE_PUBLIC_URL || "https://www.aiforhomebuilders.com").origin;
   return {
+    text,
     subject: renderMergeFields(step.subject, vars),
-    html: Templates.getB2BCampaignEmail(html, { bookingLink, unsubscribeLink: unsubscribeLinkFor(lead), portalUrl: appUrl(), websiteUrl }),
+    html: b2bEmailHtml(text, lead, { bookingLink }),
   };
 }
 
 /** Why this lead must not get this step, or null. A non-null `exit` ends the enrollment. */
-async function blockReason(lead, channel) {
+export async function blockReason(lead, channel) {
   if (B2B_CLOSED_STATUSES.includes(lead.status)) return { exit: "STATUS", reason: `Lead is ${lead.status}` };
   if (channel === "EMAIL") {
     if (lead.emailOptOut) return { exit: "UNSUBSCRIBE", reason: "Unsubscribed from email" };
@@ -63,12 +63,14 @@ async function blockReason(lead, channel) {
   }
   if (lead.smsOptOut) return { exit: "UNSUBSCRIBE", reason: "Opted out of SMS" };
   if (!lead.phone) return { reason: "No phone number" };
+  if (!toE164(lead.phone)) return { reason: "Not a +1 number" };
   // A STOP on the shared platform number is recorded as a platform-wide (companyId null) suppression.
   const digits = lead.phone.replace(/\D/g, "").slice(-10);
   const stopped = await prisma.suppressionList.findFirst({
     where: { companyId: null, value: { contains: digits } },
   });
   if (stopped) return { exit: "UNSUBSCRIBE", reason: `Replied STOP (${stopped.reason})` };
+  if (!lead.smsConsentAt) return { reason: "No SMS consent on file" };
   return null;
 }
 
@@ -77,9 +79,11 @@ async function sendStep(step, lead, campaignId, position) {
   const track = { leadId: lead.id, campaignId, stepId: `b2b:${position + 1}` };
   if (step.channel === "SMS") {
     const r = await sendSms({ to: lead.phone, body: msg.body, source: "b2b-campaign", brand: false, track });
-    return { outcome: r.outcome, sent: smsSent(r), error: r.error || null };
+    return { outcome: r.outcome, sent: smsSent(r), error: r.error || null, text: msg.text, subject: null };
   }
   const inbound = String(process.env.INBOUND_EMAIL_DOMAIN || "").trim();
+  // Brevo echoes X-Mailin-custom on every webhook event; it is how a bounce or open finds this send.
+  const trackId = randomUUID();
   const r = await MailService.sendEmail({
     to: lead.email,
     subject: msg.subject,
@@ -88,9 +92,22 @@ async function sendStep(step, lead, campaignId, position) {
     // Replies come back to the platform (inbound webhook) or straight to the super admin.
     replyTo: inbound ? `reply+${B2B_REPLY_TAG}@${inbound}` : process.env.SUPERADMIN_EMAIL || undefined,
     source: "b2b-campaign",
+    headers: { "X-Mailin-Tag": track.stepId, "X-Mailin-custom": trackId },
+    track: { ...track, providerMessageId: trackId },
   });
-  return { outcome: r.outcome, sent: !!r.success, error: r.success ? null : r.error || "Unknown error" };
+  return { outcome: r.outcome, sent: !!r.success, error: r.success ? null : r.error || "Unknown error", text: msg.text, subject: msg.subject };
 }
+
+/** Saves what we said, so the agent knows what a lead is replying to. Never blocks the campaign. */
+const recordCampaignMessage = (lead, step, sent, campaignId, position) =>
+  prisma.b2BMessage
+    .create({
+      data: {
+        leadId: lead.id, direction: "OUT", actor: "CAMPAIGN", channel: step.channel, subject: sent.subject, body: sent.text,
+        outcome: "sent", handledAt: new Date(), note: `${campaignId}|b2b:${position + 1}`,
+      },
+    })
+    .catch((e) => console.error("[B2B campaign] Could not save message text:", e.message));
 
 const load = (enrollmentId) =>
   prisma.b2BEnrollment.findUnique({
@@ -131,10 +148,15 @@ export const runB2BCampaign = inngest.createFunction(
           return { stop: "completed" };
         }
         let due = e.nextRunAt ? new Date(e.nextRunAt) : new Date();
-        if (current.channel === "SMS") {
-          // Same 8am–9pm local-time rule the Sales workspace uses for texts.
-          const tz = getLeadTimezone(null, e.lead.phone);
-          due = new Date(getNextValidSendWindow(due, tz, "Mon,Tue,Wed,Thu,Fri,Sat,Sun", "08:00", "21:00"));
+        const { timezone: tz, known } = b2bLeadTimezone(e.lead);
+        if (current.sendTime && !e.stepAttempts) {
+          // Picked in the campaign (always 8am–9pm), on the lead's own clock, for email and SMS.
+          due = nextLocalSendTime(due, tz, safeSendTime(current.sendTime, known));
+        } else if (current.channel === "SMS" || current.sendTime) {
+          // Same 8am–9pm local-time rule the Sales workspace uses for texts. A retry of a
+          // timed step goes out soon after its slot, but still inside these hours.
+          const hours = sendHoursFor(known);
+          due = new Date(getNextValidSendWindow(due, tz, "Mon,Tue,Wed,Thu,Fri,Sat,Sun", hours.start, hours.end));
         }
         if (due.getTime() > Date.now() + 30_000 && due.getTime() !== e.nextRunAt?.getTime()) {
           // Record the wake-up time so the stalled-run sweep leaves a sleeping run alone.
@@ -168,7 +190,7 @@ export const runB2BCampaign = inngest.createFunction(
         const nextRunAt = nextStep ? new Date(Date.now() + (nextStep.delayDays || 0) * DAY_MS) : null;
         const claim = await prisma.b2BEnrollment.updateMany({
           where: { id: e.id, status: "ACTIVE", currentStep: state.stepIndex },
-          data: { currentStep: state.stepIndex + 1, nextRunAt },
+          data: { currentStep: state.stepIndex + 1, nextRunAt, stepAttempts: 0 },
         });
         if (claim.count === 0) return { stop: "step already handled by another run" };
 
@@ -177,7 +199,16 @@ export const runB2BCampaign = inngest.createFunction(
           return { next: true };
         }
 
-        const sent = await sendStep(current, e.lead, e.campaignId, state.stepIndex);
+        // The step is already claimed, so an Inngest retry would stop here and the message would
+        // vanish. An unexpected error has to take the same retry path as a failed send.
+        let sent;
+        try {
+          sent = await sendStep(current, e.lead, e.campaignId, state.stepIndex);
+        } catch (error) {
+          console.error("[B2B campaign] Send error:", error);
+          sent = { outcome: MAIL_OUTCOME.FAILED, sent: false, error: error?.message || "Unexpected error" };
+        }
+        if (sent.sent) await recordCampaignMessage(e.lead, current, sent, e.campaignId, state.stepIndex);
         if (sent.outcome === MAIL_OUTCOME.NOT_CONFIGURED || sent.outcome === SMS_OUTCOME.NOT_CONFIGURED) {
           await prisma.b2BEnrollment.update({
             where: { id: e.id },
@@ -186,10 +217,23 @@ export const runB2BCampaign = inngest.createFunction(
           await exitB2BEnrollments(e.leadId, "NOT_CONFIGURED", { campaignId: e.campaignId });
           return { stop: "not configured" };
         }
+        if (sent.outcome === MAIL_OUTCOME.FAILED && e.stepAttempts < RETRY_DELAYS_MS.length) {
+          // Hand the step back; the next pass of the loop waits and sends it again.
+          await prisma.b2BEnrollment.update({
+            where: { id: e.id },
+            data: {
+              currentStep: state.stepIndex,
+              stepAttempts: e.stepAttempts + 1,
+              nextRunAt: new Date(Date.now() + RETRY_DELAYS_MS[e.stepAttempts]),
+              lastError: `Step ${state.stepIndex + 1} (${current.channel}) failed, will retry: ${sent.error}`,
+            },
+          });
+          return { next: true };
+        }
         await prisma.b2BEnrollment.update({
           where: { id: e.id },
           data: sent.sent
-            ? { sentCount: { increment: 1 }, lastSentAt: new Date(), ...(e.failedCount === 0 && !e.lastError ? { lastError: null } : {}) }
+            ? { sentCount: { increment: 1 }, lastSentAt: new Date(), lastError: null }
             : { failedCount: { increment: 1 }, lastError: `Step ${state.stepIndex + 1} (${current.channel}) failed: ${sent.error}` },
         });
         if (sent.sent && e.lead.status === "NEW") {

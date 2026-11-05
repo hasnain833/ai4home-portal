@@ -49,6 +49,52 @@ export function createSuperadminSessionToken(
   return `${body}.${signature}`;
 }
 
+// MFA challenge: proves the password was right, grants nothing by itself. The
+// "mfa:" prefix means it can never verify as a session cookie.
+export const CHALLENGE_TTL_SECONDS = 10 * 60;
+const signChallenge = (body) => sign(`mfa:${body}`);
+const codeMac = (jti, code) => sign(`mfa-code:${jti}:${code}`);
+
+const sameMac = (a, b) => {
+  const ab = Buffer.from(String(a), "utf8");
+  const bb = Buffer.from(String(b), "utf8");
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+};
+
+export function createSuperadminChallenge(claims) {
+  if (!SECRET_CONFIGURED) {
+    throw new Error(
+      "Super Admin session secret is not configured (set SESSION_SECRET).",
+    );
+  }
+  const code = String(crypto.randomInt(100000, 1000000));
+  const jti = crypto.randomUUID();
+  const body = encode({
+    claims,
+    jti,
+    mac: codeMac(jti, code),
+    exp: Math.floor(Date.now() / 1000) + CHALLENGE_TTL_SECONDS,
+  });
+  return { code, challenge: `${body}.${signChallenge(body)}` };
+}
+
+/** The challenge's claims and id when the code is right and in time, otherwise null. */
+export function verifySuperadminChallenge(challenge, code) {
+  if (!SECRET_CONFIGURED || typeof challenge !== "string") return null;
+  // Exactly two parts: extra ones would change the rate limiter's key for the same challenge.
+  const [body, signature, extra] = challenge.split(".");
+  if (extra !== undefined || !body || !signature || !sameMac(signature, signChallenge(body))) return null;
+
+  try {
+    const { claims, jti, mac, exp } = decode(body);
+    if (typeof exp !== "number" || exp < Math.floor(Date.now() / 1000)) return null;
+    if (!sameMac(mac, codeMac(jti, code))) return null;
+    return { claims, jti };
+  } catch {
+    return null;
+  }
+}
+
 export function verifySuperadminSessionToken(token) {
   if (!SECRET_CONFIGURED) return null;
   if (!token || typeof token !== "string") return null;

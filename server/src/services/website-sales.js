@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { getB2BAvailability } from "../lib/b2b.js";
+import { getB2BAvailability, exitB2BEnrollments } from "../lib/b2b.js";
 import { computeAvailableSlots, formatSlotLabel } from "../lib/scheduling.js";
 import { parseWebsiteInquiry, inquiryHash, WEBSITE_CONSENT_TEXT } from "../lib/website-inquiry.js";
 
@@ -13,6 +13,63 @@ export async function getPlatformSlots(setting, db = prisma) {
   const gap = setting.bufferMinutes * 60_000;
   const busy = taken.map((a) => ({ start: new Date(a.startTime.getTime() - gap), end: new Date(a.startTime.getTime() + setting.slotDuration * 60_000 + gap) }));
   return computeAvailableSlots({ setting, from, days: 21, busy, limit: 200 });
+}
+
+/** Books a lead into an open slot. Returns { taken: true } when the slot is gone. */
+export async function bookB2BMeeting({ lead, start, setting, campaignId }) {
+  const upcoming = await prisma.salesAgentAppointment.findFirst({
+    where: { b2bLeadId: lead.id, status: "CONFIRMED", startTime: { gte: new Date() } },
+  });
+  if (upcoming) return { alreadyBooked: true };
+  if (!(await getPlatformSlots(setting)).some((s) => s.getTime() === start.getTime())) return { taken: true };
+
+  // Which campaign brought them here: the link's ?c=, else their most recent enrollment.
+  const enrollment = await prisma.b2BEnrollment.findFirst({
+    where: { leadId: lead.id, ...(campaignId ? { campaignId: String(campaignId) } : {}) },
+    orderBy: { updatedAt: "desc" },
+    include: { campaign: { select: { name: true } } },
+  });
+  const label = formatSlotLabel(start, setting.timezone);
+  const end = new Date(start.getTime() + setting.slotDuration * 60000);
+
+  let appointment;
+  try {
+    // Serializable: two leads racing for the same slot cannot both pass the overlap check.
+    appointment = await prisma.$transaction(
+      async (tx) => {
+        const clash = await tx.salesAgentAppointment.findFirst({
+          where: {
+            status: { not: "CANCELLED" },
+            startTime: { gt: new Date(start.getTime() - (setting.slotDuration + setting.bufferMinutes) * 60000), lt: new Date(end.getTime() + setting.bufferMinutes * 60000) },
+          },
+        });
+        if (clash) return null;
+        return tx.salesAgentAppointment.create({
+          data: {
+            name: lead.contactName || lead.companyName,
+            email: lead.email,
+            phone: lead.phone || "",
+            preferredTime: label,
+            source: "CAMPAIGN",
+            campaignName: enrollment?.campaign.name || null,
+            startTime: start,
+            b2bLeadId: lead.id,
+          },
+        });
+      },
+      { isolationLevel: "Serializable" },
+    );
+  } catch (e) {
+    if (e?.code !== "P2034") throw e; // serialization conflict = someone else got the slot
+  }
+  if (!appointment) return { taken: true };
+
+  // Booked: this lead leaves every campaign; the campaigns carry on for everyone else.
+  await exitB2BEnrollments(lead.id, "APPOINTMENT");
+  if (["NEW", "CONTACTED"].includes(lead.status)) {
+    await prisma.b2BLead.update({ where: { id: lead.id }, data: { status: "INTERESTED" } });
+  }
+  return { appointment, label, enrollment };
 }
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -75,7 +132,7 @@ export const CONSULTATION_FIELDS = [
   ["name", "Please share your name, company, email, and phone number for the consultation."],
   ["company", "What company do you represent?"],
   ["email", "What email address should our team use to contact you?"],
-  ["phone", "What phone number should we use? Please include your country code."],
+  ["phone", "What +1 phone number should we use?"],
   ["role", "What is your role at the company? You can skip this."],
   ["annualClosings", "Approximately how many homes does your company close each year? You can skip this."],
   ["discussion", "What would you like to discuss during your Product Consultation? You can skip this."],
@@ -88,11 +145,11 @@ export function isApproval(text) {
 }
 
 const US_TIMEZONES = {
-  "America/New_York": "US Eastern Time",
-  "America/Chicago": "US Central Time",
-  "America/Denver": "US Mountain Time",
+  "America/New_York": "Eastern Time",
+  "America/Chicago": "Central Time",
+  "America/Denver": "Mountain Time",
   "America/Phoenix": "Arizona Time",
-  "America/Los_Angeles": "US Pacific Time",
+  "America/Los_Angeles": "Pacific Time",
   "America/Anchorage": "Alaska Time",
   "Pacific/Honolulu": "Hawaii Time",
 };
@@ -183,7 +240,7 @@ export function consultationSummary(draft) {
 }
 
 export async function saveConsultation(id, draft, page, db = prisma) {
-  if (!Object.hasOwn(US_TIMEZONES, draft.timezone)) throw Object.assign(new Error("Consultations use the team's US timezone."), { status: 400 });
+  if (!Object.hasOwn(US_TIMEZONES, draft.timezone)) throw Object.assign(new Error("Consultations use the team's timezone."), { status: 400 });
   draft = { ...draft, preferredDate: normalizeConsultationDate(draft.preferredDate, draft.timezone) || draft.preferredDate, preferredTime: normalizeConsultationTime(draft.preferredTime) || draft.preferredTime };
   const invalid = preferenceError(draft);
   if (invalid) throw Object.assign(new Error(invalid.message), { status: 400 });

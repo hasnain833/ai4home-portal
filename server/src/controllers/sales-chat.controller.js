@@ -8,7 +8,7 @@ import {
   leadTimezone,
   bookSlot,
 } from "../services/scheduling-service.js";
-import { normalizePhone } from "../services/sms.service.js";
+import { normalizePhone, PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import { KB_SCOPES } from "../lib/sales-ai.js";
 import { withInventory, homeCards } from "../lib/sales-homes.js";
 import { hasPlatformAi } from "../lib/ai-config.js";
@@ -177,9 +177,7 @@ export const bookVisit = async (req, res) => {
 
     if (name.length < 2) return res.status(400).json({ message: "Enter the buyer's name" });
     if (!EMAIL_RE.test(email)) return res.status(400).json({ message: "Enter a valid email address" });
-    if (b.phone && (phone.length < 10 || phone.length > 15)) {
-      return res.status(400).json({ message: "Enter a valid phone number, or leave it blank" });
-    }
+    if (b.phone && !toE164(b.phone)) return res.status(400).json({ message: PHONE_ERROR });
 
     const { slots } = await openSlots(companyId, PICKER_SLOT_LIMIT);
     const slot = slots.find((s) => s.iso === b.slotIso);

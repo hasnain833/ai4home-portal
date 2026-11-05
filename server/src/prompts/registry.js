@@ -8,10 +8,12 @@ import {
   WARRANTY_PLACEHOLDERS,
   validateWarrantyDraft,
 } from "./warranty-agent.js";
+import { B2B_AGENT_KB_EMPTY_TEXT, B2B_AGENT_SYSTEM, B2B_AGENT_TOOL_DESCRIPTION } from "./content.js";
 
 export const AGENT_TYPES = {
   SALES: "sales",
   WARRANTY: "warranty",
+  B2B: "b2b",
 };
 
 export const PROMPT_REGISTRY = {
@@ -26,6 +28,18 @@ export const PROMPT_REGISTRY = {
       systemTemplate: { label: "System prompt", default: PROMPT_DEFAULTS.systemTemplate },
       toolDescription: { label: "Tool description", default: PROMPT_DEFAULTS.toolDescription },
       kbEmptyText: { label: "No-KB fallback", default: PROMPT_DEFAULTS.kbEmptyText },
+    },
+  },
+
+  [AGENT_TYPES.B2B]: {
+    label: "B2B Sales Agent",
+    description: "Answers builders who reply to Business Campaigns and books qualified meetings.",
+    kb: "b2b",
+    editable: true,
+    prompts: {
+      systemTemplate: { label: "System prompt", default: B2B_AGENT_SYSTEM },
+      toolDescription: { label: "Booking & escalation rules", default: B2B_AGENT_TOOL_DESCRIPTION },
+      kbEmptyText: { label: "No-KB fallback", default: B2B_AGENT_KB_EMPTY_TEXT },
     },
   },
 

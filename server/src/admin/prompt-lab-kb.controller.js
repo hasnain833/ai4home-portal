@@ -14,6 +14,8 @@ import {
   getRetrievalStatus as salesRetrievalStatus,
   queryHelp,
   getHelpRetrievalStatus,
+  queryB2BKb,
+  getB2BKbStatus,
 } from "../services/vector-store.service.js";
 import {
   queryDetailed as warrantyQuery,
@@ -61,6 +63,19 @@ const KB_BACKENDS = {
     targetType: "SalesKB",
     softDelete: true,
     scope: "HELP",
+  },
+  b2b: {
+    model: () => prisma.salesKB,
+    bucket: BUCKETS.salesKb,
+    ingest: runKbIngestion,
+    query: (_companyId, question, limit) => queryB2BKb(question, limit),
+    deleteChunks: salesDeleteChunks,
+    retrievalStatus: getB2BKbStatus,
+    defaultScopeCategories: null,
+    supportsCommunities: false,
+    targetType: "SalesKB",
+    softDelete: true,
+    scope: "B2B",
   },
 };
 
@@ -285,7 +300,7 @@ export const uploadKbDocument = async (req, res) => {
 
 
 function mayMutate(doc) {
-  return doc.scope === "PLATFORM" || doc.scope === "HELP" || doc.isSandbox === true;
+  return doc.scope === "PLATFORM" || doc.scope === "HELP" || doc.scope === "B2B" || doc.isSandbox === true;
 }
 
 export const deleteKbDocument = async (req, res) => {

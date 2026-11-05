@@ -68,7 +68,7 @@ export function HomesCsvImport({
     setImporting(true);
     setImportErrors([]);
     try {
-      const rows = parseCsv(await file.text(), COLUMN_ALIASES);
+      const rows = await parseCsv(await file.text(), COLUMN_ALIASES);
       if (rows.length === 0) {
         showToast("That file has no rows.");
         return;

@@ -29,6 +29,12 @@ async function loadLiveRow(agentType) {
       orderBy: { setLiveAt: "desc" },
     });
   }
+  if (agentType === AGENT_TYPES.B2B) {
+    return prisma.b2BAgentPromptVersion.findFirst({
+      where: { isLive: true },
+      orderBy: { setLiveAt: "desc" },
+    });
+  }
   return null;
 }
 

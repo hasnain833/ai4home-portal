@@ -34,7 +34,7 @@ export type KbDocument = {
   size: string;
   category: string;
   status: string;
-  scope: "PLATFORM" | "COMPANY";
+  scope: "PLATFORM" | "COMPANY" | "HELP" | "B2B";
   chunkCount: number;
   error: string | null;
   companyId: string | null;
@@ -48,7 +48,7 @@ export type KbProbeResult = {
   documentId: string;
   name: string;
   category: string;
-  scope: "PLATFORM" | "COMPANY";
+  scope: "PLATFORM" | "COMPANY" | "HELP" | "B2B";
   score: number;
   text: string;
 };
@@ -74,6 +74,13 @@ type Props = {
 };
 
 const PLATFORM = "platform";
+
+const PROBE_EXAMPLES: Record<string, string> = {
+  warranty: "my AC isn't cooling",
+  sales: "do you have move-in ready homes?",
+  help: "how do I import leads?",
+  b2b: "does it sync with Salesforce?",
+};
 
 const POLL_MS = 4000;
 const BUSY_STATUSES = new Set(["PENDING", "INDEXING"]);
@@ -196,7 +203,9 @@ export default function KnowledgeBasePanel({
     const ok = await confirm({
       title: `Delete "${doc.name}"?`,
       description:
-        "This removes it from the platform knowledge base along with its indexed chunks. Every company's agent stops retrieving it.",
+        agent === "b2b"
+          ? "This removes it from the B2B knowledge base along with its indexed chunks. The B2B Sales Agent stops retrieving it."
+          : "This removes it from the platform knowledge base along with its indexed chunks. Every company's agent stops retrieving it.",
       confirmText: "Delete",
       destructive: true,
     });
@@ -431,7 +440,7 @@ export default function KnowledgeBasePanel({
         <Input
           value={probeText}
           onChange={(e) => setProbeText(e.target.value)}
-          placeholder="Test retrieval — e.g. &quot;my AC isn&apos;t cooling&quot;"
+          placeholder={`Test retrieval — e.g. "${PROBE_EXAMPLES[agent] || PROBE_EXAMPLES.sales}"`}
           className="h-9"
         />
         <Button type="submit" variant="outline" size="sm" className="h-9 gap-1.5" disabled={probing}>
@@ -475,7 +484,7 @@ export default function KnowledgeBasePanel({
                       <span className="truncate text-[11px] font-medium">{r.name || "Untitled"}</span>
                       {supportsCommunities && (
                         <Badge variant="secondary" className="text-[9px] font-normal">
-                          {r.scope === "PLATFORM" ? "Platform" : "Community"}
+                          {r.scope === "PLATFORM" ? "Platform" : r.scope === "B2B" ? "B2B" : "Community"}
                         </Badge>
                       )}
                       <span className="ml-auto font-mono text-[10px] text-muted-foreground">
@@ -500,8 +509,8 @@ export default function KnowledgeBasePanel({
         ) : (
           <>
             <DocGroup
-              title="Platform knowledge base"
-              subtitle="Every company's agent retrieves these"
+              title={agent === "b2b" ? "B2B knowledge base" : "Platform knowledge base"}
+              subtitle={agent === "b2b" ? "Only the B2B Sales Agent retrieves these. Builders' agents never see them." : "Every company's agent retrieves these"}
               icon={<Globe className="h-3.5 w-3.5" />}
               docs={documents}
               onOpen={openDocument}

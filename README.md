@@ -132,6 +132,7 @@ The following represents the complete list of environment variables used across 
 | `TELNYX_FROM_NUMBER` | Backend | Shared platform sending number |
 | `SUPERADMIN_EMAIL` | Backend | Default super admin login email |
 | `SUPERADMIN_PASSWORD` | Backend | Default super admin login password |
+| `SUPERADMIN_MFA_DISABLED` | Backend | Set to `1` to skip the emailed sign-in code. Only while email is down, or locally without SMTP |
 | `SUPERADMIN_PHONE` | Backend | Super admin phone for SMS alerts (email alerts go to `SUPERADMIN_EMAIL`) |
 
 ### AI provider keys

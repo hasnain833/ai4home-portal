@@ -40,6 +40,9 @@ export interface B2BLead {
   source: "MANUAL" | "CSV" | "WEBSITE_CONTACT" | "WEBSITE_EBOOK" | "WEBSITE_DEMO" | "WEBSITE_SALES";
   marketingOptIn: boolean;
   marketingConsentAt: string | null;
+  smsConsentAt: string | null;
+  agentPausedAt: string | null;
+  agentPauseReason: string | null;
   inquiries: { id: string; type: string; payload: Record<string, string | boolean | number>; marketingConsent: boolean; consentText: string; createdAt: string; adminSentAt: string | null; visitorSentAt: string | null; adminSmsSentAt: string | null; visitorSmsSentAt: string | null; lastError: string | null }[];
   emailOptOut: boolean;
   smsOptOut: boolean;
@@ -48,13 +51,32 @@ export interface B2BLead {
   nextAppointment: string | null;
 }
 
+export interface B2BTimeline {
+  agentPausedAt: string | null;
+  agentPausedUntil: string | null;
+  agentPauseReason: string | null;
+  waiting: number;
+  items: { id: string; at: string; kind: "agent" | "lead" | "campaign" | "meeting" | "website"; title: string; body: string | null; status: string | null }[];
+}
+
 export interface CampaignStep {
+  /** Stable across edits, so leads keep their place when steps are added or removed. */
+  id?: string;
   channel: "EMAIL" | "SMS";
   delayDays: number;
+  /** HH:mm on the lead's local clock, 8am–9pm. Empty sends as soon as the step is due. */
+  sendTime?: string | null;
   subject: string;
   body: string;
   /** Editor-only prompt for "Write with AI"; the server drops it on save. */
   topic?: string;
+}
+
+export interface B2BCampaignTemplate {
+  id: string;
+  name: string;
+  description: string;
+  steps: CampaignStep[];
 }
 
 export interface B2BCampaign {
@@ -85,6 +107,7 @@ export interface B2BEnrollment {
   lastError: string | null;
   lastSentAt: string | null;
   smsDelivery?: { status: "delivered" | "failed" | "unconfirmed"; providerMessageId: string | null } | null;
+  emailDelivery?: { status: "clicked" | "opened" | "delivered" | "failed" | "unconfirmed"; providerMessageId: string | null } | null;
   lead: Pick<B2BLead, "id" | "companyName" | "contactName" | "email" | "phone" | "status">;
 }
 
@@ -115,7 +138,10 @@ export function useApiList<T>(url: string) {
 }
 
 export const useB2BLeads = () => useApiList<B2BLead>(`${B2B_API}/leads`);
+/** For pickers that only need basic lead details. */
+export const useB2BLeadsLite = () => useApiList<B2BLead>(`${B2B_API}/leads?lite=1`);
 export const useB2BCampaigns = () => useApiList<B2BCampaign>(`${B2B_API}/campaigns`);
 export const useB2BSegments = () => useApiList<B2BSegment>(`${B2B_API}/segments`);
+export const useB2BTemplates = () => useApiList<B2BCampaignTemplate>(`${B2B_API}/templates`);
 
 export const titleCase = (s: string) => s.charAt(0) + s.slice(1).toLowerCase().replace(/_/g, " ");

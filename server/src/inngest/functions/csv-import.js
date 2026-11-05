@@ -4,6 +4,7 @@ import { triggerAutomation } from "../../lib/automation-events.js";
 import { validateLeadRow, sanitizeCsvValue } from "../../lib/csv-validation.js";
 import { findDuplicateLead, resolveMergedField } from "../../lib/lead-dedup.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
+import { NON_PLUS_ONE_TAG, usablePhone } from "../../services/sms.service.js";
 
 export const handleCsvImport = inngest.createFunction(
   {
@@ -76,7 +77,7 @@ export const handleCsvImport = inngest.createFunction(
           const firstName = sanitizeCsvValue(lead.firstName);
           const lastName = sanitizeCsvValue(lead.lastName);
           const email = lead.email;
-          const phone = lead.phone;
+          const phone = usablePhone(lead.phone);
           const street = sanitizeCsvValue(lead.street);
           const city = sanitizeCsvValue(lead.city);
           const state = sanitizeCsvValue(lead.state);
@@ -84,6 +85,7 @@ export const handleCsvImport = inngest.createFunction(
           const emailOptIn = Boolean(lead.emailOptIn);
           const smsOptIn = Boolean(lead.smsOptIn);
           const tags = (Array.isArray(lead.tags) ? lead.tags : []).map(sanitizeCsvValue);
+          if (lead.phone && !phone) tags.push(NON_PLUS_ONE_TAG);
           const duplicateLead = await findDuplicateLead(companyId, email, phone);
 
           const optInSource = emailOptIn || smsOptIn ? "CSV Import" : null;

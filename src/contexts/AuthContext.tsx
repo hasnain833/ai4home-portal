@@ -58,7 +58,8 @@ interface AuthContextType {
     email: string,
     password: string,
     redirectPath?: string,
-  ) => Promise<void>;
+  ) => Promise<{ mfaChallenge?: string } | void>;
+  verifySuperadminCode: (challenge: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
   updateAvatar: (avatarUrl: string) => void;
@@ -191,6 +192,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [router]); 
 
+  const enterSuperadminPortal = async () => {
+    const meResponse = await fetch("/api/auth/me");
+    if (meResponse.ok) {
+      const userData = await meResponse.json();
+      setUser(userData);
+    }
+    setIsLoading(false);
+    router.push("/admin");
+  };
+
+  const verifySuperadminCode = async (challenge: string, code: string) => {
+    const response = await fetch("/api/auth/superadmin-verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ challenge, code }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body?.message || "That code is incorrect or has expired.");
+    }
+    await enterSuperadminPortal();
+  };
+
   const login = async (
     email: string,
     password: string,
@@ -213,16 +237,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (response.ok) {
         const body = await response.json();
-        if (body.isSuperAdmin) {
-          const meResponse = await fetch("/api/auth/me");
-          if (meResponse.ok) {
-            const userData = await meResponse.json();
-            setUser(userData);
-          }
+        if (body.mfaRequired) {
           setIsLoading(false);
-          router.push("/admin");
+          return { mfaChallenge: body.challenge };
+        }
+        if (body.isSuperAdmin) {
+          await enterSuperadminPortal();
           return;
         }
+      } else if (response.status === 502) {
+        // Only the Super Admin gets here, with the right password: Supabase can't help.
+        const body = await response.json().catch(() => ({}));
+        if (body?.code === "MFA_SEND_FAILED") throw new Error(body.message);
       } else if (response.status !== 401) {
         // This endpoint is only a superadmin probe. A database/configuration
         // failure here must not prevent ordinary users from using Supabase auth.
@@ -237,7 +263,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
 
-      if (error) throw error;
+      if (error) {
+        if (response.status === 429) {
+          throw new Error("Too many sign-in attempts. Please wait 15 minutes and try again.");
+        }
+        throw error;
+      }
 
       // Valid password but a suspended company: sign straight back out and say why.
       const me = await fetch("/api/auth/me");
@@ -363,6 +394,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isLoading,
         login,
+        verifySuperadminCode,
         logout,
         updateProfile,
         updateAvatar,

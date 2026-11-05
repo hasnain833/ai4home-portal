@@ -55,7 +55,7 @@ export default function LeadFormEmbedDialog({
   <input name="firstName" placeholder="First name" required>
   <input name="lastName" placeholder="Last name">
   <input name="email" type="email" placeholder="Email">
-  <input name="phone" type="tel" placeholder="Phone">
+  <input name="phone" type="tel" placeholder="+1 phone">
   <input name="interest" placeholder="Community or home">
   <textarea name="message" placeholder="Message"></textarea>
   <label><input type="checkbox" name="emailOptIn" value="true"> Email me about homes and offers</label>

@@ -1,5 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { getLeadTimezone } from "../lib/timezone.js";
+import { toE164 } from "./sms.service.js";
+import { setB2BSmsOptOut } from "../lib/b2b.js";
 import { Templates } from "./templates.js";
 
 const COMPLAINT_RATE_WINDOW_HOURS = 24;
@@ -46,6 +48,9 @@ export class ComplianceService {
         allowed: false,
         reason: `Lead lacks contact details for channel ${channel}`,
       };
+    }
+    if (channel === "SMS" && !toE164(value)) {
+      return { allowed: false, reason: "SMS skipped: not a +1 number" };
     }
 
     const normalizedValue =
@@ -118,7 +123,8 @@ export class ComplianceService {
     const isSms = channel === "SMS";
 
     const stopKeywords = ["STOP", "UNSUBSCRIBE", "QUIT", "CANCEL", "END"];
-    const startKeywords = ["START", "YES", "UNSTOP", "RESUBSCRIBE"];
+    // No "YES": it is an ordinary answer ("Does Tuesday work?"), not consent.
+    const startKeywords = ["START", "UNSTOP", "RESUBSCRIBE"];
     const helpKeywords = ["HELP", "INFO"];
 
     const normalizedContact = isSms
@@ -146,6 +152,9 @@ export class ComplianceService {
     if (stopKeywords.includes(text)) {
       // 1. Opt-out
       for (const lead of leads) {
+        // Never opted in: nothing to revoke, and no STOP stamp for START to
+        // read later as consent this lead once gave.
+        if (isSms && !lead.smsOptIn) continue;
         await prisma.lead.update({
           where: { id: lead.id },
           data: {
@@ -176,6 +185,7 @@ export class ComplianceService {
           });
         }
       }
+      if (isSms) await setB2BSmsOptOut(normalizedContact, true);
 
       return {
         isComplianceAction: true,
@@ -186,7 +196,10 @@ export class ComplianceService {
     }
 
     if (startKeywords.includes(text) && isSms) {
+      // START only restores what a STOP removed. It may arrive with no tenant
+      // attached, so it must not grant consent at builders never opted in to.
       for (const lead of leads) {
+        if (lead.consentSource !== "SMS STOP Keyword") continue;
         await prisma.lead.update({
           where: { id: lead.id },
           data: {
@@ -205,6 +218,7 @@ export class ComplianceService {
           },
         })
         .catch(() => {});
+      await setB2BSmsOptOut(normalizedContact, false);
 
       return {
         isComplianceAction: true,

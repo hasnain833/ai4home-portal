@@ -193,6 +193,7 @@ export async function executeAction(action, lead, ctx = {}) {
       const r = await MessagingService.sendSms({ companyId: lead.companyId, to: lead.phone, body, source: "automation" });
       if (r?.blocked) return { type, skipped: r.reason || "send blocked" };
       if (r?.outcome === SMS_OUTCOME.NOT_CONFIGURED) return { type, skipped: "sms not configured" };
+      if (r?.outcome === SMS_OUTCOME.SKIPPED) return { type, skipped: r.error };
       if (!smsSent(r)) return { type, failed: true, to: lead.phone, error: r?.error || "Unknown error" };
       if (budget) budget.remaining -= 1;
       return { type, sent: true, to: lead.phone };

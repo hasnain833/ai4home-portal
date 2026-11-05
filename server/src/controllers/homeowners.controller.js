@@ -1,4 +1,4 @@
-import { toE164 } from "../services/sms.service.js";
+import { PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import prisma from "../lib/prisma.js";
 import { createHomeownerAccount, getSupabaseAdmin } from "../lib/homeowner-account.js";
 import bcrypt from "bcryptjs";
@@ -75,7 +75,7 @@ export const createHomeowner = async (req, res) => {
     }
 
     const phone = toE164(req.body.phone);
-    if (phone === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+    if (phone === undefined) return res.status(400).json({ message: PHONE_ERROR });
 
     if (password && password.length < 8) {
       return res.status(400).json({ message: "Password must be at least 8 characters" });
@@ -263,7 +263,7 @@ export const updateHomeowner = async (req, res) => {
     // empty string is a deliberate "clear it" rather than "leave it alone".
     if (phone !== undefined) {
       const e164 = toE164(phone);
-      if (e164 === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+      if (e164 === undefined) return res.status(400).json({ message: PHONE_ERROR });
       dbUpdateData.phone = e164;
     }
 

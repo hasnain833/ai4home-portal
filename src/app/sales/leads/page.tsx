@@ -440,80 +440,33 @@ export default function LeadsPage() {
   };
 
   // CSV Parsing
-  const handleCSVLoad = () => {
+  const handleCSVLoad = async () => {
     if (!csvRawText.trim()) {
       showToast("Please paste some CSV content.");
       return;
     }
 
-    // Split text by lines and clean commas
-    const lines = csvRawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    if (lines.length < 2) {
-      showToast("CSV must contain a header row and at least one data row.");
-      return;
-    }
-
-    // Parse values splitting by commas (considering simple quotes if any)
-    const headers = lines[0].split(",").map(h => h.trim().replace(/^["']|["']$/g, ""));
-    const dataRows = lines.slice(1).map(line => {
-      return line.split(",").map(val => val.trim().replace(/^["']|["']$/g, ""));
-    });
-
-    setCsvHeaders(headers);
-    setCsvRows(dataRows);
-
-    // Initial Guess / Auto-detection mappings
-    const initialMapping: Record<string, string> = {};
-    const standardFields = [
-      { key: "firstName", aliases: ["first name", "firstname", "first", "fname"] },
-      { key: "lastName", aliases: ["last name", "lastname", "last", "lname"] },
-      { key: "email", aliases: ["email", "e-mail", "emailaddress", "mail"] },
-      { key: "phone", aliases: ["phone", "telephone", "mobile", "tel", "cell"] },
-      { key: "street", aliases: ["street", "address", "address1", "location"] },
-      { key: "city", aliases: ["city"] },
-      { key: "state", aliases: ["state", "province"] },
-      { key: "zipCode", aliases: ["zip", "zipcode", "postal", "postalcode"] },
-      { key: "tags", aliases: ["tags", "labels", "interests"] },
-      { key: "emailOptIn", aliases: ["email opt in", "emailoptin", "email_consent", "consent_email"] },
-      { key: "smsOptIn", aliases: ["sms opt in", "smsoptin", "sms_consent", "consent_sms"] }
-    ];
-
-    headers.forEach(header => {
-      const lowerHeader = header.toLowerCase();
-      const matchedField = standardFields.find(f =>
-        f.aliases.some(alias => lowerHeader.includes(alias))
-      );
-      if (matchedField) {
-        initialMapping[header] = matchedField.key;
-      } else {
-        initialMapping[header] = "";
-      }
-    });
-
-    setCsvMapping(initialMapping);
-    setCsvStep(2);
-  };
-
-  const buildLeadsList = () => {
-    return csvRows.map(row => {
-      const leadObj: any = {};
-      csvHeaders.forEach((header, idx) => {
-        const mappedKey = csvMapping[header];
-        if (mappedKey) {
-          const rawVal = row[idx];
-          if (mappedKey === "emailOptIn" || mappedKey === "smsOptIn") {
-            const strVal = (rawVal || "").toLowerCase();
-            leadObj[mappedKey] = strVal === "true" || strVal === "yes" || strVal === "1";
-          } else if (mappedKey === "tags") {
-            leadObj[mappedKey] = rawVal ? rawVal.split(";").map(t => t.trim()).filter(Boolean) : [];
-          } else {
-            leadObj[mappedKey] = rawVal || "";
-          }
-        }
+    try {
+      const res = await fetch("/api/sales/csv/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: csvRawText }),
       });
-      return leadObj;
-    });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.message || "Could not read that CSV.");
+        return;
+      }
+      setCsvHeaders(data.headers);
+      setCsvRows(data.rows);
+      setCsvMapping(data.mapping);
+      setCsvStep(2);
+    } catch {
+      showToast("Error reading the CSV.");
+    }
   };
+
+  const csvImportBody = () => ({ headers: csvHeaders, rows: csvRows, mapping: csvMapping });
 
   const runValidation = async () => {
     setValidating(true);
@@ -522,7 +475,7 @@ export default function LeadsPage() {
       const res = await fetch("/api/sales/csv/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadsList: buildLeadsList() }),
+        body: JSON.stringify(csvImportBody()),
       });
       const data = await res.json();
       if (res.ok) setValidation(data);
@@ -610,12 +563,11 @@ export default function LeadsPage() {
   const handleCSVImportExecute = async () => {
     setImporting(true);
     try {
-      const leadsList = buildLeadsList();
       const res = await fetch("/api/sales/csv/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          leadsList,
+          ...csvImportBody(),
           mergeStrategy,
           attested: consentAttested,
         }),
@@ -1110,10 +1062,11 @@ export default function LeadsPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="phone" className="font-semibold">Telephone (E.164)</Label>
+                  <Label htmlFor="phone" className="font-semibold">Phone (+1)</Label>
                   <Input
                     id="phone"
-                    placeholder="+15550192288"
+                    type="tel"
+                    placeholder="+1 (555) 019-2288"
                     value={manualForm.phone}
                     onChange={(e) => setManualForm(f => ({ ...f, phone: e.target.value }))}
                   />

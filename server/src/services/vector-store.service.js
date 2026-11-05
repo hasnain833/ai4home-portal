@@ -42,7 +42,7 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 
-  const scope = ["PLATFORM", "HELP"].includes(meta.scope) ? meta.scope : "COMPANY";
+  const scope = ["PLATFORM", "HELP", "B2B"].includes(meta.scope) ? meta.scope : "COMPANY";
 
   await prisma.salesKBChunk.createMany({
     data: chunks.map((content, i) => ({
@@ -265,22 +265,22 @@ export async function backfillEmbeddings(companyId, batchSize = 50) {
   return { processed: updated, remaining: remaining[0]?.count || 0 };
 }
 
-// Help Agent docs live in their own scope, so no Sales/Warranty query can reach them.
-export async function queryHelp(text, limit = 6) {
+// Help Agent and B2B docs live in their own scopes, so no other agent's query can reach them.
+async function queryOwnScope(scope, text, limit) {
   const q = (text || "").trim();
   if (!q) return { method: "empty", results: [] };
   const toResult = (r) => ({
     documentId: r.documentId, name: r.name || "", category: r.category || "General",
-    scope: "HELP", text: r.content || "", score: Number(r.score) || 0,
+    scope, text: r.content || "", score: Number(r.score) || 0,
   });
   try {
     const emb = await embedText(q);
     if (emb) {
       const rows = await prisma.$queryRawUnsafe(
         `SELECT "documentId", name, category, content, 1 - (embedding <=> $1::vector) AS score
-           FROM "SalesKBChunk" WHERE scope = 'HELP' AND embedding IS NOT NULL
+           FROM "SalesKBChunk" WHERE scope = $3::"KBScope" AND embedding IS NOT NULL
            ORDER BY embedding <=> $1::vector LIMIT $2`,
-        `[${emb.join(",")}]`, limit,
+        `[${emb.join(",")}]`, limit, scope,
       );
       const hits = rows.filter((r) => Number(r.score) >= 0.3).map(toResult);
       if (hits.length) return { method: "semantic", results: hits };
@@ -289,20 +289,21 @@ export async function queryHelp(text, limit = 6) {
       SELECT "documentId", name, category, content,
              ts_rank(to_tsvector('english'::regconfig, content), replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${q})::text, '&', '|')::tsquery) AS score
       FROM "SalesKBChunk"
-      WHERE scope = 'HELP'
+      WHERE scope = ${scope}::"KBScope"
         AND to_tsvector('english'::regconfig, content) @@ replace(websearch_to_tsquery(${FTS_LANG}::regconfig, ${q})::text, '&', '|')::tsquery
       ORDER BY score DESC LIMIT ${limit}`;
     return { method: "fts", results: rows.map(toResult) };
   } catch (err) {
-    console.error("[Vector Store] Help query failed:", err.message);
+    console.error(`[Vector Store] ${scope} query failed:`, err.message);
     return { method: "unavailable", results: [] };
   }
 }
 
-export async function getHelpRetrievalStatus() {
+async function ownScopeStatus(scope) {
   try {
     const [row] = await prisma.$queryRawUnsafe(
-      `SELECT COUNT(*)::int AS total, COUNT(embedding)::int AS embedded FROM "SalesKBChunk" WHERE scope = 'HELP'`,
+      `SELECT COUNT(*)::int AS total, COUNT(embedding)::int AS embedded FROM "SalesKBChunk" WHERE scope = $1::"KBScope"`,
+      scope,
     );
     const { total, embedded } = row;
     const status = total === 0 ? "EMPTY" : embedded === 0 ? "UNAVAILABLE" : embedded < total ? "PARTIAL" : "SEMANTIC";
@@ -311,3 +312,8 @@ export async function getHelpRetrievalStatus() {
     return { status: "UNAVAILABLE", pgvectorReady: false, totalChunks: 0, embeddedChunks: 0, coverage: 0, detail: err.message };
   }
 }
+
+export const queryHelp = (text, limit = 6) => queryOwnScope("HELP", text, limit);
+export const getHelpRetrievalStatus = () => ownScopeStatus("HELP");
+export const queryB2BKb = (text, limit = 6) => queryOwnScope("B2B", text, limit);
+export const getB2BKbStatus = () => ownScopeStatus("B2B");

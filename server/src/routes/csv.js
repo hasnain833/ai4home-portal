@@ -4,6 +4,7 @@ import {
   uploadCsvMiddleware,
   handleCsvUpload,
   validateCsvImport,
+  parseLeadCsv,
   getCsvImportStatus,
   downloadCsvImportErrors,
   getMappingTemplates,
@@ -15,6 +16,7 @@ const router = Router();
 
 const canImport = requirePermission("csv.upload");
 
+router.post("/parse", requireAuth, canImport, parseLeadCsv);
 router.post("/upload", requireAuth, canImport, uploadCsvMiddleware, handleCsvUpload);
 router.post("/validate", requireAuth, canImport, validateCsvImport);
 router.get("/imports/:id", requireAuth, getCsvImportStatus);

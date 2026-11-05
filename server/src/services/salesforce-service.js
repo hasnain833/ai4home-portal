@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { randomBytes, createHash } from "crypto";
 import { encrypt, decryptSafe } from "../lib/crypto.js";
+import { toE164 } from "./sms.service.js";
 
 export { encrypt };
 export const decrypt = decryptSafe;
@@ -315,6 +316,9 @@ export function mapSalesforceRecordToLead(sfRecord, mappings) {
   if (sfRecord.Id) {
     lead.externalId = sfRecord.Id;
   }
+
+  // We only text +1; keep the lead and ignore a number we couldn't use.
+  if (lead.phone && !toE164(lead.phone)) delete lead.phone;
 
   if (Object.keys(customFields).length > 0) {
     lead.customFields = customFields;

@@ -404,7 +404,7 @@ function BookingForm({
       <p className="text-xs text-slate-500 dark:text-slate-400">Who is this visit for?</p>
       <input className={field} style={ring} placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" />
       <input className={field} style={ring} type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
-      <input className={field} style={ring} type="tel" placeholder="Phone (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" />
+      <input className={field} style={ring} type="tel" placeholder="+1 phone (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" />
       {error && <p className="text-xs text-rose-600">{error}</p>}
       <button
         type="submit"

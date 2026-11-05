@@ -59,6 +59,12 @@ async function checkHomeownerFree(homeownerId, excludePropertyId = null) {
   return {};
 }
 
+const homeownerInCompany = (homeownerId, companyId) =>
+  prisma.user.findFirst({
+    where: { id: homeownerId, companyId, role: "HOMEOWNER" },
+    select: { id: true },
+  });
+
 export const getProperties = async (req, res) => {
   try {
     const session = req.user;
@@ -145,13 +151,9 @@ export const createProperty = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    let companyId = session.companyId ?? null;
-    if (session.role !== "HOMEOWNER" && assignedHomeownerId) {
-      const owner = await prisma.user.findUnique({
-        where: { id: assignedHomeownerId },
-        select: { companyId: true },
-      });
-      companyId = owner?.companyId ?? companyId;
+    const companyId = session.companyId;
+    if (session.role !== "HOMEOWNER" && !(await homeownerInCompany(assignedHomeownerId, companyId))) {
+      return res.status(404).json({ message: "Homeowner not found" });
     }
 
     const free = await checkHomeownerFree(assignedHomeownerId);
@@ -208,6 +210,9 @@ export const updateProperty = async (req, res) => {
     }
 
     if (homeownerId && homeownerId !== existing.homeownerId) {
+      if (!(await homeownerInCompany(homeownerId, session.companyId))) {
+        return res.status(404).json({ message: "Homeowner not found" });
+      }
       const free = await checkHomeownerFree(homeownerId, id);
       if (free.error) return res.status(400).json({ message: free.error });
     }

@@ -47,12 +47,29 @@ export function brevoEventToStamp(evt) {
   return field && key ? { key, field, at } : null;
 }
 
+// A provider-reported failure arrives after the campaign moved on; show it on the enrollment.
+async function flagB2BDeliveryFailure(providerMessageId, describe) {
+  const usage = await prisma.messageUsage.findFirst({
+    where: { providerMessageId, source: "b2b-campaign", outcome: "sent" },
+    select: { leadId: true, campaignId: true, stepId: true },
+  });
+  if (!usage?.leadId || !usage?.campaignId) return;
+  await prisma.b2BEnrollment.updateMany({
+    where: { leadId: usage.leadId, campaignId: usage.campaignId },
+    data: { failedCount: { increment: 1 }, lastError: describe(usage.stepId || "").slice(0, 1000) },
+  });
+}
+
 export const processBrevoEmailEvents = async (req, res) => {
   try {
     const events = Array.isArray(req.body) ? req.body : [req.body];
     for (const evt of events) {
       const s = brevoEventToStamp(evt);
-      if (s) await stamp(s.key, s.field, s.at);
+      if (!s) continue;
+      const count = await stamp(s.key, s.field, s.at);
+      if (count && s.field === "failedAt") {
+        await flagB2BDeliveryFailure(s.key, (stepId) => `Email ${stepId} not delivered (${evt.event})${evt.reason ? `: ${evt.reason}` : ""}`);
+      }
     }
   } catch (error) {
     console.error("[Brevo Events] Failed to record email event:", error.message);
@@ -67,16 +84,7 @@ export async function recordTelnyxStatus(payload) {
   if (!Number.isFinite(at.getTime())) return 0;
   const count = await stamp(payload?.id, field, at);
   if (count && field === "failedAt") {
-    const usage = await prisma.messageUsage.findFirst({
-      where: { providerMessageId: payload.id, source: "b2b-campaign", outcome: "sent" },
-      select: { leadId: true, campaignId: true, stepId: true },
-    });
-    if (usage?.leadId && usage?.campaignId) {
-      await prisma.b2BEnrollment.updateMany({
-        where: { leadId: usage.leadId, campaignId: usage.campaignId },
-        data: { failedCount: { increment: 1 }, lastError: `SMS ${usage.stepId || ""} delivery failed: ${formatSmsError(payload.errors)}. Telnyx message: ${payload.id}`.slice(0, 1000) },
-      });
-    }
+    await flagB2BDeliveryFailure(payload.id, (stepId) => `SMS ${stepId} delivery failed: ${formatSmsError(payload.errors)}. Telnyx message: ${payload.id}`);
   }
   return count;
 }

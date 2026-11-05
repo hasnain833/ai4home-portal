@@ -2,7 +2,7 @@ import { toolCall } from "../../lib/llm.js";
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { MailService } from "../../services/mail-service.js";
-import { sendSms, smsSent } from "../../services/sms.service.js";
+import { sendSms, smsSent, toE164 } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { Templates } from "../../services/templates.js";
 import { getSenderIdentity } from "../../lib/messaging-config.js";
@@ -53,7 +53,8 @@ export function replySubject({ usedKb, companyName, slotCount }) {
 }
 
 async function sendLeadMessage(lead, channel, text, subject) {
-  const effective = channel === "SMS" && lead.phone ? "SMS" : lead.email ? "EMAIL" : null;
+  // A number we can't text falls back to email, so the lead still hears from us.
+  const effective = channel === "SMS" && toE164(lead.phone) ? "SMS" : lead.email ? "EMAIL" : null;
   if (!effective) return { channel, body: text, skipped: true };
 
   const gate = await ComplianceService.validateOutboundMessage(lead.id, effective);
@@ -65,7 +66,7 @@ async function sendLeadMessage(lead, channel, text, subject) {
   }
 
   const { replyTo } = await getSenderIdentity(lead.companyId);
-  if (channel === "SMS" && lead.phone) {
+  if (effective === "SMS") {
     const body = ComplianceService.addSmsOptOutSuffix(text);
     const result = await sendSms({ to: lead.phone, body, companyId: lead.companyId, source: "appointment" });
     if (!smsSent(result)) {

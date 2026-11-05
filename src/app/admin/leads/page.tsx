@@ -24,15 +24,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Pencil, Plus, Search, Target, Trash2, UploadCloud } from "lucide-react";
+import { History, Loader2, Pencil, Plus, Search, Target, Trash2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { parseCsv } from "@/lib/csv";
+import { apiFetch } from "@/lib/api";
 import {
   B2B_API,
   B2B_LEAD_STATUSES,
   type B2BLead,
   type B2BLeadStatus,
+  type B2BTimeline,
   sendJson,
   titleCase,
   useB2BLeads,
@@ -65,6 +67,7 @@ const COLUMN_ALIASES: Record<string, string> = {
   city: "city",
   location: "city",
   notes: "notes",
+  smsconsent: "smsConsent",
 };
 
 const EMPTY_FORM = { companyName: "", contactName: "", email: "", phone: "", website: "", city: "", notes: "" };
@@ -87,10 +90,36 @@ export default function AdminLeadsPage() {
   // null = closed, "" = adding, otherwise the id of the lead being edited.
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<LeadForm>(EMPTY_FORM);
+  const [smsConsent, setSmsConsent] = useState(false);
+  const [needsPerson, setNeedsPerson] = useState(false);
+  const [timelineFor, setTimelineFor] = useState<B2BLead | null>(null);
+  const [timeline, setTimeline] = useState<B2BTimeline | null>(null);
   const [saving, setSaving] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [preview, setPreview] = useState<{ rows: Partial<LeadForm>[]; skipped: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const openTimeline = async (lead: B2BLead) => {
+    setTimelineFor(lead);
+    setTimeline(null);
+    try {
+      setTimeline(await apiFetch<B2BTimeline>(`${B2B_API}/leads/${lead.id}/timeline`));
+    } catch (e) {
+      toast.error(errorMessage(e));
+      setTimelineFor(null);
+    }
+  };
+
+  const setLeadPaused = async (paused: boolean, answerWaiting = false) => {
+    if (!timelineFor) return;
+    try {
+      await sendJson(`${B2B_API}/leads/${timelineFor.id}/agent`, "POST", { paused, answerWaiting });
+      toast.success(paused ? "AI paused for this lead." : "AI resumed for this lead.");
+      await Promise.all([openTimeline(timelineFor), reload()]);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
 
   const openForm = (lead?: B2BLead) => {
     setForm(
@@ -98,6 +127,7 @@ export default function AdminLeadsPage() {
         ? Object.fromEntries(Object.keys(EMPTY_FORM).map((k) => [k, (lead[k as keyof LeadForm] as string) || ""])) as LeadForm
         : EMPTY_FORM,
     );
+    setSmsConsent(!!lead?.smsConsentAt);
     setEditing(lead?.id ?? "");
   };
 
@@ -106,8 +136,9 @@ export default function AdminLeadsPage() {
     if (!isEmail(form.email.trim())) return toast.error("Enter a valid email.");
     setSaving(true);
     try {
-      if (editing) await sendJson(`${B2B_API}/leads/${editing}`, "PATCH", form);
-      else await sendJson(`${B2B_API}/leads`, "POST", form);
+      const body = { ...form, smsConsent };
+      if (editing) await sendJson(`${B2B_API}/leads/${editing}`, "PATCH", body);
+      else await sendJson(`${B2B_API}/leads`, "POST", body);
       toast.success(editing ? "Lead updated." : "Lead added.");
       setEditing(null);
       await reload();
@@ -119,7 +150,13 @@ export default function AdminLeadsPage() {
   };
 
   const readCsv = async (file: File) => {
-    const rows = parseCsv(await file.text(), COLUMN_ALIASES) as Partial<LeadForm>[];
+    let rows: Partial<LeadForm>[];
+    try {
+      rows = (await parseCsv(await file.text(), COLUMN_ALIASES)) as Partial<LeadForm>[];
+    } catch (e) {
+      toast.error(errorMessage(e));
+      return;
+    }
     const existing = new Set(leads.map((l) => l.email));
     const seen = new Set<string>();
     const valid = rows.filter((row) => {
@@ -185,8 +222,9 @@ export default function AdminLeadsPage() {
   };
 
   const filters = { status: statusFilter, query, nurtureOnly };
-  const visible = leads.filter((lead) => matchesB2BSegment(lead, filters));
-  const filterKey = JSON.stringify(filters);
+  const visible = leads.filter((lead) => matchesB2BSegment(lead, filters) && (!needsPerson || !!lead.agentPausedAt));
+  const needsPersonCount = leads.filter((lead) => lead.agentPausedAt).length;
+  const filterKey = JSON.stringify({ ...filters, needsPerson });
   const totalPages = Math.max(1, Math.ceil(visible.length / 25));
   const currentPage = Math.min(pagination.filterKey === filterKey ? pagination.page : 1, totalPages);
   const pageLeads = visible.slice((currentPage - 1) * 25, currentPage * 25);
@@ -251,6 +289,7 @@ export default function AdminLeadsPage() {
               <Input value={query} maxLength={200} onChange={(e) => { setQuery(e.target.value); setActiveSegment(""); }} placeholder="Search leads" className="h-9 pl-8 text-sm" />
             </div>
             <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={nurtureOnly} onChange={(e) => { setNurtureOnly(e.target.checked); setActiveSegment(""); }} />Nurture opt-in only</label>
+            <label className={"flex items-center gap-2 text-xs " + (needsPersonCount ? "font-semibold text-amber-600" : "text-muted-foreground")}><input type="checkbox" checked={needsPerson} onChange={(e) => setNeedsPerson(e.target.checked)} />Needs a person ({needsPersonCount})</label>
             {(["ALL", ...B2B_LEAD_STATUSES] as const).map((s) => (
               <button
                 key={s}
@@ -315,12 +354,14 @@ export default function AdminLeadsPage() {
                     <TableCell className="py-3 px-4 text-xs font-semibold align-middle whitespace-nowrap">
                       <div className="space-y-0.5">
                         <span className={lead.emailOptOut ? "text-slate-400 block" : "text-green-600 block"}>{lead.emailOptOut ? "Email opted out" : "Email eligible"}</span>
-                        <span className={lead.smsOptOut || !lead.phone ? "text-slate-400 block" : "text-green-600 block"}>{!lead.phone ? "No phone" : lead.smsOptOut ? "SMS opted out" : "SMS eligible"}</span>
+                        <span className={lead.smsOptOut || !lead.phone || !lead.smsConsentAt ? "text-slate-400 block" : "text-green-600 block"}>{!lead.phone ? "No phone" : lead.smsOptOut ? "SMS opted out" : !lead.smsConsentAt ? "No SMS consent" : "SMS eligible"}</span>
                         {lead.marketingOptIn && !lead.emailOptOut && <Badge variant="secondary" className="text-[9px] font-mono tracking-tight px-1.5 py-0">Nurture opt-in</Badge>}
                         {lead.source.startsWith("WEBSITE_") && !lead.marketingOptIn && <span className="text-[10px] text-slate-400 block">No marketing consent</span>}
+                        {lead.agentPausedAt && <span className="text-amber-600 block" title={lead.agentPauseReason || undefined}>{lead.agentPauseReason === "paused by the team" ? "AI paused" : "AI paused: needs a person"}</span>}
                       </div>
                     </TableCell>
                     <TableCell className="py-3 px-4 text-right pr-6 space-x-1 align-middle whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
+                      <Button variant="ghost" size="sm" className="text-xs px-2" title="Timeline" aria-label={"Timeline for " + lead.companyName} onClick={() => openTimeline(lead)}><History className="h-3.5 w-3.5" /></Button>
                       <Button variant="ghost" size="sm" className="text-xs px-2" aria-label={"Edit " + lead.companyName} onClick={() => openForm(lead)}><Pencil className="h-3.5 w-3.5" /></Button>
                       <Button variant="ghost" size="sm" className="text-red-500 hover:bg-red-500/10 text-xs px-2" aria-label={"Delete " + lead.companyName} onClick={() => deleteLead(lead)}><Trash2 className="h-3.5 w-3.5" /></Button>
                     </TableCell>
@@ -345,6 +386,55 @@ export default function AdminLeadsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Timeline */}
+      <Dialog open={!!timelineFor} onOpenChange={(open) => !open && setTimelineFor(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{timelineFor?.companyName}: timeline</DialogTitle>
+            <DialogDescription>Campaign messages, replies, AI answers and meetings, newest first.</DialogDescription>
+          </DialogHeader>
+          {!timeline ? (
+            <Loader2 className="mx-auto my-8 h-5 w-5 animate-spin text-muted-foreground" />
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                <span className="min-w-0">
+                  {timeline.agentPausedAt ? `AI is paused for this lead: ${timeline.agentPauseReason || "paused by the team"}.` : "AI answers this lead's replies automatically."}
+                  {timeline.agentPausedUntil && ` It resumes on its own after ${new Date(timeline.agentPausedUntil).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`}
+                  {timeline.waiting > 0 && ` ${timeline.waiting} unanswered message${timeline.waiting === 1 ? "" : "s"}.`}
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {timeline.agentPausedAt && timeline.waiting > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => setLeadPaused(false, true)}>Resume and answer</Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => setLeadPaused(!timeline.agentPausedAt)}>
+                    {timeline.agentPausedAt ? "Resume AI" : "Pause AI"}
+                  </Button>
+                </div>
+              </div>
+              {timeline.items.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Nothing yet.</p>
+              ) : (
+                <ol className="space-y-2">
+                  {timeline.items.map((item) => (
+                    <li key={`${item.kind}-${item.id}`} className={"rounded-lg border p-3 text-sm " + (item.kind === "lead" ? "border-[#b48c3c]/40 bg-[#b48c3c]/5" : "border-border")}>
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium">{item.title}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {item.status && <span className={item.status === "failed" ? "text-red-500" : ""}>{titleCase(item.status)} · </span>}
+                          {new Date(item.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                        </span>
+                      </div>
+                      {item.body && <p className="mt-1 whitespace-pre-wrap wrap-break-word text-muted-foreground">{item.body}</p>}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Add / edit lead */}
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="sm:max-w-lg">
@@ -358,7 +448,7 @@ export default function AdminLeadsPage() {
                 ["companyName", "Company name *", "Olson Homes"],
                 ["contactName", "Contact person", "Jane Smith"],
                 ["email", "Email *", "jane@olsonhomes.com"],
-                ["phone", "Phone", "(562) 596-4770"],
+                ["phone", "Phone (+1)", "+1 (562) 596-4770"],
                 ["website", "Website", "olsonhomes.com"],
                 ["city", "City / State", "Long Beach, CA"],
               ] as const
@@ -378,6 +468,13 @@ export default function AdminLeadsPage() {
               <Label className="text-xs">Notes</Label>
               <Textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={3} className="text-sm" />
             </div>
+            <label className="flex items-start gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" className="mt-1" checked={smsConsent} onChange={(e) => setSmsConsent(e.target.checked)} />
+              <span>
+                This person agreed to receive marketing texts
+                <span className="block text-xs text-muted-foreground">Campaign SMS steps are skipped without this.</span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
@@ -394,7 +491,7 @@ export default function AdminLeadsPage() {
           <DialogHeader>
             <DialogTitle>Import leads from CSV</DialogTitle>
             <DialogDescription>
-              Columns: <span className="font-mono">company, contact, email, phone, website, city, notes</span>. Company and email are
+              Columns: <span className="font-mono">company, contact, email, phone, website, city, notes, smsconsent</span>. Use yes in smsconsent only for people who agreed to marketing texts. Company and email are
               required; rows with a duplicate email are skipped.
             </DialogDescription>
           </DialogHeader>

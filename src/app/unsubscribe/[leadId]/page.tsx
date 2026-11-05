@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export default function UnsubscribePage() {
   const params = useParams();
   const leadId = Array.isArray(params.leadId) ? params.leadId[0] : params.leadId;
-  // Platform (B2B) campaign emails link here with ?type=b2b and the lead's booking token.
+  // Platform (B2B) campaign emails link here with ?type=b2b and the lead's signed token.
   const isB2B = useSearchParams().get("type") === "b2b";
 
-  const [state, setState] = useState<"loading" | "success" | "error">(
-    leadId ? "loading" : "error",
+  // Waits for a click: email security scanners open links, and that must not unsubscribe anyone.
+  const [state, setState] = useState<"confirm" | "loading" | "success" | "error">(
+    leadId ? "confirm" : "error",
   );
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
@@ -19,34 +21,25 @@ export default function UnsubscribePage() {
     leadId ? "" : "This unsubscribe link is invalid.",
   );
 
-  useEffect(() => {
-    if (!leadId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const url = isB2B ? `/api/public/b2b/unsubscribe/${leadId}` : `/api/sales/compliance/unsubscribe-link/${leadId}`;
-        const res = await fetch(url, { method: "POST" });
-        const data = await res.json().catch(() => ({}));
-        if (cancelled) return;
-        if (res.ok && data.success) {
-          setCompanyName(data.companyName || null);
-          setEmail(data.email || null);
-          setState("success");
-        } else {
-          setMessage(data.message || "We couldn't process your request.");
-          setState("error");
-        }
-      } catch {
-        if (!cancelled) {
-          setMessage("Network error. Please try again.");
-          setState("error");
-        }
+  const unsubscribe = async () => {
+    setState("loading");
+    try {
+      const url = isB2B ? `/api/public/b2b/unsubscribe/${leadId}` : `/api/sales/compliance/unsubscribe-link/${leadId}`;
+      const res = await fetch(url, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setCompanyName(data.companyName || null);
+        setEmail(data.email || null);
+        setState("success");
+      } else {
+        setMessage(data.message || "We couldn't process your request.");
+        setState("error");
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [leadId, isB2B]);
+    } catch {
+      setMessage("Network error. Please try again.");
+      setState("error");
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
@@ -56,6 +49,18 @@ export default function UnsubscribePage() {
         </div>
 
         <div className="p-8 text-center">
+          {state === "confirm" && (
+            <>
+              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Unsubscribe?</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {isB2B ? "You'll stop receiving our marketing emails and texts." : "You'll stop receiving these marketing emails."}
+              </p>
+              <Button className="mt-5 bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90" onClick={unsubscribe}>
+                Unsubscribe
+              </Button>
+            </>
+          )}
+
           {state === "loading" && (
             <>
               <Loader2 className="h-10 w-10 text-[#b48c3c] animate-spin mx-auto" />
@@ -70,7 +75,7 @@ export default function UnsubscribePage() {
               <p className="mt-2 text-sm text-muted-foreground">
                 {email ? (
                   <>
-                    <span className="font-medium">{email}</span> will no longer receive marketing emails
+                    <span className="font-medium">{email}</span> will no longer receive marketing {isB2B ? "emails or texts" : "emails"}
                     {companyName ? <> from {companyName}</> : null}.
                   </>
                 ) : (

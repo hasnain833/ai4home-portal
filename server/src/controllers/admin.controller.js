@@ -1,4 +1,4 @@
-import { toE164 } from "../services/sms.service.js";
+import { PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import prisma from "../lib/prisma.js";
 import bcrypt from "bcryptjs";
 import {
@@ -59,7 +59,7 @@ export const createStaff = async (req, res) => {
     }
 
     const phone = toE164(req.body.phone);
-    if (phone === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+    if (phone === undefined) return res.status(400).json({ message: PHONE_ERROR });
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -122,7 +122,7 @@ export const updateStaff = async (req, res) => {
     }
 
     const phone = toE164(req.body.phone);
-    if (req.body.phone !== undefined && phone === undefined) return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+    if (req.body.phone !== undefined && phone === undefined) return res.status(400).json({ message: PHONE_ERROR });
 
     const staff = await prisma.user.findFirst({
       where: { id: staffId, companyId: session.companyId, role: "STAFF" },

@@ -344,6 +344,7 @@ enum KBScope {
   PLATFORM
   COMPANY
   HELP
+  B2B
 }
 
 enum LeadSource {
@@ -957,6 +958,11 @@ model B2BLead {
   smsOptOut    Boolean                 @default(false)
   marketingOptIn Boolean               @default(false)
   marketingConsentAt DateTime?
+  smsConsentAt DateTime?
+  agentPausedAt DateTime?
+  agentPausedUntil DateTime?
+  agentPauseReason String?
+  messages     B2BMessage[]
   inquiries    B2BInquiry[]
   enrollments  B2BEnrollment[]
   appointments SalesAgentAppointment[]
@@ -971,9 +977,38 @@ model B2BCampaign {
   name        String
   steps       Json            @default("[]")
   status      String          @default("DRAFT")
+  archivedAt  DateTime?
   enrollments B2BEnrollment[]
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
+}
+
+// The conversation with a B2B lead: their replies and the agent's answers.
+model B2BMessage {
+  id        String    @id @default(cuid())
+  leadId    String
+  lead      B2BLead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  direction String
+  actor     String
+  channel   String
+  subject   String?
+  body      String    @db.Text
+  outcome   String?
+  note      String?
+  handledAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([actor, createdAt])
+}
+
+model B2BCampaignTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  steps       Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model B2BEnrollment {
@@ -985,6 +1020,7 @@ model B2BEnrollment {
   status       String      @default("ACTIVE") 
   exitedReason String? 
   currentStep  Int         @default(0)
+  stepAttempts Int         @default(0)
   nextRunAt    DateTime?
   sentCount    Int         @default(0)
   failedCount  Int         @default(0)
@@ -1018,6 +1054,26 @@ model SalesAgentPromptVersion {
   @@index([isActive])
   @@index([isLive])
   @@index([createdAt])
+}
+
+model B2BAgentPromptVersion {
+  id             String    @id @default(cuid())
+  label          String?
+  systemTemplate String    @db.Text
+  toolDescription String   @default("") @db.Text
+  kbEmptyText    String    @default("") @db.Text
+  isActive       Boolean   @default(false)
+  isLive         Boolean   @default(false)
+  setLiveAt      DateTime?
+  setLiveById    String?
+  setLiveByName  String?
+  createdById    String?
+  createdByName  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([isActive])
+  @@index([isLive])
 }
 
 model WarrantyAgentPromptVersion {

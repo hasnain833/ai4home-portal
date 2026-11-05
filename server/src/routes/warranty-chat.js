@@ -60,7 +60,8 @@ async function postMessage(req, res) {
       return res.status(404).json({ error: "Company not found" });
     }
     // Suspended tenants get no AI replies (each one is a paid model call).
-    if (company.suspendedAt) {
+    // Unverified companies count too: this public route spends platform-paid AI.
+    if (company.suspendedAt || company.verificationStatus !== "VERIFIED") {
       return res.status(403).json({ error: "This assistant is currently unavailable." });
     }
 

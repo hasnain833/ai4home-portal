@@ -9,6 +9,7 @@ import {
 } from "../controllers/admin.controller.js";
 import {
   getCompanies,
+  getCompaniesOverview,
   getUsers,
   updateCompanyWorkspaces,
   updateUserAccess,
@@ -30,6 +31,7 @@ import {
 } from "../admin/platform.controller.js";
 import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
 import * as b2b from "../admin/b2b.controller.js";
+import * as b2bLab from "../admin/b2b-prompt-lab.controller.js";
 import {
   listSuperStaff,
   inviteSuperStaff,
@@ -80,6 +82,7 @@ router.get("/messaging/spend", requireAuth, requireAdmin("costs"), getMessagingS
 router.patch("/messaging/pricing", requireAuth, requireAdmin("costs"), setMessagingPricing);
 
 router.get("/companies", requireAuth, requireAdmin("companies.view", "support"), getCompanies);
+router.get("/companies-overview", requireAuth, requireAdmin("companies.view", "support"), getCompaniesOverview);
 router.get("/users", requireAuth, requireAdmin("companies.view"), getUsers);
 router.patch(
   "/companies/:companyId/workspaces",
@@ -126,9 +129,17 @@ router.post("/b2b/leads", requireAuth, requireAdmin("b2b"), b2b.createLead);
 router.post("/b2b/leads/import", requireAuth, requireAdmin("b2b"), b2b.importLeads);
 router.patch("/b2b/leads/:id", requireAuth, requireAdmin("b2b"), b2b.updateLead);
 router.delete("/b2b/leads/:id", requireAuth, requireAdmin("b2b"), b2b.deleteLead);
+router.get("/b2b/leads/:id/timeline", requireAuth, requireAdmin("b2b"), b2b.leadTimeline);
+router.post("/b2b/leads/:id/agent", requireAuth, requireAdmin("b2b"), b2b.setLeadAgentPaused);
 router.get("/b2b/campaigns", requireAuth, requireAdmin("b2b"), b2b.listCampaigns);
 router.post("/b2b/campaigns", requireAuth, requireAdmin("b2b"), b2b.createCampaign);
 router.post("/b2b/campaigns/generate-step", requireAuth, requireAdmin("b2b"), b2b.generateStep);
+router.post("/b2b/campaigns/generate", requireAuth, requireAdmin("b2b"), b2b.generateCampaign);
+router.post("/b2b/campaigns/send-test", requireAuth, requireAdmin("b2b"), b2b.sendTestStep);
+router.get("/b2b/templates", requireAuth, requireAdmin("b2b"), b2b.listTemplates);
+router.post("/b2b/templates", requireAuth, requireAdmin("b2b"), b2b.createTemplate);
+router.put("/b2b/templates/:id", requireAuth, requireAdmin("b2b"), b2b.updateTemplate);
+router.delete("/b2b/templates/:id", requireAuth, requireAdmin("b2b"), b2b.deleteTemplate);
 router.put("/b2b/campaigns/:id", requireAuth, requireAdmin("b2b"), b2b.updateCampaign);
 router.patch("/b2b/campaigns/:id/status", requireAuth, requireAdmin("b2b"), b2b.setCampaignStatus);
 router.delete("/b2b/campaigns/:id", requireAuth, requireAdmin("b2b"), b2b.deleteCampaign);
@@ -187,6 +198,15 @@ router.post(
 router.delete("/prompt-lab/kb/:documentId", requireAuth, requireAdmin("prompt-lab"), deleteKbDocument);
 
 // Warranty Prompt Lab
+router.get("/b2b-prompt-lab", requireAuth, requireAdmin("prompt-lab"), b2bLab.getB2BPromptLab);
+router.post("/b2b-prompt-lab/versions", requireAuth, requireAdmin("prompt-lab"), b2bLab.saveB2BPromptVersion);
+router.post("/b2b-prompt-lab/versions/:versionId/set-current", requireAuth, requireAdmin("prompt-lab"), b2bLab.setCurrentB2BVersion);
+router.post("/b2b-prompt-lab/versions/:versionId/set-live", requireAuth, requireAdmin("prompt-lab"), b2bLab.setB2BVersionLive);
+router.post("/b2b-prompt-lab/revert-to-defaults", requireAuth, requireAdmin("prompt-lab"), b2bLab.revertB2BToDefaults);
+router.delete("/b2b-prompt-lab/versions/:versionId", requireAuth, requireAdmin("prompt-lab"), b2bLab.deleteB2BVersion);
+router.post("/b2b-prompt-lab/preview", requireAuth, requireAdmin("prompt-lab"), b2bLab.previewB2BPrompt);
+router.post("/b2b-prompt-lab/chat", requireAuth, requireAdmin("prompt-lab"), b2bLab.b2bPromptLabChat);
+
 router.get("/warranty-prompt-lab", requireAuth, requireAdmin("prompt-lab"), getWarrantyPromptLab);
 router.post("/warranty-prompt-lab/versions", requireAuth, requireAdmin("prompt-lab"), saveWarrantyPromptVersion);
 router.post("/warranty-prompt-lab/versions/:versionId/set-current", requireAuth, requireAdmin("prompt-lab"), setCurrentWarrantyVersion);

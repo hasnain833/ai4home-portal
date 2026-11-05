@@ -8,6 +8,49 @@ const ERP_LABELS = {
   HYPHEN: "Hyphen",
 };
 
+/** A homeowner's own claim counts and latest claims. */
+export const getHomeownerSummary = async (req, res) => {
+  try {
+    const session = req.user;
+    if (session?.role !== "HOMEOWNER") {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const where = { homeownerId: session.id };
+    const [statusCounts, recentTickets] = await Promise.all([
+      prisma.ticket.groupBy({ by: ["status"], where, _count: { _all: true } }),
+      prisma.ticket.findMany({
+        where,
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          issueType: true,
+          ticketType: true,
+          warrantyYear: true,
+          priority: true,
+          status: true,
+          createdAt: true,
+          property: { select: { address: true } },
+        },
+      }),
+    ]);
+
+    const totalClaims = statusCounts.reduce((n, r) => n + r._count._all, 0);
+    const resolvedClaims = statusCounts.find((r) => r.status === "RESOLVED")?._count._all ?? 0;
+
+    return res.json({
+      totalClaims,
+      resolvedClaims,
+      activeClaims: totalClaims - resolvedClaims,
+      recentTickets,
+    });
+  } catch (error) {
+    console.error("Homeowner summary error:", error);
+    return res.status(500).json({ message: "Error fetching your claims" });
+  }
+};
+
 export const getDashboardStats = async (req, res) => {
   try {
     const session = req.user;

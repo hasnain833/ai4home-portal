@@ -1,6 +1,11 @@
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import prisma from "./prisma.js";
 import { MailService } from "../services/mail-service.js";
+import { Templates } from "../services/templates.js";
+import { toE164 } from "../services/sms.service.js";
 import { escapeHtml } from "./utils.js";
+import { hasLLM } from "./llm.js";
+import { inngest } from "./inngest.js";
 
 export const B2B_LEAD_STATUSES = ["NEW", "CONTACTED", "INTERESTED", "SIGNED", "LOST"];
 export const B2B_CLOSED_STATUSES = ["SIGNED", "LOST"];
@@ -44,7 +49,33 @@ export function appUrl() {
 }
 export const bookingLinkFor = (lead, campaignId) =>
   `${appUrl()}/meet/${encodeURIComponent(lead.bookingToken)}${campaignId ? `?c=${encodeURIComponent(campaignId)}` : ""}`;
-export const unsubscribeLinkFor = (lead) => `${appUrl()}/unsubscribe/${encodeURIComponent(lead.bookingToken)}?type=b2b`;
+
+// Unsubscribing has its own signed token, so a forwarded booking link can't opt someone out.
+// It never expires: an unsubscribe link must keep working for as long as the email exists.
+const unsubscribeSignature = (leadId) =>
+  createHmac("sha256", process.env.APP_ENCRYPTION_KEY || "b2b-unsubscribe").update(`b2b-unsubscribe:${leadId}`).digest("base64url");
+
+export const unsubscribeLinkFor = (lead) => `${appUrl()}/unsubscribe/${encodeURIComponent(`${lead.id}.${unsubscribeSignature(lead.id)}`)}?type=b2b`;
+
+export async function findLeadByUnsubscribeToken(token) {
+  const value = String(token || "");
+  const [leadId, signature] = value.split(".");
+  if (!signature) {
+    // Emails already sent carry the booking token, and those links have to keep working.
+    return prisma.b2BLead.findUnique({ where: { bookingToken: value } });
+  }
+  const expected = Buffer.from(unsubscribeSignature(leadId));
+  const given = Buffer.from(signature);
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+  return prisma.b2BLead.findUnique({ where: { id: leadId } });
+}
+
+/** Plain text in the branded email layout, shared by campaign steps and agent replies. */
+export function b2bEmailHtml(text, lead, { bookingLink, bookingButton = true }) {
+  const html = String(text).split(/\r?\n\s*\r?\n/).map((paragraph) => `<p style="margin:0 0 16px">${escapeHtml(paragraph).replace(/\r?\n/g, "<br />")}</p>`).join("");
+  const websiteUrl = new URL(process.env.WEBSITE_PUBLIC_URL || "https://www.aiforhomebuilders.com").origin;
+  return Templates.getB2BCampaignEmail(html, { bookingLink, unsubscribeLink: unsubscribeLinkFor(lead), portalUrl: appUrl(), websiteUrl, bookingButton });
+}
 
 // The merge fields renderB2BStep fills. Anything else would reach the builder
 // as literal "{{…}}" text, so saving rejects it.
@@ -55,6 +86,9 @@ export function unknownPlaceholders(text) {
   return [...new Set(found.filter((name) => !B2B_PLACEHOLDERS.includes(name)))];
 }
 
+// A send time is the lead's local clock, and must stay inside 8am–9pm.
+export const validSendTime = (t) => /^([01]\d|20):[0-5]\d$/.test(String(t)) && t >= "08:00";
+
 export function validateSteps(steps) {
   if (!Array.isArray(steps) || steps.length === 0) return "Add at least one step.";
   if (steps.length > 20) return "A campaign can have at most 20 steps.";
@@ -62,6 +96,7 @@ export function validateSteps(steps) {
     if (!["EMAIL", "SMS"].includes(s?.channel)) return `Step ${i + 1} needs a channel (Email or SMS).`;
     if (!String(s.body || "").trim()) return `Step ${i + 1} needs a message.`;
     if (s.channel === "EMAIL" && !String(s.subject || "").trim()) return `Step ${i + 1} (email) needs a subject.`;
+    if (s.sendTime && !validSendTime(s.sendTime)) return `Step ${i + 1} needs a send time between 8am and 9pm.`;
     const unknown = unknownPlaceholders(`${s.channel === "EMAIL" ? s.subject || "" : ""} ${s.body}`);
     if (unknown.length) {
       return `Step ${i + 1} uses ${unknown.map((n) => `{{${n}}}`).join(", ")}, which isn't a placeholder. Use only ${B2B_PLACEHOLDERS.map((n) => `{{${n}}}`).join(" ")}.`;
@@ -70,14 +105,86 @@ export function validateSteps(steps) {
   return null;
 }
 
+const STEP_ID_RE = /^[\w-]{1,64}$/;
+
 export function cleanSteps(steps) {
+  const seen = new Set();
   return steps.map((s) => ({
+    // A stable id lets a live campaign be edited without leads skipping or repeating steps.
+    id: STEP_ID_RE.test(s.id || "") && !seen.has(s.id) && seen.add(s.id) ? s.id : randomUUID(),
     channel: s.channel,
     delayDays: Math.max(0, Math.min(365, parseInt(s.delayDays, 10) || 0)),
+    sendTime: s.sendTime || null,
     subject: s.channel === "EMAIL" ? String(s.subject || "").trim() : "",
     body: String(s.body || ""),
   }));
 }
+
+/**
+ * Where a lead on old step i belongs after an edit: the same step, or the next one that
+ * survived. Steps saved before ids existed can only stay at the same position.
+ */
+export function remapStepIndex(oldSteps, newSteps, i) {
+  if (!oldSteps[i]?.id) return Math.min(i, newSteps.length);
+  for (let k = i; k < oldSteps.length; k++) {
+    const found = newSteps.findIndex((s) => s.id === oldSteps[k].id);
+    if (found !== -1) return found;
+  }
+  return newSteps.length;
+}
+
+// First-run starter templates. Drafts for client approval: no invented numbers or case studies.
+const emailStep = (delayDays, subject, body) => ({ channel: "EMAIL", delayDays, sendTime: "10:00", subject, body });
+const smsStep = (delayDays, body) => ({ channel: "SMS", delayDays, sendTime: "11:00", subject: "", body });
+
+export const STARTER_TEMPLATES = [
+  {
+    id: "starter-new-builder-intro",
+    name: "New builder introduction",
+    description: "A short first touch for builders who have not heard from us.",
+    steps: [
+      emailStep(0, "A question for {{companyName}}",
+        "Hi {{firstName}},\n\nMost builders we speak with are stretched in two places: replying to new buyer inquiries, and answering homeowner warranty questions after closing.\n\nAI4Home gives you a Sales Agent that responds to inquiries, follows up and arranges appointments, and a Warranty Agent that handles routine homeowner questions and passes the rest to your team.\n\nWould a short call be useful? Pick a time here: {{bookingLink}}\n\nThe AI4Home team"),
+      smsStep(2, "Hi {{firstName}}, did our note about {{companyName}}'s inquiries reach you? {{bookingLink}}"),
+      emailStep(5, "Worth a short call, {{firstName}}?",
+        "Hi {{firstName}},\n\nI'll keep this brief. If your team spends time on repeat homeowner questions or on following up with buyers, that is the work AI4Home is built to take on, with a person stepping in whenever it is needed.\n\nIf now isn't the right time, no problem. If it is, you can book a short call here: {{bookingLink}}\n\nThe AI4Home team"),
+    ],
+  },
+  {
+    id: "starter-warranty-calls",
+    name: "Cutting routine warranty calls",
+    description: "For warranty and customer care managers.",
+    steps: [
+      emailStep(0, "Routine warranty calls at {{companyName}}",
+        "Hi {{firstName}},\n\nA lot of warranty work starts with the same questions from homeowners: what's covered, how to report an issue, and what happens next.\n\nThe AI4Home Warranty Agent answers routine questions, takes the details of an issue, and hands off to your team when a person is needed.\n\nCould we show you how it would work for {{companyName}}? Book a short call: {{bookingLink}}\n\nThe AI4Home team"),
+      emailStep(4, "When the Warranty Agent hands off to your team",
+        "Hi {{firstName}},\n\nA fair question about any AI tool is what happens when it shouldn't answer. With AI4Home, your team stays in charge: issues that need a person are handed to them, along with the details already collected.\n\nHappy to walk through that flow with you. Pick a time here: {{bookingLink}}\n\nThe AI4Home team"),
+      smsStep(7, "{{firstName}}, want a quick look at the Warranty Agent? {{bookingLink}}"),
+    ],
+  },
+  {
+    id: "starter-inquiry-no-booking",
+    name: "Website inquiry that didn't book",
+    description: "Follow-up for builders who asked about us but never booked a call.",
+    steps: [
+      emailStep(0, "Thanks for your interest in AI4Home",
+        "Hi {{firstName}},\n\nThanks for reaching out about AI4Home. The quickest way to see whether it suits {{companyName}} is a short conversation about how your team handles sales inquiries and warranty requests today.\n\nYou can pick a time that suits you here: {{bookingLink}}\n\nOr just reply to this email with your questions.\n\nThe AI4Home team"),
+      smsStep(2, "Hi {{firstName}}, happy to answer your AI4Home questions on a short call: {{bookingLink}}"),
+      emailStep(6, "Anything we can answer for you?",
+        "Hi {{firstName}},\n\nI wanted to check whether you still have questions about AI4Home. If it helps, we can focus the call on just one area: the Sales Agent, the Warranty Agent, or how the two work together.\n\nBook a time here: {{bookingLink}}\n\nThe AI4Home team"),
+    ],
+  },
+  {
+    id: "starter-re-engage",
+    name: "Re-engaging quiet leads",
+    description: "A light check-in for builders who have gone quiet.",
+    steps: [
+      emailStep(0, "Still a priority for {{companyName}}?",
+        "Hi {{firstName}},\n\nWe spoke with {{companyName}} a while back about AI for sales inquiries and warranty support. I wanted to check whether that is still on your list.\n\nIf it is, you can book a short call here: {{bookingLink}}\n\nIf not, just let me know and we'll stop checking in.\n\nThe AI4Home team"),
+      smsStep(7, "Hi {{firstName}}, still worth a quick chat about AI4Home? {{bookingLink}}"),
+    ],
+  },
+];
 
 export async function exitB2BEnrollments(leadId, reason, { campaignId } = {}) {
   const { count } = await prisma.b2BEnrollment.updateMany({
@@ -99,19 +206,89 @@ export async function completeFinishedCampaigns(campaignId) {
   });
 }
 
-export async function notifySuperAdmin(subject, html) {
+export async function notifySuperAdmin(subject, html, { replyTo } = {}) {
   const to = process.env.SUPERADMIN_EMAIL;
   if (!to) {
     console.warn(`[B2B] SUPERADMIN_EMAIL is not set — dropped notification: ${subject}`);
     return;
   }
-  await MailService.sendEmail({ to, subject, html, source: "b2b-notify", noReply: true }).catch((e) =>
+  await MailService.sendEmail({ to, subject, html, source: "b2b-notify", replyTo, noReply: !replyTo }).catch((e) =>
     console.error("[B2B] Super admin notification failed:", e.message),
   );
 }
 
 
-export async function handleB2BReply({ channel, sender, body, subject }) {
+const AUTO_SUBJECT_RE = /^(auto(matic)?[\s-]*(reply|response)|autoreply|auto:|out of (the )?office|ooo\b|away from (the |my )?(office|desk)|on (vacation|holiday|leave))/i;
+const QUOTE_MARKER_RE = /^\s*(>|on .+ wrote:|-{2,}\s*(original|forwarded) message|_{5,}|from:\s|sent from my )|<blockquote|class="gmail_quote"/im;
+const OPT_OUT_RE = /\b(unsubscribe|remove me|take me off|opt(ing)?[\s-]?out|stop (e-?mailing|texting|messaging|contacting|sending)|(do not|don'?t) (contact|e-?mail|text|message)|no more (e-?mails|texts|messages))\b/i;
+
+const AUTO_BODY_RE = /\b(out of (the )?office|automatic reply|auto-?reply|auto-?response|this is an automated)\b/i;
+const lowerHeaders = (headers) =>
+  Object.fromEntries(Object.entries(headers && typeof headers === "object" ? headers : {}).map(([k, v]) => [k.toLowerCase(), String(v).toLowerCase()]));
+
+/** Out-of-office and other machine replies, which say nothing about the lead's interest. */
+export function isAutoReply({ headers, subject, body }) {
+  const h = lowerHeaders(headers);
+  if (h["auto-submitted"] && h["auto-submitted"] !== "no") return true;
+  if (h["x-autoreply"] || h["x-autorespond"]) return true;
+  if (/^(auto_reply|bulk|junk)$/.test(h.precedence || "")) return true;
+  if (AUTO_SUBJECT_RE.test(String(subject || "").trim())) return true;
+  return AUTO_BODY_RE.test(latestReplyText(body).slice(0, 400));
+}
+
+/** True when the mail server's checks say the From address is forged. No checks means unknown, not forged. */
+export function looksForged(headers) {
+  const auth = lowerHeaders(headers)["authentication-results"] || "";
+  return /\bdmarc=fail\b/.test(auth) || (/\bspf=fail\b/.test(auth) && /\bdkim=fail\b/.test(auth));
+}
+
+export const NOT_INTERESTED_REASON = "the lead said they are not interested";
+
+/** A daily-limit pause ends by itself; a handoff stays until a person resumes the AI. */
+export const isAgentPaused = (lead) =>
+  !!lead.agentPausedAt && !(lead.agentPausedUntil && new Date(lead.agentPausedUntil) <= new Date());
+
+/** Keeps a business lead's SMS status in step with STOP and START texts on the shared number. */
+export async function setB2BSmsOptOut(contact, optedOut) {
+  const digits = String(contact || "").replace(/\D/g, "").slice(-10);
+  if (digits.length !== 10) return;
+  const leads = await prisma.b2BLead.findMany({ where: { phone: { contains: digits } }, select: { id: true } });
+  for (const { id } of leads) {
+    await prisma.b2BLead.update({ where: { id }, data: { smsOptOut: optedOut } });
+    if (optedOut) await exitB2BEnrollments(id, "UNSUBSCRIBE");
+  }
+}
+
+/** Only what the lead just wrote: our own quoted email contains the word "Unsubscribe". */
+export function latestReplyText(body) {
+  const text = String(body || "");
+  const quote = text.search(QUOTE_MARKER_RE);
+  return quote === -1 ? text : text.slice(0, quote);
+}
+
+const replyPlainText = (body) =>
+  latestReplyText(body).replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/[ \t]+/g, " ").trim();
+
+/** Why the agent must not answer this lead on this channel, or null. */
+export async function agentBlockReason(lead, channel) {
+  if (!hasLLM()) return "no AI provider is configured";
+  if (isAgentPaused(lead)) return `it is paused for this lead (${lead.agentPauseReason || "paused by the team"})`;
+  if (B2B_CLOSED_STATUSES.includes(lead.status)) return `the lead is ${lead.status}`;
+  if (channel === "EMAIL") return lead.emailOptOut ? "the lead opted out of email" : null;
+  if (lead.smsOptOut) return "the lead opted out of SMS";
+  if (!toE164(lead.phone)) return "the lead has no +1 number";
+  const stopped = await prisma.suppressionList.findFirst({
+    where: { companyId: null, value: { contains: lead.phone.replace(/\D/g, "").slice(-10) } },
+  });
+  return stopped ? "the lead replied STOP" : null;
+}
+
+export function asksToOptOut({ body, subject }) {
+  const freshSubject = /^(re|fwd?):/i.test(String(subject || "").trim()) ? "" : subject;
+  return OPT_OUT_RE.test(`${freshSubject || ""} ${latestReplyText(body)}`);
+}
+
+export async function handleB2BReply({ channel, sender, body, subject, headers }) {
   const contact = String(sender || "").trim().toLowerCase();
   if (!contact) return false;
   const digits = contact.replace(/\D/g, "").slice(-10);
@@ -121,17 +298,65 @@ export async function handleB2BReply({ channel, sender, body, subject }) {
   });
   if (!lead) return false;
 
+  // Handled, but the campaign carries on: nobody actually replied.
+  if (channel === "EMAIL" && isAutoReply({ headers, subject, body })) return true;
+
+  const text = replyPlainText(body);
+
+  // Someone else may be using this address: no opt-out, no agent, no campaign change.
+  if (channel === "EMAIL" && looksForged(headers)) {
+    await notifySuperAdmin(
+      `Suspicious email claiming to be ${lead.companyName}`,
+      `<p>An email from ${escapeHtml(sender)} failed the sender checks, so it was ignored. Please check with them directly if it matters.</p>` +
+        `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeHtml(text)}</blockquote>`,
+    );
+    return true;
+  }
+
+  const record = (handledAt) =>
+    prisma.b2BMessage.create({
+      data: { leadId: lead.id, direction: "IN", actor: "LEAD", channel, subject: subject || null, body: text || "(empty message)", handledAt },
+    });
+
+  if (asksToOptOut({ body, subject })) {
+    await record(new Date());
+    await prisma.b2BLead.update({ where: { id: lead.id }, data: { emailOptOut: true, smsOptOut: true } });
+    await exitB2BEnrollments(lead.id, "UNSUBSCRIBE");
+    await notifySuperAdmin(
+      `B2B lead opted out: ${lead.companyName}`,
+      `<p><strong>${escapeHtml(lead.contactName || lead.companyName)}</strong> (${escapeHtml(lead.companyName)}, ${escapeHtml(sender)}) ` +
+        `asked by ${channel === "SMS" ? "text" : "email"} not to be contacted. They are opted out of email and SMS.</p>` +
+        `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeHtml(latestReplyText(body))}</blockquote>`,
+    );
+    return true;
+  }
+
   await exitB2BEnrollments(lead.id, "REPLY");
   if (lead.status === "NEW") {
     await prisma.b2BLead.update({ where: { id: lead.id }, data: { status: "CONTACTED" } });
+  }
+
+  // The agent answers and reports the turn itself; otherwise a person gets the reply now.
+  // While paused, keep the message open: a person can have the AI answer it on resume.
+  let blocked = await agentBlockReason(lead, channel);
+  await record(blocked && !isAgentPaused(lead) ? new Date() : null);
+  if (!blocked) {
+    try {
+      await inngest.send({ name: "b2b.reply.received", data: { leadId: lead.id, channel } });
+      return true;
+    } catch (error) {
+      console.error("[B2B agent] Could not start:", error.message);
+      blocked = "the AI could not start";
+    }
   }
   await notifySuperAdmin(
     `B2B lead reply from ${lead.companyName}${subject ? `: ${subject}` : ""}`,
     `<p><strong>${escapeHtml(lead.contactName || lead.companyName)}</strong> (${escapeHtml(lead.companyName)}, ` +
       `${escapeHtml(sender)}) replied by ${channel === "SMS" ? "text" : "email"}. ` +
-      `Their campaign messages have been stopped.</p>` +
-      `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeHtml(body || "")}</blockquote>` +
+      `Their campaign messages have been stopped. AI did not reply: ${escapeHtml(blocked)}.</p>` +
+      `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeHtml(text)}</blockquote>` +
       `<p><a href="${appUrl()}/admin/leads">Open Business Leads</a></p>`,
+    { replyTo: channel === "EMAIL" ? lead.email : undefined },
   );
   return true;
 }

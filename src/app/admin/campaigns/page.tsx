@@ -20,6 +20,7 @@ import {
 import {
   AlertTriangle,
   BarChart3,
+  BookmarkPlus,
   Loader2,
   Mail,
   Megaphone,
@@ -28,6 +29,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Send,
   Sparkles,
   Trash2,
   UserPlus,
@@ -40,14 +42,16 @@ import {
   B2B_API,
   B2B_LEAD_STATUSES,
   type B2BCampaign,
+  type B2BCampaignTemplate,
   type B2BEnrollment,
   type B2BLeadStatus,
   type CampaignStep,
   sendJson,
   titleCase,
   useB2BCampaigns,
-  useB2BLeads,
+  useB2BLeadsLite,
   useB2BSegments,
+  useB2BTemplates,
   matchesB2BSegment,
 } from "@/lib/b2b-store";
 
@@ -68,16 +72,31 @@ const EXIT_LABELS: Record<string, string> = {
   NOT_CONFIGURED: "Messaging not configured",
 };
 
-const newStep = (delayDays = 0): CampaignStep => ({ channel: "EMAIL", delayDays, subject: "", body: "" });
-type Draft = { id?: string; name: string; steps: CampaignStep[] };
+const newStep = (delayDays = 0): CampaignStep => ({ channel: "EMAIL", delayDays, sendTime: "10:00", subject: "", body: "" });
+type Draft = { id?: string; name: string; steps: CampaignStep[]; template?: { id?: string; description: string } };
+
+// Half-hour slots on the lead's clock. The last is 8:30pm so a send never lands after 9pm.
+const SEND_TIMES = Array.from({ length: 26 }, (_, i) => {
+  const hour = 8 + Math.floor(i / 2);
+  const minute = i % 2 ? "30" : "00";
+  return { value: `${String(hour).padStart(2, "0")}:${minute}`, label: `${hour % 12 || 12}:${minute} ${hour < 12 ? "AM" : "PM"}` };
+});
+const SEND_RIGHT_AWAY = "right-away";
 const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 const PLACEHOLDERS = ["{{firstName}}", "{{contactName}}", "{{companyName}}", "{{city}}", "{{bookingLink}}"];
 
 export default function AdminCampaignsPage() {
   const confirm = useConfirm();
   const { items: campaigns, loading, reload } = useB2BCampaigns();
-  const { items: leads, reload: reloadLeads } = useB2BLeads();
+  const { items: leads, reload: reloadLeads } = useB2BLeadsLite();
   const { items: segments, reload: reloadSegments } = useB2BSegments();
+  const { items: templates, reload: reloadTemplates } = useB2BTemplates();
+  const [starting, setStarting] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+  const [testPhone, setTestPhone] = useState("");
+  const [testingStep, setTestingStep] = useState<number | null>(null);
   const [pickSegment, setPickSegment] = useState("all");
   const [wholeSegment, setWholeSegment] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -138,16 +157,83 @@ export default function AdminCampaignsPage() {
 
   const save = async () => {
     if (!draft) return;
-    if (!draft.name.trim()) return toast.error("Give the campaign a name.");
+    const { template } = draft;
+    if (!draft.name.trim()) return toast.error(`Give the ${template ? "template" : "campaign"} a name.`);
     if (draft.steps.some((s) => !s.body.trim() || (s.channel === "EMAIL" && !s.subject.trim())))
       return toast.error("Every email needs a subject and a message; every SMS needs a message.");
-    const ok = await run(
-      () => (draft.id ? sendJson(`${B2B_API}/campaigns/${draft.id}`, "PUT", draft) : sendJson(`${B2B_API}/campaigns`, "POST", draft)),
-      "Campaign saved.",
-    );
+    const ok = template
+      ? await run(() => {
+          const body = { name: draft.name, description: template.description, steps: draft.steps };
+          return template.id ? sendJson(`${B2B_API}/templates/${template.id}`, "PUT", body) : sendJson(`${B2B_API}/templates`, "POST", body);
+        }, "Template saved.")
+      : await run(
+          () => (draft.id ? sendJson(`${B2B_API}/campaigns/${draft.id}`, "PUT", draft) : sendJson(`${B2B_API}/campaigns`, "POST", draft)),
+          "Campaign saved.",
+        );
     if (ok) {
       setDraft(null);
-      await reload();
+      await (template ? reloadTemplates() : reload());
+    }
+  };
+
+  const openStart = () => {
+    setAiPrompt("");
+    setStarting(true);
+    void reloadTemplates();
+  };
+
+  // Each option opens the normal editor; nothing is saved until Save.
+  const startFrom = (next: Draft) => {
+    setStarting(false);
+    setDraft(next);
+  };
+
+  const generateCampaign = async () => {
+    setGenerating(true);
+    try {
+      const out = await sendJson<{ name: string; steps: CampaignStep[]; warning: string | null }>(
+        `${B2B_API}/campaigns/generate`,
+        "POST",
+        { prompt: aiPrompt },
+      );
+      startFrom({ name: out.name, steps: out.steps });
+      if (out.warning) toast.warning(out.warning);
+      else toast.success("Campaign drafted. Review and edit it before saving.");
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const removeTemplate = async (t: B2BCampaignTemplate) => {
+    const ok = await confirm({
+      title: `Delete "${t.name}"?`,
+      description: "Campaigns already made from this template are not affected. This can't be undone.",
+      confirmText: "Delete template",
+    });
+    if (ok && (await run(() => sendJson(`${B2B_API}/templates/${t.id}`, "DELETE"), "Template deleted."))) await reloadTemplates();
+  };
+
+  const saveAsTemplate = async (c: B2BCampaign) => {
+    if (await run(() => sendJson(`${B2B_API}/templates`, "POST", { name: c.name, description: "", steps: c.steps }), `Saved "${c.name}" as a template.`)) {
+      await reloadTemplates();
+    }
+  };
+
+  const sendTest = async (i: number) => {
+    if (!draft) return;
+    const step = draft.steps[i];
+    const to = step.channel === "SMS" ? testPhone : testEmail;
+    if (!to.trim()) return toast.error(`Enter your ${step.channel === "SMS" ? "phone number" : "email"} under "Send tests to" first.`);
+    setTestingStep(i);
+    try {
+      const out = await sendJson<{ message: string }>(`${B2B_API}/campaigns/send-test`, "POST", { step, to });
+      toast.success(out.message);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setTestingStep(null);
     }
   };
 
@@ -171,7 +257,7 @@ export default function AdminCampaignsPage() {
       description:
         c.stats.active > 0
           ? `${c.stats.active} lead${c.stats.active === 1 ? " is" : "s are"} still in this campaign and will stop receiving messages. This can't be undone.`
-          : "The campaign and its history will be removed. This can't be undone.",
+          : "The campaign will be removed from this page. Each lead's timeline keeps what they were sent. This can't be undone.",
       confirmText: "Delete campaign",
     });
     if (!ok) return;
@@ -199,7 +285,7 @@ export default function AdminCampaignsPage() {
       const skipped = r.skipped.closed + r.skipped.alreadyEnrolled + r.skipped.optedOut;
       toast.success(
         `Enrolled ${r.enrolled} lead${r.enrolled === 1 ? "" : "s"}` +
-          (skipped ? ` · skipped ${skipped} (already in it, signed/lost, or opted out)` : "") +
+          (skipped ? ` · skipped ${skipped} (already in it, signed/lost, opted out, or no SMS consent for an SMS-only campaign)` : "") +
           (r.startsOnLaunch && r.enrolled ? ". Messages start when you launch." : "."),
       );
       setEnrollFor(null);
@@ -250,7 +336,7 @@ export default function AdminCampaignsPage() {
                 </p>
               </div>
             </div>
-            <Button size="sm" className="gap-1.5 bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" onClick={() => setDraft({ name: "", steps: [newStep()] })}>
+            <Button size="sm" className="gap-1.5 bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" onClick={openStart}>
               <Plus className="h-3.5 w-3.5" /> New campaign
             </Button>
           </div>
@@ -329,6 +415,9 @@ export default function AdminCampaignsPage() {
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
+                      <Button variant="outline" size="icon" className="h-8 w-8" title="Save as template" aria-label="Save as template" disabled={busy} onClick={() => saveAsTemplate(c)}>
+                        <BookmarkPlus className="h-3.5 w-3.5" />
+                      </Button>
                       <Button variant="outline" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-500/10" title="Delete" onClick={() => remove(c)}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
@@ -341,14 +430,113 @@ export default function AdminCampaignsPage() {
         </CardContent>
       </Card>
 
+      {/* Start a campaign: blank, from AI, or from a template */}
+      <Dialog open={starting} onOpenChange={setStarting}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>New campaign</DialogTitle>
+            <DialogDescription>Start from a template, or have AI draft one. You can edit everything before saving, and nothing is sent until you launch.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="campaign-ai-prompt" className="text-xs">Create with AI</Label>
+              <Textarea
+                id="campaign-ai-prompt"
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                maxLength={1000}
+                rows={3}
+                placeholder="e.g. A 3-step campaign for warranty managers about reducing routine homeowner calls, with one SMS"
+                className="text-sm"
+              />
+              <Button
+                type="button"
+                size="sm"
+                className="gap-1.5 bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90"
+                disabled={generating || !aiPrompt.trim()}
+                onClick={generateCampaign}
+              >
+                {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                {generating ? "Writing campaign…" : "Create with AI"}
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Templates</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  onClick={() => startFrom({ name: "", steps: [newStep()], template: { description: "" } })}
+                >
+                  <Plus className="h-3 w-3" /> New template
+                </Button>
+              </div>
+              {templates.length === 0 ? (
+                <p className="rounded-lg border border-border py-6 text-center text-xs text-muted-foreground">No templates yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {templates.map((t) => {
+                    const emails = t.steps.filter((s) => s.channel === "EMAIL").length;
+                    const texts = t.steps.length - emails;
+                    return (
+                      <li key={t.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{t.name}</p>
+                          {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">{emails} email{emails === 1 ? "" : "s"} · {texts} SMS</p>
+                        </div>
+                        <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => startFrom({ name: t.name, steps: structuredClone(t.steps) })}>
+                          Use
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="Edit template"
+                          aria-label={`Edit template ${t.name}`}
+                          onClick={() => startFrom({ name: t.name, steps: structuredClone(t.steps), template: { id: t.id, description: t.description } })}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 text-red-500 hover:bg-red-500/10"
+                          title="Delete template"
+                          aria-label={`Delete template ${t.name}`}
+                          disabled={busy}
+                          onClick={() => removeTemplate(t)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => startFrom({ name: "", steps: [newStep()] })}>Start blank</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Create / edit */}
       <Dialog open={!!draft} onOpenChange={(open) => !open && setDraft(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{draft?.id ? "Edit campaign" : "New campaign"}</DialogTitle>
+            <DialogTitle>
+              {draft?.template ? (draft.template.id ? "Edit template" : "New template") : draft?.id ? "Edit campaign" : "New campaign"}
+            </DialogTitle>
             <DialogDescription>
-              Messages go out in order; each step waits its delay after the previous one. Texts only go out 8am–9pm in the lead&apos;s
-              time zone. Every message includes the booking link and an opt-out.
+              Messages go out in order; each step waits its delay after the previous one. Send times are 8am–9pm on each lead&apos;s
+              local clock, for email and SMS. Every message includes the booking link and an opt-out.
             </DialogDescription>
           </DialogHeader>
           {draft && (
@@ -356,6 +544,23 @@ export default function AdminCampaignsPage() {
               <div className="space-y-1.5">
                 <Label className="text-xs">Name</Label>
                 <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Builder intro sequence" className="h-9 text-sm" />
+              </div>
+              {draft.template && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Description</Label>
+                  <Input
+                    value={draft.template.description}
+                    onChange={(e) => setDraft({ ...draft, template: { ...draft.template, description: e.target.value } })}
+                    placeholder="When to use this template"
+                    className="h-9 text-sm"
+                  />
+                </div>
+              )}
+              <div className="grid gap-2 rounded-lg border border-border bg-muted/30 p-3 sm:grid-cols-2">
+                <p className="text-xs font-medium sm:col-span-2">Send tests to</p>
+                <Input type="email" aria-label="Test email" value={testEmail} onChange={(e) => setTestEmail(e.target.value)} placeholder="you@example.com" className="h-8 text-xs" />
+                <Input type="tel" aria-label="Test phone" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder="+1 555 123 4567" className="h-8 text-xs" />
+                <p className="text-[11px] text-muted-foreground sm:col-span-2">A test sends that step right away with sample details. No lead is enrolled.</p>
               </div>
 
               <div className="space-y-3">
@@ -389,7 +594,18 @@ export default function AdminCampaignsPage() {
                           onChange={(e) => updateStep(i, { delayDays: Math.max(0, Number(e.target.value) || 0) })}
                           className="h-7 w-16 text-xs"
                         />
-                        <span className="text-muted-foreground">days</span>
+                        <span className="text-muted-foreground">days, at</span>
+                        <Select
+                          value={step.sendTime || SEND_RIGHT_AWAY}
+                          onValueChange={(value) => updateStep(i, { sendTime: value === SEND_RIGHT_AWAY ? null : value })}
+                        >
+                          <SelectTrigger aria-label={`Step ${i + 1} send time`} className="h-7 w-28 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={SEND_RIGHT_AWAY}>When due</SelectItem>
+                            {SEND_TIMES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <span className="text-muted-foreground">lead&apos;s time</span>
                         {draft.steps.length > 1 && (
                           <Button
                             variant="ghost"
@@ -430,6 +646,17 @@ export default function AdminCampaignsPage() {
                         {writingStep === i ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                         {step.body.trim() ? "Rewrite with AI" : "Write with AI"}
                       </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 shrink-0 gap-1.5"
+                        disabled={testingStep !== null || !step.body.trim() || (step.channel === "EMAIL" && !step.subject.trim())}
+                        onClick={() => sendTest(i)}
+                      >
+                        {testingStep === i ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                        Send test
+                      </Button>
                     </div>
                     {step.channel === "EMAIL" && (
                       <Input value={step.subject} onChange={(e) => updateStep(i, { subject: e.target.value })} placeholder="Subject" className="h-9 text-sm" />
@@ -464,7 +691,7 @@ export default function AdminCampaignsPage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDraft(null)}>Cancel</Button>
-            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={busy || writingStep !== null} onClick={save}>Save campaign</Button>
+            <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={busy || writingStep !== null} onClick={save}>{draft?.template ? "Save template" : "Save campaign"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -566,7 +793,7 @@ export default function AdminCampaignsPage() {
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>{progressFor?.name}: lead progress</DialogTitle>
-            <DialogDescription>Lead progress and send issues. Accepted means the provider accepted a message; SMS delivery is confirmed separately by a delivery receipt. Refresh this view to see new receipts.</DialogDescription>
+            <DialogDescription>Lead progress and send issues. Accepted means the provider accepted a message; delivery, opens and clicks are confirmed separately by provider receipts. Open counts are approximate. Refresh this view to see new receipts.</DialogDescription>
           </DialogHeader>
           {!enrollments ? (
             <Loader2 className="mx-auto my-8 h-5 w-5 animate-spin text-muted-foreground" />
@@ -582,6 +809,7 @@ export default function AdminCampaignsPage() {
                     <th className="px-3 py-2 font-medium">Step</th>
                     <th className="px-3 py-2 font-medium">Next send</th>
                     <th className="px-3 py-2 font-medium">Accepted</th>
+                    <th className="px-3 py-2 font-medium">Latest email</th>
                     <th className="px-3 py-2 font-medium">Latest SMS delivery</th>
                     <th className="px-3 py-2" />
                   </tr>
@@ -593,7 +821,7 @@ export default function AdminCampaignsPage() {
                         <div className="font-medium">{e.lead.companyName}</div>
                         <div className="text-xs text-muted-foreground">{e.lead.email}</div>
                         {e.lastError && (
-                          <div className="mt-1 flex items-start gap-1 text-[11px] text-amber-600">
+                          <div className={"mt-1 flex items-start gap-1 text-[11px] " + (/ skipped: /.test(e.lastError) ? "text-muted-foreground" : "text-amber-600")}>
                             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> {e.lastError}
                           </div>
                         )}
@@ -616,6 +844,13 @@ export default function AdminCampaignsPage() {
                       <td className="px-3 py-2 text-xs text-muted-foreground">
                         {e.sentCount}
                         {e.failedCount > 0 && <span className="text-red-500"> · {e.failedCount} failed</span>}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        {e.emailDelivery?.status === "failed" ? <span className="text-red-500">Failed</span> :
+                          e.emailDelivery?.status === "clicked" ? <span className="text-emerald-600">Clicked</span> :
+                          e.emailDelivery?.status === "opened" ? <span className="text-emerald-600">Opened</span> :
+                          e.emailDelivery?.status === "delivered" ? <span className="text-emerald-600">Delivered</span> :
+                          e.emailDelivery ? "Not confirmed" : "Not tracked"}
                       </td>
                       <td className="px-3 py-2 text-xs" title={e.smsDelivery?.providerMessageId ? `Telnyx message: ${e.smsDelivery.providerMessageId}` : undefined}>
                         {e.smsDelivery?.status === "delivered" ? <span className="text-emerald-600">Delivered</span> :

@@ -46,7 +46,7 @@ export async function deliverWebsiteInquiry(id, { retrySms = false } = {}) {
         try {
           const result = await MessagingService.sendSms({ companyId: null, to, body, source: "website-b2b-booking", tag: "website-b2b-booking", addOptOut: kind !== "admin" });
           if (result.outcome === "sent") await prisma.b2BInquiry.update({ where: { id }, data: { [field]: new Date() } });
-          else errors.push(kind + ": SMS " + result.outcome + ": " + (result.error || result.reason || "Delivery failed"));
+          else if (result.outcome !== "skipped") errors.push(kind + ": SMS " + result.outcome + ": " + (result.error || result.reason || "Delivery failed"));
         } catch (error) { errors.push(kind + ": SMS " + (error.message || "Delivery failed")); }
       }
     }

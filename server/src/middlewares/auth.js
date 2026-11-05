@@ -34,12 +34,14 @@ async function loadAuthUser(email) {
           hasSalesAccess: true,
           salesPermissions: true,
           adminPermissions: true,
-          company: { select: { salesEnabled: true, warrantyEnabled: true, suspendedAt: true } },
+          company: { select: { salesEnabled: true, warrantyEnabled: true, suspendedAt: true, verificationStatus: true } },
         },
       }),
     { label: "auth user lookup" },
   );
-  if (user) {
+  // A company waiting on approval is re-read each time, so the moment it is
+  // verified the portal unlocks and the API agrees.
+  if (user && (!user.company || user.company.verificationStatus === "VERIFIED")) {
     if (authUserCache.size >= AUTH_USER_CACHE_MAX) authUserCache.clear();
     authUserCache.set(email, { user, expires: Date.now() + AUTH_USER_TTL_MS });
   }
@@ -244,6 +246,7 @@ export async function requireAuth(req, res, next) {
       name: dbUser.name,
       role: isSuperAdmin ? "ADMIN" : dbUser.role,
       companyId: dbUser.companyId,
+      companyVerified: dbUser.company?.verificationStatus === "VERIFIED",
       hasWarrantyAccess,
       hasSalesAccess,
       isSuperAdmin,
@@ -288,6 +291,16 @@ export function requireCompany(req, res, next) {
       .json({ message: "User is not associated with a company." });
   }
   next();
+}
+
+// The API side of the portal's VerificationGate: until a company is approved,
+// its warranty workspace is locked. Uploading the documents stays open.
+export function requireVerifiedCompany(req, res, next) {
+  if (req.user?.isSuperAdmin || req.user?.companyVerified) return next();
+  return res.status(403).json({
+    message: "Your company is still awaiting verification.",
+    code: "COMPANY_UNVERIFIED",
+  });
 }
 
 export function requireRoles(allowedRoles) {

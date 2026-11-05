@@ -2,12 +2,36 @@ import { inngest } from "../lib/inngest.js";
 import prisma from "../lib/prisma.js";
 import { validateLeadRow, leadDedupKeys } from "../lib/csv-validation.js";
 import { toCsv } from "../lib/utils.js";
+import { parseCsvText, parseCsvWithAliases, suggestLeadMapping, leadsFromMapping } from "../lib/csv-parse.js";
+
+const leadsFromBody = ({ headers, rows, mapping } = {}) =>
+  Array.isArray(headers) && Array.isArray(rows) && rows.every(Array.isArray) && mapping && typeof mapping === "object"
+    ? leadsFromMapping(headers, rows, mapping)
+    : [];
+
+/** For importers with fixed columns: rows keyed by field name, from the caller's aliases. */
+export const parseCsvRows = (req, res) => {
+  const { text, aliases } = req.body || {};
+  if (typeof text !== "string" || !aliases || typeof aliases !== "object") {
+    return res.status(400).json({ message: "text and aliases are required." });
+  }
+  return res.json({ rows: parseCsvWithAliases(text, aliases) });
+};
+
+/** Step 1 of the lead import: the file's columns, its rows and a first guess at the mapping. */
+export const parseLeadCsv = (req, res) => {
+  const [headers, ...rows] = parseCsvText(req.body?.text);
+  if (!headers || rows.length === 0) {
+    return res.status(400).json({ message: "CSV must contain a header row and at least one data row." });
+  }
+  return res.json({ headers, rows, mapping: suggestLeadMapping(headers) });
+};
 
 export const uploadCsvMiddleware = (req, res, next) => next();
 export const validateCsvImport = async (req, res) => {
   try {
-    const { leadsList } = req.body;
-    if (!leadsList || !Array.isArray(leadsList) || leadsList.length === 0) {
+    const leadsList = leadsFromBody(req.body);
+    if (leadsList.length === 0) {
       return res.status(400).json({ message: "No rows to validate." });
     }
 
@@ -129,9 +153,10 @@ export const deleteMappingTemplate = async (req, res) => {
 
 export const handleCsvUpload = async (req, res) => {
   try {
-    const { leadsList, attested, mergeStrategy = "update" } = req.body;
+    const { attested, mergeStrategy = "update" } = req.body;
+    const leadsList = leadsFromBody(req.body);
 
-    if (!leadsList || !Array.isArray(leadsList) || leadsList.length === 0) {
+    if (leadsList.length === 0) {
       return res.status(400).json({ message: "No valid leads provided for import." });
     }
 

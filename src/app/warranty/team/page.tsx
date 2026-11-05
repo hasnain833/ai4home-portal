@@ -328,7 +328,7 @@ export default function TeamManagementPage() {
                         <Input
                           id="staff-phone"
                           type="tel"
-                          placeholder="(555) 123-4567"
+                          placeholder="+1 (555) 123-4567"
                           className="pl-9"
                           value={newStaff.phone}
                           onChange={(e) => setNewStaff({ ...newStaff, phone: e.target.value })}
@@ -547,7 +547,7 @@ export default function TeamManagementPage() {
                       <Input
                         id="edit-staff-phone"
                         type="tel"
-                        placeholder="(555) 123-4567"
+                        placeholder="+1 (555) 123-4567"
                         className="pl-9"
                         value={editForm.phone}
                         onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}

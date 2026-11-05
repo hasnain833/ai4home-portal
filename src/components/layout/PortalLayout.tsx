@@ -124,7 +124,7 @@ export default function PortalLayout({
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfile } = useAuth();
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
@@ -186,8 +186,9 @@ export default function PortalLayout({
   const WorkspaceIcon = workspace === "warranty" ? Bot : Layers;
 
   const handleWorkspaceSwitch = (ws: "warranty" | "sales") => {
-    localStorage.setItem("last-workspace", ws);
-    document.cookie = `last-workspace=${ws}; path=/; max-age=31536000; SameSite=Lax`;
+    updateProfile({ lastActiveWorkspace: ws }).catch((err) =>
+      console.error("Failed to update last active workspace", err),
+    );
     router.push(`/${ws}/dashboard`);
   };
 
@@ -547,17 +548,8 @@ export default function PortalLayout({
 
         {/* Page content wrapper with padding */}
         <div className="relative flex-1">
-          <div
-            className={`p-4 md:p-6 ${
-              warrantyLocked
-                ? "pointer-events-none select-none blur-[6px]"
-                : ""
-            }`}
-            aria-hidden={warrantyLocked}
-          >
-            {children}
-          </div>
-          {warrantyLocked && <VerificationGate />}
+          {/* Locked pages aren't mounted: their API calls would only get 403s. */}
+          {warrantyLocked ? <VerificationGate /> : <div className="p-4 md:p-6">{children}</div>}
         </div>
       </main>
     </div>

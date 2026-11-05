@@ -24,7 +24,12 @@ export const SMS_OUTCOME = {
   FAILED: "failed",
   NOT_CONFIGURED: "not_configured",
   SUSPENDED: "suspended",
+  // The number is outside +1, which we don't text. Not a failure: nothing to retry or park.
+  SKIPPED: "skipped",
 };
+
+export const PHONE_ERROR = "Only +1 phone numbers are supported, e.g. +1 (555) 123-4567.";
+export const NON_PLUS_ONE_TAG = "non-+1-phone";
 
 export const smsSent = (result) => result?.outcome === SMS_OUTCOME.SENT;
 
@@ -81,17 +86,18 @@ export function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-// Phone as typed by an admin -> E.164 for Telnyx. Bare 10-digit numbers are
-// taken as US. "" -> null (clear); anything unparseable -> undefined (reject).
+// Phone as typed -> E.164 for Telnyx. We only text +1 (US and Canada); bare
+// 10-digit numbers are taken as +1. "" -> null (clear); anything else -> undefined (reject).
 export function toE164(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
   const digits = normalizePhone(raw);
-  if (raw.startsWith("+")) return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : undefined;
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  return undefined;
+  const withCountry = digits.length === 10 && !raw.startsWith("+") ? `1${digits}` : digits;
+  return /^1[2-9]\d{9}$/.test(withCountry) ? `+${withCountry}` : undefined;
 }
+
+// For imports and CRM sync: one bad number shouldn't cost us the lead, so keep it without a phone.
+export const usablePhone = (value) => (toE164(value) ? value : null);
 
 const NAME_TTL_MS = 60_000;
 const nameCache = new Map();
@@ -128,6 +134,11 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
   if (await isCompanySuspended(companyId)) {
     return { outcome: SMS_OUTCOME.SUSPENDED, to, body, provider: null, error: "Company is suspended." };
   }
+  const destination = toE164(to);
+  if (!destination) {
+    console.info(`[SMS] Skipped for ${source || "unknown source"}: not a +1 number.`);
+    return { outcome: SMS_OUTCOME.SKIPPED, to, body, provider: null, error: "SMS skipped: not a +1 number." };
+  }
   const cfg = resolveSystemConfig();
 
   if (!cfg) {
@@ -155,11 +166,6 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
     });
 
   try {
-    const destination = toE164(to);
-    if (!destination) {
-      await meter("failed");
-      return { outcome: SMS_OUTCOME.FAILED, to, body: finalBody, provider: cfg.provider, error: "Invalid destination phone number. Use E.164 format, including the country code." };
-    }
     const result = await sendViaTelnyx({ to: destination, body: finalBody, cfg, tag });
 
     if (result.error) {

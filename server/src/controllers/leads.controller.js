@@ -6,7 +6,7 @@ import { DEFAULT_LEAD_STATUSES, LEAD_STATUS } from "../lib/lead-statuses.js";
 import { roomInCommunity } from "../lib/communities.js";
 import { createHomeownerAccount, passwordSetupLink } from "../lib/homeowner-account.js";
 import { coverageTermFor } from "./properties.controller.js";
-import { toE164 } from "../services/sms.service.js";
+import { NON_PLUS_ONE_TAG, PHONE_ERROR, toE164, usablePhone } from "../services/sms.service.js";
 import { MessagingService } from "../services/messaging-service.js";
 import { Templates } from "../services/templates.js";
 import { invalidateSalesSuggestions } from "../services/sales-suggestions.service.js";
@@ -228,6 +228,7 @@ export const createLead = async (req, res) => {
     if (status && !ALLOWED_LEAD_STATUSES.has(status)) {
       return res.status(400).json({ message: "Invalid lead status." });
     }
+    if (phone && !toE164(phone)) return res.status(400).json({ message: PHONE_ERROR });
 
     const lead = await prisma.lead.create({
       data: {
@@ -489,15 +490,17 @@ export const importLeads = async (req, res) => {
         firstName,
         lastName,
         email,
-        phone,
+        phone: rawPhone,
         street,
         city,
         state,
         zipCode,
-        tags,
+        tags: rawTags,
         emailOptIn,
         smsOptIn,
       } = rawLead;
+      const phone = usablePhone(rawPhone);
+      const tags = rawPhone && !phone ? [...(rawTags || []), NON_PLUS_ONE_TAG] : rawTags;
 
       if (!firstName || !lastName) {
         errors.push({
@@ -694,6 +697,10 @@ export const updateLead = async (req, res) => {
     }
     if (status !== undefined && !ALLOWED_LEAD_STATUSES.has(status)) {
       return res.status(400).json({ message: "Invalid lead status." });
+    }
+    // An older non-+1 number on file doesn't block edits to the rest of the lead.
+    if (phone && phone !== lead.phone && !toE164(phone)) {
+      return res.status(400).json({ message: PHONE_ERROR });
     }
 
     if (ownerId !== undefined && ownerId !== null) {

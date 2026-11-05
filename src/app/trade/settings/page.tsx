@@ -167,7 +167,7 @@ function ProfileCard() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="trade-phone">Mobile phone</Label>
-              <Input id="trade-phone" type="tel" placeholder="(555) 123-4567" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <Input id="trade-phone" type="tel" placeholder="+1 (555) 123-4567" value={phone} onChange={(e) => setPhone(e.target.value)} />
               <p className="text-xs text-muted-foreground">New jobs are also sent to you by SMS.</p>
             </div>
             <div className="space-y-2 md:col-span-2">

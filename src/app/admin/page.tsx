@@ -37,6 +37,16 @@ interface CompanyOverview {
   salesEnabled: boolean;
 }
 
+interface CompaniesOverview {
+  total: number;
+  verified: number;
+  warranty: number;
+  sales: number;
+  recent: CompanyOverview[];
+}
+
+const NO_COMPANIES: CompaniesOverview = { total: 0, verified: 0, warranty: 0, sales: 0, recent: [] };
+
 interface MessagingOverview {
   emailSender: { configured: boolean; sendingAddress: string };
   failures: { categories: { attempts: number }[] };
@@ -45,7 +55,7 @@ interface MessagingOverview {
 export default function SuperAdminOverviewPage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
-  const [companies, setCompanies] = useState<CompanyOverview[]>([]);
+  const [overview, setOverview] = useState<CompaniesOverview>(NO_COMPANIES);
   const [messaging, setMessaging] = useState<MessagingOverview | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -63,11 +73,11 @@ export default function SuperAdminOverviewPage() {
     const fetchOverview = async () => {
       setLoading(true);
       try {
-        const [companiesResponse, messagingResponse] = await Promise.all([
-          fetch("/api/admin/companies"),
+        const [overviewResponse, messagingResponse] = await Promise.all([
+          fetch("/api/admin/companies-overview"),
           fetch("/api/admin/messaging/spend"),
         ]);
-        if (companiesResponse.ok) setCompanies(await companiesResponse.json());
+        if (overviewResponse.ok) setOverview(await overviewResponse.json());
         if (messagingResponse.ok) setMessaging(await messagingResponse.json());
       } catch (error) {
         console.error("Failed to load super admin overview:", error);
@@ -79,26 +89,20 @@ export default function SuperAdminOverviewPage() {
     void fetchOverview();
   }, [user]);
 
-  const stats = useMemo(() => {
-    const verified = companies.filter((company) => company.verificationStatus === "VERIFIED").length;
-    const warranty = companies.filter((company) => company.warrantyEnabled).length;
-    const sales = companies.filter((company) => company.salesEnabled).length;
-    const failures = messaging?.failures.categories.reduce(
-      (sum, category) => sum + category.attempts,
-      0,
-    ) ?? 0;
-    return { verified, warranty, sales, failures };
-  }, [companies, messaging]);
+  const failures = useMemo(
+    () => messaging?.failures.categories.reduce((sum, category) => sum + category.attempts, 0) ?? 0,
+    [messaging],
+  );
 
   if (loading) {
     return <div className="p-8 text-center text-muted-foreground">Loading overview...</div>;
   }
 
   const metricCards = [
-    { label: "Tenant companies", value: companies.length, icon: Building2 },
-    { label: "Verified tenants", value: stats.verified, icon: ShieldCheck },
-    { label: "Warranty enabled", value: stats.warranty, icon: Wrench },
-    { label: "Sales enabled", value: stats.sales, icon: ShoppingBag },
+    { label: "Tenant companies", value: overview.total, icon: Building2 },
+    { label: "Verified tenants", value: overview.verified, icon: ShieldCheck },
+    { label: "Warranty enabled", value: overview.warranty, icon: Wrench },
+    { label: "Sales enabled", value: overview.sales, icon: ShoppingBag },
   ];
 
   return (
@@ -157,14 +161,14 @@ export default function SuperAdminOverviewPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {companies.length === 0 ? (
+                  {overview.recent.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
                         No tenant companies found.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    companies.slice(0, 6).map((company) => (
+                    overview.recent.map((company) => (
                       <TableRow key={company.id}>
                         <TableCell>
                           <p className="font-medium">{company.name}</p>
@@ -204,7 +208,7 @@ export default function SuperAdminOverviewPage() {
                 </div>
               </div>
               <div className="flex items-start gap-3">
-                {stats.failures > 0 ? (
+                {failures > 0 ? (
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 ) : (
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
@@ -212,7 +216,7 @@ export default function SuperAdminOverviewPage() {
                 <div>
                   <p className="text-sm font-medium">Delivery failures</p>
                   <p className="text-xs text-muted-foreground">
-                    {stats.failures > 0 ? `${stats.failures} attempts need review` : "No failures recorded"}
+                    {failures > 0 ? `${failures} attempts need review` : "No failures recorded"}
                   </p>
                 </div>
               </div>

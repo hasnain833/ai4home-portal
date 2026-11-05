@@ -1,7 +1,8 @@
-import { getPlatformSlots as openSlots } from "../services/website-sales.js";
+import { bookB2BMeeting, getPlatformSlots as openSlots } from "../services/website-sales.js";
 import prisma from "../lib/prisma.js";
 import { denyUnlessAdminAccess } from "../middlewares/auth.js";
-import { toE164 } from "../services/sms.service.js";
+import { PHONE_ERROR, sendSms, smsSent, toE164 } from "../services/sms.service.js";
+import { renderB2BStep } from "../inngest/functions/b2b-campaign.js";
 import { MailService } from "../services/mail-service.js";
 import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
 import { formatSlotLabel } from "../lib/scheduling.js";
@@ -12,15 +13,21 @@ import { renderTemplate } from "../prompts/template.js";
 import { B2B_STEP_SYSTEM, B2B_EMAIL_RULES, B2B_SMS_RULES } from "../prompts/content.js";
 import { PLATFORM_GUIDE } from "../prompts/help-agent.js";
 import { randomUUID } from "node:crypto";
+import { inngest } from "../lib/inngest.js";
 import {
   B2B_LEAD_STATUSES,
   B2B_CLOSED_STATUSES,
   appUrl,
   getB2BAvailability,
   saveB2BAvailability,
+  NOT_INTERESTED_REASON,
+  findLeadByUnsubscribeToken,
+  remapStepIndex,
   validateSteps,
+  validSendTime,
   cleanSteps,
   unknownPlaceholders,
+  STARTER_TEMPLATES,
   exitB2BEnrollments,
   completeFinishedCampaigns,
   notifySuperAdmin,
@@ -52,9 +59,11 @@ function leadData(body, { partial = false } = {}) {
   if (body.email !== undefined) data.email = String(body.email || "").trim().toLowerCase();
   if (body.phone !== undefined) {
     const raw = String(body.phone || "").trim();
-    if (raw && !toE164(raw)) return { error: `"${raw}" is not a valid phone number.` };
+    if (raw && !toE164(raw)) return { error: PHONE_ERROR };
     data.phone = raw ? toE164(raw) : null;
   }
+  // A CSV sends text; "no" must not count as consent.
+  if (body.smsConsent !== undefined) data.smsConsentAt = /^(true|yes|y|1)$/i.test(String(body.smsConsent).trim()) ? new Date() : null;
   if (body.status !== undefined) {
     if (!B2B_LEAD_STATUSES.includes(body.status)) return { error: "Unknown status." };
     data.status = body.status;
@@ -127,7 +136,8 @@ export const listLeads = wrap("Leads", async (req, res) => {
   const leads = await prisma.b2BLead.findMany({
     orderBy: { createdAt: "desc" },
     include: {
-      inquiries: { orderBy: { createdAt: "desc" }, take: 20 },
+      // ponytail: every lead loads at once with light inquiries; move to server paging past a few thousand leads.
+      inquiries: req.query.lite ? false : { orderBy: { createdAt: "desc" }, take: 5 },
       enrollments: {
         where: { status: "ACTIVE" },
         select: { campaign: { select: { id: true, name: true } } },
@@ -143,6 +153,7 @@ export const listLeads = wrap("Leads", async (req, res) => {
   res.json(
     leads.map(({ enrollments, appointments, ...l }) => ({
       ...l,
+      inquiries: l.inquiries || [],
       activeCampaigns: enrollments.map((e) => e.campaign),
       nextAppointment: appointments[0]?.startTime || null,
     })),
@@ -187,11 +198,94 @@ export const updateLead = wrap("Lead update", async (req, res) => {
     const taken = await prisma.b2BLead.findUnique({ where: { email: data.email } });
     if (taken) return res.status(409).json({ message: "Another lead already uses that email." });
   }
+  // Re-saving the form must not move the date consent was first recorded.
+  if (data.smsConsentAt && lead.smsConsentAt) delete data.smsConsentAt;
   const updated = await prisma.b2BLead.update({ where: { id: lead.id }, data });
   if (data.status && B2B_CLOSED_STATUSES.includes(data.status)) {
     await exitB2BEnrollments(lead.id, "STATUS");
   }
   res.json(updated);
+});
+
+export const setLeadAgentPaused = wrap("Lead agent pause", async (req, res) => {
+  const lead = await prisma.b2BLead.findUnique({ where: { id: req.params.id } });
+  if (!lead) return res.status(404).json({ message: "Lead not found." });
+  const paused = !!req.body?.paused;
+  if (paused) {
+    await prisma.b2BLead.update({ where: { id: lead.id }, data: { agentPausedAt: new Date(), agentPausedUntil: null, agentPauseReason: "paused by the team" } });
+    return res.json({ paused });
+  }
+  // Resuming a lead the AI marked Lost has to reopen it, or the AI still couldn't answer.
+  const reopen = lead.status === "LOST" && lead.agentPauseReason === NOT_INTERESTED_REASON;
+  await prisma.b2BLead.update({
+    where: { id: lead.id },
+    data: { agentPausedAt: null, agentPausedUntil: null, agentPauseReason: null, ...(reopen ? { status: "CONTACTED" } : {}) },
+  });
+  const waiting = await prisma.b2BMessage.findFirst({
+    where: { leadId: lead.id, direction: "IN", handledAt: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (waiting && req.body?.answerWaiting) {
+    await inngest.send({ name: "b2b.reply.received", data: { leadId: lead.id, channel: waiting.channel } });
+  } else if (waiting) {
+    await prisma.b2BMessage.updateMany({ where: { leadId: lead.id, direction: "IN", handledAt: null }, data: { handledAt: new Date() } });
+  }
+  res.json({ paused });
+});
+
+// One lead's history, newest first: what we sent, what they said, and what happened.
+export const leadTimeline = wrap("Lead timeline", async (req, res) => {
+  const lead = await prisma.b2BLead.findUnique({
+    where: { id: req.params.id },
+    include: {
+      messages: { orderBy: { createdAt: "desc" }, take: 200 },
+      appointments: true,
+      enrollments: { include: { campaign: { select: { name: true } } } },
+      inquiries: { select: { id: true, type: true, createdAt: true } },
+    },
+  });
+  if (!lead) return res.status(404).json({ message: "Lead not found." });
+
+  const sends = await prisma.messageUsage.findMany({
+    where: { source: "b2b-campaign", OR: [{ leadId: lead.id }, { recipient: lead.email }] },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+    select: { id: true, channel: true, outcome: true, stepId: true, campaignId: true, createdAt: true, deliveredAt: true, openedAt: true, clickedAt: true, failedAt: true },
+  });
+  const campaignName = new Map(lead.enrollments.map((e) => [e.campaignId, e.campaign.name]));
+  const campaignText = new Map(lead.messages.filter((m) => m.actor === "CAMPAIGN").map((m) => [m.note, m]));
+  const delivery = (s) => (s.failedAt || s.outcome !== "sent" ? "failed" : s.clickedAt ? "clicked" : s.openedAt ? "opened" : s.deliveredAt ? "delivered" : "accepted");
+
+  const items = [
+    ...lead.messages.filter((m) => m.actor !== "CAMPAIGN").map((m) => ({
+      id: m.id,
+      at: m.createdAt,
+      kind: m.actor === "AGENT" ? "agent" : "lead",
+      title: `${m.actor === "AGENT" ? "AI replied" : "Lead replied"} by ${m.channel === "SMS" ? "text" : "email"}`,
+      body: m.body,
+      status: m.actor === "AGENT" ? m.outcome : null,
+    })),
+    ...sends.map((s) => ({
+      id: s.id,
+      at: s.createdAt,
+      kind: "campaign",
+      title: `Campaign ${s.channel === "SMS" ? "text" : "email"}${s.campaignId && campaignName.get(s.campaignId) ? `: ${campaignName.get(s.campaignId)}` : ""}${s.stepId ? ` (${s.stepId.replace("b2b:", "step ")})` : ""}`,
+      body: campaignText.get(`${s.campaignId}|${s.stepId}`)?.body || null,
+      status: delivery(s),
+    })),
+    ...lead.appointments.map((a) => ({
+      id: a.id,
+      at: a.createdAt,
+      kind: "meeting",
+      title: `Meeting ${a.status === "CONFIRMED" ? "booked" : a.status.toLowerCase()}`,
+      body: a.preferredTime,
+      status: a.status.toLowerCase(),
+    })),
+    ...lead.inquiries.map((i) => ({ id: i.id, at: i.createdAt, kind: "website", title: `Website ${i.type.toLowerCase()}`, body: null, status: null })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+  const waiting = lead.messages.filter((m) => m.direction === "IN" && !m.handledAt).length;
+  res.json({ agentPausedAt: lead.agentPausedAt, agentPausedUntil: lead.agentPausedUntil, agentPauseReason: lead.agentPauseReason, waiting, items });
 });
 
 export const deleteLead = wrap("Lead delete", async (req, res) => {
@@ -222,6 +316,7 @@ async function launchBlocker(steps) {
 
 export const listCampaigns = wrap("Campaigns", async (req, res) => {
   const campaigns = await prisma.b2BCampaign.findMany({
+    where: { archivedAt: null },
     orderBy: { createdAt: "desc" },
     include: { enrollments: { select: { status: true, exitedReason: true, failedCount: true, lastError: true } } },
   });
@@ -237,7 +332,7 @@ export const listCampaigns = wrap("Campaigns", async (req, res) => {
           booked: count((e) => e.exitedReason === "APPOINTMENT"),
           replied: count((e) => e.exitedReason === "REPLY"),
           unsubscribed: count((e) => e.exitedReason === "UNSUBSCRIBE"),
-          withIssues: count((e) => e.failedCount > 0 || e.exitedReason === "NOT_CONFIGURED" || !!e.lastError),
+          withIssues: count((e) => e.failedCount > 0 || e.exitedReason === "NOT_CONFIGURED" || (!!e.lastError && !/ skipped: /.test(e.lastError))),
         },
       };
     }),
@@ -313,6 +408,140 @@ ${others}`,
   res.json({ subject, body, warning: unknown.length ? `Replace ${unknown.map((n) => `{{${n}}}`).join(", ")} before saving.` : null });
 });
 
+const CAMPAIGN_TOOL = {
+  name: "write_campaign",
+  description: "Return the finished B2B campaign sequence.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Short campaign name." },
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            channel: { type: "string", enum: ["EMAIL", "SMS"] },
+            delayDays: { type: "integer", description: "Days to wait after the previous step; 0 for the first step." },
+            sendTime: { type: "string", description: "Local send time as HH:mm, from 08:00 to 20:30." },
+            subject: { type: "string", description: "Email subject line; empty string for SMS." },
+            body: { type: "string", description: "The message body, plain text." },
+          },
+          required: ["channel", "delayDays", "sendTime", "subject", "body"],
+        },
+      },
+    },
+    required: ["name", "steps"],
+  },
+};
+const MAX_AI_STEPS = 8;
+
+// Drafts a whole sequence into the editor; nothing is saved or sent here.
+export const generateCampaign = wrap("Campaign AI", async (req, res) => {
+  const prompt = clip(req.body?.prompt, 1000);
+  if (!prompt) return res.status(400).json({ message: "Describe the campaign you want." });
+  if (!hasLLM()) return res.status(503).json({ message: aiUnavailableMessage() });
+
+  const out = await toolCall({
+    companyId: null,
+    system: renderTemplate(B2B_STEP_SYSTEM, { productGuide: PLATFORM_GUIDE }),
+    messages: [{
+      role: "user",
+      content: [
+        `Write a complete campaign sequence for this request: ${prompt}`,
+        `Use 2 to ${MAX_AI_STEPS} steps unless the request says otherwise, and honour any channels, timing or length it asks for. Each step must add a new angle. The first step has delayDays 0.`,
+        `Email steps. ${B2B_EMAIL_RULES}`,
+        `SMS steps. ${B2B_SMS_RULES}`,
+      ].join("\n\n"),
+    }],
+    tool: CAMPAIGN_TOOL,
+    maxTokens: 4000,
+  });
+
+  const raw = (Array.isArray(out?.steps) ? out.steps : []).slice(0, MAX_AI_STEPS);
+  const steps = cleanSteps(raw.map((s) => ({ ...s, sendTime: validSendTime(s?.sendTime) ? s.sendTime : "10:00" })));
+  const unknown = unknownPlaceholders(steps.map((s) => `${s.subject} ${s.body}`).join(" "));
+  const complete = steps.length > 0 && steps.every((s) => ["EMAIL", "SMS"].includes(s.channel) && s.body.trim() && (s.channel === "SMS" || s.subject));
+  if (!complete) return res.status(502).json({ message: "AI couldn't write this campaign. Try again or rephrase it." });
+
+  res.json({
+    name: clip(out?.name, 120) || "AI campaign",
+    steps,
+    warning: unknown.length ? `Replace ${unknown.map((n) => `{{${n}}}`).join(", ")} before saving.` : null,
+  });
+});
+
+// Sends one step to the admin's own email or phone, right away, with no enrollment.
+export const sendTestStep = wrap("Campaign test", async (req, res) => {
+  const { step, to } = req.body || {};
+  const invalid = validateSteps([step]);
+  if (invalid) return res.status(400).json({ message: invalid.replace("Step 1", "This step") });
+  const destination = String(to || "").trim();
+  const sample = { contactName: "Test Contact", companyName: "Sample Homes", city: "Your City", bookingToken: "test" };
+  try { appUrl(); } catch (error) { return res.status(400).json({ message: error.message }); }
+
+  if (step.channel === "SMS") {
+    const phone = toE164(destination);
+    if (!phone) return res.status(400).json({ message: PHONE_ERROR });
+    const stopped = await prisma.suppressionList.findFirst({ where: { companyId: null, value: { contains: phone.slice(-10) } } });
+    if (stopped) return res.status(400).json({ message: "That number has replied STOP, so it can't get tests." });
+    const r = await sendSms({ to: phone, body: renderB2BStep(step, sample, null).body, source: "b2b-test", brand: false });
+    if (!smsSent(r)) return res.status(400).json({ message: r.error || "The test text was not sent." });
+    return res.json({ success: true, message: `Test text accepted for ${phone}. The provider confirms delivery separately.` });
+  }
+
+  if (!EMAIL_RE.test(destination)) return res.status(400).json({ message: "Enter a valid email address for the test." });
+  const msg = renderB2BStep(step, sample, null);
+  const r = await MailService.sendEmail({ to: destination, subject: `[Test] ${msg.subject}`, html: msg.html, fromName: "AI for Homebuilders", source: "b2b-test", noReply: true });
+  if (!r.success) return res.status(400).json({ message: r.error || "The test email was not sent." });
+  res.json({ success: true, message: `Test email accepted for ${destination}.` });
+});
+
+const TEMPLATES_SEEDED_KEY = "b2b.templates.seeded";
+
+/** Adds the starters once, so a template the admin deletes stays deleted. */
+async function seedStarterTemplates() {
+  if (await prisma.platformSetting.findUnique({ where: { key: TEMPLATES_SEEDED_KEY } })) return;
+  await prisma.b2BCampaignTemplate.createMany({ data: STARTER_TEMPLATES, skipDuplicates: true });
+  await prisma.platformSetting.upsert({
+    where: { key: TEMPLATES_SEEDED_KEY },
+    create: { key: TEMPLATES_SEEDED_KEY, value: true },
+    update: {},
+  });
+}
+
+function templateData(body) {
+  const name = String(body?.name || "").trim();
+  if (!name) return { error: "Give the template a name." };
+  const steps = Array.isArray(body?.steps) ? body.steps : [];
+  const error = validateSteps(steps);
+  if (error) return { error };
+  return { data: { name, description: clip(body?.description, 300), steps: cleanSteps(steps) } };
+}
+
+export const listTemplates = wrap("Templates", async (req, res) => {
+  await seedStarterTemplates();
+  res.json(await prisma.b2BCampaignTemplate.findMany({ orderBy: { createdAt: "asc" } }));
+});
+
+export const createTemplate = wrap("Template create", async (req, res) => {
+  const { data, error } = templateData(req.body);
+  if (error) return res.status(400).json({ message: error });
+  res.status(201).json(await prisma.b2BCampaignTemplate.create({ data }));
+});
+
+export const updateTemplate = wrap("Template update", async (req, res) => {
+  const { data, error } = templateData(req.body);
+  if (error) return res.status(400).json({ message: error });
+  const { count } = await prisma.b2BCampaignTemplate.updateMany({ where: { id: req.params.id }, data });
+  if (!count) return res.status(404).json({ message: "Template not found." });
+  res.json({ success: true });
+});
+
+export const deleteTemplate = wrap("Template delete", async (req, res) => {
+  await prisma.b2BCampaignTemplate.deleteMany({ where: { id: req.params.id } });
+  res.json({ success: true });
+});
+
 export const updateCampaign = wrap("Campaign update", async (req, res) => {
   const campaign = await prisma.b2BCampaign.findUnique({ where: { id: req.params.id } });
   if (!campaign) return res.status(404).json({ message: "Campaign not found." });
@@ -321,8 +550,19 @@ export const updateCampaign = wrap("Campaign update", async (req, res) => {
   const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
   const blocker = campaign.status === "ACTIVE" ? await launchBlocker(steps) : validateSteps(steps);
   if (blocker) return res.status(400).json({ message: blocker });
-  // Edits apply to leads already in the sequence from their next step on.
-  res.json(await prisma.b2BCampaign.update({ where: { id: campaign.id }, data: { name, steps: cleanSteps(steps) } }));
+  // Edits apply to leads already in the sequence from their next step on, and each lead
+  // stays on the same message even when steps are added or removed before it.
+  const cleaned = cleanSteps(steps);
+  const oldSteps = Array.isArray(campaign.steps) ? campaign.steps : [];
+  const active = await prisma.b2BEnrollment.findMany({ where: { campaignId: campaign.id, status: "ACTIVE" }, select: { id: true, currentStep: true } });
+  const moved = active
+    .map((e) => ({ id: e.id, to: remapStepIndex(oldSteps, cleaned, e.currentStep), from: e.currentStep }))
+    .filter((e) => e.to !== e.from);
+  const [updated] = await prisma.$transaction([
+    prisma.b2BCampaign.update({ where: { id: campaign.id }, data: { name, steps: cleaned } }),
+    ...moved.map((e) => prisma.b2BEnrollment.update({ where: { id: e.id }, data: { currentStep: e.to, stepAttempts: 0 } })),
+  ]);
+  res.json(updated);
 });
 
 export const setCampaignStatus = wrap("Campaign status", async (req, res) => {
@@ -347,7 +587,17 @@ export const setCampaignStatus = wrap("Campaign status", async (req, res) => {
 });
 
 export const deleteCampaign = wrap("Campaign delete", async (req, res) => {
-  await prisma.b2BCampaign.delete({ where: { id: req.params.id } }).catch(() => null);
+  const history = await prisma.b2BEnrollment.count({ where: { campaignId: req.params.id } });
+  if (!history) {
+    await prisma.b2BCampaign.delete({ where: { id: req.params.id } }).catch(() => null);
+    return res.json({ success: true });
+  }
+  // Keep who got what: leads' timelines and the campaign's history outlive the card.
+  await prisma.b2BEnrollment.updateMany({
+    where: { campaignId: req.params.id, status: "ACTIVE" },
+    data: { status: "EXITED", exitedReason: "MANUAL", nextRunAt: null },
+  });
+  await prisma.b2BCampaign.updateMany({ where: { id: req.params.id }, data: { status: "PAUSED", archivedAt: new Date() } });
   res.json({ success: true });
 });
 
@@ -357,17 +607,20 @@ export const listEnrollments = wrap("Enrollments", async (req, res) => {
     orderBy: { createdAt: "desc" },
     include: { lead: { select: { id: true, companyName: true, contactName: true, email: true, phone: true, status: true } } },
   });
-  const latestSms = rows.length ? await prisma.messageUsage.findMany({
-    where: { campaignId: req.params.id, source: "b2b-campaign", channel: "SMS", leadId: { in: rows.map((row) => row.leadId) } },
-    orderBy: { createdAt: "desc" },
-    distinct: ["leadId"],
-    select: { leadId: true, outcome: true, deliveredAt: true, failedAt: true, providerMessageId: true },
-  }) : [];
-  const smsByLead = new Map(latestSms.map((sms) => [sms.leadId, {
-    status: sms.failedAt || sms.outcome !== "sent" ? "failed" : sms.deliveredAt ? "delivered" : "unconfirmed",
-    providerMessageId: sms.providerMessageId,
-  }]));
-  res.json(rows.map((row) => ({ ...row, smsDelivery: smsByLead.get(row.leadId) || null })));
+  const latestByLead = async (channel) => {
+    const latest = rows.length ? await prisma.messageUsage.findMany({
+      where: { campaignId: req.params.id, source: "b2b-campaign", channel, leadId: { in: rows.map((row) => row.leadId) } },
+      orderBy: { createdAt: "desc" },
+      distinct: ["leadId"],
+      select: { leadId: true, outcome: true, deliveredAt: true, openedAt: true, clickedAt: true, failedAt: true, providerMessageId: true },
+    }) : [];
+    return new Map(latest.map((m) => [m.leadId, {
+      status: m.failedAt || m.outcome !== "sent" ? "failed" : m.clickedAt ? "clicked" : m.openedAt ? "opened" : m.deliveredAt ? "delivered" : "unconfirmed",
+      providerMessageId: m.providerMessageId,
+    }]));
+  };
+  const [smsByLead, emailByLead] = await Promise.all([latestByLead("SMS"), latestByLead("EMAIL")]);
+  res.json(rows.map((row) => ({ ...row, smsDelivery: smsByLead.get(row.leadId) || null, emailDelivery: emailByLead.get(row.leadId) || null })));
 });
 
 export const enrollLeads = wrap("Enroll", async (req, res) => {
@@ -379,7 +632,7 @@ export const enrollLeads = wrap("Enroll", async (req, res) => {
     leadIds = (await prisma.b2BLead.findMany({ where: b2bSegmentWhere(segment.filters), select: { id: true } })).map((lead) => lead.id);
   }
   if (!leadIds.length) return res.status(400).json({ message: "Pick at least one lead." });
-  const campaign = await prisma.b2BCampaign.findUnique({ where: { id: req.params.id } });
+  const campaign = await prisma.b2BCampaign.findFirst({ where: { id: req.params.id, archivedAt: null } });
   if (!campaign) return res.status(404).json({ message: "Campaign not found." });
   const steps = Array.isArray(campaign.steps) ? campaign.steps : [];
   if (!steps.length) return res.status(400).json({ message: "Add steps to the campaign before enrolling leads." });
@@ -398,13 +651,13 @@ export const enrollLeads = wrap("Enroll", async (req, res) => {
   for (const lead of leads) {
     if (B2B_CLOSED_STATUSES.includes(lead.status)) { skipped.closed++; continue; }
     if (alreadyIn.has(lead.id)) { skipped.alreadyEnrolled++; continue; }
-    const reachable = (channels.has("EMAIL") && !lead.emailOptOut) || (channels.has("SMS") && !lead.smsOptOut && lead.phone);
+    const reachable = (channels.has("EMAIL") && !lead.emailOptOut) || (channels.has("SMS") && !lead.smsOptOut && lead.phone && lead.smsConsentAt);
     if (!reachable) { skipped.optedOut++; continue; }
     eligible.push(lead.id);
   }
   // Large segments must not require thousands of individual database writes.
   // Keep completed/exit history counters, just as individual re-enrollment did.
-  const reset = { status: "ACTIVE", exitedReason: null, currentStep: 0, nextRunAt: firstRunAt, lastError: null };
+  const reset = { status: "ACTIVE", exitedReason: null, currentStep: 0, stepAttempts: 0, nextRunAt: firstRunAt, lastError: null };
   for (let offset = 0; offset < eligible.length; offset += 500) {
     const batch = eligible.slice(offset, offset + 500);
     const [, , enrolled] = await prisma.$transaction([
@@ -511,58 +764,12 @@ export const publicBook = wrap("Public book", async (req, res) => {
   if (Number.isNaN(start.getTime())) return res.status(400).json({ message: "Pick a time." });
 
   const setting = await getB2BAvailability();
-  if (!(await openSlots(setting)).some((s) => s.getTime() === start.getTime())) {
+  const booked = await bookB2BMeeting({ lead, start, setting, campaignId: req.body?.campaignId });
+  if (booked.alreadyBooked) return res.status(409).json({ message: "You already have a meeting booked. Reply to your confirmation email to change it." });
+  if (booked.taken) {
     return res.status(409).json({ message: "Sorry, that time is no longer available. Please pick another." });
   }
-
-  // Which campaign brought them here: the link's ?c=, else their most recent enrollment.
-  const enrollment = await prisma.b2BEnrollment.findFirst({
-    where: { leadId: lead.id, ...(req.body?.campaignId ? { campaignId: String(req.body.campaignId) } : {}) },
-    orderBy: { updatedAt: "desc" },
-    include: { campaign: { select: { name: true } } },
-  });
-  const label = formatSlotLabel(start, setting.timezone);
-  const end = new Date(start.getTime() + setting.slotDuration * 60000);
-
-  let appointment;
-  try {
-    // Serializable: two leads racing for the same slot cannot both pass the overlap check.
-    appointment = await prisma.$transaction(
-      async (tx) => {
-        const clash = await tx.salesAgentAppointment.findFirst({
-          where: {
-            status: { not: "CANCELLED" },
-            startTime: { gt: new Date(start.getTime() - (setting.slotDuration + setting.bufferMinutes) * 60000), lt: new Date(end.getTime() + setting.bufferMinutes * 60000) },
-          },
-        });
-        if (clash) return null;
-        return tx.salesAgentAppointment.create({
-          data: {
-            name: lead.contactName || lead.companyName,
-            email: lead.email,
-            phone: lead.phone || "",
-            preferredTime: label,
-            source: "CAMPAIGN",
-            campaignName: enrollment?.campaign.name || null,
-            startTime: start,
-            b2bLeadId: lead.id,
-          },
-        });
-      },
-      { isolationLevel: "Serializable" },
-    );
-  } catch (e) {
-    if (e?.code !== "P2034") throw e; // serialization conflict = someone else got the slot
-  }
-  if (!appointment) {
-    return res.status(409).json({ message: "Sorry, that time was just taken. Please pick another." });
-  }
-
-  // Booked: this lead leaves every campaign; the campaigns carry on for everyone else.
-  await exitB2BEnrollments(lead.id, "APPOINTMENT");
-  if (["NEW", "CONTACTED"].includes(lead.status)) {
-    await prisma.b2BLead.update({ where: { id: lead.id }, data: { status: "INTERESTED" } });
-  }
+  const { label, enrollment } = booked;
 
   const who = escapeHtml(lead.contactName || lead.companyName);
   const confirmationEmail = await MailService.sendEmail({
@@ -584,9 +791,9 @@ export const publicBook = wrap("Public book", async (req, res) => {
 }, { admin: false });
 
 export const publicUnsubscribe = wrap("Public unsubscribe", async (req, res) => {
-  const lead = await findByToken(req.params.token);
+  const lead = await findLeadByUnsubscribeToken(req.params.token);
   if (!lead) return res.status(404).json({ success: false, message: "This unsubscribe link is invalid or has expired." });
-  await prisma.b2BLead.update({ where: { id: lead.id }, data: { emailOptOut: true } });
+  await prisma.b2BLead.update({ where: { id: lead.id }, data: { emailOptOut: true, smsOptOut: true } });
   await exitB2BEnrollments(lead.id, "UNSUBSCRIBE");
-  res.json({ success: true, channel: "EMAIL", email: lead.email, companyName: MailService.SENDER_NAME });
+  res.json({ success: true, channel: "ALL", email: lead.email, companyName: MailService.SENDER_NAME });
 }, { admin: false });

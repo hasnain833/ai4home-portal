@@ -57,7 +57,7 @@ export default function HelpAgentLab() {
     }`;
 
   return (
-    <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2">
+    <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)]">
       <Card className="flex min-h-0 flex-col overflow-hidden">
         <CardHeader className="shrink-0 flex-row items-center justify-between space-y-0 py-3">
           <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
@@ -80,7 +80,7 @@ export default function HelpAgentLab() {
             </Button>
           )}
         </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pb-3">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-3">
           {tab === "kb" ? (
             <KnowledgeBasePanel agent="help" />
           ) : !agent ? (
@@ -102,7 +102,7 @@ export default function HelpAgentLab() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 aria-label="Help Agent prompt"
-                className="min-h-80 flex-1 resize-none font-mono text-[11px] leading-relaxed"
+                className="min-h-64 flex-1 resize-none field-sizing-fixed font-mono text-[11px] leading-relaxed"
               />
               <p className="text-[11px] text-muted-foreground">
                 <code>{"{{portalGuide}}"}</code> adds the built-in guide to every page and workflow in the portal.

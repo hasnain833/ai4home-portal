@@ -2,12 +2,16 @@ import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import prisma from "../lib/prisma.js";
+import { waitUntil } from "@vercel/functions";
 import {
   createSuperadminSessionToken,
+  createSuperadminChallenge,
+  verifySuperadminChallenge,
+  CHALLENGE_TTL_SECONDS,
   SESSION_COOKIE_OPTIONS,
 } from "../lib/superadmin-session.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
-import { sendSms, smsSent, toE164 } from "../services/sms.service.js";
+import { PHONE_ERROR, sendSms, smsSent, toE164 } from "../services/sms.service.js";
 import { MailService } from "../services/mail-service.js";
 import { Templates, SmsTemplates } from "../services/templates.js";
 import { effectiveSalesPermissions } from "../lib/permissions.js";
@@ -108,8 +112,10 @@ export const getMe = async (req, res) => {
     const {
       password: _password,
       emailChangeTokenHash: _emailChangeTokenHash,
+      company: _company,
       ...safeUser
     } = dbUser;
+    const canSeeCompanyDocs = isAdmin || isStaff;
 
     return res.json({
       ...safeUser,
@@ -121,12 +127,12 @@ export const getMe = async (req, res) => {
       hasWarrantyAccess,
       hasSalesAccess,
       verificationStatus,
-      verificationDocUrl: await resolveDownloadUrl(
-        dbUser.company?.verificationDocUrl,
-      ),
-      agreementDocUrl: await resolveDownloadUrl(
-        dbUser.company?.agreementDocUrl,
-      ),
+      verificationDocUrl: canSeeCompanyDocs
+        ? await resolveDownloadUrl(dbUser.company?.verificationDocUrl)
+        : null,
+      agreementDocUrl: canSeeCompanyDocs
+        ? await resolveDownloadUrl(dbUser.company?.agreementDocUrl)
+        : null,
       agreementVersion: dbUser.company?.agreementVersion || null,
       avatar: avatarUrl,
       companyLogo: dbUser.company?.logo || null,
@@ -155,13 +161,17 @@ export const updateProfile = async (req, res) => {
     if (req.body.phone !== undefined) {
       const phone = toE164(req.body.phone);
       if (phone === undefined) {
-        return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+        return res.status(400).json({ message: PHONE_ERROR });
       }
       updateData.phone = phone;
     }
     if (avatar !== undefined) updateData.avatar = avatar;
-    if (lastActiveWorkspace)
+    if (lastActiveWorkspace) {
+      if (!["warranty", "sales"].includes(lastActiveWorkspace)) {
+        return res.status(400).json({ message: "Unknown workspace" });
+      }
       updateData.lastActiveWorkspace = lastActiveWorkspace;
+    }
 
     if (email && email.toLowerCase() !== String(req.user.email || "").toLowerCase()) {
       return res.status(400).json({
@@ -401,6 +411,67 @@ export const cancelEmailChange = async (req, res) => {
   }
 };
 
+function startSuperadminSession(res, claims) {
+  res.cookie("superadmin_session", createSuperadminSessionToken(claims), SESSION_COOKIE_OPTIONS);
+  return res.json({ message: "Authenticated", isSuperAdmin: true });
+}
+
+// The password was right; the session waits for the emailed code.
+async function challengeSuperadmin(res, claims) {
+  // Way back in if email delivery is down. Set it only for as long as that lasts.
+  if (process.env.SUPERADMIN_MFA_DISABLED === "1") {
+    console.warn("[Auth] SUPERADMIN_MFA_DISABLED is set: Super Admin signed in without a code.");
+    return startSuperadminSession(res, claims);
+  }
+
+  const { code, challenge } = createSuperadminChallenge(claims);
+  const mail = await MailService.sendEmail({
+    to: claims.email,
+    subject: "Your Super Admin sign-in code",
+    html: Templates.getSuperadminCodeEmail(code),
+    source: "superadmin-mfa",
+    noReply: true,
+    branding: "platform",
+  });
+  if (!mail.success) {
+    console.error("[Auth] Super Admin code not delivered:", mail.error);
+    return res.status(502).json({
+      message: "We couldn't email your sign-in code. Please try again.",
+      code: "MFA_SEND_FAILED",
+    });
+  }
+  return res.json({ mfaRequired: true, challenge });
+}
+
+export const superadminVerifyCode = async (req, res) => {
+  try {
+    const { challenge, code } = req.body || {};
+    const verified = verifySuperadminChallenge(challenge, String(code ?? "").trim());
+    if (!verified) {
+      return res.status(401).json({ message: "That code is incorrect or has expired." });
+    }
+
+    // Single use: the primary key refuses a second claim on the same challenge.
+    try {
+      await prisma.rateLimit.create({
+        data: {
+          key: `superadmin-mfa:${verified.jti}`,
+          count: 1,
+          resetAt: new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000),
+        },
+      });
+    } catch (err) {
+      if (err?.code !== "P2002") throw err;
+      return res.status(401).json({ message: "That code is incorrect or has expired." });
+    }
+
+    return startSuperadminSession(res, verified.claims);
+  } catch (error) {
+    console.error("Superadmin code check error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const superadminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -422,17 +493,13 @@ export const superadminLogin = async (req, res) => {
       emailMatches &&
       safeEqual(password, envPassword)
     ) {
-      const token = createSuperadminSessionToken({
+      return await challengeSuperadmin(res, {
         id: "env-superadmin",
-        email: email,
+        email: envEmail.trim(),
         name: "Super Admin",
         role: "SUPER_ADMIN",
         companyId: null,
       });
-
-      res.cookie("superadmin_session", token, SESSION_COOKIE_OPTIONS);
-
-      return res.json({ message: "Authenticated", isSuperAdmin: true });
     }
 
     const dbUser = await prisma.user.findUnique({
@@ -448,17 +515,13 @@ export const superadminLogin = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const token = createSuperadminSessionToken({
+    return await challengeSuperadmin(res, {
       id: dbUser.id,
       email: dbUser.email,
       name: dbUser.name || "Super Admin",
       role: dbUser.role,
       companyId: dbUser.companyId || null,
     });
-
-    res.cookie("superadmin_session", token, SESSION_COOKIE_OPTIONS);
-
-    return res.json({ message: "Authenticated", isSuperAdmin: true });
   } catch (error) {
     console.error("Superadmin login error:", error);
     return res.status(500).json({ message: "Internal server error" });
@@ -645,32 +708,13 @@ export const signup = async (req, res) => {
   }
 };
 
-export const forgotPassword = async (req, res) => {
+async function sendPasswordReset(email) {
   try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" });
-    }
-
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      return res
-        .status(404)
-        .json({ message: "No account found with this email address." });
-    }
+    if (!user) return;
 
-    let actionLink;
-    try {
-      actionLink = await passwordSetupLink(email);
-    } catch (err) {
-      return res.status(400).json({ message: err.message });
-    }
-    if (!actionLink) {
-      return res
-        .status(500)
-        .json({ message: "Failed to generate action link" });
-    }
+    const actionLink = await passwordSetupLink(email);
+    if (!actionLink) throw new Error("no action link generated");
 
     const result = await MailService.sendEmail({
       to: email,
@@ -680,11 +724,21 @@ export const forgotPassword = async (req, res) => {
       noReply: true,
       branding: "platform",
     });
-    if (!result.success) return res.status(502).json({ message: "Could not send the password reset email. Please try again." });
-
-    return res.json({ message: "Password reset link sent successfully" });
+    if (!result.success) throw new Error(result.error || "email not delivered");
   } catch (error) {
     console.error("Recovery link error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+}
+
+export const forgotPassword = async (req, res) => {
+  const { email } = req.body || {};
+
+  if (!email || typeof email !== "string") {
+    return res.status(400).json({ message: "Email is required" });
+  }
+
+  // Answers before the lookup, so neither the reply nor its timing says whether
+  // the account exists. Delivery failures therefore show only in the logs.
+  waitUntil(sendPasswordReset(email));
+  return res.json({ message: "If that email has an account, a reset link is on its way." });
 };

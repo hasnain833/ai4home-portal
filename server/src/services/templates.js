@@ -168,12 +168,12 @@ function websiteInquiryEmails(inquiry, { portalUrl, bookingLink }) {
 export const Templates = {
   getWebsiteInquiryEmails: websiteInquiryEmails,
 
-  getB2BCampaignEmail: (bodyHtml, { bookingLink, unsubscribeLink, portalUrl, websiteUrl }) => {
+  getB2BCampaignEmail: (bodyHtml, { bookingLink, unsubscribeLink, portalUrl, websiteUrl, bookingButton = true }) => {
     const site = escapeHtml(websiteUrl);
     const unsubscribe = escapeHtml(unsubscribeLink);
     const logo = escapeHtml(`${portalUrl}/logo-email.png`);
     const body = bookingButtonsInEmail(bodyHtml);
-    const fallbackButton = body.includes(`href="${escapeHtml(bookingLink)}"`) ? "" : emailButton(escapeHtml(bookingLink), "Book a Product Consultation");
+    const fallbackButton = !bookingButton || body.includes(`href="${escapeHtml(bookingLink)}"`) ? "" : emailButton(escapeHtml(bookingLink), "Book a Product Consultation");
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;background:#f1f3f5;font-family:Arial,Helvetica,sans-serif;color:#334155">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 12px">
@@ -569,6 +569,15 @@ export const Templates = {
       <p style="font-size: 14px; color: ${COLORS.textMuted};">If you did not request a password reset, please safely ignore this email.</p>
     `;
     return wrapEmail(content, "Password Reset Request");
+  },
+
+  getSuperadminCodeEmail: (code) => {
+    const content = `
+      <p style="margin-top: 0;">Your Super Admin sign-in code is:</p>
+      <p style="font-size: 28px; font-weight: bold; letter-spacing: 6px; color: ${COLORS.primary};">${code}</p>
+      <p style="font-size: 14px; color: ${COLORS.textMuted};">It works once, for 10 minutes. If you did not just sign in, someone has your Super Admin password: change it now.</p>
+    `;
+    return wrapEmail(content, "Super Admin Sign-in Code");
   },
 
 

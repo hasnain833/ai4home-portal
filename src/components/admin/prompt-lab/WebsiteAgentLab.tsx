@@ -43,7 +43,7 @@ export default function WebsiteAgentLab() {
     finally { setBusy(false); }
   };
   return (
-    <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2">
+    <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)]">
       {error && <p role="alert" className="text-sm text-red-600 xl:col-span-2">{error}</p>}
       {notice && <p role="status" className="text-sm xl:col-span-2">{notice}</p>}
       <Card className="flex min-h-0 min-w-0 flex-col overflow-hidden">
@@ -55,7 +55,7 @@ export default function WebsiteAgentLab() {
             <RotateCcw className="h-3.5 w-3.5" /> Load default
           </Button>
         </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pb-3">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-3">
           {!data ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
               {!error && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -64,7 +64,7 @@ export default function WebsiteAgentLab() {
           ) : (
             <>
               <label htmlFor="website-prompt" className="text-[11px] text-muted-foreground">Conversation style and public product guidance</label>
-              <Textarea id="website-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={20000} rows={18} className="min-h-80 flex-1 resize-none font-mono text-[11px] leading-relaxed" />
+              <Textarea id="website-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={20000} rows={18} className="min-h-64 flex-1 resize-none field-sizing-fixed font-mono text-[11px] leading-relaxed" />
               <p className="text-[11px] text-muted-foreground">Consultation requests require visitor approval. Preferred meeting times remain subject to team confirmation.</p>
               <p className="text-[11px] text-muted-foreground">The built-in product guide and privacy rules are added to every reply automatically. Keep customer details and credentials out of this public-facing prompt.</p>
               <details className="text-[11px] text-muted-foreground">

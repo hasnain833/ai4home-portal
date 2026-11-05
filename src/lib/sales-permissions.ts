@@ -10,20 +10,10 @@ export const SALES_PERMISSION = {
 
 export type SalesPermission = (typeof SALES_PERMISSION)[keyof typeof SALES_PERMISSION];
 
-type PermissionUser = {
-  role?: string;
-  isSuperAdmin?: boolean;
-  salesPermissions?: string[];
-} | null | undefined;
-
-/** Mirrors `hasSalesPermission` in server/src/lib/permissions.js. */
-export function hasSalesPermission(user: PermissionUser, permission: SalesPermission): boolean {
-  if (!user) return false;
-  if (user.isSuperAdmin) return true;
-
-  const role = String(user.role || "").toLowerCase();
-  if (role === "admin") return true;
-  if (role !== "staff") return false;
-
-  return Array.isArray(user.salesPermissions) && user.salesPermissions.includes(permission);
+/** `salesPermissions` is the final list from /api/auth/me; the server owns the rules. This only hides what can't be used. */
+export function hasSalesPermission(
+  user: { salesPermissions?: string[] } | null | undefined,
+  permission: SalesPermission,
+): boolean {
+  return !!user?.salesPermissions?.includes(permission);
 }

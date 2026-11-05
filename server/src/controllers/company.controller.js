@@ -7,6 +7,15 @@ import { Templates } from "../services/templates.js";
 import { hasSalesPermission } from "../lib/permissions.js";
 
 const AGREEMENT_VERSION = "1.0";
+const HOMEOWNER_COMPANY_SELECT = {
+  id: true,
+  name: true,
+  logo: true,
+  email: true,
+  phone: true,
+  address: true,
+  botColor: true,
+};
 
 export const getCompany = async (req, res) => {
   try {
@@ -19,7 +28,8 @@ export const getCompany = async (req, res) => {
     if (!session.companyId) return res.json({});
 
     const company = await prisma.company.findUnique({
-      where: { id: session.companyId }
+      where: { id: session.companyId },
+      ...(session.role === "HOMEOWNER" && { select: HOMEOWNER_COMPANY_SELECT }),
     });
 
     return res.json({ ...(company || {}) });

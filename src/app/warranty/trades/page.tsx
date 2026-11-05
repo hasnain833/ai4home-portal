@@ -301,7 +301,7 @@ export default function TradesPage() {
               {!editing && (
                 <div className="space-y-2">
                   <Label htmlFor="trade-phone">Mobile phone (optional)</Label>
-                  <Input id="trade-phone" type="tel" value={form.phone} placeholder="(555) 123-4567"
+                  <Input id="trade-phone" type="tel" value={form.phone} placeholder="+1 (555) 123-4567"
                     onChange={(e) => setForm({ ...form, phone: e.target.value })} />
                   <p className="text-xs text-muted-foreground">Job assignments are also sent by SMS.</p>
                 </div>

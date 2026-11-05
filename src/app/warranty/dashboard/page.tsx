@@ -148,6 +148,7 @@ export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>("7d");
   const [kpis, setKpis] = useState<KPIs | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [claimCounts, setClaimCounts] = useState({ total: 0, active: 0, resolved: 0 });
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const [systemHealth, setSystemHealth] = useState({
@@ -190,11 +191,16 @@ export default function DashboardPage() {
   const fetchHomeownerData = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/tickets");
+      const response = await fetch("/api/dashboard/homeowner");
       if (response.ok) {
         const data = await response.json();
+        setClaimCounts({
+          total: data.totalClaims,
+          active: data.activeClaims,
+          resolved: data.resolvedClaims,
+        });
         setTickets(
-          (data as Partial<Ticket>[]).map((t, index) => ({
+          (data.recentTickets as Partial<Ticket>[]).map((t, index) => ({
             id: t.id ?? `ticket-${index}`,
             homeowner: {
               name: t.homeowner?.name || user?.name || "Me",
@@ -248,11 +254,10 @@ export default function DashboardPage() {
     }
   };
 
-  // Calculate client-side stats for homeowner
   const homeownerStats = {
     totalProperties: user?.properties?.length || 0,
-    activeClaims: tickets.filter((t) => t.status !== "RESOLVED").length,
-    resolvedClaims: tickets.filter((t) => t.status === "RESOLVED").length,
+    activeClaims: claimCounts.active,
+    resolvedClaims: claimCounts.resolved,
   };
 
   return (
@@ -304,7 +309,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-[#0F3B3D] dark:text-slate-100">
-                    {tickets.length}
+                    {claimCounts.total}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     Claims submitted to builders

@@ -32,6 +32,43 @@ const withNextVisit = (ticket) => {
 
 const DISPATCH_ROLES = ["ADMIN", "STAFF"];
 
+const TICKET_LIST_INCLUDE = {
+  homeowner: { select: { name: true, email: true } },
+  property: true,
+  assignedStaff: ASSIGNED_STAFF_SELECT,
+  appointments: NEXT_VISIT_SELECT,
+};
+const DATE_RANGE_DAYS = { "7d": 7, "30d": 30, "90d": 90 };
+const DEFAULT_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 100;
+const contains = (value) => ({ contains: value, mode: "insensitive" });
+
+/** The list page's filters as Prisma conditions. Anything unrecognised is ignored. */
+export function ticketFilterConditions({ search, status, priority, dateRange } = {}, now = Date.now()) {
+  const conditions = [];
+  if (TICKET_STATUSES.includes(status)) conditions.push({ status });
+  if (TICKET_PRIORITIES.includes(priority)) conditions.push({ priority });
+  if (DATE_RANGE_DAYS[dateRange]) {
+    conditions.push({ createdAt: { gte: new Date(now - DATE_RANGE_DAYS[dateRange] * 86_400_000) } });
+  }
+
+  const text = typeof search === "string" ? search.trim() : "";
+  if (text) {
+    // "WC-12" or "12" finds ticket 12; "#ABC123" is how a ticket with no number is shown.
+    const number = text.match(/^(?:wc-?)?(\d{1,9})$/i);
+    conditions.push({
+      OR: [
+        { id: contains(text.replace(/^#/, "")) },
+        ...(number ? [{ number: Number(number[1]) }] : []),
+        { issueType: contains(text) },
+        { homeowner: { name: contains(text) } },
+        { property: { address: contains(text) } },
+      ],
+    });
+  }
+  return conditions;
+}
+
 export const getTickets = async (req, res) => {
   try {
     const session = req.user;
@@ -39,24 +76,10 @@ export const getTickets = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    let tickets;
+    let scope;
 
     if (session.role === "HOMEOWNER") {
-      tickets = await prisma.ticket.findMany({
-        where: { homeownerId: session.id },
-        include: {
-          homeowner: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
-          property: true,
-          assignedStaff: ASSIGNED_STAFF_SELECT,
-          appointments: NEXT_VISIT_SELECT,
-        },
-        orderBy: { createdAt: "desc" },
-      });
+      scope = { homeownerId: session.id };
     } else {
       const homeownerId = req.query.homeownerId;
       const propertyId = req.query.propertyId;
@@ -66,7 +89,9 @@ export const getTickets = async (req, res) => {
           where: { id: propertyId, homeowner: { companyId: session.companyId } },
           select: { homeownerId: true },
         });
-        if (!property) return res.json([]);
+        if (!property) {
+          return res.json(req.query.page ? { tickets: [], total: 0, page: 1, pageSize: DEFAULT_PAGE_SIZE, totalPages: 0 } : []);
+        }
         propertyScope = {
           OR: [
             { propertyId },
@@ -75,27 +100,42 @@ export const getTickets = async (req, res) => {
         };
       }
 
-      tickets = await prisma.ticket.findMany({
-        where: {
-          companyId: session.companyId,
-          ...(homeownerId ? { homeownerId } : {}),
-          ...propertyScope,
-        },
-        include: {
-          homeowner: {
-            select: {
-              name: true,
-              email: true,
-            },
-          },
-          property: true,
-          assignedStaff: ASSIGNED_STAFF_SELECT,
-          appointments: NEXT_VISIT_SELECT,
-        },
-        orderBy: { createdAt: "desc" },
+      scope = {
+        companyId: session.companyId,
+        ...(homeownerId ? { homeownerId } : {}),
+        ...propertyScope,
+      };
+    }
+
+    // Asking for a page returns one page and the totals; otherwise the plain list.
+    if (req.query.page) {
+      const where = { ...scope, AND: ticketFilterConditions(req.query) };
+      const pageSize = Math.min(Math.max(Number.parseInt(req.query.pageSize, 10) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+      const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+      const [total, tickets] = await Promise.all([
+        prisma.ticket.count({ where }),
+        prisma.ticket.findMany({
+          where,
+          include: TICKET_LIST_INCLUDE,
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+      ]);
+      return res.json({
+        tickets: tickets.map(withNextVisit),
+        total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize),
       });
     }
 
+    const tickets = await prisma.ticket.findMany({
+      where: scope,
+      include: TICKET_LIST_INCLUDE,
+      orderBy: { createdAt: "desc" },
+    });
     return res.json(tickets.map(withNextVisit));
   } catch (error) {
     console.error("Failed to fetch tickets:", error);
@@ -145,12 +185,17 @@ export const createTicket = async (req, res) => {
       return res.status(404).json({ message: "Property not found" });
     }
 
+    // Same answer as a missing id, so other tenants' ids can't be probed.
+    if (property.homeowner?.companyId !== session.companyId) {
+      return res.status(404).json({ message: "Property not found" });
+    }
+
     // Ensure homeowner owns the property
     if (property.homeownerId !== homeownerId) {
       return res.status(403).json({ message: "Property does not belong to specified homeowner" });
     }
 
-    const companyId = property.homeowner?.companyId ?? null;
+    const companyId = session.companyId;
     const ticket = await prisma.$transaction(async (tx) => tx.ticket.create({
       data: {
         // id omitted — Supabase/Prisma auto-assigns a cuid
@@ -204,7 +249,7 @@ export const getTicket = async (req, res) => {
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: {
-        homeowner: true,
+        homeowner: { select: { id: true, name: true, email: true, phone: true, companyId: true } },
         property: true,
         assignedStaff: ASSIGNED_STAFF_SELECT,
         workDoneBy: WORK_DONE_BY_SELECT,

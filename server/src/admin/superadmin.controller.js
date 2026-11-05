@@ -37,6 +37,42 @@ export const getCompanies = async (req, res) => {
   }
 };
 
+const OVERVIEW_COMPANIES = 6;
+
+/** Totals and newest tenants for the admin home, without signing every company's documents. */
+export const getCompaniesOverview = async (req, res) => {
+  try {
+    const session = req.user;
+    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const [total, verified, warranty, sales, recent] = await Promise.all([
+      prisma.company.count(),
+      prisma.company.count({ where: { verificationStatus: "VERIFIED" } }),
+      prisma.company.count({ where: { warrantyEnabled: true } }),
+      prisma.company.count({ where: { salesEnabled: true } }),
+      prisma.company.findMany({
+        orderBy: { createdAt: "desc" },
+        take: OVERVIEW_COMPANIES,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          verificationStatus: true,
+          warrantyEnabled: true,
+          salesEnabled: true,
+        },
+      }),
+    ]);
+
+    return res.json({ total, verified, warranty, sales, recent });
+  } catch (error) {
+    console.error("Error fetching companies overview:", error);
+    return res.status(500).json({ message: "Error fetching companies overview" });
+  }
+};
+
 export const getUsers = async (req, res) => {
   try {
     const session = req.user;

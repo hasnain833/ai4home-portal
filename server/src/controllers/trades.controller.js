@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { toE164 } from "../services/sms.service.js";
+import { PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import { createHomeownerAccount, sendAccountInvite } from "../lib/homeowner-account.js";
 import { listTicketPhotos } from "../services/warranty-photos.service.js";
 import { companyAdmins, writeNotifications } from "../services/notification-service.js";
@@ -56,7 +56,7 @@ export const createTrade = async (req, res) => {
     }
     const phone = toE164(req.body.phone);
     if (phone === undefined) {
-      return res.status(400).json({ message: "Enter a valid phone number, e.g. (555) 123-4567 or +15551234567" });
+      return res.status(400).json({ message: PHONE_ERROR });
     }
 
     // Same email already a trade for another builder: reuse that login.

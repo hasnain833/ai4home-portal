@@ -36,6 +36,26 @@ const calculateDelayTime = (value, unit) => {
   return d;
 };
 
+const ALREADY_HANDLED = { status: "stopped", reason: "Another run already handled this step" };
+
+// Only ever moves forward. False means another run for this enrollment is past
+// this step, so sending it here would be a duplicate.
+async function advancePast(enrollmentId, position) {
+  const { count } = await prisma.campaignEnrollment.updateMany({
+    where: { id: enrollmentId, status: "ACTIVE", currentStepPosition: { lte: position } },
+    data: { currentStepPosition: position + 1 },
+  });
+  return count === 1;
+}
+
+// A run asleep until a send window is not stalled; a future nextRunAt tells the
+// resume sweep to leave it alone.
+const markWaitingUntil = (enrollmentId, when) =>
+  prisma.campaignEnrollment.update({
+    where: { id: enrollmentId },
+    data: { nextRunAt: new Date(when) },
+  });
+
 const ENROLLMENT_SELECT = {
   id: true,
   status: true,
@@ -142,13 +162,14 @@ export const runNurtureCampaign = inngest.createFunction(
             t = getNextValidSendWindow(t, tz, currentStep.sendWindowDays, currentStep.sendWindowStart, currentStep.sendWindowEnd);
           }
 
-          await prisma.campaignEnrollment.update({
-            where: { id: enrollment.id },
+          const { count } = await prisma.campaignEnrollment.updateMany({
+            where: { id: enrollment.id, currentStepPosition: { lte: currentStep.position } },
             data: { currentStepPosition: nextPosition, nextRunAt: t },
           });
 
-          return new Date(t).toISOString();
+          return count === 1 ? new Date(t).toISOString() : null;
         });
+        if (!nextTime) return ALREADY_HANDLED;
 
         await step.sleepUntil(`wait-for-delay-${currentStep.position}`, nextTime);
 
@@ -158,10 +179,7 @@ export const runNurtureCampaign = inngest.createFunction(
 
       if (currentStep.enabled === false) {
         await step.run(`skip-disabled-${currentStep.position}`, async () =>
-          prisma.campaignEnrollment.update({
-            where: { id: enrollment.id },
-            data: { currentStepPosition: nextPosition },
-          }),
+          advancePast(enrollment.id, currentStep.position),
         );
         currentPosition = nextPosition;
         continue;
@@ -172,6 +190,7 @@ export const runNurtureCampaign = inngest.createFunction(
           const tz = getLeadTimezone(lead.state);
           const nextValidTime = getNextValidSendWindow(new Date(), tz, currentStep.sendWindowDays, currentStep.sendWindowStart, currentStep.sendWindowEnd);
           if (new Date(nextValidTime).getTime() > Date.now() + 60000) {
+            await markWaitingUntil(enrollment.id, nextValidTime);
             return new Date(nextValidTime).toISOString();
           }
           return null;
@@ -198,18 +217,16 @@ export const runNurtureCampaign = inngest.createFunction(
         const resumeAt = await step.run(`calc-quiet-hours-${currentStep.position}-${quietHoursAttempts}`, async () => {
           const tz = getLeadTimezone(lead.state, lead.phone);
           const target = getNextValidSendWindow(new Date(Date.now() + 60000), tz, "Mon,Tue,Wed,Thu,Fri,Sat,Sun", "08:00", "21:00");
+          await markWaitingUntil(enrollment.id, target);
           return new Date(target).toISOString();
         });
         await step.sleepUntil(`wait-for-quiet-hours-${currentStep.position}-${quietHoursAttempts}`, resumeAt);
       }
 
       if (!complianceCheck.allowed) {
-        await step.run(`skip-step-${currentStep.position}`, async () => {
-          await prisma.campaignEnrollment.update({
-            where: { id: enrollment.id },
-            data: { currentStepPosition: nextPosition },
-          });
-        });
+        await step.run(`skip-step-${currentStep.position}`, async () =>
+          advancePast(enrollment.id, currentStep.position),
+        );
         currentPosition = nextPosition;
         continue;
       }
@@ -229,6 +246,13 @@ export const runNurtureCampaign = inngest.createFunction(
         console.log(`[Nurture] Stopping before step ${currentStep.position}: enrollment exited or campaign paused.`);
         return { status: "stopped", reason: "Enrollment no longer active or campaign paused" };
       }
+
+      // Its own step, so a retry of the send below keeps this run's claim. A run
+      // lost after claiming skips the message, which beats sending it twice.
+      const claimed = await step.run(`claim-step-${currentStep.position}`, async () =>
+        advancePast(enrollment.id, currentStep.position),
+      );
+      if (!claimed) return ALREADY_HANDLED;
 
       const sendResult = await step.run(`send-step-${currentStep.position}`, async () => {
         // Credentials are read here, not once per run: they stay out of the job
@@ -384,12 +408,6 @@ export const runNurtureCampaign = inngest.createFunction(
         } else {
           console.log(`[Nurture] Step ${currentStep.position}: no ${currentStep.type} contact channel on lead; nothing sent.`);
         }
-
-        // Advance past the completed step so a resumed run does not re-send it.
-        await prisma.campaignEnrollment.update({
-          where: { id: enrollment.id },
-          data: { currentStepPosition: nextPosition },
-        });
       });
 
       currentPosition = nextPosition;

@@ -45,6 +45,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
 import HelpAgentLab from "@/components/admin/prompt-lab/HelpAgentLab";
 import WebsiteAgentLab from "@/components/admin/prompt-lab/WebsiteAgentLab";
+import B2BAgentLab from "@/components/admin/prompt-lab/B2BAgentLab";
 
 type Draft = {
   systemTemplate: string;
@@ -129,7 +130,7 @@ type WarrantyChatMessage = {
   options?: string[];
 };
 
-type AgentTab = "sales" | "warranty" | "help" | "website";
+type AgentTab = "sales" | "b2b" | "warranty" | "help" | "website";
 
 const PHASE_LABELS: Record<WarrantyPhaseKey, string> = {
   INTAKE: "Intake",
@@ -180,6 +181,8 @@ export default function PromptLabPage() {
 
   // ── Agent switcher ───────────────────────────────────────────────────────
   const [agentTab, setAgentTab] = useState<AgentTab>("sales");
+  const [b2bMeta, setB2bMeta] = useState({ edited: false, versions: 0 });
+  const [b2bHistoryOpen, setB2bHistoryOpen] = useState(false);
 
   // ── Warranty state ───────────────────────────────────────────────────────
   const [wLoading, setWLoading] = useState(false);
@@ -689,7 +692,7 @@ export default function PromptLabPage() {
   }
 
   return (
-    <div className="flex h-full min-h-150 flex-col gap-3">
+    <div className="flex min-h-150 flex-col gap-3 xl:h-[max(46rem,calc(100dvh-4rem))]">
       {/* Heading + Agent Switcher */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
@@ -702,7 +705,13 @@ export default function PromptLabPage() {
             className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
               agentTab === "sales" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
             }`}>
-            <FlaskConical className="h-3.5 w-3.5" /> Sales Agent
+            <FlaskConical className="h-3.5 w-3.5" /> B2C Sales Agent
+          </button>
+          <button type="button" onClick={() => setAgentTab("b2b")}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+              agentTab === "b2b" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            <Building2 className="h-3.5 w-3.5" /> B2B Sales Agent
           </button>
           <button type="button" onClick={() => setAgentTab("warranty")}
             className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -736,6 +745,18 @@ export default function PromptLabPage() {
                 {versions.length > 0 && <span className="text-muted-foreground">({versions.length})</span>}
               </Button>
             </>
+          ) : agentTab === "b2b" ? (
+            <>
+              {b2bMeta.edited ? (
+                <Badge className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]">Edited</Badge>
+              ) : (
+                <Badge variant="secondary">Matches shipped prompt</Badge>
+              )}
+              <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setB2bHistoryOpen(true)}>
+                <History className="h-4 w-4" /> History
+                {b2bMeta.versions > 0 && <span className="text-muted-foreground">({b2bMeta.versions})</span>}
+              </Button>
+            </>
           ) : agentTab === "warranty" ? (
             <>
               <Badge variant="secondary">
@@ -753,6 +774,8 @@ export default function PromptLabPage() {
             ? <>Edit the prompt, add knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> puts a prompt in front of real leads.</>
             : agentTab === "warranty"
             ? <>Edit the four phase prompts the warranty agent uses, add platform knowledge-base documents, and test both in sandbox mode. No tickets or emails are sent during testing.</>
+            : agentTab === "b2b"
+            ? <>The agent that answers builders who reply to Business Campaigns. Edit the prompt, add its own knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> changes what real builders get.</>
             : agentTab === "website"
             ? <>Manage the public website assistant&apos;s prompt and review conversations and notification activity. <strong>Save &amp; go live</strong> applies to the next visitor message.</>
             : <>The assistant builder staff open from <strong>Help</strong> in the sidebar. It already knows the whole portal; add docs for anything else. <strong>Save &amp; go live</strong> applies to their next question.</>}
@@ -825,7 +848,7 @@ export default function PromptLabPage() {
         </Button>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)]">
         {/* Prompt */}
         <Card className="flex min-h-0 flex-col overflow-hidden">
           <CardHeader className="shrink-0 flex-row items-center justify-between space-y-0 py-3">
@@ -871,7 +894,7 @@ export default function PromptLabPage() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pb-3">
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-3">
             {tab === "kb" ? (
               <KnowledgeBasePanel agent="sales" />
             ) : (
@@ -908,7 +931,7 @@ export default function PromptLabPage() {
               value={draft.systemTemplate}
               onChange={(e) => updateDraft({ systemTemplate: e.target.value })}
               spellCheck={false}
-              className="min-h-0 flex-1 resize-none font-mono text-xs leading-relaxed"
+              className="min-h-64 flex-1 resize-none field-sizing-fixed font-mono text-xs leading-relaxed"
             />
 
             {errors.length > 0 && (
@@ -1137,6 +1160,7 @@ export default function PromptLabPage() {
       </>
       )}
 
+      {agentTab === "b2b" && <B2BAgentLab onMetaChange={setB2bMeta} historyOpen={b2bHistoryOpen} onHistoryOpenChange={setB2bHistoryOpen} />}
       {agentTab === "help" && <HelpAgentLab />}
       {agentTab === "website" && <WebsiteAgentLab />}
 
@@ -1167,7 +1191,7 @@ export default function PromptLabPage() {
             </div>
           </div>
 
-          <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 mt-3">
+          <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)] mt-3">
             {/* Warranty Prompt Editor */}
             <Card className="flex min-h-0 flex-col overflow-hidden">
               <CardHeader className="shrink-0 flex-col justify-between space-y-3 py-3">
@@ -1218,7 +1242,7 @@ export default function PromptLabPage() {
                   </>
                 )}
               </CardHeader>
-              <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pb-3">
+              <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-3">
                 {wTab === "kb" ? (
                   <KnowledgeBasePanel
                     agent="warranty"
@@ -1233,7 +1257,7 @@ export default function PromptLabPage() {
                 <Textarea
                   value={wDraft[wPhaseTab]}
                   onChange={(e) => setWDraft(d => ({ ...d, [wPhaseTab]: e.target.value }))}
-                  className="min-h-0 flex-1 resize-none font-mono text-[11px] leading-relaxed"
+                  className="min-h-64 flex-1 resize-none field-sizing-fixed font-mono text-[11px] leading-relaxed"
                   placeholder="System prompt instructions..."
                 />
 

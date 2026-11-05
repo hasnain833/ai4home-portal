@@ -53,6 +53,7 @@ const SENSITIVE_KEYS = new Set([
   "authToken",
   "rows",
   "leadsList",
+  "text",
 ]);
 
 function safeBodySummary(body) {

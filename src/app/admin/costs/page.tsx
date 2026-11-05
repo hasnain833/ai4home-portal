@@ -82,7 +82,7 @@ const PRICING_FIELDS: { key: string; label: string; help: string }[] = [
   {
     key: "TELNYX_SMS",
     label: "Telnyx (per segment)",
-    help: "Telnyx US long-code list price is $0.004. Volume commitments lower this.",
+    help: "Telnyx long-code list price is $0.004. Volume commitments lower this.",
   },
   {
     key: "FAILED_SEND",

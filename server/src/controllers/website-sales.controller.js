@@ -92,7 +92,7 @@ export async function websiteSales(req, res) {
         if (draft.email && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(draft.email)) { delete draft.email; invalid = "Please provide a valid email address."; }
         if (draft.phone) {
           try { parseWebsiteInquiry({ type: "EBOOK", email: "check@example.com", phone: draft.phone, marketingConsent: false }); }
-          catch { delete draft.phone; invalid = invalid || "Please provide a valid phone number, including your country code."; }
+          catch { delete draft.phone; invalid = invalid || "We can only use +1 phone numbers. Please share a +1 number."; }
         }
         const preference = preferenceError(draft);
         if (preference) { delete draft[preference.field]; invalid = invalid || preference.message; }

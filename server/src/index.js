@@ -4,6 +4,7 @@ import {
   requireAuth,
   requireWorkspace,
   requireCompany,
+  requireVerifiedCompany,
 } from "./middlewares/auth.js";
 import { auditMutations } from "./lib/audit.js";
 import { createRateLimiter } from "./middlewares/rate-limit.js";
@@ -19,6 +20,7 @@ import kbRouter from "./routes/kb.js";
 import appointmentsRouter from "./routes/appointments.js";
 import segmentsRouter from "./routes/segments.js";
 import csvRouter from "./routes/csv.js";
+import { parseCsvRows } from "./controllers/csv.controller.js";
 import salesDashboardRouter from "./routes/sales-dashboard.js";
 import messagingSettingsRouter from "./routes/messaging-settings.js";
 import schedulingRouter from "./routes/scheduling.js";
@@ -83,6 +85,7 @@ import { warrantyConversationRetention } from "./inngest/functions/warranty-conv
 import { ticketAppointmentReminders } from "./inngest/functions/appointment-reminders.js";
 import { bookingNudges } from "./inngest/functions/booking-nudges.js";
 import { runB2BCampaign, resumeStalledB2BEnrollments } from "./inngest/functions/b2b-campaign.js";
+import { runB2BAgent, resumeB2BAgentPauses } from "./inngest/functions/b2b-agent.js";
 
 import { websiteInquiryDelivery } from "./inngest/functions/website-inquiry.js";
 
@@ -116,6 +119,8 @@ app.use(
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.use("/api/auth", authRouter);
+// Stateless, and shared by importers in different workspaces and the admin portal.
+app.post("/api/csv/parse", requireAuth, parseCsvRows);
 
 const salesGuard = [
   requireAuth,
@@ -174,6 +179,7 @@ const warrantyGuard = [
   requireAuth,
   requireWorkspace("warranty"),
   requireCompany,
+  requireVerifiedCompany,
   auditMutations("warranty"),
 ];
 app.use("/api/dashboard", ...warrantyGuard, dashboardRouter);
@@ -226,6 +232,8 @@ app.use(
       warrantyConversationRetention,
       runB2BCampaign,
       resumeStalledB2BEnrollments,
+      runB2BAgent,
+      resumeB2BAgentPauses,
       websiteInquiryDelivery,
     ],
   }),

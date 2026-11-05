@@ -41,10 +41,6 @@ export default function HubPage() {
   }
 
   const handleSelectWorkspace = async (workspace: "warranty" | "sales") => {
-    // Save selection in memory (both localStorage and cookies for middleware accessibility)
-    localStorage.setItem("last-workspace", workspace);
-    document.cookie = `last-workspace=${workspace}; path=/; max-age=31536000; SameSite=Lax`;
-
     try {
       await updateProfile({ lastActiveWorkspace: workspace });
     } catch (err) {

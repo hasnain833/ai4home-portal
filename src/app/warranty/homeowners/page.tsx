@@ -363,7 +363,7 @@ export default function HomeownersManagementPage() {
                     <Input
                       id="phone"
                       type="tel"
-                      placeholder="(555) 123-4567"
+                      placeholder="+1 (555) 123-4567"
                       className="pl-9"
                       value={newHomeowner.phone}
                       onChange={(e) => setNewHomeowner({ ...newHomeowner, phone: e.target.value })}
@@ -618,7 +618,7 @@ export default function HomeownersManagementPage() {
         )}
         <Input
           type="tel"
-          placeholder="(555) 123-4567"
+          placeholder="+1 (555) 123-4567"
           value={phoneEdit?.value ?? ""}
           onChange={(e) => setPhoneEdit((p) => (p ? { ...p, value: e.target.value } : p))}
           onKeyDown={(e) => { if (e.key === "Enter") savePhone(); }}

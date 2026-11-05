@@ -21,22 +21,9 @@ export default function Home() {
           return;
         }
 
-        const storedLastWorkspace = localStorage.getItem("last-workspace");
-        const getCookie = (name: string) => {
-          const value = `; ${document.cookie}`;
-          const parts = value.split(`; ${name}=`);
-          if (parts.length === 2) return parts.pop()?.split(";").shift();
-          return null;
-        };
-        const cookieLastWorkspace = getCookie("last-workspace");
-        const lastWorkspace =
-          user.lastActiveWorkspace ||
-          storedLastWorkspace ||
-          cookieLastWorkspace;
-
-        if (lastWorkspace === "warranty" && user.hasWarrantyAccess) {
+        if (user.lastActiveWorkspace === "warranty" && user.hasWarrantyAccess) {
           router.push("/warranty/dashboard");
-        } else if (lastWorkspace === "sales" && user.hasSalesAccess) {
+        } else if (user.lastActiveWorkspace === "sales" && user.hasSalesAccess) {
           router.push("/sales/dashboard");
         } else {
           const hasWarranty = user.hasWarrantyAccess;

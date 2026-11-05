@@ -1,7 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { findDuplicateLead } from "../lib/lead-dedup.js";
 import { triggerAutomation } from "../lib/automation-events.js";
-import { normalizePhone } from "../services/sms.service.js";
+import { normalizePhone, PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import { pushLeadToSalesforce } from "../services/salesforce-writeback.js";
 
 // ponytail: no per-company form key, add a rotatable one if a form gets spammed.
@@ -58,9 +58,7 @@ export const submitLeadForm = async (req, res) => {
 
     if (!firstName) return res.status(400).json({ message: "Please enter your name." });
     if (email && !EMAIL_RE.test(email)) return res.status(400).json({ message: "Please enter a valid email address." });
-    if (b.phone && (phone.length < 10 || phone.length > 15)) {
-      return res.status(400).json({ message: "Please enter a valid phone number." });
-    }
+    if (b.phone && !toE164(b.phone)) return res.status(400).json({ message: PHONE_ERROR });
     if (!email && !phone) return res.status(400).json({ message: "Please enter an email address or phone number." });
 
     const emailOptIn = !!email && checked(b.emailOptIn);

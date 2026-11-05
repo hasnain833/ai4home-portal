@@ -509,7 +509,7 @@ export const processBrevoInboundEmail = async (req, res) => {
 
       // Reply to a platform (B2B) campaign: no agent on that side, hand it to the super admin.
       if (companyIdFromReplyAddress(item.To) === B2B_REPLY_TAG) {
-        await handleB2BReply({ channel: "EMAIL", sender: normalizedEmail, body: textBody || htmlBody, subject: item.Subject });
+        await handleB2BReply({ channel: "EMAIL", sender: normalizedEmail, body: textBody || htmlBody, subject: item.Subject, headers: item.Headers });
         processedCount++;
         continue;
       }
@@ -661,6 +661,12 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
   if (lastOutbound?.source?.startsWith("warranty-")) {
     console.log(`[SMS IN] reply from ${sender} follows a warranty text (${lastOutbound.source}) — warranty SMS is no-reply, ignored.`);
     return { ignored: true, reason: "warranty-no-reply" };
+  }
+
+  // We texted them last as a platform lead, so this is their answer, even if the same
+  // number also exists as a lead under a builder.
+  if (!companyId && ["b2b-campaign", "b2b-agent"].includes(lastOutbound?.source) && (await handleB2BReply({ channel: "SMS", sender, body }))) {
+    return { b2b: true };
   }
 
   let resolvedCompanyId = companyId;

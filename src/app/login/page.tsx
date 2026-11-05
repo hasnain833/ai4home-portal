@@ -37,12 +37,14 @@ const getPasswordStrength = (password: string) => {
 };
 
 function AuthContainer() {
-  const { login } = useAuth();
+  const { login, verifySuperadminCode } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Mode: login, signup, verify, forgot
-  const [mode, setMode] = useState<"login" | "signup" | "verify" | "forgot">("login");
+  // Mode: login, signup, verify, forgot, code (Super Admin's emailed sign-in code)
+  const [mode, setMode] = useState<"login" | "signup" | "verify" | "forgot" | "code">("login");
+  const [mfaChallenge, setMfaChallenge] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
 
   // Forgot password state
   const [forgotEmail, setForgotEmail] = useState("");
@@ -146,13 +148,33 @@ function AuthContainer() {
 
     setIsLoading(true);
     try {
-      await login(loginEmail, loginPassword, redirectPath);
+      const result = await login(loginEmail, loginPassword, redirectPath);
+      if (result?.mfaChallenge) {
+        setMfaChallenge(result.mfaChallenge);
+        setMfaCode("");
+        setLoginPassword("");
+        setMode("code");
+      }
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
           : "Login failed. Please check your credentials.",
       );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleMfaCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    setIsLoading(true);
+    try {
+      await verifySuperadminCode(mfaChallenge, mfaCode);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That code is incorrect or has expired.");
     } finally {
       setIsLoading(false);
     }
@@ -182,7 +204,7 @@ function AuthContainer() {
         return;
       }
 
-      setSuccess("A recovery link has been dispatched to your email inbox.");
+      setSuccess("If that email has an account, a recovery link is on its way.");
       setForgotEmail("");
     } catch {
       setError("An unexpected error occurred. Please try again.");
@@ -345,12 +367,14 @@ function AuthContainer() {
                 {mode === "signup" && "Create Account"}
                 {mode === "verify" && "Verify Your Email"}
                 {mode === "forgot" && "Forgot Password"}
+                {mode === "code" && "Enter Your Code"}
               </h3>
               <p className="text-[13px] text-zinc-400 leading-relaxed font-sans mt-2">
                 {mode === "login" && "Enter your credentials to access your account"}
                 {mode === "signup" && "Register your company profile to access the admin portal"}
                 {mode === "verify" && `Enter the 6-digit validation code dispatched to ${companyEmail}`}
                 {mode === "forgot" && "Enter your email address to receive a secure password reset link"}
+                {mode === "code" && `We emailed a 6-digit sign-in code to ${loginEmail}. It works for 10 minutes.`}
               </p>
             </div>
 
@@ -684,6 +708,44 @@ function AuthContainer() {
                     </motion.form>
                   )}
 
+                  {mode === "code" && (
+                    <motion.form
+                      key="code-form"
+                      initial={{ opacity: 0, x: 15 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -15 }}
+                      transition={{ duration: 0.2 }}
+                      onSubmit={handleMfaCode}
+                      className="space-y-5"
+                    >
+                      <div className="space-y-2">
+                        <Label htmlFor="mfa-code" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block">Sign-in Code</Label>
+                        <Input
+                          id="mfa-code"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          maxLength={6}
+                          placeholder="123456"
+                          className="px-4 h-12 w-full bg-white/2 border border-white/10 hover:bg-white/10 text-zinc-100 placeholder-zinc-600 rounded-xl focus:border-[#c59b4c]/60 focus:ring-1 focus:ring-[#c59b4c]/20 focus:bg-white/20 transition-all duration-200 focus:outline-none text-sm tracking-widest"
+                          value={mfaCode}
+                          onChange={(e) => setMfaCode(e.target.value)}
+                          disabled={isLoading}
+                          required
+                          autoFocus
+                        />
+                      </div>
+
+                      <Button
+                        type="submit"
+                        className="w-full h-12 text-sm font-bold tracking-wide rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 mt-2 bg-[#c59b4c] hover:bg-[#d4ae62] text-zinc-950 hover:scale-[1.01] active:scale-[0.99] border-0 cursor-pointer flex items-center justify-center"
+                        disabled={isLoading}
+                      >
+                        {isLoading ? "Checking..." : "Verify and Sign In"}
+                      </Button>
+                    </motion.form>
+                  )}
+
                 </AnimatePresence>
               </div>
             </div>
@@ -704,7 +766,7 @@ function AuthContainer() {
                       Create account
                     </button>
                   </>
-                ) : mode === "forgot" ? (
+                ) : mode === "forgot" || mode === "code" ? (
                   <button
                     onClick={() => {
                       setMode("login");

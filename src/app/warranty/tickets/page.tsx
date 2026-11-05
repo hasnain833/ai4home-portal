@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -9,6 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DispatchTicketDialog } from "@/components/warranty/DispatchTicketDialog";
 import { cn, ticketRef } from "@/lib/utils";
 import { useQuery, QUERY_KEYS } from "@/lib/use-query";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -211,6 +212,10 @@ function TicketsPageInner() {
   const [priority, setPriority] = useState<string>("all");
   const [dateRange, setDateRange] = useState<string>("all");
   const [page, setPage] = useState(1);
+  const [totalTickets, setTotalTickets] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const debouncedSearch = useDebouncedValue(search);
+  const latestRequest = useRef(0);
   const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const itemsPerPage = 10;
 
@@ -230,19 +235,25 @@ function TicketsPageInner() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const fetchTickets = useCallback(async (isRefresh = false) => {
-    if (!isRefresh) setLoading(true);
+  const fetchTickets = useCallback(async () => {
+    const requestId = ++latestRequest.current;
     try {
-      let url = "/api/tickets";
-      if (isHomeowner && user?.id) {
-        url += `?homeownerId=${user.id}`;
-      } else if (propertyFilter) {
-        url += `?propertyId=${encodeURIComponent(propertyFilter)}`;
-      }
-      const response = await fetch(url);
+      const params = new URLSearchParams({ page: String(page), pageSize: String(itemsPerPage) });
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      if (status !== "all") params.set("status", status);
+      if (priority !== "all") params.set("priority", priority);
+      if (dateRange !== "all") params.set("dateRange", dateRange);
+      if (!isHomeowner && propertyFilter) params.set("propertyId", propertyFilter);
+
+      const response = await fetch(`/api/tickets?${params}`);
+      // A slower, older request must not overwrite a newer one.
+      if (requestId !== latestRequest.current) return;
       if (response.ok) {
         const data = await response.json();
-        setTickets(data);
+        if (requestId !== latestRequest.current) return;
+        setTickets(data.tickets);
+        setTotalTickets(data.total);
+        setTotalPages(data.totalPages);
       } else {
         showToast("error", "Failed to fetch tickets");
       }
@@ -252,12 +263,17 @@ function TicketsPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [isHomeowner, user?.id, propertyFilter]);
+  }, [isHomeowner, propertyFilter, page, debouncedSearch, status, priority, dateRange]);
 
   // Load tickets
   useEffect(() => {
     fetchTickets();
   }, [fetchTickets]);
+
+  // Resolving the last ticket on the last page leaves that page empty.
+  useEffect(() => {
+    if (totalPages > 0 && page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   // Create-ticket dropdowns: cached and shared with the properties page.
   const { data: homeowners = NO_HOMEOWNERS } = useQuery<HomeownerOption[]>(
@@ -277,44 +293,10 @@ function TicketsPageInner() {
     tickets.find((t) => t.property?.address)?.property?.address ||
     "Selected property";
 
-  const filteredTickets = useMemo(() => {
-    return tickets.filter((t) => {
-      const homeownerName = t.homeowner?.name || "Unknown";
-      const matchSearch =
-        search === "" ||
-        t.id.toLowerCase().includes(search.toLowerCase()) ||
-        ticketRef(t).toLowerCase().includes(search.toLowerCase()) ||
-        homeownerName.toLowerCase().includes(search.toLowerCase()) ||
-        (t.property?.address ?? "").toLowerCase().includes(search.toLowerCase()) ||
-        t.issueType.toLowerCase().includes(search.toLowerCase());
-      const matchStatus = status === "all" || t.status === status;
-      const matchPriority = priority === "all" || t.priority === priority;
-
-      let matchDate = true;
-      if (dateRange !== "all") {
-        const ticketDate = new Date(t.createdAt);
-        const now = new Date();
-        const diffDays = (now.getTime() - ticketDate.getTime()) / (1000 * 3600 * 24);
-
-        if (dateRange === "7d") matchDate = diffDays <= 7;
-        else if (dateRange === "30d") matchDate = diffDays <= 30;
-        else if (dateRange === "90d") matchDate = diffDays <= 90;
-      }
-
-      return matchSearch && matchStatus && matchPriority && matchDate;
-    });
-  }, [tickets, search, status, priority, dateRange]);
-
-  const totalPages = Math.ceil(filteredTickets.length / itemsPerPage);
-  const paginatedTickets = filteredTickets.slice(
-    (page - 1) * itemsPerPage,
-    page * itemsPerPage
-  );
-
   // Reset page when filters change
   useEffect(() => {
     setPage(1);
-  }, [search, status, priority, dateRange]);
+  }, [debouncedSearch, status, priority, dateRange]);
 
   const handleResetFilters = () => {
     setSearch("");
@@ -378,7 +360,7 @@ function TicketsPageInner() {
       }
 
       closeCreateModal();
-      await fetchTickets(true);
+      await fetchTickets();
       showToast(data.notice ? "error" : "success", data.notice || "Ticket created");
     } catch (error) {
       console.error("Error creating ticket:", error);
@@ -389,7 +371,7 @@ function TicketsPageInner() {
   };
 
   const handleDispatched = async (notice?: string) => {
-    await fetchTickets(true);
+    await fetchTickets();
     showToast(
       notice ? "error" : "success",
       notice || "Ticket dispatched. The homeowner has been emailed a link to pick a time.",
@@ -412,7 +394,7 @@ function TicketsPageInner() {
         return;
       }
 
-      await fetchTickets(true);
+      await fetchTickets();
       showToast(data.notice ? "error" : "success", data.notice || "Ticket resolved");
     } catch (error) {
       console.error("Error resolving ticket:", error);
@@ -464,7 +446,7 @@ function TicketsPageInner() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await fetchTickets(true);
+    await fetchTickets();
     setIsRefreshing(false);
     showToast("success", "Tickets refreshed");
   };
@@ -670,12 +652,12 @@ function TicketsPageInner() {
                     Active Claims
                   </span>
                   <span className="text-xs font-semibold px-2.5 py-1 bg-muted rounded-full text-muted-foreground">
-                    {filteredTickets.length} ticket{filteredTickets.length !== 1 ? "s" : ""}
+                    {totalTickets} ticket{totalTickets !== 1 ? "s" : ""}
                   </span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                {filteredTickets.length === 0 ? (
+                {tickets.length === 0 ? (
                   <div className="text-center py-16 text-muted-foreground px-6">
                     <AlertCircle className="h-10 w-10 mx-auto mb-3 text-muted-foreground/60" />
                     <h3 className="font-semibold text-foreground text-sm">No tickets found</h3>
@@ -690,7 +672,7 @@ function TicketsPageInner() {
                   // Mobile card view
                   <AnimatePresence mode="popLayout">
                     <div className="space-y-3 p-4">
-                      {paginatedTickets.map((ticket) => (
+                      {tickets.map((ticket) => (
                         <motion.div
                           key={ticket.id}
                           variants={rowVariants}
@@ -773,7 +755,7 @@ function TicketsPageInner() {
                       </TableHeader>
                       <TableBody>
                         <AnimatePresence mode="popLayout">
-                          {paginatedTickets.map((ticket) => (
+                          {tickets.map((ticket) => (
                             <motion.tr
                               key={ticket.id}
                               variants={rowVariants}

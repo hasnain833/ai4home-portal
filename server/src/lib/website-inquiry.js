@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { toE164 } from "../services/sms.service.js";
+import { PHONE_ERROR, toE164 } from "../services/sms.service.js";
 
 export const WEBSITE_CONSENT_TEXT = "Send me occasional AI for Homebuilders updates and resources. Optional; unsubscribe anytime.";
 export const WEBSITE_TYPES = ["CONTACT", "EBOOK", "DEMO"];
@@ -18,7 +18,7 @@ export function parseWebsiteInquiry(body) {
   }
   // Use the same phone representation as platform B2B leads and Telnyx.
   const phone = toE164(data.phone);
-  if (phone === undefined) throw new Error("Please enter a valid phone number, including country code outside the US.");
+  if (phone === undefined) throw new Error(PHONE_ERROR);
   data.phone = phone || "";
   data.email = data.email.toLowerCase();
   if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(data.email)) throw new Error("A valid email is required.");
