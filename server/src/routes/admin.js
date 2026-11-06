@@ -31,6 +31,7 @@ import {
 } from "../admin/platform.controller.js";
 import { getSalesAgentAppointments } from "../controllers/admin-sales-agent.controller.js";
 import * as b2b from "../admin/b2b.controller.js";
+import * as nurture from "../admin/b2b-nurture.controller.js";
 import * as b2bLab from "../admin/b2b-prompt-lab.controller.js";
 import {
   listSuperStaff,
@@ -131,6 +132,26 @@ router.patch("/b2b/leads/:id", requireAuth, requireAdmin("b2b"), b2b.updateLead)
 router.delete("/b2b/leads/:id", requireAuth, requireAdmin("b2b"), b2b.deleteLead);
 router.get("/b2b/leads/:id/timeline", requireAuth, requireAdmin("b2b"), b2b.leadTimeline);
 router.post("/b2b/leads/:id/agent", requireAuth, requireAdmin("b2b"), b2b.setLeadAgentPaused);
+router.get("/b2b/nurture/content", requireAuth, requireAdmin("b2b"), nurture.listContent);
+router.post("/b2b/nurture/content", requireAuth, requireAdmin("b2b"), nurture.createContent);
+router.post("/b2b/nurture/content/generate", requireAuth, requireAdmin("b2b"), nurture.generateBatch);
+router.put("/b2b/nurture/content/:id", requireAuth, requireAdmin("b2b"), nurture.updateContent);
+router.post("/b2b/nurture/content/:id/review", requireAuth, requireAdmin("b2b"), nurture.reviewContent);
+router.post("/b2b/nurture/content/:id/rewrite", requireAuth, requireAdmin("b2b"), nurture.rewriteContent);
+router.post("/b2b/nurture/content/:id/order", requireAuth, requireAdmin("b2b"), nurture.setContentOrder);
+router.post("/b2b/nurture/sources/extract-url", requireAuth, requireAdmin("b2b"), nurture.extractSourceUrl);
+router.delete("/b2b/nurture/content/:id", requireAuth, requireAdmin("b2b"), nurture.deleteContent);
+router.get("/b2b/nurture/sources", requireAuth, requireAdmin("b2b"), nurture.listSources);
+router.post("/b2b/nurture/sources", requireAuth, requireAdmin("b2b"), nurture.createSource);
+router.put("/b2b/nurture/sources/:id", requireAuth, requireAdmin("b2b"), nurture.updateSource);
+router.delete("/b2b/nurture/sources/:id", requireAuth, requireAdmin("b2b"), nurture.deleteSource);
+router.get("/b2b/nurture/journey", requireAuth, requireAdmin("b2b"), nurture.journeyOverview);
+router.post("/b2b/nurture/journey/join", requireAuth, requireAdmin("b2b"), nurture.joinLeads);
+router.post("/b2b/nurture/journey/remove", requireAuth, requireAdmin("b2b"), nurture.removeLeads);
+router.post("/b2b/nurture/journey/:id/send-now", requireAuth, requireAdmin("b2b"), nurture.sendNow);
+router.get("/b2b/nurture/settings", requireAuth, requireAdmin("b2b"), nurture.getSettings);
+router.put("/b2b/nurture/settings", requireAuth, requireAdmin("b2b"), nurture.updateSettings);
+router.get("/b2b/nurture/kpis", requireAuth, requireAdmin("b2b"), nurture.kpis);
 router.get("/b2b/campaigns", requireAuth, requireAdmin("b2b"), b2b.listCampaigns);
 router.post("/b2b/campaigns", requireAuth, requireAdmin("b2b"), b2b.createCampaign);
 router.post("/b2b/campaigns/generate-step", requireAuth, requireAdmin("b2b"), b2b.generateStep);
@@ -153,6 +174,7 @@ const promptLabUpload = multer({
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 const uploadKbFile = handleUploadErrors(promptLabUpload.single("file"));
+router.post("/b2b/nurture/sources/extract-file", requireAuth, requireAdmin("b2b"), uploadKbFile, nurture.extractSourceFile);
 
 router.get("/prompt-lab", requireAuth, requireAdmin("prompt-lab"), getPromptLab);
 router.get("/prompt-lab/website-agent", requireAuth, requireAdmin("prompt-lab"), getWebsiteAgent);

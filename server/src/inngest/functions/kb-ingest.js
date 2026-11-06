@@ -26,8 +26,11 @@ async function fetchBuffer(url) {
 }
 
 export async function extractText(url, name) {
-  const buffer = await fetchBuffer(url);
-  const lower = (name || url).toLowerCase();
+  return extractTextFromBuffer(await fetchBuffer(url), name || url);
+}
+
+export async function extractTextFromBuffer(buffer, name) {
+  const lower = String(name || "").toLowerCase();
 
   if (isLegacyExcelFile(lower)) {
     throw new Error(

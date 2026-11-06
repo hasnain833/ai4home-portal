@@ -47,8 +47,73 @@ export function appUrl() {
   }
   return url.origin;
 }
-export const bookingLinkFor = (lead, campaignId) =>
-  `${appUrl()}/meet/${encodeURIComponent(lead.bookingToken)}${campaignId ? `?c=${encodeURIComponent(campaignId)}` : ""}`;
+/** `stepId` marks a text's link: opening it is how an SMS click gets counted. */
+export function bookingLinkFor(lead, campaignId, stepId) {
+  const query = new URLSearchParams({ ...(campaignId ? { c: campaignId } : {}), ...(stepId ? { s: stepId } : {}) }).toString();
+  return `${appUrl()}/meet/${encodeURIComponent(lead.bookingToken)}${query ? `?${query}` : ""}`;
+}
+
+// ---------- Weekly limits and journey settings ----------
+
+const JOURNEY_SETTINGS_KEY = "b2b.journey";
+export const JOURNEY_DEFAULTS = { sendDays: "Tue,Wed,Thu", emailTime: "10:00", smsTime: "11:00", emailsPerWeek: 2, smsPerWeek: 1 };
+
+export async function getB2BJourneySettings() {
+  const row = await prisma.platformSetting.findUnique({ where: { key: JOURNEY_SETTINGS_KEY } });
+  return { ...JOURNEY_DEFAULTS, ...(row?.value || {}) };
+}
+
+export async function saveB2BJourneySettings(value) {
+  await prisma.platformSetting.upsert({ where: { key: JOURNEY_SETTINGS_KEY }, create: { key: JOURNEY_SETTINGS_KEY, value }, update: { value } });
+  return getB2BJourneySettings();
+}
+
+/** Every scheduled message counts, whether it came from a campaign or the journey. Live replies don't. */
+export async function weeklyLimitReached(leadId, channel, settings) {
+  const limit = channel === "SMS" ? settings.smsPerWeek : settings.emailsPerWeek;
+  const sent = await prisma.b2BMessage.count({
+    where: { leadId, actor: "CAMPAIGN", channel, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+  });
+  return sent >= limit;
+}
+
+/** Takes the lead out of the journey. Their history stays. */
+export const endB2BJourney = (leadId) =>
+  prisma.b2BLead.updateMany({
+    where: { id: leadId, journeyStage: { not: null } },
+    data: { journeyStage: null, journeyNextAt: null, journeyHoldReason: null },
+  });
+
+const QUIET_AFTER_MS = 5 * 24 * 60 * 60 * 1000;
+
+/**
+ * A reply moves the lead out of scheduled sending. If it goes quiet, the journey picks it up again.
+ * A lead with a meeting stays booked: "thanks, see you then" is no reason to re-engage them.
+ */
+export const moveJourneyToResponded = (leadId) =>
+  prisma.b2BLead.updateMany({
+    where: { id: leadId, journeyStage: { not: null, notIn: ["APPOINTMENT_BOOKED"] } },
+    data: { journeyStage: "RESPONDED", journeyTouches: 0, journeyNextAt: new Date(Date.now() + QUIET_AFTER_MS), journeyHoldReason: null },
+  });
+
+export const QUIET_AFTER = QUIET_AFTER_MS;
+
+const icsText = (value) => String(value).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+const icsDate = (date) => date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+
+/** A calendar invite to attach to a meeting confirmation. */
+export function meetingInvite(lead, start, setting) {
+  const end = new Date(start.getTime() + setting.slotDuration * 60000);
+  const details = setting.meetingLink ? `Join: ${setting.meetingLink}` : "Our team will contact you at your email or phone number.";
+  const lines = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//AI for Homebuilders//Meetings//EN", "METHOD:PUBLISH", "BEGIN:VEVENT",
+    `UID:${lead.id}-${start.getTime()}@aiforhomebuilders`, `DTSTAMP:${icsDate(new Date())}`, `DTSTART:${icsDate(start)}`, `DTEND:${icsDate(end)}`,
+    "SUMMARY:Product Consultation with AI for Homebuilders", `DESCRIPTION:${icsText(details)}`,
+    ...(setting.meetingLink ? [`LOCATION:${icsText(setting.meetingLink)}`] : []),
+    "END:VEVENT", "END:VCALENDAR",
+  ];
+  return { filename: "meeting.ics", content: lines.join("\r\n"), contentType: "text/calendar; charset=utf-8" };
+}
 
 // Unsubscribing has its own signed token, so a forwarded booking link can't opt someone out.
 // It never expires: an unsubscribe link must keep working for as long as the email exists.
@@ -219,7 +284,9 @@ export async function notifySuperAdmin(subject, html, { replyTo } = {}) {
 
 
 const AUTO_SUBJECT_RE = /^(auto(matic)?[\s-]*(reply|response)|autoreply|auto:|out of (the )?office|ooo\b|away from (the |my )?(office|desk)|on (vacation|holiday|leave))/i;
-const QUOTE_MARKER_RE = /^\s*(>|on .+ wrote:|-{2,}\s*(original|forwarded) message|_{5,}|from:\s|sent from my )|<blockquote|class="gmail_quote"/im;
+// Mail apps wrap a long "On ... wrote:" line, so it can span two lines.
+const QUOTE_MARKER_RE = /^\s*(>|on [^\n]+(\r?\n[^\n]*)?wrote:|-{2,}\s*(original|forwarded) message|_{5,}|from:\s|sent from my )|<blockquote|class="gmail_quote"/im;
+const BARE_STOP_RE = /^\s*(please\s+)?stop[\s.!]*$/i;
 const OPT_OUT_RE = /\b(unsubscribe|remove me|take me off|opt(ing)?[\s-]?out|stop (e-?mailing|texting|messaging|contacting|sending)|(do not|don'?t) (contact|e-?mail|text|message)|no more (e-?mails|texts|messages))\b/i;
 
 const AUTO_BODY_RE = /\b(out of (the )?office|automatic reply|auto-?reply|auto-?response|this is an automated)\b/i;
@@ -255,7 +322,10 @@ export async function setB2BSmsOptOut(contact, optedOut) {
   const leads = await prisma.b2BLead.findMany({ where: { phone: { contains: digits } }, select: { id: true } });
   for (const { id } of leads) {
     await prisma.b2BLead.update({ where: { id }, data: { smsOptOut: optedOut } });
-    if (optedOut) await exitB2BEnrollments(id, "UNSUBSCRIBE");
+    if (optedOut) {
+      await exitB2BEnrollments(id, "UNSUBSCRIBE");
+      await endB2BJourney(id);
+    }
   }
 }
 
@@ -285,7 +355,8 @@ export async function agentBlockReason(lead, channel) {
 
 export function asksToOptOut({ body, subject }) {
   const freshSubject = /^(re|fwd?):/i.test(String(subject || "").trim()) ? "" : subject;
-  return OPT_OUT_RE.test(`${freshSubject || ""} ${latestReplyText(body)}`);
+  const latest = latestReplyText(body);
+  return OPT_OUT_RE.test(`${freshSubject || ""} ${latest}`) || BARE_STOP_RE.test(latest);
 }
 
 export async function handleB2BReply({ channel, sender, body, subject, headers }) {
@@ -318,20 +389,24 @@ export async function handleB2BReply({ channel, sender, body, subject, headers }
       data: { leadId: lead.id, direction: "IN", actor: "LEAD", channel, subject: subject || null, body: text || "(empty message)", handledAt },
     });
 
-  if (asksToOptOut({ body, subject })) {
+  // A text has no unsubscribe link, so words count there. Email opts out only through its
+  // link; a request by email is answered with that link by the agent.
+  if (channel === "SMS" && asksToOptOut({ body, subject })) {
     await record(new Date());
-    await prisma.b2BLead.update({ where: { id: lead.id }, data: { emailOptOut: true, smsOptOut: true } });
+    await prisma.b2BLead.update({ where: { id: lead.id }, data: { smsOptOut: true } });
     await exitB2BEnrollments(lead.id, "UNSUBSCRIBE");
+    await endB2BJourney(lead.id);
     await notifySuperAdmin(
-      `B2B lead opted out: ${lead.companyName}`,
+      `B2B lead opted out of SMS: ${lead.companyName}`,
       `<p><strong>${escapeHtml(lead.contactName || lead.companyName)}</strong> (${escapeHtml(lead.companyName)}, ${escapeHtml(sender)}) ` +
-        `asked by ${channel === "SMS" ? "text" : "email"} not to be contacted. They are opted out of email and SMS.</p>` +
+        `asked by text not to be contacted. They are opted out of SMS and all scheduled messages have stopped.</p>` +
         `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeHtml(latestReplyText(body))}</blockquote>`,
     );
     return true;
   }
 
   await exitB2BEnrollments(lead.id, "REPLY");
+  await moveJourneyToResponded(lead.id);
   if (lead.status === "NEW") {
     await prisma.b2BLead.update({ where: { id: lead.id }, data: { status: "CONTACTED" } });
   }

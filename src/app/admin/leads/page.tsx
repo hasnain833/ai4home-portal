@@ -110,6 +110,18 @@ export default function AdminLeadsPage() {
     }
   };
 
+  const setJourney = async (join: boolean) => {
+    if (!timelineFor) return;
+    try {
+      const out = await sendJson<{ joined?: number }>(`${B2B_API}/nurture/journey/${join ? "join" : "remove"}`, "POST", { leadIds: [timelineFor.id] });
+      if (join && !out.joined) toast.error("This lead can't join: it is closed, opted out of email, or already in the journey.");
+      else toast.success(join ? "Added to the journey." : "Removed from the journey.");
+      await Promise.all([openTimeline(timelineFor), reload()]);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  };
+
   const setLeadPaused = async (paused: boolean, answerWaiting = false) => {
     if (!timelineFor) return;
     try {
@@ -288,8 +300,6 @@ export default function AdminLeadsPage() {
               <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
               <Input value={query} maxLength={200} onChange={(e) => { setQuery(e.target.value); setActiveSegment(""); }} placeholder="Search leads" className="h-9 pl-8 text-sm" />
             </div>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={nurtureOnly} onChange={(e) => { setNurtureOnly(e.target.checked); setActiveSegment(""); }} />Nurture opt-in only</label>
-            <label className={"flex items-center gap-2 text-xs " + (needsPersonCount ? "font-semibold text-amber-600" : "text-muted-foreground")}><input type="checkbox" checked={needsPerson} onChange={(e) => setNeedsPerson(e.target.checked)} />Needs a person ({needsPersonCount})</label>
             {(["ALL", ...B2B_LEAD_STATUSES] as const).map((s) => (
               <button
                 key={s}
@@ -302,6 +312,32 @@ export default function AdminLeadsPage() {
                 {s === "ALL" ? "All" : titleCase(s)} ({s === "ALL" ? leads.length : counts[s] || 0})
               </button>
             ))}
+            {/* Status picks one. These two can each be on or off alongside it, so a divider sets them apart. */}
+            <span aria-hidden="true" className="mx-1 h-5 w-px bg-border" />
+            <button
+              type="button"
+              aria-pressed={nurtureOnly}
+              onClick={() => { setNurtureOnly(!nurtureOnly); setActiveSegment(""); }}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                nurtureOnly ? "border-[#b48c3c] bg-[#b48c3c]/10 text-[#b48c3c]" : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Nurture opt-in only
+            </button>
+            <button
+              type="button"
+              aria-pressed={needsPerson}
+              onClick={() => setNeedsPerson(!needsPerson)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                needsPerson
+                  ? "border-[#b48c3c] bg-[#b48c3c]/10 text-[#b48c3c]"
+                  : needsPersonCount
+                    ? "border-amber-500/50 text-amber-600"
+                    : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Needs a person ({needsPersonCount})
+            </button>
           </div>
           <div className="mt-4 space-y-3 border-t pt-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -412,6 +448,26 @@ export default function AdminLeadsPage() {
                   </Button>
                 </div>
               </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3 text-sm">
+                <span className="min-w-0">
+                  {timeline.journeyStage ? `Journey: ${titleCase(timeline.journeyStage)}.` : "Not in the journey."}
+                  {timeline.journeyNextAt && ` Next step ${new Date(timeline.journeyNextAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`}
+                  {timeline.journeyHoldReason && ` On hold: ${timeline.journeyHoldReason}.`}
+                </span>
+                <Button variant="outline" size="sm" onClick={() => setJourney(!timeline.journeyStage)}>
+                  {timeline.journeyStage ? "Remove from journey" : "Add to journey"}
+                </Button>
+              </div>
+              {timeline.profile && (
+                <div className="rounded-lg border border-border p-3 text-sm">
+                  <p className="font-medium">What the AI remembers</p>
+                  <dl className="mt-1 grid gap-1 text-muted-foreground">
+                    {Object.entries(timeline.profile).map(([key, value]) => (
+                      <div key={key}><dt className="inline font-medium">{titleCase(key)}: </dt><dd className="inline">{value}</dd></div>
+                    ))}
+                  </dl>
+                </div>
+              )}
               {timeline.items.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">Nothing yet.</p>
               ) : (

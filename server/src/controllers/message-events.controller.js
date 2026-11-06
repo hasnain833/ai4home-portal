@@ -1,5 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { formatSmsError } from "../services/sms.service.js";
+import { endB2BJourney, exitB2BEnrollments, notifySuperAdmin } from "../lib/b2b.js";
+import { escapeHtml } from "../lib/utils.js";
 
 // Brevo transactional events -> the MessageUsage column they stamp. Unlisted
 // events are ignored: proxy_open is Apple Mail pre-loading the pixel (not a real
@@ -60,6 +62,27 @@ async function flagB2BDeliveryFailure(providerMessageId, describe) {
   });
 }
 
+const PERMANENT_EMAIL_FAILURES = new Set(["hard_bounce", "invalid_email", "blocked"]);
+
+/**
+ * Repeatedly mailing a dead address hurts delivery for every other lead. Stop scheduled email and
+ * tell staff. It isn't recorded as an unsubscribe: the person never asked for that.
+ */
+async function stopEmailingBadAddress(providerMessageId, evt) {
+  const usage = await prisma.messageUsage.findFirst({
+    where: { providerMessageId, source: { in: ["b2b-campaign", "b2b-agent", "b2b-meeting"] }, outcome: "sent" },
+    select: { leadId: true },
+  });
+  const lead = usage?.leadId ? await prisma.b2BLead.findUnique({ where: { id: usage.leadId } }) : null;
+  if (!lead) return;
+  await exitB2BEnrollments(lead.id, "BOUNCED");
+  await endB2BJourney(lead.id);
+  await notifySuperAdmin(
+    `B2B email bounced: ${lead.companyName}`,
+    `<p>Email to ${escapeHtml(lead.email)} (${escapeHtml(lead.companyName)}) failed permanently (${escapeHtml(evt.event)}), so its scheduled messages have stopped. Correct the address to contact this lead again.</p>`,
+  );
+}
+
 export const processBrevoEmailEvents = async (req, res) => {
   try {
     const events = Array.isArray(req.body) ? req.body : [req.body];
@@ -69,6 +92,7 @@ export const processBrevoEmailEvents = async (req, res) => {
       const count = await stamp(s.key, s.field, s.at);
       if (count && s.field === "failedAt") {
         await flagB2BDeliveryFailure(s.key, (stepId) => `Email ${stepId} not delivered (${evt.event})${evt.reason ? `: ${evt.reason}` : ""}`);
+        if (PERMANENT_EMAIL_FAILURES.has(evt.event)) await stopEmailingBadAddress(s.key, evt);
       }
     }
   } catch (error) {

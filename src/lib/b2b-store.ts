@@ -43,6 +43,8 @@ export interface B2BLead {
   smsConsentAt: string | null;
   agentPausedAt: string | null;
   agentPauseReason: string | null;
+  journeyStage: string | null;
+  journeyNextAt: string | null;
   inquiries: { id: string; type: string; payload: Record<string, string | boolean | number>; marketingConsent: boolean; consentText: string; createdAt: string; adminSentAt: string | null; visitorSentAt: string | null; adminSmsSentAt: string | null; visitorSmsSentAt: string | null; lastError: string | null }[];
   emailOptOut: boolean;
   smsOptOut: boolean;
@@ -56,6 +58,10 @@ export interface B2BTimeline {
   agentPausedUntil: string | null;
   agentPauseReason: string | null;
   waiting: number;
+  profile: Record<string, string> | null;
+  journeyStage: string | null;
+  journeyNextAt: string | null;
+  journeyHoldReason: string | null;
   items: { id: string; at: string; kind: "agent" | "lead" | "campaign" | "meeting" | "website"; title: string; body: string | null; status: string | null }[];
 }
 
