@@ -33,6 +33,7 @@ type Availability = {
   bufferMinutes: number;
   workingDays: string;
   timezone: string;
+  meetingLink?: string;
 };
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -282,6 +283,10 @@ function AvailabilityCard() {
               <SelectContent align="start">{[...new Set([form.timezone, ...Intl.supportedValuesOf("timeZone")])].filter(Boolean).map((timezone) => <SelectItem key={timezone} value={timezone}>{timezone.replace(/_/g, " ")}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="availability-meeting-link" className="text-xs">Meeting link (optional, goes in invites and reminders)</Label>
+          <Input id="availability-meeting-link" type="url" value={form.meetingLink || ""} onChange={(e) => setForm({ ...form, meetingLink: e.target.value })} placeholder="https://" className="h-9 text-sm" />
         </div>
         <Button size="sm" className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={saving} onClick={save}>
           Save availability

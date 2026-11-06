@@ -86,6 +86,7 @@ import { ticketAppointmentReminders } from "./inngest/functions/appointment-remi
 import { bookingNudges } from "./inngest/functions/booking-nudges.js";
 import { runB2BCampaign, resumeStalledB2BEnrollments } from "./inngest/functions/b2b-campaign.js";
 import { runB2BAgent, resumeB2BAgentPauses } from "./inngest/functions/b2b-agent.js";
+import { runB2BJourney, b2bJourneyTouch, b2bMeetingReminders, generateContentBatch } from "./inngest/functions/b2b-journey.js";
 
 import { websiteInquiryDelivery } from "./inngest/functions/website-inquiry.js";
 
@@ -234,6 +235,10 @@ app.use(
       resumeStalledB2BEnrollments,
       runB2BAgent,
       resumeB2BAgentPauses,
+      runB2BJourney,
+      b2bJourneyTouch,
+      b2bMeetingReminders,
+      generateContentBatch,
       websiteInquiryDelivery,
     ],
   }),

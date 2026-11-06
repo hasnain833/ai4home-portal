@@ -14,6 +14,7 @@ import { B2B_STEP_SYSTEM, B2B_EMAIL_RULES, B2B_SMS_RULES } from "../prompts/cont
 import { PLATFORM_GUIDE } from "../prompts/help-agent.js";
 import { randomUUID } from "node:crypto";
 import { inngest } from "../lib/inngest.js";
+import { journeyOnMeetingStatus } from "../lib/b2b-journey.js";
 import {
   B2B_LEAD_STATUSES,
   B2B_CLOSED_STATUSES,
@@ -21,6 +22,8 @@ import {
   getB2BAvailability,
   saveB2BAvailability,
   NOT_INTERESTED_REASON,
+  endB2BJourney,
+  meetingInvite,
   findLeadByUnsubscribeToken,
   remapStepIndex,
   validateSteps,
@@ -100,7 +103,7 @@ export function b2bSegmentWhere(filters) {
   return where;
 }
 
-async function findSegment(id) {
+export async function findSegment(id) {
   const builtIn = DEFAULT_SEGMENTS.find((segment) => segment.id === id);
   if (builtIn) return builtIn;
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) return null;
@@ -203,6 +206,7 @@ export const updateLead = wrap("Lead update", async (req, res) => {
   const updated = await prisma.b2BLead.update({ where: { id: lead.id }, data });
   if (data.status && B2B_CLOSED_STATUSES.includes(data.status)) {
     await exitB2BEnrollments(lead.id, "STATUS");
+    await endB2BJourney(lead.id);
   }
   res.json(updated);
 });
@@ -269,7 +273,9 @@ export const leadTimeline = wrap("Lead timeline", async (req, res) => {
       id: s.id,
       at: s.createdAt,
       kind: "campaign",
-      title: `Campaign ${s.channel === "SMS" ? "text" : "email"}${s.campaignId && campaignName.get(s.campaignId) ? `: ${campaignName.get(s.campaignId)}` : ""}${s.stepId ? ` (${s.stepId.replace("b2b:", "step ")})` : ""}`,
+      title: s.stepId?.startsWith("content:")
+        ? `Journey ${s.channel === "SMS" ? "text" : "email"}`
+        : `Campaign ${s.channel === "SMS" ? "text" : "email"}${s.campaignId && campaignName.get(s.campaignId) ? `: ${campaignName.get(s.campaignId)}` : ""}${s.stepId ? ` (${s.stepId.replace("b2b:", "step ")})` : ""}`,
       body: campaignText.get(`${s.campaignId}|${s.stepId}`)?.body || null,
       status: delivery(s),
     })),
@@ -285,7 +291,7 @@ export const leadTimeline = wrap("Lead timeline", async (req, res) => {
   ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
   const waiting = lead.messages.filter((m) => m.direction === "IN" && !m.handledAt).length;
-  res.json({ agentPausedAt: lead.agentPausedAt, agentPausedUntil: lead.agentPausedUntil, agentPauseReason: lead.agentPauseReason, waiting, items });
+  res.json({ agentPausedAt: lead.agentPausedAt, agentPausedUntil: lead.agentPausedUntil, agentPauseReason: lead.agentPauseReason, waiting, profile: lead.profile, journeyStage: lead.journeyStage, journeyNextAt: lead.journeyNextAt, journeyHoldReason: lead.journeyHoldReason, items });
 });
 
 export const deleteLead = wrap("Lead delete", async (req, res) => {
@@ -332,7 +338,7 @@ export const listCampaigns = wrap("Campaigns", async (req, res) => {
           booked: count((e) => e.exitedReason === "APPOINTMENT"),
           replied: count((e) => e.exitedReason === "REPLY"),
           unsubscribed: count((e) => e.exitedReason === "UNSUBSCRIBE"),
-          withIssues: count((e) => e.failedCount > 0 || e.exitedReason === "NOT_CONFIGURED" || (!!e.lastError && !/ skipped: /.test(e.lastError))),
+          withIssues: count((e) => e.failedCount > 0 || e.exitedReason === "NOT_CONFIGURED" || (!!e.lastError && !/ (skipped: |waiting: )/.test(e.lastError))),
         },
       };
     }),
@@ -716,6 +722,7 @@ export const updateAvailability = wrap("Availability update", async (req, res) =
       bufferMinutes: Math.min(120, Math.max(0, parseInt(b.bufferMinutes, 10) || 0)),
       workingDays: days.join(","),
       timezone: b.timezone,
+      meetingLink: String(b.meetingLink || "").trim().startsWith("https://") ? String(b.meetingLink).trim() : "",
     }),
   );
 });
@@ -726,7 +733,8 @@ export const updateAppointmentStatus = wrap("Appointment status", async (req, re
     return res.status(400).json({ message: "Unknown status." });
   }
   try {
-    await updatePlatformAppointment(req.params.id, status, req.body.startTime, await getB2BAvailability());
+    const appointment = await updatePlatformAppointment(req.params.id, status, req.body.startTime, await getB2BAvailability());
+    await journeyOnMeetingStatus(appointment.b2bLeadId, status);
   } catch (error) {
     if (error.status) return res.status(error.status).json({ message: error.message });
     throw error;
@@ -742,6 +750,15 @@ const findByToken = (token) => prisma.b2BLead.findUnique({ where: { bookingToken
 export const publicGetBooking = wrap("Public booking", async (req, res) => {
   const lead = await findByToken(req.params.token);
   if (!lead) return res.status(404).json({ message: "This booking link is no longer valid." });
+  // A text's link carries its step, so opening it counts as a click.
+  if (req.query.s) {
+    const usage = await prisma.messageUsage.findFirst({
+      where: { leadId: lead.id, channel: "SMS", stepId: String(req.query.s), clickedAt: null },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (usage) await prisma.messageUsage.update({ where: { id: usage.id }, data: { clickedAt: new Date() } });
+  }
   const setting = await getB2BAvailability();
   const existing = await prisma.salesAgentAppointment.findFirst({
     where: { b2bLeadId: lead.id, status: "CONFIRMED", startTime: { gte: new Date() } },
@@ -775,9 +792,10 @@ export const publicBook = wrap("Public book", async (req, res) => {
   const confirmationEmail = await MailService.sendEmail({
     to: lead.email,
     subject: `Your meeting with ${MailService.SENDER_NAME} is confirmed`,
-    html: `<p>Hi ${who},</p><p>Thanks for booking a time with us. You're confirmed for <strong>${escapeHtml(label)}</strong> (${setting.slotDuration} minutes).</p><p>We'll reach out at this email or phone number. Need to change it? Just reply to this email.</p>`,
+    html: `<p>Hi ${who},</p><p>Thanks for booking a time with us. You're confirmed for <strong>${escapeHtml(label)}</strong> (${setting.slotDuration} minutes).</p><p>${setting.meetingLink ? `Join here: ${escapeHtml(setting.meetingLink)}.` : "We'll reach out at this email or phone number."} A calendar invite is attached. Need to change it? Just reply to this email.</p>`,
     replyTo: process.env.SUPERADMIN_EMAIL || undefined,
     source: "b2b-booking",
+    attachments: [meetingInvite(lead, start, setting)],
   }).catch((e) => console.error("[B2B booking] Confirmation email failed:", e.message));
   await notifySuperAdmin(
     `New meeting booked: ${lead.companyName} — ${label}`,
@@ -795,5 +813,6 @@ export const publicUnsubscribe = wrap("Public unsubscribe", async (req, res) => 
   if (!lead) return res.status(404).json({ success: false, message: "This unsubscribe link is invalid or has expired." });
   await prisma.b2BLead.update({ where: { id: lead.id }, data: { emailOptOut: true, smsOptOut: true } });
   await exitB2BEnrollments(lead.id, "UNSUBSCRIBE");
+  await endB2BJourney(lead.id);
   res.json({ success: true, channel: "ALL", email: lead.email, companyName: MailService.SENDER_NAME });
 }, { admin: false });

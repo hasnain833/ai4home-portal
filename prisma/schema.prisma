@@ -935,6 +935,7 @@ model SalesAgentAppointment {
   startTime     DateTime?
   b2bLeadId     String?
   b2bLead       B2BLead?  @relation(fields: [b2bLeadId], references: [id], onDelete: SetNull)
+  reminderSentAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -962,6 +963,14 @@ model B2BLead {
   agentPausedAt DateTime?
   agentPausedUntil DateTime?
   agentPauseReason String?
+  journeyStage String?
+  journeyNextAt DateTime?
+  journeyTouches Int @default(0)
+  journeyFailures Int @default(0)
+  journeyLastCategory String?
+  journeyHoldReason String?
+  journeyEnteredAt DateTime?
+  profile      Json?
   messages     B2BMessage[]
   inquiries    B2BInquiry[]
   enrollments  B2BEnrollment[]
@@ -970,6 +979,7 @@ model B2BLead {
   updatedAt    DateTime                @updatedAt
 
   @@index([status])
+  @@index([journeyNextAt])
 }
 
 model B2BCampaign {
@@ -996,10 +1006,46 @@ model B2BMessage {
   outcome   String?
   note      String?
   handledAt DateTime?
+  contentItemId String?
   createdAt DateTime  @default(now())
 
   @@index([leadId, createdAt])
   @@index([actor, createdAt])
+}
+
+// Reviewed nurture content. The journey only ever sends APPROVED items, word for word.
+model B2BContentItem {
+  id         String    @id @default(cuid())
+  category   String
+  stage      String
+  channel    String
+  subject    String?
+  body       String    @db.Text
+  status     String    @default("DRAFT")
+  warning    String?
+  reviewNote String?
+  batchId    String?
+  sourceId   String?
+  expiresAt  DateTime?
+  sendOrder  Int?
+  reviewedBy String?
+  reviewedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([status, stage, channel])
+  @@index([batchId])
+}
+
+// Articles and notes staff trust. The AI only drafts industry content from these.
+model B2BContentSource {
+  id        String   @id @default(cuid())
+  title     String
+  url       String?
+  text      String   @db.Text
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model B2BCampaignTemplate {

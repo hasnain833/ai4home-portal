@@ -13,6 +13,8 @@ import {
   bookingLinkFor,
   exitB2BEnrollments,
   completeFinishedCampaigns,
+  getB2BJourneySettings,
+  weeklyLimitReached,
 } from "../../lib/b2b.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -25,8 +27,9 @@ const RETRY_DELAYS_MS = [15 * 60 * 1000, 60 * 60 * 1000];
 /** First word of the contact name, for "Hi {{firstName}}". */
 const firstNameOf = (lead) => (lead.contactName || "").trim().split(/\s+/)[0] || "there";
 
-export function renderB2BStep(step, lead, campaignId) {
-  const bookingLink = bookingLinkFor(lead, campaignId);
+export function renderB2BStep(step, lead, campaignId, stepId) {
+  // Email clicks come from Brevo. A text's link carries the step, so opening it counts as a click.
+  const bookingLink = bookingLinkFor(lead, campaignId, step.channel === "SMS" ? stepId : undefined);
   const vars = {
     firstName: firstNameOf(lead),
     contactName: lead.contactName || "",
@@ -39,7 +42,8 @@ export function renderB2BStep(step, lead, campaignId) {
   if (step.channel === "SMS") {
     let text = renderMergeFields(step.body, vars);
     // Every message carries the booking link, even if the template forgot it.
-    if (!hasLink) text = `${text.trim()} Book a time: ${bookingLink}`;
+    // A lead who already has a meeting shouldn't be told to book one.
+    if (!hasLink && !step.noBookingLink) text = `${text.trim()} Book a time: ${bookingLink}`;
     return { text, body: ComplianceService.addSmsOptOutSuffix(brandSmsBody(text, SENDER)) };
   }
 
@@ -49,7 +53,7 @@ export function renderB2BStep(step, lead, campaignId) {
   return {
     text,
     subject: renderMergeFields(step.subject, vars),
-    html: b2bEmailHtml(text, lead, { bookingLink }),
+    html: b2bEmailHtml(text, lead, { bookingLink, bookingButton: !step.noBookingLink }),
   };
 }
 
@@ -74,9 +78,9 @@ export async function blockReason(lead, channel) {
   return null;
 }
 
-async function sendStep(step, lead, campaignId, position) {
-  const msg = renderB2BStep(step, lead, campaignId);
-  const track = { leadId: lead.id, campaignId, stepId: `b2b:${position + 1}` };
+export async function sendStep(step, lead, campaignId, stepId) {
+  const msg = renderB2BStep(step, lead, campaignId, stepId);
+  const track = { leadId: lead.id, campaignId, stepId };
   if (step.channel === "SMS") {
     const r = await sendSms({ to: lead.phone, body: msg.body, source: "b2b-campaign", brand: false, track });
     return { outcome: r.outcome, sent: smsSent(r), error: r.error || null, text: msg.text, subject: null };
@@ -184,6 +188,15 @@ export const runB2BCampaign = inngest.createFunction(
           return { stop: blocked.reason };
         }
 
+        // Over the weekly limit: try again tomorrow. The step isn't lost.
+        if (!blocked && (await weeklyLimitReached(e.leadId, current.channel, await getB2BJourneySettings()))) {
+          await prisma.b2BEnrollment.update({
+            where: { id: e.id },
+            data: { nextRunAt: new Date(Date.now() + DAY_MS), lastError: `Step ${state.stepIndex + 1} waiting: the weekly ${current.channel === "SMS" ? "SMS" : "email"} limit was reached` },
+          });
+          return { next: true };
+        }
+
         // Claim the step before sending: if a second run (resume, stalled-run sweep) got
         // here first the update matches nothing, and this run stops without a duplicate send.
         const nextStep = (Array.isArray(e.campaign.steps) ? e.campaign.steps : [])[state.stepIndex + 1];
@@ -203,7 +216,7 @@ export const runB2BCampaign = inngest.createFunction(
         // vanish. An unexpected error has to take the same retry path as a failed send.
         let sent;
         try {
-          sent = await sendStep(current, e.lead, e.campaignId, state.stepIndex);
+          sent = await sendStep(current, e.lead, e.campaignId, `b2b:${state.stepIndex + 1}`);
         } catch (error) {
           console.error("[B2B campaign] Send error:", error);
           sent = { outcome: MAIL_OUTCOME.FAILED, sent: false, error: error?.message || "Unexpected error" };

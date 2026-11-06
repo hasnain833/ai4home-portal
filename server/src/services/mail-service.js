@@ -50,7 +50,7 @@ export class MailService {
     return !!(this.SMTP_USER && this.SMTP_PASS);
   }
 
-  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null, noReply = false, track = null, branding }) {
+  static async sendEmail({ to, subject, html, fromName, fromEmail, replyTo, headers, companyId = null, source = null, noReply = false, track = null, branding, attachments = [] }) {
     if (await isCompanySuspended(companyId)) {
       return { success: false, outcome: MAIL_OUTCOME.SUSPENDED, error: "Company is suspended." };
     }
@@ -99,13 +99,16 @@ export class MailService {
         to,
         subject,
         html: emailHtml,
-        ...(hasLogo ? { attachments: [{
-          filename: "ai4hb-logo.png",
-          path: fileURLToPath(new URL("../../../public/logo-email.png", import.meta.url)),
-          cid: "ai4hb-logo",
-          contentType: "image/png",
-          contentDisposition: "inline",
-        }] } : {}),
+        attachments: [
+          ...attachments,
+          ...(hasLogo ? [{
+            filename: "ai4hb-logo.png",
+            path: fileURLToPath(new URL("../../../public/logo-email.png", import.meta.url)),
+            cid: "ai4hb-logo",
+            contentType: "image/png",
+            contentDisposition: "inline",
+          }] : []),
+        ],
         headers,
       });
 

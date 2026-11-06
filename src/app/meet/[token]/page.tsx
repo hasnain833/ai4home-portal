@@ -17,7 +17,9 @@ type BookingData = {
 /** Public page a business lead reaches from the booking link in a platform campaign message. */
 export default function PlatformBookingPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
-  const campaignId = useSearchParams().get("c");
+  const searchParams = useSearchParams();
+  const campaignId = searchParams.get("c");
+  const stepId = searchParams.get("s");
   const [data, setData] = useState<BookingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -29,7 +31,7 @@ export default function PlatformBookingPage({ params }: { params: Promise<{ toke
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/public/b2b/booking/${token}`);
+      const res = await fetch(`/api/public/b2b/booking/${token}${stepId ? `?s=${encodeURIComponent(stepId)}` : ""}`);
       if (!res.ok) return setNotFound(true);
       setData(await res.json());
     } catch {
