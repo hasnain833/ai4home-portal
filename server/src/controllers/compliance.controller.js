@@ -1,5 +1,7 @@
 import prisma from "../lib/prisma.js";
-import { handleB2BReply, B2B_REPLY_TAG } from "../lib/b2b.js";
+import { handleB2BReply, B2B_REPLY_TAG, notifySuperAdmin } from "../lib/b2b.js";
+import { B2B_OWNER, CONVERSATION_LOCK_MS, recentSmsOwners, sendSms } from "../services/sms.service.js";
+import { inngest } from "../lib/inngest.js";
 import { ComplianceService } from "../services/compliance-service.js";
 import { triggerAutomation } from "../lib/automation-events.js";
 import { writeBackLeadToSalesforce } from "../services/salesforce-writeback.js";
@@ -634,6 +636,55 @@ async function resolveInboundCompany(sender, channel = "SMS") {
   return { companyId: null, reason: "unknown" };
 }
 
+// ---------- Shared number: ask who a reply is for ----------
+
+export const SMS_ROUTE_TTL_MS = 24 * 60 * 60 * 1000;
+export const smsRouteKey = (phone) => `sms.route.${normalizePhone(phone).slice(-10)}`;
+
+/** "1 thanks" picks option 1; "10am works" or "2pm" are words, not a choice. */
+export function pickRouteOption(body, options) {
+  const match = String(body || "").trim().match(/^([1-9])(?!\d)(?![ap]m\b)/i);
+  return (match && options[Number(match[1]) - 1]) || null;
+}
+
+async function askWhichSender(sender, body, owners) {
+  const ids = owners.slice(0, 4).map((o) => o.owner);
+  const companies = await prisma.company.findMany({ where: { id: { in: ids.filter((o) => o !== B2B_OWNER) } }, select: { id: true, name: true } });
+  const options = ids.map((owner) => ({ owner, name: owner === B2B_OWNER ? "AI for Homebuilders" : companies.find((c) => c.id === owner)?.name || "a builder" }));
+  const key = smsRouteKey(sender);
+  const value = { options, body, askedAt: new Date().toISOString() };
+  await prisma.platformSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
+  await sendSms({ to: sender, body: `Thanks for your message! Which is it about? Reply ${options.map((o, i) => `${i + 1} for ${o.name}`).join(", ")}.`, source: "sms-route", brand: false });
+  await inngest.send({ name: "sms.route.asked", data: { key, askedAt: value.askedAt } });
+  console.log(`[SMS IN] ${sender} was texted by ${options.length} senders today — asked which one.`);
+}
+
+async function routeToOwner(owner, { sender, body, toNumber, provider }) {
+  if (owner !== B2B_OWNER) return routeInboundSms({ companyId: owner, sender, body, toNumber, provider });
+  if (await handleB2BReply({ channel: "SMS", sender, body })) return { b2b: true };
+  await notifySuperAdmin(`SMS for AI for Homebuilders from ${sender}`, `<p>They picked AI for Homebuilders, but no B2B lead has this number.</p><blockquote>${escapeHtml(body)}</blockquote>`);
+  return { unmatched: true };
+}
+
+/** No answer to the question within a day: a person reads it instead. */
+export const smsRouteExpired = inngest.createFunction(
+  { id: "sms-route-expired", triggers: [{ event: "sms.route.asked" }] },
+  async ({ event, step }) => {
+    await step.sleep("wait-for-answer", "24h");
+    return step.run("hand-off", async () => {
+      const { key, askedAt } = event.data;
+      const pending = (await prisma.platformSetting.findUnique({ where: { key } }))?.value;
+      if (pending?.askedAt !== askedAt) return { answered: true };
+      await prisma.platformSetting.delete({ where: { key } }).catch(() => {});
+      await notifySuperAdmin(
+        `Unanswered SMS from ${key.slice("sms.route.".length)}`,
+        `<p>Several senders texted this number, and they didn't say which one they meant. Possible senders: ${escapeHtml(pending.options.map((o) => o.name).join(", "))}.</p><blockquote style="white-space:pre-wrap">${escapeHtml(pending.body)}</blockquote>`,
+      );
+      return { handedOff: true };
+    });
+  },
+);
+
 async function routeInboundSms({ companyId, sender, body, toNumber, provider }) {
   console.log(`[SMS IN] ← inbound SMS (${provider}) | company=${companyId} from=${sender || "?"} to=${toNumber || "?"} | body="${(body || "").replace(/\s+/g, " ").slice(0, 160)}"`);
 
@@ -663,6 +714,29 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
     return { ignored: true, reason: "warranty-no-reply" };
   }
 
+  if (!companyId) {
+    // Answering our "which is it about?" question.
+    const key = smsRouteKey(sender);
+    const pending = (await prisma.platformSetting.findUnique({ where: { key } }))?.value;
+    if (pending && Date.now() - new Date(pending.askedAt).getTime() < SMS_ROUTE_TTL_MS) {
+      const choice = pickRouteOption(body, pending.options);
+      if (!choice) {
+        // More words, not a choice: keep them with the question still open.
+        await prisma.platformSetting.update({ where: { key }, data: { value: { ...pending, body: `${pending.body}\n${body}` } } });
+        return { asked: true };
+      }
+      await prisma.platformSetting.delete({ where: { key } }).catch(() => {});
+      console.log(`[SMS IN] ${sender} picked ${choice.name}.`);
+      return routeToOwner(choice.owner, { sender, body: pending.body, toNumber, provider });
+    }
+    // Two senders texted them today: ask, don't guess.
+    const owners = await recentSmsOwners(sender, new Date(Date.now() - CONVERSATION_LOCK_MS));
+    if (owners.length > 1) {
+      await askWhichSender(sender, body, owners);
+      return { asked: true };
+    }
+  }
+
   // We texted them last as a platform lead, so this is their answer, even if the same
   // number also exists as a lead under a builder.
   // Any platform B2B text counts: campaign, agent, meeting reminder or a staff test send.
@@ -686,6 +760,10 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
           `${resolution.candidates ? `, candidates: ${resolution.candidates.join(", ")}` : ""}). ` +
           `Not routing it — a reply sent to the wrong builder is worse than one left unrouted.`,
       );
+      // Several builders this month: a person decides, so the reply isn't lost.
+      if (resolution.reason.startsWith("ambiguous")) {
+        await notifySuperAdmin(`Unrouted SMS from ${sender}`, `<p>More than one builder has texted this number, so the reply wasn't sent to any of them.</p><blockquote style="white-space:pre-wrap">${escapeHtml(body)}</blockquote>`);
+      }
       return { unattributed: true, reason: resolution.reason };
     }
 

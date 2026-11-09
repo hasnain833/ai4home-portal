@@ -4,7 +4,7 @@ import { getZonedParts } from "./scheduling.js";
 import { escapeHtml } from "./utils.js";
 import { blockReason, sendStep, renderB2BStep } from "../inngest/functions/b2b-campaign.js";
 import { MailService } from "../services/mail-service.js";
-import { sendSms, smsSent } from "../services/sms.service.js";
+import { sendSms, smsSent, smsConversationHold } from "../services/sms.service.js";
 import {
   B2B_CLOSED_STATUSES,
   B2B_REPLY_TAG,
@@ -249,9 +249,15 @@ export async function journeyTouch(leadId, { sendNow = false } = {}) {
   // 3–6. Which channel and piece is allowed right now?
   const planned = plannedChannel(stage, touches);
   const smsBlock = await blockReason(lead, "SMS");
-  const usable = (channel) => (channel === "SMS" ? !smsBlock : hasEmail(lead));
+  // A builder mid-conversation with this phone holds our texts; email still goes.
+  const smsHeldUntil = smsBlock ? null : await smsConversationHold(lead.phone, null);
+  const usable = (channel) => (channel === "SMS" ? !smsBlock && !smsHeldUntil : hasEmail(lead));
   const order = planned === "SMS" ? ["SMS", "EMAIL"] : ["EMAIL", "SMS"];
   const channels = order.filter(usable);
+  if (!channels.length && smsHeldUntil) {
+    await prisma.b2BLead.update({ where: { id: leadId }, data: { journeyNextAt: nextJourneySlot(lead, settings, "SMS", smsHeldUntil), journeyHoldReason: "A builder is texting this number" } });
+    return { action: "held", reason: "shared number in use" };
+  }
   if (!channels.length) {
     await prisma.b2BLead.update({ where: { id: leadId }, data: { journeyStage: null, journeyNextAt: null, journeyHoldReason: null } });
     return { action: "ended", reason: "no way to reach this lead" };

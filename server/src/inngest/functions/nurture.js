@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { MailService, MAIL_OUTCOME, mailShouldPark } from "../../services/mail-service.js";
-import { sendSms, smsSent, smsShouldPark } from "../../services/sms.service.js";
+import { sendSms, smsSent, smsShouldPark, smsConversationHold } from "../../services/sms.service.js";
 import { getLeadTimezone, getNextValidSendWindow } from "../../lib/timezone.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { getSenderIdentity } from "../../lib/messaging-config.js";
@@ -197,6 +197,20 @@ export const runNurtureCampaign = inngest.createFunction(
         });
         if (windowTarget) {
           await step.sleepUntil(`wait-for-window-${currentStep.position}`, windowTarget);
+        }
+      }
+
+      // Shared number: while another builder or B2B is texting this phone, wait so the reply has
+      // one owner. Before the quiet-hours check, so a hold that ends at night still waits for morning.
+      if (currentStep.type === "SMS" && lead.phone) {
+        for (let round = 0; ; round++) {
+          const heldUntil = await step.run(`sms-hold-${currentStep.position}-${round}`, async () => {
+            const until = await smsConversationHold(lead.phone, lead.companyId);
+            if (until) await markWaitingUntil(enrollment.id, until);
+            return until ? until.toISOString() : null;
+          });
+          if (!heldUntil) break;
+          await step.sleepUntil(`wait-for-sms-hold-${currentStep.position}-${round}`, heldUntil);
         }
       }
 

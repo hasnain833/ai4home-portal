@@ -60,6 +60,25 @@ Separate from the existing Sales Agent (which talks to home buyers).
 - [x] Decide with the client if any action should stay Super Admin-only beyond staff (suspend, Prompt Lab "Set Live", pricing); today the area tick covers them
 
 
+## 17. Shared SMS number (B2B + all builders on one Telnyx number)
+Done 2026-11-09: conversation lock (marketing texts wait while another sender texted the phone in the last 24h), the "which one? reply 1/2" question with a Super Admin hand-off after 24h, alert for unrouted replies, B2B test/meeting replies routed to B2B.
+- [ ] Test tomorrow: reply to a B2B text → B2B agent answers; reply while two senders texted today → question arrives, "1"/"2" routes it
+- [ ] Deploy, and make sure the Telnyx webhook URL has no `?companyId=`
+- [ ] Hold builder announcements and automation texts too (they have no retry yet, so they aren't held)
+- [ ] Platform-wide daily cap per phone number (e.g. 2 marketing texts a day across all senders)
+- [ ] Show "Opted out on the shared number" in the builder's lead view, so a STOP from another builder isn't a mystery
+- [ ] Telnyx: forward calls to the number to a recorded message or the AI4Home office
+- [ ] Check with Telnyx how the 10DLC registration is classed (one brand texting for many builders risks filtering/suspension)
+- [ ] Later, if builders complain: after STOP, offer "reply START <BUILDER>" to opt back in to one builder only
+- [ ] Later, as we grow: a separate B2B number, then one number per builder (routes by the number texted; fixes STOP, filtering and limits)
+
+## 18. B2B nurture audit leftovers
+- [ ] "No opens" check moves leads to Quarterly early: SMS sends count as unopened, and Apple opens are ignored
+- [ ] Leads stay in "Appointment booked" forever if staff never mark the meeting Completed / No-show
+- [ ] After 3 failed sends the same piece is picked again (it isn't marked used), so alerts repeat
+- [ ] Opt-out KPI counts any opted-out lead updated in the period, not new opt-outs
+- [ ] One live end-to-end test send (send → reply → agent answers)
+
 ## Questions for the client
 - [ ] Which warranty ERP does the first builder use? Can we get API access?
 - [ ] What is the support phone number?

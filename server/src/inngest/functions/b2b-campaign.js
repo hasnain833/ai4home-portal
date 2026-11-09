@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { MailService, MAIL_OUTCOME } from "../../services/mail-service.js";
-import { sendSms, smsSent, brandSmsBody, toE164, SMS_OUTCOME } from "../../services/sms.service.js";
+import { sendSms, smsSent, brandSmsBody, toE164, SMS_OUTCOME, smsConversationHold } from "../../services/sms.service.js";
 import { ComplianceService } from "../../services/compliance-service.js";
 import { b2bLeadTimezone, getNextValidSendWindow, nextLocalSendTime, safeSendTime, sendHoursFor } from "../../lib/timezone.js";
 import { renderMergeFields } from "../../lib/utils.js";
@@ -193,6 +193,16 @@ export const runB2BCampaign = inngest.createFunction(
           await prisma.b2BEnrollment.update({
             where: { id: e.id },
             data: { nextRunAt: new Date(Date.now() + DAY_MS), lastError: `Step ${state.stepIndex + 1} waiting: the weekly ${current.channel === "SMS" ? "SMS" : "email"} limit was reached` },
+          });
+          return { next: true };
+        }
+
+        // A builder is mid-conversation with this phone on the shared number: wait, so their reply isn't ours.
+        const heldUntil = !blocked && current.channel === "SMS" ? await smsConversationHold(e.lead.phone, null) : null;
+        if (heldUntil) {
+          await prisma.b2BEnrollment.update({
+            where: { id: e.id },
+            data: { nextRunAt: heldUntil, lastError: `Step ${state.stepIndex + 1} waiting: a builder is texting this number` },
           });
           return { next: true };
         }

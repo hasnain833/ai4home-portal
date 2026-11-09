@@ -82,6 +82,51 @@ async function sendViaTelnyx({ to, body, cfg }) {
 }
 
 // Digits only, so a number written any way matches the same conversation.
+
+// ---------- One shared number: who owns the conversation ----------
+
+export const CONVERSATION_LOCK_MS = 24 * 60 * 60 * 1000;
+export const B2B_OWNER = "B2B";
+
+/**
+ * Who a text speaks for: a builder (its companyId) or the platform's B2B sales.
+ * No-reply texts (warranty, logins, the routing question) belong to no one.
+ */
+export function smsOwner({ companyId, source }) {
+  if (String(source || "").startsWith("warranty-")) return null;
+  if (companyId) return companyId;
+  return /^(b2b-|website-b2b)/.test(source || "") ? B2B_OWNER : null;
+}
+
+/** Everyone who texted this phone since `since`, newest first: [{ owner, at }]. */
+export async function recentSmsOwners(phone, since) {
+  const digits = normalizePhone(phone).slice(-10);
+  if (!digits) return [];
+  const rows = await prisma.messageUsage.findMany({
+    where: { channel: "SMS", outcome: "sent", recipient: { endsWith: digits }, createdAt: { gte: since } },
+    select: { companyId: true, source: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  const owners = new Map();
+  for (const row of rows) {
+    const owner = smsOwner(row);
+    if (owner && !owners.has(owner)) owners.set(owner, row.createdAt);
+  }
+  return [...owners].map(([owner, at]) => ({ owner, at }));
+}
+
+/**
+ * Marketing waits while someone else is talking to this phone, so a reply has one clear owner.
+ * Returns when it may go, or null for now. `companyId` null means B2B.
+ * ponytail: a sender who texts daily keeps the lock; add a max wait if builders starve.
+ */
+export async function smsConversationHold(phone, companyId) {
+  const me = companyId || B2B_OWNER;
+  const others = (await recentSmsOwners(phone, new Date(Date.now() - CONVERSATION_LOCK_MS))).filter((o) => o.owner !== me);
+  if (!others.length) return null;
+  return new Date(Math.max(...others.map((o) => new Date(o.at).getTime())) + CONVERSATION_LOCK_MS);
+}
 export function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
