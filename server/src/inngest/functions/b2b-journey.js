@@ -4,7 +4,7 @@ import { formatSlotLabel } from "../../lib/scheduling.js";
 import { b2bLeadTimezone } from "../../lib/timezone.js";
 import { toolCall } from "../../lib/llm.js";
 import { notifySuperAdmin, unknownPlaceholders, getB2BAvailability } from "../../lib/b2b.js";
-import { autoJoinWebsiteLeads, journeyTouch, sendMeetingReminder, CONTENT_CATEGORIES, CONTENT_STAGES } from "../../lib/b2b-journey.js";
+import { autoJoinWebsiteLeads, insideSendWindow, journeyTouch, sendMeetingReminder, CONTENT_CATEGORIES, CONTENT_STAGES } from "../../lib/b2b-journey.js";
 import { B2B_CONTENT_SYSTEM } from "../../prompts/content.js";
 import { WEBSITE_PRODUCT_GUIDE } from "../../prompts/help-agent.js";
 import { queryB2BKb } from "../../services/vector-store.service.js";
@@ -232,6 +232,9 @@ export const b2bMeetingReminders = inngest.createFunction(
       const setting = await getB2BAvailability();
       let sent = 0;
       for (const appointment of rows) {
+        // Same 8am-9pm rule as every other text. Outside it, a later run picks this up;
+        // a meeting that starts before the window opens just keeps its confirmation.
+        if (!insideSendWindow(appointment.b2bLead, null, new Date(now), { ignoreDays: true })) continue;
         const { timezone, known } = b2bLeadTimezone(appointment.b2bLead);
         if (await sendMeetingReminder(appointment, formatSlotLabel(appointment.startTime, known ? timezone : setting.timezone))) sent++;
       }

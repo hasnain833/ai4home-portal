@@ -665,7 +665,8 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
 
   // We texted them last as a platform lead, so this is their answer, even if the same
   // number also exists as a lead under a builder.
-  if (!companyId && ["b2b-campaign", "b2b-agent"].includes(lastOutbound?.source) && (await handleB2BReply({ channel: "SMS", sender, body }))) {
+  // Any platform B2B text counts: campaign, agent, meeting reminder or a staff test send.
+  if (!companyId && lastOutbound?.source?.startsWith("b2b-") && (await handleB2BReply({ channel: "SMS", sender, body }))) {
     return { b2b: true };
   }
 
