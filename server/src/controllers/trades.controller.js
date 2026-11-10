@@ -16,6 +16,7 @@ import {
   CalendlyBookingError,
 } from "../services/calendly.service.js";
 import { adoptPlatformCalendly } from "../admin/platform-calendly.controller.js";
+import { PLATFORM_CALENDLY_OWNER } from "../lib/calendly-connection.js";
 
 const TRADE_SELECT = {
   id: true,
@@ -326,14 +327,19 @@ export const startCalendlyConnect = (req, res) => {
 export const calendlyCallback = async (req, res) => {
   const userId = verifyState(req.query.state);
   // One OAuth callback for both: a trade's own calendar, or the platform's (Super Admin → Appointments).
-  const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { role: true } }) : null;
-  const platform = ["SUPER_ADMIN", "SUPER_STAFF"].includes(user?.role);
-  const page = platform ? "/admin/sales-agent-appointments" : "/trade/settings";
-  const back = (result) => res.redirect(`${process.env.NEXT_PUBLIC_URL || ""}${page}?calendly=${result}`);
+  const platformOwner = userId === PLATFORM_CALENDLY_OWNER || userId === "env-superadmin";
+  const page = platformOwner ? "/admin/sales-agent-appointments" : "/trade/settings";
+  let returnPage = page;
+  const back = (result) => res.redirect(`${process.env.NEXT_PUBLIC_URL || ""}${returnPage}?calendly=${result}`);
   if (!userId || !req.query.code) return back(req.query.error ? "cancelled" : "failed");
   try {
-    await connectCalendly(userId, String(req.query.code));
-    if (platform) await adoptPlatformCalendly(userId);
+    const user = platformOwner ? null : await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    const platform = platformOwner || ["SUPER_ADMIN", "SUPER_STAFF"].includes(user?.role);
+    if (platform) returnPage = "/admin/sales-agent-appointments";
+    if (!platform && user?.role !== "TRADE") return back("failed");
+    const ownerId = platform ? PLATFORM_CALENDLY_OWNER : userId;
+    await connectCalendly(ownerId, String(req.query.code));
+    if (platform) await adoptPlatformCalendly(ownerId);
     return back("connected");
   } catch (error) {
     console.error("[Calendly] connect failed:", error.message);

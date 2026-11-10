@@ -82,27 +82,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
   useEffect(() => {
     const originalFetch = window.fetch;
-    let verifying = false;
+    let recovery: Promise<boolean> | null = null;
 
-    const confirmSessionGone = async () => {
-      if (verifying) return;
-      verifying = true;
-      try {
-        const check = await originalFetch("/api/auth/me");
-        if (check.status === 401) setSessionExpired(true);
-      } catch {
-      } finally {
-        verifying = false;
-      }
+    const recoverSession = () => {
+      if (recovery) return recovery;
+      recovery = (async () => {
+        try {
+          let check = await originalFetch("/api/auth/me");
+          if (check.ok) return true;
+          if (check.status !== 401) return false;
+          // Supabase can refresh an ordinary session; the separate Super Admin
+          // cookie is renewed by the API and must not adopt another user's JWT.
+          if (!userRef.current?.isSuperAdmin) {
+            const { data, error } = await supabaseRef.current.auth.refreshSession();
+            if (!error && data.session) {
+              check = await originalFetch("/api/auth/me");
+              if (check.ok) return true;
+              if (check.status !== 401) return false;
+            }
+          }
+          setSessionExpired(true);
+        } catch {
+          // A network failure is not evidence that the user signed out.
+        }
+        return false;
+      })().finally(() => { recovery = null; });
+      return recovery;
     };
 
     window.fetch = async (...args: Parameters<typeof fetch>) => {
+      const retryArgs: Parameters<typeof fetch> = [
+        args[0] instanceof Request ? args[0].clone() : args[0], args[1],
+      ];
       const response = await originalFetch(...args);
       try {
-        const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url || "";
-        const isApiCall = url.includes("/api/") && !url.includes("/api/auth/me");
+        const url = new URL(args[0] instanceof Request ? args[0].url : String(args[0]), window.location.href);
+        const isApiCall = url.origin === window.location.origin && url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/auth/");
         if (response.status === 401 && isApiCall && userRef.current) {
-          void confirmSessionGone();
+          if (await recoverSession()) return originalFetch(...retryArgs);
         }
       } catch {
       }
@@ -149,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
-      if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
         if (event === "INITIAL_SESSION") initialFetchDone = true;
         fetchUser();
       } else if (event === "SIGNED_OUT") {

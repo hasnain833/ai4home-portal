@@ -1,5 +1,5 @@
 // Super Admin → Appointments: connect the Calendly account AI4Home's own meetings are booked on.
-import prisma from "../lib/prisma.js";
+import { findCalendlyConnection, PLATFORM_CALENDLY_OWNER } from "../lib/calendly-connection.js";
 import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import {
@@ -26,9 +26,9 @@ const wrap = (label, fn) => async (req, res) => {
   }
 };
 
-/** Saves which user's Calendly is the platform's, with the timezone of its hours. */
+/** Saves the platform's connection owner and the timezone of its hours. */
 export async function adoptPlatformCalendly(userId) {
-  const conn = await prisma.calendlyConnection.findUnique({ where: { userId } });
+  const conn = await findCalendlyConnection(userId);
   if (!conn) return;
   const schedule = await defaultSchedule(conn).catch(() => null);
   await setPlatformCalendlyPointer({ userId, timezone: schedule?.timezone || null });
@@ -36,7 +36,7 @@ export async function adoptPlatformCalendly(userId) {
 
 export const getPlatformCalendly = wrap("Loading Calendly", async (_req, res) => {
   const pointer = await platformCalendlyPointer();
-  const conn = pointer?.userId ? await prisma.calendlyConnection.findUnique({ where: { userId: pointer.userId } }) : null;
+  const conn = pointer?.userId ? await findCalendlyConnection(pointer.userId) : null;
   if (!conn) return res.json({ available: calendlyConfigured(), connected: false });
 
   const [status, eventTypes, schedule] = await Promise.all([
@@ -51,9 +51,9 @@ export const getPlatformCalendly = wrap("Loading Calendly", async (_req, res) =>
   res.json({ ...status, eventTypes, schedule, webhook: !!conn.webhookUri });
 });
 
-export const connectPlatformCalendly = wrap("Connecting Calendly", async (req, res) => {
+export const connectPlatformCalendly = wrap("Connecting Calendly", async (_req, res) => {
   if (!calendlyConfigured()) return res.status(503).json({ message: "Calendly isn't set up on this portal yet (CALENDLY_CLIENT_ID)." });
-  res.json({ url: authorizeUrl(req.user.id) });
+  res.json({ url: authorizeUrl(PLATFORM_CALENDLY_OWNER) });
 });
 
 export const setPlatformEventType = wrap("Choosing the event type", async (req, res) => {

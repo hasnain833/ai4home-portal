@@ -257,6 +257,9 @@ export async function requireAuth(req, res, next) {
 
     next();
   } catch (err) {
+    if (err?.message === "JWT has expired") {
+      return res.status(401).json({ message: "Your session has expired. Please sign in again.", code: "SESSION_EXPIRED" });
+    }
     console.error("Auth middleware error:", err);
     return res
       .status(500)

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import prisma from "../lib/prisma.js";
+import { findCalendlyConnection, saveCalendlyConnection, deleteCalendlyConnection } from "../lib/calendly-connection.js";
 import { encrypt, decrypt } from "../lib/crypto.js";
 
 const AUTH_URL = "https://auth.calendly.com/oauth";
@@ -78,17 +78,13 @@ export async function connectCalendly(userId, code) {
   if (!calendlyUser) throw new Error("Calendly did not return the account");
 
   const data = { calendlyUser, email: me.resource.email || null, ...tokenFields(tokens) };
-  const conn = await prisma.calendlyConnection.upsert({
-    where: { userId },
-    create: { userId, ...data },
-    update: data,
-  });
+  const conn = await saveCalendlyConnection(userId, data, { create: true });
   busyCache.delete(userId);
 
   // Without the webhook the link still works one way; it needs a paid plan.
   try {
     const webhookUri = await ensureWebhook(conn, me.resource.current_organization);
-    await prisma.calendlyConnection.update({ where: { id: conn.id }, data: { webhookUri } });
+    await saveCalendlyConnection(userId, { webhookUri });
   } catch (err) {
     console.error(`[Calendly] webhook not set up for user ${userId}:`, err.status, err.message);
   }
@@ -138,7 +134,7 @@ export function verifyCalendlySignature(header, rawBody, now = Date.now()) {
 }
 
 export async function disconnectCalendly(userId) {
-  const conn = await prisma.calendlyConnection.findUnique({ where: { userId } });
+  const conn = await findCalendlyConnection(userId);
   if (!conn) return;
   if (conn.webhookUri) {
     await calendlyApi(conn, `/webhook_subscriptions/${uuidOf(conn.webhookUri)}`, { method: "DELETE" }).catch((err) =>
@@ -160,14 +156,14 @@ export async function disconnectCalendly(userId) {
   } catch {
     /* already revoked, unreachable, or key rotated */
   }
-  await prisma.calendlyConnection.delete({ where: { userId } });
+  await deleteCalendlyConnection(userId);
   busyCache.delete(userId);
 }
 
 async function accessTokenFor(conn) {
   if (conn.expiresAt.getTime() - Date.now() > 60_000) return decrypt(conn.accessToken);
   const tokens = await tokenRequest({ grant_type: "refresh_token", refresh_token: decrypt(conn.refreshToken) });
-  await prisma.calendlyConnection.update({ where: { id: conn.id }, data: tokenFields(tokens) });
+  await saveCalendlyConnection(conn.userId, tokenFields(tokens));
   return tokens.access_token;
 }
 
@@ -182,7 +178,7 @@ export async function calendlyBusyFor(userId, from, to) {
     return cached.busy;
   }
 
-  const conn = await prisma.calendlyConnection.findUnique({ where: { userId } });
+  const conn = await findCalendlyConnection(userId);
   if (!conn) return [];
 
   try {
@@ -217,10 +213,7 @@ export async function calendlyBusyFor(userId, from, to) {
 }
 
 export async function calendlyStatus(userId) {
-  const conn = await prisma.calendlyConnection.findUnique({
-    where: { userId },
-    select: { email: true, createdAt: true, eventTypeUri: true, eventTypeName: true, eventDuration: true },
-  });
+  const conn = await findCalendlyConnection(userId);
   return {
     available: calendlyConfigured(),
     connected: !!conn,
@@ -257,13 +250,13 @@ const uuidOf = (uri) => String(uri || "").split("/").pop();
 /** The connection, only when the trade has picked an event type to book. */
 export async function calendlyBookingFor(userId) {
   if (!userId || !calendlyConfigured()) return null;
-  const conn = await prisma.calendlyConnection.findUnique({ where: { userId } });
+  const conn = await findCalendlyConnection(userId);
   return conn?.eventTypeUri ? conn : null;
 }
 
 /** The trade's active event types, for the picker in their settings. */
 export async function listEventTypes(userId) {
-  const conn = await prisma.calendlyConnection.findUnique({ where: { userId } });
+  const conn = await findCalendlyConnection(userId);
   if (!conn) return [];
   const params = new URLSearchParams({ user: conn.calendlyUser, active: "true", count: "100" });
   const data = await calendlyApi(conn, `/event_types?${params}`);
@@ -279,22 +272,16 @@ export async function listEventTypes(userId) {
 /** Sets (or clears, with null) the event type homeowners book. */
 export async function setEventType(userId, uri) {
   if (!uri) {
-    await prisma.calendlyConnection.update({
-      where: { userId },
-      data: { eventTypeUri: null, eventTypeName: null, eventDuration: null, eventLocationKind: null },
-    });
+    await saveCalendlyConnection(userId, { eventTypeUri: null, eventTypeName: null, eventDuration: null, eventLocationKind: null });
     return null;
   }
   const chosen = (await listEventTypes(userId)).find((t) => t.uri === uri);
   if (!chosen) throw new CalendlyBookingError("That event type is not on your Calendly account.");
-  await prisma.calendlyConnection.update({
-    where: { userId },
-    data: {
-      eventTypeUri: chosen.uri,
-      eventTypeName: chosen.name,
-      eventDuration: chosen.duration,
-      eventLocationKind: chosen.locationKind,
-    },
+  await saveCalendlyConnection(userId, {
+    eventTypeUri: chosen.uri,
+    eventTypeName: chosen.name,
+    eventDuration: chosen.duration,
+    eventLocationKind: chosen.locationKind,
   });
   return chosen;
 }
@@ -383,7 +370,7 @@ export async function createCalendlyVisit(conn, { startTime, name, email, timezo
 export async function cancelCalendlyVisit(userId, eventUri, reason = "Cancelled from the warranty portal") {
   if (!userId || !eventUri || !calendlyConfigured()) return;
   try {
-    const conn = await prisma.calendlyConnection.findUnique({ where: { userId } });
+    const conn = await findCalendlyConnection(userId);
     if (!conn) return;
     await calendlyApi(conn, `/scheduled_events/${uuidOf(eventUri)}/cancellation`, {
       method: "POST",

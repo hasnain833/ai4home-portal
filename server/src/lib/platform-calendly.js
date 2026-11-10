@@ -1,6 +1,6 @@
 // The Calendly account AI4Home's own meetings are booked on (B2B leads, website chat).
-// Connected from Super Admin → Appointments; stored as a pointer to the connecting user,
-// whose CalendlyConnection row (shared with the trade integration) holds the tokens.
+// Connected from Super Admin → Appointments. New connections use a platform-owned
+// encrypted setting; existing pointers to user-owned connections remain readable.
 import prisma from "./prisma.js";
 import {
   calendlyAvailableTimes,
