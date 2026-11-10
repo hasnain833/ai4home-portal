@@ -1,11 +1,18 @@
 import prisma from "../lib/prisma.js";
 import { getB2BAvailability, exitB2BEnrollments } from "../lib/b2b.js";
+import { calendlySlots, platformCalendly, platformCalendlyPointer, reserveInCalendly } from "../lib/platform-calendly.js";
+import { cancelCalendlyVisit } from "./calendly.service.js";
 import { computeAvailableSlots, formatSlotLabel } from "../lib/scheduling.js";
 import { parseWebsiteInquiry, inquiryHash, WEBSITE_CONSENT_TEXT } from "../lib/website-inquiry.js";
 
 export const MEETING_SOURCES = ["CAMPAIGN", "WEBSITE_SALES"];
 export async function getPlatformSlots(setting, db = prisma) {
   const from = new Date(Date.now() + 60 * 60_000);
+  // Calendly knows its own bookings, buffers and notice period.
+  if (setting.calendly) {
+    const conn = await platformCalendly();
+    if (conn) return (await calendlySlots(conn, from, 21)).slice(0, 200);
+  }
   const taken = await db.salesAgentAppointment.findMany({
     where: { status: { not: "CANCELLED" }, startTime: { gte: new Date(from.getTime() - 86_400_000), lte: new Date(from.getTime() + 21 * 86_400_000) } },
     select: { startTime: true },
@@ -33,7 +40,25 @@ export async function bookB2BMeeting({ lead, start, setting, campaignId }) {
   const end = new Date(start.getTime() + setting.slotDuration * 60000);
 
   let appointment;
-  try {
+  if (setting.calendly) {
+    // Calendly is the calendar: it accepts the time or says it's gone.
+    const conn = await platformCalendly();
+    const eventUri = conn && await reserveInCalendly(conn, { start, name: lead.contactName || lead.companyName, email: lead.email, phone: lead.phone, timezone: setting.timezone });
+    if (!eventUri) return { taken: true };
+    appointment = await prisma.salesAgentAppointment.create({
+      data: {
+        name: lead.contactName || lead.companyName,
+        email: lead.email,
+        phone: lead.phone || "",
+        preferredTime: label,
+        source: "CAMPAIGN",
+        campaignName: enrollment?.campaign.name || null,
+        startTime: start,
+        b2bLeadId: lead.id,
+        calendlyEventUri: eventUri,
+      },
+    });
+  } else try {
     // Serializable: two leads racing for the same slot cannot both pass the overlap check.
     appointment = await prisma.$transaction(
       async (tx) => {
@@ -92,6 +117,22 @@ export async function saveSalesBooking(id, payload, db = prisma, availability = 
   const hash = inquiryHash(payload);
   const setting = await availability();
   const start = new Date(payload.startTime);
+  let eventUri = null;
+  if (setting.calendly) {
+    const prior = await db.b2BInquiry.findUnique({ where: { id } });
+    if (prior) {
+      if (prior.payloadHash !== hash || prior.type !== "BOOKING") throw fail("Request ID already used. Please restart the booking.", 409);
+      return { label: prior.payload.label, appointmentId: id };
+    }
+    // Checked before Calendly, so a refused booking never leaves an event behind.
+    const existing = await db.b2BLead.findUnique({ where: { email: payload.email } });
+    if (existing && await db.salesAgentAppointment.findFirst({ where: { b2bLeadId: existing.id, status: "CONFIRMED", startTime: { gte: new Date() } } })) {
+      throw fail("A meeting is already booked for this email. Please contact the team to change it.", 409);
+    }
+    const conn = await platformCalendly();
+    eventUri = conn && await reserveInCalendly(conn, { start, name: payload.name, email: payload.email, phone: payload.phone, timezone: setting.timezone });
+    if (!eventUri) throw fail("That time is no longer available. Please choose another.", 409);
+  }
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return await db.$transaction(async (tx) => {
@@ -100,7 +141,7 @@ export async function saveSalesBooking(id, payload, db = prisma, availability = 
           if (prior.payloadHash !== hash || prior.type !== "BOOKING") throw fail("Request ID already used. Please restart the booking.", 409);
           return { label: prior.payload.label, appointmentId: id };
         }
-        if (!(await getPlatformSlots(setting, tx)).some((s) => s.getTime() === start.getTime())) throw fail("That time is no longer available. Please choose another.", 409);
+        if (!eventUri && !(await getPlatformSlots(setting, tx)).some((s) => s.getTime() === start.getTime())) throw fail("That time is no longer available. Please choose another.", 409);
         const existing = await tx.b2BLead.findUnique({ where: { email: payload.email } });
         if (existing && await tx.salesAgentAppointment.findFirst({ where: { b2bLeadId: existing.id, status: "CONFIRMED", startTime: { gte: new Date() } } })) {
           throw fail("A meeting is already booked for this email. Please contact the team to change it.", 409);
@@ -117,7 +158,7 @@ export async function saveSalesBooking(id, payload, db = prisma, availability = 
           },
         });
         const label = formatSlotLabel(start, setting.timezone);
-        await tx.salesAgentAppointment.create({ data: { id, name: payload.name, email: payload.email, phone: payload.phone, preferredTime: label, source: "WEBSITE_SALES", startTime: start, b2bLeadId: lead.id } });
+        await tx.salesAgentAppointment.create({ data: { id, name: payload.name, email: payload.email, phone: payload.phone, preferredTime: label, source: "WEBSITE_SALES", startTime: start, b2bLeadId: lead.id, calendlyEventUri: eventUri } });
         await tx.b2BInquiry.create({ data: { id, leadId: lead.id, type: "BOOKING", payload: { ...payload, label, slotDuration: setting.slotDuration }, payloadHash: hash, marketingConsent: payload.marketingConsent, consentText: `${WEBSITE_CONSENT_TEXT}\nMeeting consent: Receive email and SMS confirmations for this booking.` } });
         await tx.b2BEnrollment.updateMany({ where: { leadId: lead.id, status: "ACTIVE" }, data: { status: "EXITED", exitedReason: "APPOINTMENT", nextRunAt: null } });
         await tx.b2BLead.updateMany({ where: { id: lead.id, journeyStage: { not: null } }, data: { journeyStage: "APPOINTMENT_BOOKED", journeyTouches: 0, journeyNextAt: new Date(), journeyHoldReason: null } });
@@ -161,8 +202,40 @@ const US_TIMEZONES = {
 export const resolveConsultationTimezone = (timezone) => Object.hasOwn(US_TIMEZONES, timezone) ? timezone : "America/New_York";
 export const consultationTimezoneLabel = (timezone) => US_TIMEZONES[resolveConsultationTimezone(timezone)];
 
-export function nextConsultationField(draft) {
-  return CONSULTATION_FIELDS.find(([key]) => !["role", "annualClosings", "discussion"].includes(key) && !draft[key]);
+// With Calendly connected the visitor picks one of the open times instead of naming a preference.
+const SLOT_FIELD = ["slot", "Which of these times works for you?"];
+export const consultationFields = (calendly) =>
+  calendly ? [...CONSULTATION_FIELDS.filter(([key]) => !["preferredDate", "preferredTime"].includes(key)), SLOT_FIELD] : CONSULTATION_FIELDS;
+
+export function nextConsultationField(draft, calendly = false) {
+  return consultationFields(calendly).find(([key]) => !["role", "annualClosings", "discussion"].includes(key) && !draft[key]);
+}
+
+/** The offered time the visitor chose: by its number, or by naming its day and time. */
+export function slotChoice(text, offered = []) {
+  const value = String(text || "").trim().toLowerCase();
+  const number = /^(?:option\s*|#)?(\d{1,2})[.)]?$/.exec(value);
+  if (number) return offered[Number(number[1]) - 1] || null;
+  const matches = offered.filter((o) => {
+    const [day, labelTime] = o.label.toLowerCase().split(" at ");
+    const weekday = day.split(",")[0]; // "wed" also matches "wednesday"
+    const time = labelTime.replace(/\s+[a-z]{2,5}$/, ""); // drop "EST"
+    const compact = time.replace(":00", "").replace(/\s+/g, "");
+    return value.includes(weekday) && (value.replace(/\s+/g, "").includes(compact) || value.includes(time));
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+export function slotQuestion(offered, timezone) {
+  if (!offered.length) return "There are no open times in the next three weeks. Please email our team and we'll find a time with you.";
+  const list = offered.map((o, i) => `${i + 1}. ${o.label}`).join("\n");
+  return `Here are the next open times (${consultationTimezoneLabel(timezone)}):\n${list}\n\nReply with the number of the time that suits you.`;
+}
+
+export function bookingSummary(draft, minutes) {
+  const contact = [["Name", draft.name], ["Company", draft.company], ["Email", draft.email], ["Phone", draft.phone]];
+  const lines = contact.map(([key, value]) => key + ": " + value).join("\n");
+  return `Please review your Product Consultation:\n${lines}\nMeeting time: ${draft.slotLabel} (${consultationTimezoneLabel(draft.timezone)}, ${minutes} minutes)\n\nMay I book this time and send email and SMS confirmations about it? Message and data rates may apply; reply STOP to opt out of texts. This does not subscribe you to marketing. Reply yes to book it, or tell me what to change.`;
 }
 
 function localCalendarDate(now, timezone) {
@@ -301,6 +374,7 @@ export async function updatePlatformAppointment(id, status, startTime, setting, 
           start = new Date(startTime);
         }
         if (!start || !Number.isFinite(start.getTime())) throw fail("Choose a scheduled meeting time before confirming this request.", 400);
+        if (appointment.calendlyEventUri && start.getTime() !== appointment.startTime?.getTime()) throw fail("This meeting is in Calendly. Reschedule it there; the new time comes back here automatically.", 409);
         if ((!appointment.startTime || start.getTime() !== appointment.startTime.getTime()) && start.getTime() <= Date.now()) throw fail("Choose a future meeting time.", 400);
         const gap = setting.bufferMinutes * 60000;
         const duration = setting.slotDuration * 60000;
@@ -313,7 +387,14 @@ export async function updatePlatformAppointment(id, status, startTime, setting, 
       // A new time needs its own reminder.
       const moved = status === "CONFIRMED" && appointment.startTime?.getTime() !== start.getTime();
       return tx.salesAgentAppointment.update({ where: { id }, data: { status, ...(status === "CONFIRMED" ? { startTime: start } : {}), ...(moved ? { reminderSentAt: null } : {}) } });
-    }, { isolationLevel: "Serializable" });
+    }, { isolationLevel: "Serializable" }).then(async (updated) => {
+      // Cancelling here frees the time in Calendly too (best effort).
+      if (status === "CANCELLED" && updated.calendlyEventUri) {
+        const pointer = await platformCalendlyPointer();
+        await cancelCalendlyVisit(pointer?.userId, updated.calendlyEventUri, "Cancelled from the AI4Home portal");
+      }
+      return updated;
+    });
   } catch (error) {
     if (error.code === "P2034") throw fail("The calendar changed. Please try again.", 409);
     throw error;

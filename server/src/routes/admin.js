@@ -18,7 +18,6 @@ import {
   setCompanySuspension,
 } from "../admin/superadmin.controller.js";
 import {
-  getCrmHealth,
   getDefaultNewsSources,
   updateDefaultNewsSources,
   getSupportLeads,
@@ -42,6 +41,8 @@ import {
 } from "../admin/super-staff.controller.js";
 import { listHandoffIssues, retryHandoffIssue, resolveHandoffIssue } from "../admin/handoffs.controller.js";
 import * as coach from "../admin/sales-coach.controller.js";
+import * as platformCalendly from "../admin/platform-calendly.controller.js";
+import * as adminNews from "../admin/news.controller.js";
 import { createRateLimiter } from "../middlewares/rate-limit.js";
 import {
   getPromptLab,
@@ -94,9 +95,14 @@ router.patch("/users/:userId/access", requireAuth, requireAdmin("companies.manag
 router.patch("/companies/:companyId/verify", requireAuth, requireAdmin("companies.manage"), verifyCompany);
 router.patch("/companies/:companyId/onboarding", requireAuth, requireAdmin("companies.manage"), updateCompanyOnboarding);
 router.patch("/companies/:companyId/suspension", requireAuth, requireAdmin("companies.manage"), setCompanySuspension);
-router.get("/crm-health", requireAuth, requireAdmin("integrations"), getCrmHealth);
 router.get("/news-defaults", requireAuth, requireAdmin("integrations"), getDefaultNewsSources);
 router.put("/news-defaults", requireAuth, requireAdmin("integrations"), updateDefaultNewsSources);
+router.get("/news", requireAuth, requireAdmin("integrations"), adminNews.listNews);
+router.post("/news", requireAuth, requireAdmin("integrations"), adminNews.createNews);
+router.post("/news/fetch", requireAuth, requireAdmin("integrations"), adminNews.fetchNews);
+router.post("/news/combine", requireAuth, requireAdmin("integrations"), adminNews.combineNewsPosts);
+router.patch("/news/:id", requireAuth, requireAdmin("integrations"), adminNews.updateNews);
+router.delete("/news/:id", requireAuth, requireAdmin("integrations"), adminNews.deleteNews);
 router.get("/support/leads/:companyId", requireAuth, requireAdmin("support"), getSupportLeads);
 router.get("/support/access-log", requireAuth, requireAdmin("support"), getSupportAccessLog);
 router.get("/handoff-issues", requireAuth, requireAdmin("handoffs"), listHandoffIssues);
@@ -167,8 +173,10 @@ router.delete("/b2b/campaigns/:id", requireAuth, requireAdmin("b2b"), b2b.delete
 router.get("/b2b/campaigns/:id/enrollments", requireAuth, requireAdmin("b2b"), b2b.listEnrollments);
 router.post("/b2b/campaigns/:id/enroll", requireAuth, requireAdmin("b2b"), b2b.enrollLeads);
 router.post("/b2b/campaigns/:id/unenroll", requireAuth, requireAdmin("b2b"), b2b.unenrollLeads);
-router.get("/b2b/availability", requireAuth, requireAdmin("appointments", "b2b"), b2b.getAvailability);
-router.put("/b2b/availability", requireAuth, requireAdmin("appointments", "b2b"), b2b.updateAvailability);
+router.get("/platform-calendly", requireAuth, requireAdmin("appointments"), platformCalendly.getPlatformCalendly);
+router.post("/platform-calendly/connect", requireAuth, requireAdmin("appointments"), platformCalendly.connectPlatformCalendly);
+router.put("/platform-calendly/event-type", requireAuth, requireAdmin("appointments"), platformCalendly.setPlatformEventType);
+router.delete("/platform-calendly", requireAuth, requireAdmin("appointments"), platformCalendly.disconnectPlatformCalendly);
 const promptLabUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
@@ -253,5 +261,7 @@ router.post("/sales-coach/sessions/:id/hint", ...coachAccess, coach.getHint);
 router.post("/sales-coach/sessions/:id/score", ...coachAccess, coach.scoreSession);
 router.get("/sales-coach/team", ...coachAccess, coach.getTeam);
 router.post("/sales-coach/ask", ...coachAccess, coachAskCap, coach.askCoach);
+router.get("/sales-coach/prompts", requireAuth, requireAdmin("prompt-lab"), coach.getCoachPrompts);
+router.put("/sales-coach/prompts", requireAuth, requireAdmin("prompt-lab"), coach.saveCoachPrompts);
 
 export default router;

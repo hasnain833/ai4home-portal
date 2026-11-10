@@ -414,9 +414,9 @@ export const getCalendarSuggestions = async (req, res) => {
             .map((d) => `${d.title} (${d.reason || "No reason"})`)
             .join("\n")
         : "None";
-    const recentNews = await prisma.scrapedNews.findMany({
+    const recentNews = await prisma.newsPost.findMany({
       where: {
-        companyId,
+        status: "PUBLISHED",
         publishedAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
       },
       select: { title: true, summary: true, source: true, publishedAt: true },

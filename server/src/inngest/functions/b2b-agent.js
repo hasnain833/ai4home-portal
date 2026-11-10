@@ -409,15 +409,18 @@ async function actOnDecision(ctx, decision) {
       return { action: "slot taken" };
     }
     const start = new Date(slot.iso);
-    const invite = meetingInvite(lead, start, setting);
-    const joinLine = setting.meetingLink ? `Join here: ${setting.meetingLink}.` : "Our team will reach out at your email or phone number.";
+    // With Calendly connected, Calendly emails the invite and joining details itself.
+    const invite = setting.calendly ? null : meetingInvite(lead, start, setting);
+    const joinLine = setting.calendly
+      ? "You'll get a calendar invite with the joining details from Calendly by email."
+      : setting.meetingLink ? `Join here: ${setting.meetingLink}.` : "Our team will reach out at your email or phone number.";
     const r = await deliver(
       ctx,
-      `You're booked for ${slot.label} (${setting.slotDuration} minutes). ${joinLine} If anything changes, just reply here.${ctx.channel === "SMS" ? "" : " A calendar invite is attached."}`,
-      { attachments: ctx.channel === "EMAIL" ? [invite] : [] },
+      `You're booked for ${slot.label} (${setting.slotDuration} minutes). ${joinLine} If anything changes, just reply here.${ctx.channel === "SMS" || !invite ? "" : " A calendar invite is attached."}`,
+      { attachments: ctx.channel === "EMAIL" && invite ? [invite] : [] },
     );
-    // A booking made by text still gets the invite, by email.
-    if (ctx.channel === "SMS" && !lead.emailOptOut) {
+    // A booking made by text still gets the invite, by email (Calendly sends its own).
+    if (ctx.channel === "SMS" && invite && !lead.emailOptOut) {
       await MailService.sendEmail({
         to: lead.email,
         subject: "Your meeting with AI for Homebuilders",

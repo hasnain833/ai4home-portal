@@ -1,6 +1,5 @@
 import prisma from "../lib/prisma.js";
 import { MailService } from "../services/mail-service.js";
-import { normalizeNewsSources } from "../lib/news-sources.js";
 import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
 import { BUCKETS, resolveDownloadUrl, uploadObject } from "../lib/storage.js";
 import { Templates } from "../services/templates.js";
@@ -52,7 +51,6 @@ export const updateCompany = async (req, res) => {
       "voiceProfile",
       "campaignExitConditions",
       "campaignVersionPolicy",
-      "newsSources",
     ];
 
     const COMPLIANCE_FIELDS = [
@@ -96,15 +94,10 @@ export const updateCompany = async (req, res) => {
       "quietHoursStart",
       "quietHoursEnd",
       "quietHoursTimezone",
-      "newsSources",
     ];
     const data = {};
     for (const key of ALLOWED_FIELDS) {
       if (req.body[key] !== undefined) data[key] = req.body[key];
-    }
-
-    if (data.newsSources !== undefined) {
-      data.newsSources = normalizeNewsSources(data.newsSources);
     }
 
     const clampHour = (v, fallback) => {

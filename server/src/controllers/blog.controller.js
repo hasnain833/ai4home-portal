@@ -226,7 +226,7 @@ export const generateBlogDraft = async (req, res) => {
     let citations = [];
     let newsContext = "No source news selected.";
     if (Array.isArray(newsIds) && newsIds.length) {
-      const news = await prisma.scrapedNews.findMany({ where: { companyId, id: { in: newsIds } } });
+      const news = await prisma.newsPost.findMany({ where: { status: "PUBLISHED", id: { in: newsIds.map(String) } } });
       citations = news.map((n) => ({ title: n.title, url: n.originalUrl }));
       newsContext = news.map((n) => `- ${n.title}: ${n.summary} (${n.originalUrl})`).join("\n") || newsContext;
     }

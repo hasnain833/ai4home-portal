@@ -104,6 +104,13 @@ export const NEWS_SUMMARY_PROMPT =
   "You are an expert real estate content marketer. You rewrite news snippets into engaging, 2-3 sentence summaries that are easy to read for homeowners and leads. Always maintain a professional, helpful tone.";
 
 
+export const NEWS_COMBINE_PROMPT = `You are the editor of AI for Homebuilders' market news feed, read by homebuilder sales teams. Combine the articles you are given into ONE short post.
+- Headline: clear and specific, under 90 characters. No clickbait.
+- Body: 2-3 short paragraphs in plain language. First what happened, then why it matters for homebuilders and their buyers (pace, pricing, incentives, rates, demand).
+- Use only facts stated in the articles. Never invent figures, dates, names or quotes. If the articles disagree, say so briefly.
+- Write in your own words; don't copy sentences from the articles.
+- Professional and neutral: no hype, no doom, no advice on specific investments.`;
+
 export const SMS_FORMAT_RULES =
   "- Keep it under 160 characters if possible.\n- You may use merge tags {firstName}, {city}, {companyName}, {campaignName}. No other placeholders.";
 

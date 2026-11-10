@@ -15,7 +15,6 @@ import {
   Menu,
   X,
   Loader2,
-  PlugZap,
   LifeBuoy,
   CalendarRange,
   PanelLeftClose,
@@ -28,6 +27,7 @@ import {
   UserCog,
   ShieldAlert,
   GraduationCap,
+  Newspaper,
   type LucideIcon,
 } from "lucide-react";
 import { canAdmin, isPlatformUser, type AdminPermission } from "@/lib/admin-permissions";
@@ -42,7 +42,7 @@ const adminNavItems: { name: string; href: string; icon: LucideIcon; perm: Admin
   { name: "Companies", href: "/admin/companies", icon: Building2, perm: ["companies.view"] },
   { name: "Business Leads", href: "/admin/leads", icon: Target, perm: ["b2b"] },
   { name: "Nurture", href: "/admin/nurture", icon: Route, perm: ["b2b"] },
-  { name: "CRM & News", href: "/admin/integrations", icon: PlugZap, perm: ["integrations"] },
+  { name: "News", href: "/admin/news", icon: Newspaper, perm: ["integrations"] },
   { name: "Hand-off Issues", href: "/admin/handoffs", icon: ArrowRightLeft, perm: ["handoffs"] },
   { name: "Support Access", href: "/admin/support", icon: LifeBuoy, perm: ["support"] },
   {

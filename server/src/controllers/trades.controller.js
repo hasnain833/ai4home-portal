@@ -15,6 +15,7 @@ import {
   setEventType,
   CalendlyBookingError,
 } from "../services/calendly.service.js";
+import { adoptPlatformCalendly } from "../admin/platform-calendly.controller.js";
 
 const TRADE_SELECT = {
   id: true,
@@ -323,11 +324,16 @@ export const startCalendlyConnect = (req, res) => {
 };
 
 export const calendlyCallback = async (req, res) => {
-  const back = (result) => res.redirect(`${process.env.NEXT_PUBLIC_URL || ""}/trade/settings?calendly=${result}`);
   const userId = verifyState(req.query.state);
+  // One OAuth callback for both: a trade's own calendar, or the platform's (Super Admin → Appointments).
+  const user = userId ? await prisma.user.findUnique({ where: { id: userId }, select: { role: true } }) : null;
+  const platform = ["SUPER_ADMIN", "SUPER_STAFF"].includes(user?.role);
+  const page = platform ? "/admin/sales-agent-appointments" : "/trade/settings";
+  const back = (result) => res.redirect(`${process.env.NEXT_PUBLIC_URL || ""}${page}?calendly=${result}`);
   if (!userId || !req.query.code) return back(req.query.error ? "cancelled" : "failed");
   try {
     await connectCalendly(userId, String(req.query.code));
+    if (platform) await adoptPlatformCalendly(userId);
     return back("connected");
   } catch (error) {
     console.error("[Calendly] connect failed:", error.message);

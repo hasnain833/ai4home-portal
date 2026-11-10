@@ -18,8 +18,8 @@ export const ADMIN_PERMISSIONS = {
     description: "See demo bookings and set booking availability.",
   },
   integrations: {
-    label: "CRM & News",
-    description: "CRM health, default news sources and the security checklist.",
+    label: "News & Security",
+    description: "The security checklist, and reviewing and publishing news to builders.",
   },
   handoffs: {
     label: "Hand-off issues",

@@ -34,7 +34,7 @@ export type KbDocument = {
   size: string;
   category: string;
   status: string;
-  scope: "PLATFORM" | "COMPANY" | "HELP" | "B2B";
+  scope: "PLATFORM" | "COMPANY" | "HELP" | "B2B" | "COACH";
   chunkCount: number;
   error: string | null;
   companyId: string | null;
@@ -48,7 +48,7 @@ export type KbProbeResult = {
   documentId: string;
   name: string;
   category: string;
-  scope: "PLATFORM" | "COMPANY" | "HELP" | "B2B";
+  scope: "PLATFORM" | "COMPANY" | "HELP" | "B2B" | "COACH";
   score: number;
   text: string;
 };
@@ -80,6 +80,7 @@ const PROBE_EXAMPLES: Record<string, string> = {
   sales: "do you have move-in ready homes?",
   help: "how do I import leads?",
   b2b: "does it sync with Salesforce?",
+  coach: "how do I answer \"we already have Salesforce\"?",
 };
 
 const POLL_MS = 4000;
@@ -484,7 +485,7 @@ export default function KnowledgeBasePanel({
                       <span className="truncate text-[11px] font-medium">{r.name || "Untitled"}</span>
                       {supportsCommunities && (
                         <Badge variant="secondary" className="text-[9px] font-normal">
-                          {r.scope === "PLATFORM" ? "Platform" : r.scope === "B2B" ? "B2B" : "Community"}
+                          {r.scope === "PLATFORM" ? "Platform" : r.scope === "B2B" ? "B2B" : r.scope === "COACH" ? "Sales Coach" : "Community"}
                         </Badge>
                       )}
                       <span className="ml-auto font-mono text-[10px] text-muted-foreground">

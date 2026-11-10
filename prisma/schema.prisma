@@ -345,6 +345,7 @@ enum KBScope {
   COMPANY
   HELP
   B2B
+  COACH
 }
 
 enum LeadSource {
@@ -923,6 +924,31 @@ model ScrapedNews {
   @@index([companyId, publishedAt])
 }
 
+/// Platform news, curated in Super Admin → News. Builders see only PUBLISHED posts.
+/// status: CANDIDATE (scraped, unreviewed) · DRAFT (AI-combined or written, being edited)
+///         PUBLISHED · REJECTED · USED (a candidate folded into a published combined post)
+/// origin: SCRAPED · AI · MANUAL
+model NewsPost {
+  id              String    @id @default(cuid())
+  status          String    @default("CANDIDATE")
+  origin          String    @default("SCRAPED")
+  title           String
+  summary         String    @db.Text
+  originalUrl     String
+  source          String
+  imageUrl        String?
+  /// Combined posts: the candidates they were written from, [{ id, title, url, source }].
+  sources         Json?
+  articleDate     DateTime  @default(now())
+  publishedAt     DateTime?
+  publishedByName String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, publishedAt])
+  @@index([title])
+}
+
 model SalesAgentAppointment {
   id            String    @id @default(cuid())
   name          String
@@ -936,10 +962,12 @@ model SalesAgentAppointment {
   b2bLeadId     String?
   b2bLead       B2BLead?  @relation(fields: [b2bLeadId], references: [id], onDelete: SetNull)
   reminderSentAt DateTime?
+  calendlyEventUri String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([startTime])
+  @@index([calendlyEventUri])
 }
 
 

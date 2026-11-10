@@ -7,10 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Loader2, Calendar, Clock } from "lucide-react";
+import { Loader2, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
-import { B2B_API, sendJson } from "@/lib/b2b-store";
+import { sendJson } from "@/lib/b2b-store";
 
 type SalesAgentAppointment = {
   id: string;
@@ -26,17 +26,6 @@ type SalesAgentAppointment = {
   createdAt: string;
 };
 
-type Availability = {
-  dayStart: string;
-  dayEnd: string;
-  slotDuration: number;
-  bufferMinutes: number;
-  workingDays: string;
-  timezone: string;
-  meetingLink?: string;
-};
-
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const CAMPAIGN_STATUSES = ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW", "CANCELLED"];
 const STATUS_STYLES: Record<string, string> = {
   PENDING: "bg-amber-500/10 text-amber-600",
@@ -106,7 +95,7 @@ export default function SalesAgentAppointmentsPage() {
         </p>
       </div>
 
-      <AvailabilityCard />
+      <CalendlyCard />
 
       <Card className="border border-border/80 shadow-sm">
         <CardHeader>
@@ -206,91 +195,146 @@ export default function SalesAgentAppointmentsPage() {
   );
 }
 
-/** The platform team's bookable hours, offered on the booking link in campaign messages. */
-function AvailabilityCard() {
-  const [form, setForm] = useState<Availability | null>(null);
-  const [saving, setSaving] = useState(false);
+type CalendlyState = {
+  available: boolean;
+  connected: boolean;
+  email?: string | null;
+  eventType?: { uri: string; name: string; duration: number } | null;
+  eventTypes?: { uri: string; name: string; duration: number }[];
+  schedule?: { name: string; timezone: string | null; days: { day: string; intervals: string[] }[] } | null;
+  webhook?: boolean;
+};
 
-  useEffect(() => {
-    apiFetch<Availability>(`${B2B_API}/availability`)
-      .then(setForm)
-      .catch((e) => toast.error(errorMessage(e)));
+const CALENDLY_API = "/api/admin/platform-calendly";
+const WEEK = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+/** The Calendly account every platform booking uses: booking links, the B2B agent and website chat. */
+function CalendlyCard() {
+  const [state, setState] = useState<CalendlyState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const next = await apiFetch<CalendlyState>(CALENDLY_API);
+      setState(next);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
   }, []);
 
-  if (!form) return null;
-  const days = form.workingDays.split(",");
-  const toggleDay = (d: string) =>
-    setForm({ ...form, workingDays: DAYS.filter((x) => (x === d ? !days.includes(d) : days.includes(x))).join(",") });
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("calendly");
+    if (result === "connected") toast.success("Calendly connected.");
+    if (result === "failed") toast.error("Calendly couldn't be connected. Please try again.");
+    if (result) window.history.replaceState(null, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial load
+    void load();
+  }, [load]);
 
-  const save = async () => {
-    setSaving(true);
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
     try {
-      setForm(await sendJson<Availability>(`${B2B_API}/availability`, "PUT", form));
-      toast.success("Availability saved.");
+      await fn();
+      await load();
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   };
+
+  const connect = () =>
+    run(async () => {
+      const { url } = await sendJson<{ url: string }>(`${CALENDLY_API}/connect`, "POST", {});
+      window.location.href = url;
+    });
+
+  if (!state) return null;
+  const days = new Map((state.schedule?.days || []).map((d) => [d.day, d.intervals]));
 
   return (
     <Card className="border border-border/80 shadow-sm">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <Clock className="h-4 w-4 text-[#b48c3c]" /> Meeting availability
+          <Calendar className="h-4 w-4 text-[#b48c3c]" /> Calendly
         </CardTitle>
         <CardDescription>
-          The times offered through business-lead booking links. Website chat collects preferred times for the team to confirm. Scheduled meetings reserve their slots automatically.
+          Booking links, the B2B agent and the website chat offer the open times from this Calendly account and book them there.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex flex-wrap gap-1.5">
-          {DAYS.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => toggleDay(d)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                days.includes(d) ? "border-[#b48c3c] bg-[#b48c3c]/10 text-[#b48c3c]" : "border-border text-muted-foreground"
-              }`}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
-        <div className="grid gap-3 sm:grid-cols-5">
-          <div className="space-y-1.5">
-            <Label className="text-xs">From</Label>
-            <Input type="time" value={form.dayStart} onChange={(e) => setForm({ ...form, dayStart: e.target.value })} className="h-9 text-sm" />
+        {!state.connected ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border p-4">
+            <p className="text-sm text-muted-foreground">
+              {state.available
+                ? "Not connected. Until it is, booking keeps using the previous fixed hours (Mon–Fri, 9 AM–5 PM Eastern, 30 minutes)."
+                : "Calendly isn't set up on this portal yet (CALENDLY_CLIENT_ID and CALENDLY_CLIENT_SECRET). Until it is, booking keeps using the previous fixed hours."}
+            </p>
+            {state.available && (
+              <Button size="sm" className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={busy} onClick={connect}>
+                {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />} Connect Calendly
+              </Button>
+            )}
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">To</Label>
-            <Input type="time" value={form.dayEnd} onChange={(e) => setForm({ ...form, dayEnd: e.target.value })} className="h-9 text-sm" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Meeting length (min)</Label>
-            <Input type="number" min={10} max={240} value={form.slotDuration} onChange={(e) => setForm({ ...form, slotDuration: Number(e.target.value) })} className="h-9 text-sm" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Gap between (min)</Label>
-            <Input type="number" min={0} max={120} value={form.bufferMinutes} onChange={(e) => setForm({ ...form, bufferMinutes: Number(e.target.value) })} className="h-9 text-sm" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="availability-timezone" className="text-xs">Time zone</Label>
-            <Select value={form.timezone} onValueChange={(timezone) => setForm({ ...form, timezone })}>
-              <SelectTrigger id="availability-timezone" className="h-9"><SelectValue placeholder="Select a time zone" /></SelectTrigger>
-              <SelectContent align="start">{[...new Set([form.timezone, ...Intl.supportedValuesOf("timeZone")])].filter(Boolean).map((timezone) => <SelectItem key={timezone} value={timezone}>{timezone.replace(/_/g, " ")}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="availability-meeting-link" className="text-xs">Meeting link (optional, goes in invites and reminders)</Label>
-          <Input id="availability-meeting-link" type="url" value={form.meetingLink || ""} onChange={(e) => setForm({ ...form, meetingLink: e.target.value })} placeholder="https://" className="h-9 text-sm" />
-        </div>
-        <Button size="sm" className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={saving} onClick={save}>
-          Save availability
-        </Button>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm">
+                Connected as <span className="font-medium">{state.email || "your Calendly account"}</span>
+              </p>
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => sendJson(CALENDLY_API, "DELETE"))}>
+                Disconnect
+              </Button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="calendly-event-type" className="text-xs">Meeting type to book</Label>
+                <Select
+                  value={state.eventType?.uri || ""}
+                  onValueChange={(uri) => run(() => sendJson(`${CALENDLY_API}/event-type`, "PUT", { uri }))}
+                  disabled={busy}
+                >
+                  <SelectTrigger id="calendly-event-type" className="h-9"><SelectValue placeholder="Choose a Calendly event type" /></SelectTrigger>
+                  <SelectContent>
+                    {(state.eventTypes || []).map((t) => (
+                      <SelectItem key={t.uri} value={t.uri}>{t.name} ({t.duration} min)</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!state.eventType && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">Choose a meeting type. Until then, booking keeps using the previous fixed hours.</p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium">
+                    {state.schedule?.name || "Hours"}{state.schedule?.timezone ? ` · ${state.schedule.timezone.replace(/_/g, " ")}` : ""}
+                  </span>
+                  <a href="https://calendly.com/app/availability/schedules" target="_blank" rel="noreferrer" className="text-xs font-medium text-[#b48c3c] hover:underline">
+                    Edit hours in Calendly ↗
+                  </a>
+                </div>
+                <div className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5 rounded-lg border border-border p-3 text-xs">
+                  {WEEK.map((d) => (
+                    <div key={d} className="contents">
+                      <span className="capitalize text-muted-foreground">{d}</span>
+                      <span>{days.get(d)?.length ? days.get(d)!.join(", ") : <span className="text-muted-foreground">Unavailable</span>}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground">Calendly&apos;s API can read these hours but not change them; edits made in Calendly show here.</p>
+              </div>
+            </div>
+
+            {state.webhook === false && (
+              <p className="rounded-lg bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+                Calendly didn&apos;t accept our update subscription (it needs a paid Calendly plan). Bookings still work, but cancellations and reschedules made in Calendly won&apos;t show here.
+              </p>
+            )}
+          </>
+        )}
       </CardContent>
     </Card>
   );

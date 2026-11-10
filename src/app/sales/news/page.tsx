@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-import { Bot, Newspaper, ExternalLink, Calendar, Loader2, RefreshCcw, Megaphone, ChevronLeft, ChevronRight } from "lucide-react";
+import { Newspaper, ExternalLink, Calendar, Loader2, RefreshCcw, Megaphone, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
@@ -16,14 +16,15 @@ interface ScrapedNews {
   summary: string;
   source: string;
   imageUrl?: string;
+  sources?: { url: string; source: string }[] | null;
   publishedAt: string;
 }
 
 const PAGE_SIZE = 8;
 
 export default function SalesNewsPage() {
-  // SRS 4.12: a homeowner may view the news feed, not trigger scrapes or
-  // configure sources.
+  // SRS 4.12: a homeowner may view the news feed. Everyone sees the same
+  // posts, published by the AI for Homebuilders team.
   const { user } = useAuth();
   const isHomeowner = user?.role === "homeowner";
   const router = useRouter();
@@ -31,7 +32,6 @@ export default function SalesNewsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [creatingId, setCreatingId] = useState<string | null>(null);
-  const [fetchingLatest, setFetchingLatest] = useState(false);
 
   const fetchNews = async () => {
     setIsLoading(true);
@@ -52,30 +52,6 @@ export default function SalesNewsPage() {
   useEffect(() => {
     fetchNews();
   }, []);
-
-  // SW-NEWS-001: pull immediately from this tenant's configured sources,
-  // then reload the stored feed.
-  const fetchLatest = async () => {
-    setFetchingLatest(true);
-    try {
-      const res = await fetch("/api/sales/news/refresh", { method: "POST" });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok) {
-        toast.success(
-          json.saved > 0
-            ? `Fetched ${json.saved} new article${json.saved === 1 ? "" : "s"}.`
-            : "No new articles — your feed is up to date."
-        );
-        await fetchNews();
-      } else {
-        toast.error(json.error || "Failed to fetch latest news.");
-      }
-    } catch {
-      toast.error("Error fetching latest news.");
-    } finally {
-      setFetchingLatest(false);
-    }
-  };
 
   const createCampaignFromNews = async (item: ScrapedNews) => {
     setCreatingId(item.id);
@@ -116,7 +92,7 @@ export default function SalesNewsPage() {
                 Housing Market News
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                AI-summarized market news from the last 30 days, powering your calendar suggestions and blog drafts. Older stories drop off automatically so drafts stay current. Nothing is sent to leads without your approval.
+                Market news reviewed and published by the AI for Homebuilders team, from the last 30 days. It also powers your calendar suggestions, blog drafts and news campaigns. Nothing is sent to leads without your approval.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -124,12 +100,6 @@ export default function SalesNewsPage() {
                 <RefreshCcw className="h-4 w-4" />
                 Refresh
               </Button>
-              {!isHomeowner && (
-                <Button className="gap-2" onClick={fetchLatest} disabled={fetchingLatest}>
-                  {fetchingLatest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Newspaper className="h-4 w-4" />}
-                  Fetch latest
-                </Button>
-              )}
             </div>
           </div>
 
@@ -143,7 +113,7 @@ export default function SalesNewsPage() {
                 <Newspaper className="h-10 w-10 text-muted-foreground mb-3 opacity-50" />
                 <p className="text-muted-foreground font-medium">No news articles found yet.</p>
                 <p className="text-xs text-muted-foreground/70 max-w-sm text-center mt-1">
-                  The AI News Scraper runs daily and will populate this feed automatically.
+                  New market news appears here once the AI for Homebuilders team publishes it.
                 </p>
               </div>
             ) : (
@@ -166,12 +136,19 @@ export default function SalesNewsPage() {
                           {item.title}
                         </h3>
 
-                        <div className="flex items-start gap-1.5 mb-3">
-                          <Bot className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
-                          <p className="text-xs text-muted-foreground line-clamp-2">
-                            {item.summary}
+                        <p className="mb-3 whitespace-pre-line text-xs leading-relaxed text-muted-foreground">
+                          {item.summary}
+                        </p>
+                        {item.sources && item.sources.length > 1 && (
+                          <p className="mb-3 text-[11px] text-muted-foreground">
+                            Sources:{" "}
+                            {item.sources.map((s, i) => (
+                              <a key={s.url + i} href={s.url} target="_blank" rel="noreferrer" className="hover:underline">
+                                {i ? ", " : ""}{s.source}
+                              </a>
+                            ))}
                           </p>
-                        </div>
+                        )}
 
                         <div className="mt-auto pt-2.5 flex items-center justify-between gap-2 border-t border-border/50">
                           {/* Campaigns are builder-only, so a homeowner reads the
@@ -190,14 +167,16 @@ export default function SalesNewsPage() {
                             )}
                             Create Campaign
                           </Button>)}
-                          <a
-                            href={item.originalUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] font-semibold text-primary hover:underline flex items-center gap-1 shrink-0"
-                          >
-                            Read Original <ExternalLink className="h-3 w-3" />
-                          </a>
+                          {item.originalUrl && (
+                            <a
+                              href={item.originalUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[11px] font-semibold text-primary hover:underline flex items-center gap-1 shrink-0"
+                            >
+                              Read Original <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
                         </div>
                       </div>
                     </div>

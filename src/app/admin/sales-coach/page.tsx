@@ -40,6 +40,16 @@ export default function SalesCoachPage() {
   const [askSeed, setAskSeed] = useState<string | null>(null);
   const [member, setMember] = useState<TeamRow | null>(null);
   const [scoring, setScoring] = useState(false);
+  const [mine, setMine] = useState<SessionSummary[]>([]);
+
+  // Own sessions, for the best score on each scenario card. Reloads after a role-play or review.
+  useEffect(() => {
+    if (active || viewing) return;
+    coachApi
+      .sessions()
+      .then((r) => setMine(r.sessions))
+      .catch(() => {});
+  }, [active, viewing]);
 
   useEffect(() => {
     coachApi
@@ -136,37 +146,33 @@ export default function SalesCoachPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <Card className="border-border bg-card shadow-sm">
-        <CardHeader className="pb-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#b48c3c]/10 text-[#b48c3c]">
-              <GraduationCap className="h-5 w-5" />
-            </div>
-            <div>
-              <CardTitle className="text-xl text-foreground">Sales Coach</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Practise selling AI4Home to builders with an AI role-play partner, then get scored feedback.
-              </p>
-            </div>
-          </div>
-          {/* FR-MG-05 */}
-          <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+    <Tabs value={tab} onValueChange={setTab} className="space-y-4">
+      {/* Same header as Prompt Lab: title left, tabs centred. */}
+      <div className="space-y-1">
+        <div className="grid grid-cols-1 items-center gap-x-4 gap-y-2 lg:grid-cols-[1fr_auto_1fr]">
+          <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
+            <GraduationCap className="h-5 w-5 text-[#b48c3c]" />
+            Sales Coach
+          </h1>
+          <TabsList className="justify-self-center">
+            <TabsTrigger value="practice">Practice</TabsTrigger>
+            <TabsTrigger value="ask">Ask the Coach</TabsTrigger>
+            <TabsTrigger value="history">My history</TabsTrigger>
+            {user?.isSuperAdmin && <TabsTrigger value="team">Team</TabsTrigger>}
+          </TabsList>
+          <div aria-hidden className="hidden lg:block" />
+        </div>
+        {/* FR-MG-05 */}
+        <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+          Practise selling AI4Home to builders with an AI role-play partner, then get scored feedback.
+          <span className="inline-flex items-center gap-1">
             <Eye className="h-3.5 w-3.5" /> Your manager can see your practice sessions and scores.
-          </p>
-        </CardHeader>
-      </Card>
-
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="practice">Practice</TabsTrigger>
-          <TabsTrigger value="ask">Ask the Coach</TabsTrigger>
-          <TabsTrigger value="history">My history</TabsTrigger>
-          {user?.isSuperAdmin && <TabsTrigger value="team">Team</TabsTrigger>}
-        </TabsList>
+          </span>
+        </p>
+      </div>
 
         <TabsContent value="practice" className="mt-4">
-          {scenarios ? <Library scenarios={scenarios} onStart={setActive} /> : spinner}
+          {scenarios ? <Library scenarios={scenarios} sessions={mine} onStart={setActive} /> : spinner}
         </TabsContent>
         <TabsContent value="ask" className="mt-4">
           <AskCoach key={askSeed ?? ""} seed={askSeed} />
@@ -189,8 +195,7 @@ export default function SalesCoachPage() {
             )}
           </TabsContent>
         )}
-      </Tabs>
-    </div>
+    </Tabs>
   );
 }
 
@@ -209,16 +214,32 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   );
 }
 
-function Library({ scenarios, onStart }: { scenarios: Scenario[]; onStart: (s: Scenario) => void }) {
+function Library({
+  scenarios,
+  sessions,
+  onStart,
+}: {
+  scenarios: Scenario[];
+  sessions: SessionSummary[];
+  onStart: (s: Scenario) => void;
+}) {
   const [level, setLevel] = useState<Difficulty | null>(null);
   const [area, setArea] = useState<Area | null>(null);
-  const list = scenarios.filter((s) => (!level || s.difficulty === level) && (!area || s.areas.includes(area)));
+  const [untried, setUntried] = useState(false);
+  const tried = new Set(sessions.map((x) => x.scenarioId));
+  const best = new Map<string, number>();
+  for (const x of sessions) {
+    if (x.scorecard) best.set(x.scenarioId, Math.max(best.get(x.scenarioId) ?? 0, x.scorecard.overall));
+  }
+  const list = scenarios.filter(
+    (s) => (!level || s.difficulty === level) && (!area || s.areas.includes(area)) && (!untried || !tried.has(s.id)),
+  );
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Chip on={!level && !area} onClick={() => { setLevel(null); setArea(null); }}>All</Chip>
+          <Chip on={!level && !area && !untried} onClick={() => { setLevel(null); setArea(null); setUntried(false); }}>All</Chip>
           {DIFFICULTIES.map((d) => (
             <Chip key={d} on={level === d} onClick={() => setLevel(level === d ? null : d)}>{d}</Chip>
           ))}
@@ -226,6 +247,8 @@ function Library({ scenarios, onStart }: { scenarios: Scenario[]; onStart: (s: S
           {AREAS.map((a) => (
             <Chip key={a} on={area === a} onClick={() => setArea(area === a ? null : a)}>{a}</Chip>
           ))}
+          <span className="mx-1 h-4 w-px bg-border" />
+          <Chip on={untried} onClick={() => setUntried(!untried)}>Not tried</Chip>
         </div>
         <Button
           variant="outline"
@@ -239,7 +262,9 @@ function Library({ scenarios, onStart }: { scenarios: Scenario[]; onStart: (s: S
       </div>
 
       {list.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">No scenarios match those filters.</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          {untried && !level && !area ? "You've tried every scenario. Nice work." : "No scenarios match those filters."}
+        </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {list.map((s) => (
@@ -262,10 +287,23 @@ function Library({ scenarios, onStart }: { scenarios: Scenario[]; onStart: (s: S
               <p className="mt-3 flex-1 text-sm text-muted-foreground">
                 <span className="font-medium text-foreground">Goal:</span> {s.goal}
               </p>
-              <div className="mt-3 flex flex-wrap gap-1">
-                {s.areas.map((a) => (
-                  <Badge key={a} variant="secondary" className="text-[10px]">{a}</Badge>
-                ))}
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-1">
+                  {s.areas.map((a) => (
+                    <Badge key={a} variant="outline" className="text-[10px] font-normal text-muted-foreground">{a}</Badge>
+                  ))}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {best.has(s.id) ? (
+                    <>
+                      Best <strong className="tabular-nums text-foreground">{best.get(s.id)}</strong> · {band(best.get(s.id)!).label}
+                    </>
+                  ) : tried.has(s.id) ? (
+                    "Not scored yet"
+                  ) : (
+                    "Not tried yet"
+                  )}
+                </span>
               </div>
             </button>
           ))}

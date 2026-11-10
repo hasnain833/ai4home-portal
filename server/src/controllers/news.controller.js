@@ -1,70 +1,29 @@
 import prisma from "../lib/prisma.js";
-import { scrapeNewsForCompany } from "../services/news-service.js";
 
 const NEWS_MAX_AGE_DAYS = 30;
 
+/** Builders (and homeowners) see only what the Super Admin published; the same feed for everyone. */
 export const getNews = async (req, res) => {
   try {
-    const { companyId } = req.user;
-    const { limit = 20, offset = 0 } = req.query;
-
-    if (!companyId) {
-      return res.status(400).json({ error: "Company ID is required" });
-    }
-
-    const cutoff = new Date(Date.now() - NEWS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000);
-    const where = { companyId, publishedAt: { gte: cutoff } };
-
-    const news = await prisma.scrapedNews.findMany({
-      where,
-      orderBy: { publishedAt: 'desc' },
-      take: parseInt(limit),
-      skip: parseInt(offset),
-    });
-
-    const total = await prisma.scrapedNews.count({ where });
-
-    return res.status(200).json({
-      data: news,
-      meta: {
-        total,
-        limit: parseInt(limit),
-        offset: parseInt(offset),
-        maxAgeDays: NEWS_MAX_AGE_DAYS,
-      }
-    });
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const where = {
+      status: "PUBLISHED",
+      publishedAt: { gte: new Date(Date.now() - NEWS_MAX_AGE_DAYS * 24 * 60 * 60 * 1000) },
+    };
+    const [news, total] = await Promise.all([
+      prisma.newsPost.findMany({
+        where,
+        orderBy: { publishedAt: "desc" },
+        take: limit,
+        skip: offset,
+        select: { id: true, title: true, summary: true, originalUrl: true, source: true, imageUrl: true, sources: true, publishedAt: true },
+      }),
+      prisma.newsPost.count({ where }),
+    ]);
+    return res.status(200).json({ data: news, meta: { total, limit, offset, maxAgeDays: NEWS_MAX_AGE_DAYS } });
   } catch (error) {
     console.error("Error fetching news:", error);
     return res.status(500).json({ error: "Failed to fetch news" });
-  }
-};
-
-export const refreshNews = async (req, res) => {
-  try {
-    const { companyId, role } = req.user;
-    if (!companyId) {
-      return res.status(400).json({ error: "Company ID is required" });
-    }
-    if (role !== "ADMIN" && role !== "STAFF") {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-
-    const company = await prisma.company.findUnique({
-      where: { id: companyId },
-      select: { id: true, name: true, newsSources: true },
-    });
-    if (!company) {
-      return res.status(404).json({ error: "Company not found" });
-    }
-
-    const result = await scrapeNewsForCompany(company);
-    return res.status(200).json({
-      saved: result.saved,
-      sources: result.sourceCount,
-      failedSources: result.failedSources,
-    });
-  } catch (error) {
-    console.error("Error refreshing news:", error);
-    return res.status(500).json({ error: "Failed to refresh news" });
   }
 };

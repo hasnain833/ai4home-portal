@@ -42,7 +42,7 @@ export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
 
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 
-  const scope = ["PLATFORM", "HELP", "B2B"].includes(meta.scope) ? meta.scope : "COMPANY";
+  const scope = ["PLATFORM", "HELP", "B2B", "COACH"].includes(meta.scope) ? meta.scope : "COMPANY";
 
   await prisma.salesKBChunk.createMany({
     data: chunks.map((content, i) => ({
@@ -265,7 +265,7 @@ export async function backfillEmbeddings(companyId, batchSize = 50) {
   return { processed: updated, remaining: remaining[0]?.count || 0 };
 }
 
-// Help Agent and B2B docs live in their own scopes, so no other agent's query can reach them.
+// Help Agent, B2B and Sales Coach docs live in their own scopes, so no other agent's query can reach them.
 async function queryOwnScope(scope, text, limit) {
   const q = (text || "").trim();
   if (!q) return { method: "empty", results: [] };
@@ -317,3 +317,5 @@ export const queryHelp = (text, limit = 6) => queryOwnScope("HELP", text, limit)
 export const getHelpRetrievalStatus = () => ownScopeStatus("HELP");
 export const queryB2BKb = (text, limit = 6) => queryOwnScope("B2B", text, limit);
 export const getB2BKbStatus = () => ownScopeStatus("B2B");
+export const queryCoachKb = (text, limit = 6) => queryOwnScope("COACH", text, limit);
+export const getCoachKbStatus = () => ownScopeStatus("COACH");

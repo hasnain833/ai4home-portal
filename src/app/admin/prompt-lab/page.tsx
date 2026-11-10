@@ -32,9 +32,9 @@ import {
   FlaskConical,
   MessagesSquare,
   Radio,
-  Undo2,
   BookOpen,
   Globe,
+  GraduationCap,
   Building2,
   ShieldCheck,
   LifeBuoy,
@@ -46,6 +46,8 @@ import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel
 import HelpAgentLab from "@/components/admin/prompt-lab/HelpAgentLab";
 import WebsiteAgentLab from "@/components/admin/prompt-lab/WebsiteAgentLab";
 import B2BAgentLab from "@/components/admin/prompt-lab/B2BAgentLab";
+import SalesCoachLab from "@/components/admin/prompt-lab/SalesCoachLab";
+import LiveStatus from "@/components/admin/prompt-lab/LiveStatus";
 
 type Draft = {
   systemTemplate: string;
@@ -130,7 +132,7 @@ type WarrantyChatMessage = {
   options?: string[];
 };
 
-type AgentTab = "sales" | "b2b" | "warranty" | "help" | "website";
+type AgentTab = "sales" | "b2b" | "warranty" | "help" | "website" | "coach";
 
 const PHASE_LABELS: Record<WarrantyPhaseKey, string> = {
   INTAKE: "Intake",
@@ -182,6 +184,7 @@ export default function PromptLabPage() {
   // ── Agent switcher ───────────────────────────────────────────────────────
   const [agentTab, setAgentTab] = useState<AgentTab>("sales");
   const [b2bMeta, setB2bMeta] = useState({ edited: false, versions: 0 });
+  const [b2bLiveSlot, setB2bLiveSlot] = useState<HTMLElement | null>(null);
   const [b2bHistoryOpen, setB2bHistoryOpen] = useState(false);
 
   // ── Warranty state ───────────────────────────────────────────────────────
@@ -692,15 +695,15 @@ export default function PromptLabPage() {
   }
 
   return (
-    <div className="flex min-h-150 flex-col gap-3 xl:h-[max(46rem,calc(100dvh-4rem))]">
+    <div className="flex min-h-150 flex-col gap-4 xl:h-[max(46rem,calc(100dvh-4rem))]">
       {/* Heading + Agent Switcher */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+      <div className="grid grid-cols-1 items-center gap-x-4 gap-y-2 lg:grid-cols-[1fr_auto_1fr]">
         <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
           <FlaskConical className="h-5 w-5 text-[#b48c3c]" />
           Prompt Lab
         </h1>
         {/* Agent switcher tabs */}
-        <div className="flex flex-wrap items-center gap-0.5 rounded-md bg-muted p-0.5">
+        <div className="flex flex-wrap items-center justify-center gap-0.5 justify-self-center rounded-md bg-muted p-0.5">
           <button type="button" onClick={() => setAgentTab("sales")}
             className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
               agentTab === "sales" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -731,10 +734,35 @@ export default function PromptLabPage() {
             }`}>
             <Globe className="h-3.5 w-3.5" /> Website Agent
           </button>
+          <button type="button" onClick={() => setAgentTab("coach")}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+              agentTab === "coach" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            <GraduationCap className="h-3.5 w-3.5" /> Sales Coach
+          </button>
         </div>
-        <div className="flex items-center gap-2">
+        <div aria-hidden className="hidden lg:block" />
+      </div>
+
+      {/* Description, plus live status and history for the versioned agents */}
+      <div className="-mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {agentTab === "sales"
+            ? <>Edit the prompt, add knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> puts a prompt in front of real leads.</>
+            : agentTab === "warranty"
+            ? <>Edit the four phase prompts the warranty agent uses, add platform knowledge-base documents, and test both in sandbox mode. No tickets or emails are sent during testing.</>
+            : agentTab === "b2b"
+            ? <>The agent that answers builders who reply to Business Campaigns. Edit the prompt, add its own knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> changes what real builders get.</>
+            : agentTab === "coach"
+            ? <>The AI4Home team&apos;s training partner. Edit its four prompts and add training material to its own knowledge base; nothing here reaches a builder or a lead. <strong>Save &amp; go live</strong> applies to the next role-play message.</>
+            : agentTab === "website"
+            ? <>The public assistant on <strong>aiforhomebuilders.com</strong>: it answers visitors about AI4Home and takes consultation requests. Manage its prompt and review conversations and notification activity. <strong>Save &amp; go live</strong> applies to the next visitor message.</>
+            : <>The assistant builder staff open from <strong>Help</strong> in the sidebar. It already knows the whole portal; add docs for anything else. <strong>Save &amp; go live</strong> applies to their next question.</>}
+        </p>
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {agentTab === "sales" ? (
             <>
+              <LiveStatus live={live} busy={settingLive} onRevert={revertToDefaults} onChooseVersion={() => setHistoryOpen(true)} />
               {isDefault ? (
                 <Badge variant="secondary">Matches shipped prompt</Badge>
               ) : (
@@ -747,6 +775,7 @@ export default function PromptLabPage() {
             </>
           ) : agentTab === "b2b" ? (
             <>
+              <span ref={setB2bLiveSlot} className="contents" />
               {b2bMeta.edited ? (
                 <Badge className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]">Edited</Badge>
               ) : (
@@ -759,6 +788,7 @@ export default function PromptLabPage() {
             </>
           ) : agentTab === "warranty" ? (
             <>
+              <LiveStatus live={wLive} busy={wSettingLive} onRevert={revertWarrantyToDefaults} onChooseVersion={() => setWHistoryOpen(true)} />
               <Badge variant="secondary">
                 {wLive?.source === "live-version" ? "Custom prompt live" : "Matches shipped prompt"}
               </Badge>
@@ -769,85 +799,10 @@ export default function PromptLabPage() {
             </>
           ) : null}
         </div>
-        <p className="w-full text-xs text-muted-foreground">
-          {agentTab === "sales"
-            ? <>Edit the prompt, add knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> puts a prompt in front of real leads.</>
-            : agentTab === "warranty"
-            ? <>Edit the four phase prompts the warranty agent uses, add platform knowledge-base documents, and test both in sandbox mode. No tickets or emails are sent during testing.</>
-            : agentTab === "b2b"
-            ? <>The agent that answers builders who reply to Business Campaigns. Edit the prompt, add its own knowledge-base documents, and talk to the agent. Saving keeps a draft for testing; only <strong>Set live</strong> changes what real builders get.</>
-            : agentTab === "website"
-            ? <>Manage the public website assistant&apos;s prompt and review conversations and notification activity. <strong>Save &amp; go live</strong> applies to the next visitor message.</>
-            : <>The assistant builder staff open from <strong>Help</strong> in the sidebar. It already knows the whole portal; add docs for anything else. <strong>Save &amp; go live</strong> applies to their next question.</>}
-        </p>
       </div>
 
       {agentTab === "sales" && (
         <>
-          {/* What the running agent is actually using. */}
-      <div
-        className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-xs ${
-          live?.source === "live-version"
-            ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
-            : "border-border bg-muted/40 text-muted-foreground"
-        }`}
-      >
-        <span className="flex items-center gap-1.5 font-semibold">
-          <Radio className="h-3.5 w-3.5" />
-          Live agent
-        </span>
-        {live?.source === "live-version" ? (
-          <span>
-            running <strong>{live.label || "an unlabelled version"}</strong>
-            {live.setLiveByName && ` — set live by ${live.setLiveByName}`}
-            {live.setLiveAt && ` on ${new Date(live.setLiveAt).toLocaleDateString()}`}
-          </span>
-        ) : (
-          <span>running the prompt that ships in code. No lab version has been set live.</span>
-        )}
-        <div className="ml-auto flex items-center gap-1.5">
-          {live?.source === "live-version" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 text-xs"
-              disabled={settingLive}
-              onClick={revertToDefaults}
-            >
-              <Undo2 className="h-3.5 w-3.5" /> Revert to code
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={() => setHistoryOpen(true)}
-          >
-            Choose a version to set live
-          </Button>
-        </div>
-      </div>
-
-      {/* Test context */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
-        <div className="w-35">
-          <Label className="text-[11px] font-semibold text-muted-foreground">Lead name</Label>
-          <Input
-            className="mt-0.5 h-9"
-            value={leadFirstName}
-            onChange={(e) => setLeadFirstName(e.target.value)}
-            placeholder="Dana"
-          />
-        </div>
-        <p className="flex-1 text-[11px] text-muted-foreground">
-          Answers are grounded in the <strong>platform knowledge base</strong> — the documents on
-          the Knowledge base tab. No single company&apos;s own KB is used here.
-        </p>
-        <Button variant="outline" size="sm" onClick={openPreview} className="h-9 gap-1.5">
-          <Eye className="h-4 w-4" /> Rendered prompt
-        </Button>
-      </div>
-
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)]">
         {/* Prompt */}
         <Card className="flex min-h-0 flex-col overflow-hidden">
@@ -1015,23 +970,37 @@ export default function PromptLabPage() {
         {/* Test conversation */}
         <Card className="flex min-h-0 flex-col overflow-hidden">
           <CardHeader className="shrink-0 space-y-1 py-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2 text-base">
                 <MessagesSquare className="h-4 w-4 text-muted-foreground" />
                 Test conversation
               </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setMessages([])}
-                disabled={!messages.length}
-              >
-                Reset chat
-              </Button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Label htmlFor="b2c-lab-lead" className="text-xs text-muted-foreground">Lead</Label>
+                <Input
+                  id="b2c-lab-lead"
+                  className="h-7 w-28 text-xs"
+                  value={leadFirstName}
+                  onChange={(e) => setLeadFirstName(e.target.value)}
+                  placeholder="Dana"
+                />
+                <Button variant="outline" size="sm" onClick={openPreview} className="h-7 gap-1.5 text-xs">
+                  <Eye className="h-3.5 w-3.5" /> Rendered prompt
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setMessages([])}
+                  disabled={!messages.length}
+                >
+                  Reset chat
+                </Button>
+              </div>
             </div>
             <p className="text-[11px] text-muted-foreground">
               Runs as the website widget: short, snappy replies, and times offered sooner because
-              the visitor is on the site right now.
+              the visitor is on the site right now. Answers use the <strong>platform knowledge base</strong>, not any single company&apos;s own KB.
             </p>
           </CardHeader>
           <CardContent className="flex min-h-0 flex-1 flex-col gap-2 pb-3">
@@ -1160,38 +1129,14 @@ export default function PromptLabPage() {
       </>
       )}
 
-      {agentTab === "b2b" && <B2BAgentLab onMetaChange={setB2bMeta} historyOpen={b2bHistoryOpen} onHistoryOpenChange={setB2bHistoryOpen} />}
+      {agentTab === "b2b" && <B2BAgentLab liveSlot={b2bLiveSlot} onMetaChange={setB2bMeta} historyOpen={b2bHistoryOpen} onHistoryOpenChange={setB2bHistoryOpen} />}
       {agentTab === "help" && <HelpAgentLab />}
       {agentTab === "website" && <WebsiteAgentLab />}
+      {agentTab === "coach" && <SalesCoachLab />}
 
       {agentTab === "warranty" && (
         <>
-          {/* Warranty Agent Live Banner */}
-          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-xs ${
-              wLive?.source === "live-version"
-                ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
-                : "border-border bg-muted/40 text-muted-foreground"
-            }`}>
-            <span className="flex items-center gap-1.5 font-semibold"><Radio className="h-3.5 w-3.5" />Live agent</span>
-            {wLive?.source === "live-version" ? (
-              <span>running <strong>{wLive.label || "an unlabelled version"}</strong>
-                {wLive.setLiveByName && ` — set live by ${wLive.setLiveByName}`}
-                {wLive.setLiveAt && ` on ${new Date(wLive.setLiveAt).toLocaleDateString()}`}
-              </span>
-            ) : (<span>running the prompts that ship in code. No lab version has been set live.</span>)}
-            <div className="ml-auto flex items-center gap-1.5">
-              {wLive?.source === "live-version" && (
-                <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" disabled={wSettingLive} onClick={revertWarrantyToDefaults}>
-                  <Undo2 className="h-3.5 w-3.5" /> Revert to code
-                </Button>
-              )}
-              <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setWHistoryOpen(true)}>
-                Choose a version to set live
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)] mt-3">
+          <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)]">
             {/* Warranty Prompt Editor */}
             <Card className="flex min-h-0 flex-col overflow-hidden">
               <CardHeader className="shrink-0 flex-col justify-between space-y-3 py-3">

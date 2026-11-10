@@ -322,6 +322,21 @@ export async function calendlyAvailableTimes(conn, from, to) {
     .map((t) => new Date(t.start_time));
 }
 
+/** The account's default Calendly schedule: its timezone and weekly hours (the API can read these, not change them). */
+export async function defaultSchedule(conn) {
+  const params = new URLSearchParams({ user: conn.calendlyUser });
+  const data = await calendlyApi(conn, `/user_availability_schedules?${params}`);
+  const schedule = (data.collection || []).find((s) => s.default) || data.collection?.[0];
+  if (!schedule) return null;
+  return {
+    name: schedule.name || "Working hours",
+    timezone: schedule.timezone || null,
+    days: (schedule.rules || [])
+      .filter((r) => r.type === "wday")
+      .map((r) => ({ day: r.wday, intervals: (r.intervals || []).map((i) => `${i.from}–${i.to}`) })),
+  };
+}
+
 /** The location the event type expects from the person booking. */
 function inviteeLocation(conn, { address, phone }) {
   const kind = conn.eventLocationKind;
@@ -350,8 +365,11 @@ export async function createCalendlyVisit(conn, { startTime, name, email, timezo
   } catch (err) {
     console.error(`[Calendly] booking ${ticketRef || ""} failed:`, err.status, err.message);
     if (err.status === 403) {
-      throw new CalendlyBookingError(
-        "This trade's calendar can't take online bookings right now. Please contact us to arrange the visit.",
+      throw Object.assign(
+        new CalendlyBookingError(
+          "This trade's calendar can't take online bookings right now. Please contact us to arrange the visit.",
+        ),
+        { status: 403 },
       );
     }
     if (err.status >= 400 && err.status < 500) {

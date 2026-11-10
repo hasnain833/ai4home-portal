@@ -3,9 +3,10 @@ import prisma from "../lib/prisma.js";
 import { chat, toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 import { effectiveAdminPermissions } from "../lib/admin-permissions.js";
-import { renderTemplate } from "../prompts/template.js";
-import { queryDetailed, queryHelp } from "../services/vector-store.service.js";
-import { ASK_PROMPT, BUYER_PROMPT, BUYER_TOOL, HINT_PROMPT, SCORE_PROMPT, SCORE_TOOL } from "../prompts/sales-coach.js";
+import { writeAuditLog } from "../lib/audit.js";
+import { checkTokens, renderTemplate } from "../prompts/template.js";
+import { queryB2BKb, queryCoachKb } from "../services/vector-store.service.js";
+import { BUYER_TOOL, COACH_PROMPTS, SCORE_TOOL } from "../prompts/sales-coach.js";
 import {
   PROMPT_VERSION,
   SCENARIOS,
@@ -24,6 +25,20 @@ import {
 } from "../lib/sales-coach.js";
 
 const SOURCE = "sales-coach";
+const PROMPTS_KEY = "sales-coach.prompts";
+const MAX_PROMPT_CHARS = 30_000;
+const PROMPT_KEYS = Object.keys(COACH_PROMPTS);
+
+/** Saved overrides only; anything not saved runs the code default. */
+async function savedPrompts() {
+  return (await prisma.platformSetting.findUnique({ where: { key: PROMPTS_KEY } }))?.value || {};
+}
+
+async function livePrompts() {
+  const saved = await savedPrompts();
+  const prompts = Object.fromEntries(PROMPT_KEYS.map((k) => [k, saved[k] || COACH_PROMPTS[k].default]));
+  return { ...prompts, custom: PROMPT_KEYS.some((k) => saved[k]) };
+}
 const MAX_MESSAGE_CHARS = 2000;
 const MAX_ASK_TURNS = 20;
 
@@ -51,13 +66,10 @@ function scenarioVars(scenario) {
   };
 }
 
-/** Platform tier plus the Help docs: both describe AI4Home and neither is company data. */
+/** The Coach's own KB plus the B2B agent's AI4Home material. Coach docs never reach a live agent. */
 async function coachKnowledge(question) {
-  const [platform, help] = await Promise.all([
-    queryDetailed(null, question, 4).catch(() => ({ results: [] })),
-    queryHelp(question, 3),
-  ]);
-  const results = [...platform.results, ...help.results];
+  const [coach, b2b] = await Promise.all([queryCoachKb(question, 5), queryB2BKb(question, 3)]);
+  const results = [...coach.results, ...b2b.results];
   return results.length ? results.map((r) => `[${r.name}]\n${r.text}`).join("\n\n---\n\n") : "(no Sales Coach material matched)";
 }
 
@@ -111,7 +123,7 @@ export const startSession = wrap("Start", async (req, res) => {
     hintsUsed: 0,
     goalReached: false,
     scorecard: null,
-    promptVersion: PROMPT_VERSION,
+    promptVersion: (await livePrompts()).custom ? "custom" : PROMPT_VERSION,
     startedAt: now,
     endedAt: null,
   });
@@ -136,7 +148,7 @@ export const sendTurn = wrap("Turn", async (req, res) => {
   ];
   const out = await toolCall({
     companyId: null,
-    system: renderTemplate(BUYER_PROMPT, scenarioVars(scenario)),
+    system: renderTemplate((await livePrompts()).buyer, scenarioVars(scenario)),
     messages,
     tool: BUYER_TOOL,
     maxTokens: 400,
@@ -164,7 +176,7 @@ export const getHint = wrap("Hint", async (req, res) => {
   const hint = String(
     (await chat({
       companyId: null,
-      system: renderTemplate(HINT_PROMPT, scenarioVars(scenario)),
+      system: renderTemplate((await livePrompts()).hint, scenarioVars(scenario)),
       user: `Transcript so far:\n${transcript}\n\nYour one tip:`,
       maxTokens: 150,
       source: SOURCE,
@@ -194,9 +206,9 @@ export const scoreSession = wrap("Score", async (req, res) => {
   );
   const traineeText = session.transcript.filter((m) => m.role === "trainee").map((m) => m.content).join(" ");
   const rubric = SKILLS.map((s) => `- ${s.key} (${s.label}, ${s.weight}%): 5 = ${s.five} 1 = ${s.one}`).join("\n");
-  const system = renderTemplate(SCORE_PROMPT, {
+  const system = renderTemplate((await livePrompts()).score, {
     ...scenarioVars(scenario),
-    hidden: bullets(scenario.hidden.map((h) => h.fact)),
+    hidden: scenario.hidden.map((h, i) => `${i + 1}. ${h.fact}`).join("\n"),
     emphasis: scenario.emphasis.map((k) => SKILLS.find((s) => s.key === k)?.label).join(", ") || "none",
     rubric,
     kbContext: await coachKnowledge(traineeText.slice(0, 1000)),
@@ -252,11 +264,51 @@ export const askCoach = wrap("Ask", async (req, res) => {
   }
   if (!hasLLM()) return res.status(503).json({ message: aiUnavailableMessage() });
 
-  const system = renderTemplate(ASK_PROMPT, {
+  const system = renderTemplate((await livePrompts()).ask, {
     scenarios: SCENARIOS.map((s) => `"${s.title}"`).join(", "),
     kbContext: await coachKnowledge(messages[messages.length - 1].content),
   });
   const reply = await chat({ companyId: null, system, messages, maxTokens: 900, source: SOURCE });
   if (!reply) return res.status(502).json({ message: "The Coach couldn't answer just now. Please try again." });
   res.json({ reply });
+});
+
+// ─── Prompt Lab ───────────────────────────────────────────────────────────
+// ponytail: Save goes live at once (Help Agent pattern); internal training only. Copy the B2B versions table if history is wanted.
+
+export const getCoachPrompts = wrap("Prompts", async (_req, res) => {
+  const saved = await savedPrompts();
+  res.json({
+    prompts: PROMPT_KEYS.map((key) => {
+      const { label, description, placeholders } = COACH_PROMPTS[key];
+      return { key, label, description, placeholders, defaultPrompt: COACH_PROMPTS[key].default, prompt: saved[key] || COACH_PROMPTS[key].default, isDefault: !saved[key] };
+    }),
+  });
+});
+
+// An empty prompt, or the default itself, resets that prompt.
+export const saveCoachPrompts = wrap("Save prompts", async (req, res) => {
+  const input = req.body?.prompts || {};
+  const next = { ...(await savedPrompts()) };
+  for (const key of PROMPT_KEYS) {
+    if (typeof input[key] !== "string") continue;
+    const text = input[key].trim();
+    const spec = COACH_PROMPTS[key];
+    if (!text || text === spec.default.trim()) {
+      delete next[key];
+      continue;
+    }
+    if (text.length > MAX_PROMPT_CHARS) return res.status(400).json({ message: `${spec.label}: keep it under ${MAX_PROMPT_CHARS} characters.` });
+    const { errors, missing } = checkTokens(text, spec.placeholders);
+    if (errors.length) return res.status(400).json({ message: `${spec.label}: ${errors[0]}` });
+    if (missing.length) return res.status(400).json({ message: `${spec.label}: keep {{${missing[0]}}} in the prompt.` });
+    next[key] = text;
+  }
+  if (Object.keys(next).length) {
+    await prisma.platformSetting.upsert({ where: { key: PROMPTS_KEY }, create: { key: PROMPTS_KEY, value: next }, update: { value: next } });
+  } else {
+    await prisma.platformSetting.deleteMany({ where: { key: PROMPTS_KEY } });
+  }
+  await writeAuditLog({ req, action: "sales_coach.prompts_saved", targetType: "PlatformSetting", targetId: PROMPTS_KEY, metadata: { custom: Object.keys(next) } });
+  res.json({ ok: true, custom: Object.keys(next) });
 });

@@ -5,14 +5,16 @@ import { websiteVisitorKey } from "../middlewares/website-intake-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { inngest } from "../lib/inngest.js";
 import { deliverWebsiteInquiry } from "../services/website-inquiry-mail.js";
-import { saveConsultation, CONSULTATION_FIELDS, isApproval, consultationSummary, preferenceError, nextConsultationField, resolveConsultationTimezone, consultationTimezoneLabel, normalizeConsultationDate, normalizeConsultationTime } from "../services/website-sales.js";
+import { saveConsultation, CONSULTATION_FIELDS, isApproval, consultationSummary, preferenceError, nextConsultationField, resolveConsultationTimezone, consultationTimezoneLabel, normalizeConsultationDate, normalizeConsultationTime, getPlatformSlots, parseSalesBooking, saveSalesBooking, slotChoice, slotQuestion, bookingSummary } from "../services/website-sales.js";
+import { pickSlots } from "../inngest/functions/b2b-agent.js";
 import { getB2BAvailability } from "../lib/b2b.js";
 import { parseWebsiteInquiry } from "../lib/website-inquiry.js";
 import { WEBSITE_PROMPT_KEY, WEBSITE_DEFAULT_PROMPT, WEBSITE_RULES } from "../prompts/content.js";
 import { WEBSITE_PRODUCT_GUIDE } from "../prompts/help-agent.js";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const savedMessage = "Your Product Consultation request has been saved. Your preferred time is pending confirmation by our team. Email and SMS acknowledgments have been queued; this does not confirm the meeting time. Is there anything else you would like to know about our products?";
+const bookedMessage = (label) => `You're booked for ${label}. Calendly will email you a calendar invite with the joining details, and we've sent an email and SMS confirmation. Is there anything else you would like to know about our products?`;
+const savedMessage ="Your Product Consultation request has been saved. Your preferred time is pending confirmation by our team. Email and SMS acknowledgments have been queued; this does not confirm the meeting time. Is there anything else you would like to know about our products?";
 
 export async function websiteSales(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -48,9 +50,30 @@ export async function websiteSales(req, res) {
     let active = session.collecting;
     let waitingApproval = false;
     let reply;
-    if (session.waitingApproval && isApproval(message) && !session.submittedAt) {
-      const inquiry = await saveConsultation(conversationId, draft, session.page);
-      session.submittedAt = inquiry.createdAt;
+    // With Calendly connected the visitor books a real open time; without it, a preferred time waits for the team.
+    const calendly = !!availability.calendly;
+    const approved = session.waitingApproval && isApproval(message) && !session.submittedAt;
+    let booking = null;
+    if (approved && calendly) {
+      try {
+        booking = await saveSalesBooking(conversationId, parseSalesBooking({ name: draft.name, company: draft.company, email: draft.email, phone: draft.phone, role: draft.role, annualClosings: draft.annualClosings, notes: draft.discussion, page: session.page, marketingConsent: false, meetingConsent: true, startTime: draft.slot }), prisma, async () => ({ ...availability, timezone: draft.timezone }));
+      } catch (error) {
+        if (error.status !== 409) throw error;
+        if (/already booked/.test(error.message)) {
+          active = false;
+          reply = error.message;
+        } else {
+          delete draft.slot; delete draft.slotLabel;
+          draft.offered = pickSlots(await getPlatformSlots(availability), draft.timezone);
+          reply = "Sorry, that time was just taken. " + slotQuestion(draft.offered, draft.timezone);
+        }
+      }
+    }
+    if (reply) {
+      // The time was taken: the fresh offer above is the reply.
+    } else if (approved) {
+      if (calendly) session.submittedAt = new Date();
+      else session.submittedAt = (await saveConsultation(conversationId, draft, session.page)).createdAt;
       active = false;
       // Immediate attempt; durable event/cron retries only recipients not yet sent.
       const delivery = (async () => {
@@ -59,7 +82,7 @@ export async function websiteSales(req, res) {
         await inngest.send({ name: "b2b.website-inquiry.saved", data: { inquiryId: conversationId } }).catch(() => console.warn("[Website Consultation] Retry event deferred to cron", { conversationId }));
       })();
       waitUntil(delivery);
-      reply = savedMessage;
+      reply = booking ? bookedMessage(booking.label) : savedMessage;
     } else {
       const prompt = (await prisma.platformSetting.findUnique({ where: { key: WEBSITE_PROMPT_KEY } }))?.value?.prompt || WEBSITE_DEFAULT_PROMPT;
       const history = [...session.messages.slice(-30), { role: "user", content: message.trim() }];
@@ -71,8 +94,16 @@ export async function websiteSales(req, res) {
         if (result.cancelRequest) { active = false; for (const key of Object.keys(draft)) delete draft[key]; }
         if (!result.cancelRequest) for (const [key] of CONSULTATION_FIELDS) if (typeof result.details[key] === "string" && result.details[key].trim()) draft[key] = result.details[key].trim().slice(0, 200);
       }
-      const expected = nextConsultationField(session.draft);
-      if (active && !session.submittedAt) {
+      const expected = nextConsultationField(session.draft, calendly);
+      if (calendly) {
+        delete draft.preferredDate; delete draft.preferredTime;
+        // Asking for another time while reviewing reopens the choice.
+        if (session.waitingApproval && /\b(?:another|different|other|change|earlier|later)\b[^.?!]*\btime/i.test(message)) { delete draft.slot; delete draft.slotLabel; }
+        const choosing = active && !session.submittedAt && (expected?.[0] === "slot" || session.waitingApproval);
+        const picked = choosing ? slotChoice(message, session.draft.offered) : null;
+        if (picked) { draft.slot = picked.iso; draft.slotLabel = picked.label; }
+      }
+      if (active && !session.submittedAt && !calendly) {
         if (expected?.[0] === "preferredDate" && !result.details.preferredDate) {
           const date = normalizeConsultationDate(message, draft.timezone);
           if (date) draft.preferredDate = date;
@@ -94,24 +125,30 @@ export async function websiteSales(req, res) {
           try { parseWebsiteInquiry({ type: "EBOOK", email: "check@example.com", phone: draft.phone, marketingConsent: false }); }
           catch { delete draft.phone; invalid = invalid || "We can only use +1 phone numbers. Please share a +1 number."; }
         }
-        const preference = preferenceError(draft);
+        const preference = calendly ? null : preferenceError(draft);
         if (preference) { delete draft[preference.field]; invalid = invalid || preference.message; }
-        const next = nextConsultationField(draft);
+        const next = nextConsultationField(draft, calendly);
         if (next) {
           // The application owns intake questions. AI text is used only for a
           // substantive visitor question, with any generated questions removed.
           const asksQuestion = /\?|\b(?:how|what|why|explain|tell me|can you|does|do you)\b/i.test(message);
           const answer = asksQuestion ? reply.split(/(?<=[.!?])\s+|\n+/).filter((part) => !part.includes("?")).join(" ") : "";
-          const question = invalid || next[1];
+          let question = invalid || next[1];
+          if (next[0] === "slot") {
+            // Fresh open times each time we ask, so a stale list can't be booked.
+            draft.offered = pickSlots(await getPlatformSlots(availability), draft.timezone);
+            const unmatched = expected?.[0] === "slot" && !asksQuestion && draft.offered.length;
+            question = (unmatched ? "I couldn't match that to one of the times. " : "") + slotQuestion(draft.offered, draft.timezone);
+          }
           const timezoneNote = ["preferredDate", "preferredTime"].includes(next[0]) ? " We use " + consultationTimezoneLabel(draft.timezone) + "." : "";
           reply = [answer, question + timezoneNote].filter(Boolean).join("\n\n");
         }
-        else { reply = consultationSummary(draft); waitingApproval = true; }
+        else { reply = calendly ? bookingSummary(draft, availability.slotDuration) : consultationSummary(draft); waitingApproval = true; }
       }
       if (result.cancelRequest && !session.submittedAt) reply = "I haven't submitted your consultation request. What else would you like to know?";
       if (!reply) reply = "What would you like to know about AI for your building business?";
     }
-    const response = { message: reply, requestId, consultationStatus: session.submittedAt ? "pending_team_confirmation" : "not_submitted" };
+    const response = { message: reply, requestId, consultationStatus: session.submittedAt ? (calendly ? "booked" : "pending_team_confirmation") : "not_submitted" };
     const saved = await prisma.websiteConversation.updateMany({ where: { id: conversationId, processingUntil: leaseUntil }, data: { messages: [...session.messages, { role: "user", content: message.trim() }, { role: "assistant", content: reply }].slice(-100), draft, collecting: active, waitingApproval, submittedAt: session.submittedAt, lastRequestId: requestId, lastRequestText: message.trim(), lastResponse: response, lastError: null } });
     if (!saved.count) throw Object.assign(new Error("Conversation lease changed. Please retry your message."), { status: 409 });
     await writeAuditLog({ req, action: session.submittedAt ? "website_agent.consultation_saved_or_followup" : "website_agent.reply_saved", targetType: "WebsiteConversation", targetId: conversationId, metadata: { requestId, traceId: req.get("X-Request-ID") || null } });

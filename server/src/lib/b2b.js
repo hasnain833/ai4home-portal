@@ -1,5 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import prisma from "./prisma.js";
+import { platformCalendly, platformCalendlyPointer } from "./platform-calendly.js";
 import { MailService } from "../services/mail-service.js";
 import { Templates } from "../services/templates.js";
 import { toE164 } from "../services/sms.service.js";
@@ -21,18 +22,24 @@ const B2B_AVAILABILITY_DEFAULTS = {
   timezone: "America/New_York",
 };
 
+/**
+ * The meeting settings every platform booking uses. With Calendly connected, the open times,
+ * length and invite come from Calendly (`calendly: true`); the manual hours apply only without it.
+ */
 export async function getB2BAvailability() {
   const row = await prisma.platformSetting.findUnique({ where: { key: AVAILABILITY_KEY } });
-  return { ...B2B_AVAILABILITY_DEFAULTS, ...(row?.value || {}) };
-}
-
-export async function saveB2BAvailability(value) {
-  await prisma.platformSetting.upsert({
-    where: { key: AVAILABILITY_KEY },
-    create: { key: AVAILABILITY_KEY, value },
-    update: { value },
-  });
-  return getB2BAvailability();
+  const manual = { ...B2B_AVAILABILITY_DEFAULTS, ...(row?.value || {}) };
+  const conn = await platformCalendly();
+  if (!conn) return manual;
+  const pointer = await platformCalendlyPointer();
+  return {
+    ...manual,
+    calendly: true,
+    slotDuration: conn.eventDuration || manual.slotDuration,
+    bufferMinutes: 0,
+    meetingLink: "",
+    timezone: pointer?.timezone || manual.timezone,
+  };
 }
 
 export function appUrl() {

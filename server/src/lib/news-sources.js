@@ -58,9 +58,3 @@ export async function getPlatformDefaultNewsSources() {
     return BUILTIN_NEWS_SOURCES;
   }
 }
-
-export async function resolveNewsSources(company) {
-  const configured = normalizeNewsSources(company?.newsSources);
-  const enabled = configured.filter((s) => s.enabled);
-  return enabled.length ? enabled : await getPlatformDefaultNewsSources();
-}

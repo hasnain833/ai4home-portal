@@ -48,8 +48,9 @@ export function buildScorecard(scenario, raw, { goalReached, hintsUsed }) {
   });
   const scores = Object.fromEntries(skills.map((s) => [s.key, s.score]));
   const facts = scenario.hidden.map((h) => h.fact);
-  // Only facts that exist in the scenario; the model is told to copy them exactly.
-  const uncovered = facts.filter((f) => list(raw?.uncovered, 10).includes(f));
+  // The model lists revealed facts by number (1-based), so rewording can't drop one.
+  const revealed = new Set((Array.isArray(raw?.uncovered) ? raw.uncovered : []).map(Number));
+  const uncovered = facts.filter((_, i) => revealed.has(i + 1));
   const overall = overallScore(scores, scenario.emphasis);
   return {
     overall,

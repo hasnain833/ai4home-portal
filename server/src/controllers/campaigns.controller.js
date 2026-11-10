@@ -806,8 +806,8 @@ export const createCampaignFromNews = async (req, res) => {
 
     const companyId = req.user.companyId;
 
-    const news = await prisma.scrapedNews.findFirst({
-      where: { id: newsId, companyId },
+    const news = await prisma.newsPost.findFirst({
+      where: { id: String(newsId), status: "PUBLISHED" },
     });
     if (!news) {
       return res.status(404).json({ message: "News article not found" });

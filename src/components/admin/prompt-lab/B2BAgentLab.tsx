@@ -1,7 +1,10 @@
 "use client";
 
+import { createPortal } from "react-dom";
+import LiveStatus from "@/components/admin/prompt-lab/LiveStatus";
+
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, Check, ChevronRight, Copy, Eye, FlaskConical, Loader2, MessagesSquare, Radio, RotateCcw, Save, Send, Trash2, Undo2 } from "lucide-react";
+import { BookOpen, Check, ChevronRight, Copy, Eye, FlaskConical, Loader2, MessagesSquare, Radio, RotateCcw, Save, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +40,8 @@ type LabData = {
 type ChatReply = { action: string; message: string; summary: string; slotLabel: string | null; sources: string[]; blockedBecause: string | null };
 type Turn = { role: "user" | "agent"; content: string } & Partial<Omit<ChatReply, "message">>;
 type Props = {
+  /** Header element the live-status pill is rendered into. */
+  liveSlot: HTMLElement | null;
   onMetaChange: (meta: { edited: boolean; versions: number }) => void;
   historyOpen: boolean;
   onHistoryOpenChange: (open: boolean) => void;
@@ -64,7 +69,7 @@ function PromptSection({ title, hint, value, onChange, height }: { title: string
   );
 }
 
-export default function B2BAgentLab({ onMetaChange, historyOpen, onHistoryOpenChange }: Props) {
+export default function B2BAgentLab({ liveSlot, onMetaChange, historyOpen, onHistoryOpenChange }: Props) {
   const confirm = useConfirm();
   const [data, setData] = useState<LabData | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
@@ -213,51 +218,13 @@ export default function B2BAgentLab({ onMetaChange, historyOpen, onHistoryOpenCh
   }
 
   const { live } = data;
-  const isLiveVersion = live.source === "live-version";
 
   return (
     <>
-      {/* What the running agent is actually using. */}
-      <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-xs ${isLiveVersion ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200" : "border-border bg-muted/40 text-muted-foreground"}`}>
-        <span className="flex items-center gap-1.5 font-semibold"><Radio className="h-3.5 w-3.5" /> Live agent</span>
-        {isLiveVersion ? (
-          <span>
-            running <strong>{live.label || "an unlabelled version"}</strong>
-            {live.setLiveByName && ` — set live by ${live.setLiveByName}`}
-            {live.setLiveAt && ` on ${new Date(live.setLiveAt).toLocaleDateString()}`}
-          </span>
-        ) : (
-          <span>running the prompt that ships in code. No lab version has been set live.</span>
-        )}
-        <div className="ml-auto flex items-center gap-1.5">
-          {isLiveVersion && (
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" disabled={busy} onClick={revert}>
-              <Undo2 className="h-3.5 w-3.5" /> Revert to code
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => onHistoryOpenChange(true)}>
-            Choose a version to set live
-          </Button>
-        </div>
-      </div>
-
-      {/* Test context */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
-        <div className="w-40">
-          <Label htmlFor="b2b-lab-lead" className="text-[11px] font-semibold text-muted-foreground">Lead name</Label>
-          <Input id="b2b-lab-lead" className="mt-0.5 h-9" value={leadName} maxLength={120} onChange={(e) => setLeadName(e.target.value)} />
-        </div>
-        <div className="w-40">
-          <Label htmlFor="b2b-lab-company" className="text-[11px] font-semibold text-muted-foreground">Company</Label>
-          <Input id="b2b-lab-company" className="mt-0.5 h-9" value={companyName} maxLength={120} onChange={(e) => setCompanyName(e.target.value)} />
-        </div>
-        <p className="min-w-48 flex-1 text-[11px] text-muted-foreground">
-          Answers are grounded in the product guide and the <strong>B2B knowledge base</strong>. Other agents can&apos;t see these documents, and this agent can&apos;t see theirs.
-        </p>
-        <Button variant="outline" size="sm" disabled={busy} onClick={openPreview} className="h-9 gap-1.5">
-          <Eye className="h-4 w-4" /> Rendered prompt
-        </Button>
-      </div>
+      {liveSlot && createPortal(
+        <LiveStatus live={live} busy={busy} onRevert={revert} onChooseVersion={() => onHistoryOpenChange(true)} />,
+        liveSlot,
+      )}
 
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)]">
         <Card className="flex min-h-0 min-w-0 flex-col overflow-hidden">
@@ -308,9 +275,18 @@ export default function B2BAgentLab({ onMetaChange, historyOpen, onHistoryOpenCh
           <CardHeader className="shrink-0 space-y-1 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2 text-base"><MessagesSquare className="h-4 w-4" /> Test conversation</CardTitle>
-              <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={!turns.length} onClick={() => setTurns([])}>Reset chat</Button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Label htmlFor="b2b-lab-lead" className="text-xs text-muted-foreground">Lead</Label>
+                <Input id="b2b-lab-lead" className="h-7 w-28 text-xs" value={leadName} maxLength={120} onChange={(e) => setLeadName(e.target.value)} />
+                <Label htmlFor="b2b-lab-company" className="text-xs text-muted-foreground">Company</Label>
+                <Input id="b2b-lab-company" className="h-7 w-28 text-xs" value={companyName} maxLength={120} onChange={(e) => setCompanyName(e.target.value)} />
+                <Button variant="outline" size="sm" disabled={busy} onClick={openPreview} className="h-7 gap-1.5 text-xs">
+                  <Eye className="h-3.5 w-3.5" /> Rendered prompt
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={!turns.length} onClick={() => setTurns([])}>Reset chat</Button>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">Uses the prompt on the left and the B2B knowledge base. Nothing is sent, booked or saved.</p>
+            <p className="text-xs text-muted-foreground">Uses the prompt on the left, the product guide and the B2B knowledge base (other agents can&apos;t see these documents). Nothing is sent, booked or saved.</p>
           </CardHeader>
           <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-3">
             <div ref={chatRef} className="flex min-h-48 flex-1 flex-col gap-2 overflow-y-auto rounded-lg border border-border bg-muted/30 p-3">

@@ -1,4 +1,4 @@
-// Sales Coach prompts, Track B (SRS v1.1). Code defaults; Prompt Lab editing comes later (FR-PL-01).
+// Sales Coach prompts, Track B (SRS v1.1). These are the code defaults; Prompt Lab can override each one (FR-PL-01).
 
 export const BUYER_PROMPT = `You are playing a character in a sales-training role-play for AI4Home's own sales team. The trainee is an AI4Home salesperson. AI4Home sells AI agents to homebuilders: a Warranty Care agent (homeowner claims and trades) and a Sales agent (lead conversations by SMS and email, nurture campaigns, booking), with Salesforce integration and Prompt Lab control.
 
@@ -39,7 +39,7 @@ export const SCORE_PROMPT = `You are an experienced B2B software sales trainer m
 # Scenario
 {{title}}. Buyer: {{personaName}}, {{personaRole}}.
 Goal: {{goal}}
-Hidden facts the trainee should uncover (copy the text exactly when listing uncovered ones):
+Hidden facts the trainee should uncover (list uncovered ones by number):
 {{hidden}}
 Objections the buyer was told to raise:
 {{objections}}
@@ -106,7 +106,7 @@ export const SCORE_TOOL = {
         },
       },
       goalReached: { type: "boolean" },
-      uncovered: { type: "array", items: { type: "string" }, description: "Hidden facts revealed, copied exactly." },
+      uncovered: { type: "array", items: { type: "integer" }, description: "Numbers of the hidden facts the buyer actually revealed in the transcript." },
       strengths: { type: "array", items: { type: "string" } },
       improvements: {
         type: "array",
@@ -123,5 +123,49 @@ export const SCORE_TOOL = {
       wrongFacts: { type: "array", items: { type: "string" } },
     },
     required: ["skills", "goalReached", "uncovered", "strengths", "improvements", "wrongFacts"],
+  },
+};
+
+const P = (token, description, required = false) => ({ token, description, required });
+const SCENARIO_TOKENS = [
+  P("title", "Scenario title"),
+  P("personaName", "Buyer's name"),
+  P("personaRole", "Buyer's role and company"),
+  P("brief", "The situation the trainee is told"),
+  P("goal", "What the trainee must win", true),
+];
+
+/** The four prompts Prompt Lab can edit. The tools and rubric maths stay in code. */
+export const COACH_PROMPTS = {
+  buyer: {
+    label: "AI buyer",
+    description: "Plays the homebuilder in the role-play.",
+    default: BUYER_PROMPT,
+    placeholders: [...SCENARIO_TOKENS, P("hidden", "Hidden facts and how the buyer reveals them", true), P("objections", "Objections to raise", true)],
+  },
+  hint: {
+    label: "Hint",
+    description: "The one tip a stuck trainee gets.",
+    default: HINT_PROMPT,
+    placeholders: [...SCENARIO_TOKENS, P("hidden", "Hidden facts (for guidance only)")],
+  },
+  score: {
+    label: "Scoring",
+    description: "Marks the finished role-play against the rubric.",
+    default: SCORE_PROMPT,
+    placeholders: [
+      ...SCENARIO_TOKENS,
+      P("hidden", "Numbered hidden facts", true),
+      P("objections", "Objections the buyer raised"),
+      P("emphasis", "Skills weighted double"),
+      P("rubric", "The 7 skills with 1 and 5 descriptions", true),
+      P("kbContext", "Matching Sales Coach knowledge-base excerpts"),
+    ],
+  },
+  ask: {
+    label: "Ask the Coach",
+    description: "Answers the team's sales questions.",
+    default: ASK_PROMPT,
+    placeholders: [P("kbContext", "Matching Sales Coach knowledge-base excerpts", true), P("scenarios", "Names of the practice scenarios")],
   },
 };

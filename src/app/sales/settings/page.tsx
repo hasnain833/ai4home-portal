@@ -12,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import MessagingSettingsTab from "@/components/sales/settings/MessagingSettingsTab";
-import NewsSourcesTab from "@/components/sales/settings/NewsSourcesTab";
 import MappingHistoryDialog from "@/components/sales/settings/MappingHistoryDialog";
 import DeadLetterTab from "@/components/sales/settings/DeadLetterTab";
 import PrivacyRequestsTab from "@/components/sales/settings/PrivacyRequestsTab";
@@ -649,7 +648,7 @@ function SettingsPageContent() {
               <TabsList className="flex w-full max-w-6xl items-center justify-start gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 min-h-10 h-auto dark:bg-slate-900/60">
                 <TabsTrigger value="crm" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">CRM Integrations</TabsTrigger>
                 <TabsTrigger value="outreach" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Outreach & Compliance</TabsTrigger>
-                <TabsTrigger value="messaging" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Email, SMS &amp; News</TabsTrigger>
+                <TabsTrigger value="messaging" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Email &amp; SMS</TabsTrigger>
                 <TabsTrigger value="failed" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Failed Sends</TabsTrigger>
                 <TabsTrigger value="privacy" className="flex-auto shrink-0 px-3 text-xs font-semibold rounded-lg">Privacy</TabsTrigger>
               </TabsList>
@@ -657,7 +656,6 @@ function SettingsPageContent() {
 
             <TabsContent value="messaging" className="space-y-6 focus-visible:outline-none">
               <MessagingSettingsTab />
-              <NewsSourcesTab />
             </TabsContent>
             <TabsContent value="failed" className="space-y-6 focus-visible:outline-none">
               <DeadLetterTab />

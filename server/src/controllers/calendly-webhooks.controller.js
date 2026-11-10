@@ -5,12 +5,43 @@ import {
   notifyAppointmentScheduled,
   notifyAppointmentCancelled,
 } from "../services/ticket-appointment-service.js";
+import { journeyOnMeetingStatus } from "../lib/b2b-journey.js";
+import { getB2BAvailability } from "../lib/b2b.js";
+import { formatSlotLabel } from "../lib/scheduling.js";
+import { clearPlatformSlotCache } from "../lib/platform-calendly.js";
+
+/** AI4Home's own meetings (Super Admin → Appointments) booked through the platform Calendly. */
+async function handlePlatformMeeting(event, payload, eventUri) {
+  if (event === "invitee.canceled") {
+    if (payload.rescheduled) return null;
+    const meeting = await prisma.salesAgentAppointment.findFirst({ where: { calendlyEventUri: eventUri, status: { not: "CANCELLED" } } });
+    if (!meeting) return null;
+    await prisma.salesAgentAppointment.update({ where: { id: meeting.id }, data: { status: "CANCELLED" } });
+    await journeyOnMeetingStatus(meeting.b2bLeadId, "CANCELLED");
+    clearPlatformSlotCache();
+    return "meeting cancelled";
+  }
+  const oldEventUri = eventOfInvitee(payload.old_invitee);
+  if (event !== "invitee.created" || !oldEventUri) return null;
+  const meeting = await prisma.salesAgentAppointment.findFirst({ where: { calendlyEventUri: oldEventUri } });
+  const start = new Date(payload.scheduled_event?.start_time);
+  if (!meeting || Number.isNaN(start.getTime())) return null;
+  const { timezone } = await getB2BAvailability();
+  await prisma.salesAgentAppointment.update({
+    where: { id: meeting.id },
+    data: { startTime: start, preferredTime: formatSlotLabel(start, timezone), calendlyEventUri: eventUri, status: "CONFIRMED", reminderSentAt: null },
+  });
+  clearPlatformSlotCache();
+  return "meeting rescheduled";
+}
 
 const eventOfInvitee = (inviteeUri) => String(inviteeUri || "").split("/invitees/")[0] || null;
 
 export async function handleCalendlyEvent({ event, payload } = {}) {
   const eventUri = payload?.scheduled_event?.uri || payload?.event || eventOfInvitee(payload?.uri);
   if (!eventUri) return "ignored";
+  const platform = await handlePlatformMeeting(event, payload, eventUri);
+  if (platform) return platform;
 
   if (event === "invitee.canceled") {
     if (payload.rescheduled) return "ignored";
