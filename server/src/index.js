@@ -191,6 +191,9 @@ app.use("/api/tickets", ...warrantyGuard, ticketsRouter);
 app.use("/api/properties", ...warrantyGuard, propertiesRouter);
 app.use("/api/company", companyRouter);
 app.use("/api/knowledge-base", ...warrantyGuard, knowledgeBaseRouter);
+// OAuth returns without a tenant session; signed state identifies the owner.
+// Register this exact path before the company-only integrations router.
+app.get("/api/integrations/calendly/callback", calendlyCallback);
 app.use("/api/integrations", requireAuth, requireCompany, integrationsRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/communities", ...warrantyGuard, communitiesRouter);
@@ -207,8 +210,6 @@ app.use(
 app.use("/api/ticket-appointments", ...warrantyGuard, ticketAppointmentsRouter);
 app.use("/api/trades", ...warrantyGuard, tradesRouter);
 app.use("/api/trade", tradePortalRouter);
-// Shared OAuth entry point for the platform and trade accounts.
-app.get("/api/integrations/calendly/callback", calendlyCallback);
 app.post("/api/webhooks/calendly", calendlyWebhook);
 app.use("/api/ticket-scheduling", ticketSchedulingRouter);
 app.use(
