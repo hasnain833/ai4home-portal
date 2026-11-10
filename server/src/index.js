@@ -47,6 +47,7 @@ import salesHomesRouter from "./routes/sales-homes.js";
 import salesChatRouter from "./routes/sales-chat.js";
 import ticketAppointmentsRouter from "./routes/ticket-appointments.js";
 import { tradesRouter, tradePortalRouter } from "./routes/trades.js";
+import { calendlyCallback } from "./controllers/trades.controller.js";
 import { calendlyWebhook } from "./controllers/calendly-webhooks.controller.js";
 import ticketSchedulingRouter from "./routes/ticket-scheduling.js";
 import deadLetterRouter from "./routes/dead-letter.js";
@@ -206,6 +207,8 @@ app.use(
 app.use("/api/ticket-appointments", ...warrantyGuard, ticketAppointmentsRouter);
 app.use("/api/trades", ...warrantyGuard, tradesRouter);
 app.use("/api/trade", tradePortalRouter);
+// Shared OAuth entry point for the platform and trade accounts.
+app.get("/api/integrations/calendly/callback", calendlyCallback);
 app.post("/api/webhooks/calendly", calendlyWebhook);
 app.use("/api/ticket-scheduling", ticketSchedulingRouter);
 app.use(

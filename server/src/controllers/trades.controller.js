@@ -338,7 +338,11 @@ export const calendlyCallback = async (req, res) => {
     if (platform) returnPage = "/admin/sales-agent-appointments";
     if (!platform && user?.role !== "TRADE") return back("failed");
     const ownerId = platform ? PLATFORM_CALENDLY_OWNER : userId;
-    await connectCalendly(ownerId, String(req.query.code));
+    // Honor approvals already in flight through the legacy registered URL.
+    const legacyCallback = req.originalUrl?.split("?")[0] === "/api/trade/calendly/callback"
+      ? `${(process.env.NEXT_PUBLIC_URL || "").replace(/\/$/, "")}/api/trade/calendly/callback`
+      : undefined;
+    await connectCalendly(ownerId, String(req.query.code), legacyCallback);
     if (platform) await adoptPlatformCalendly(ownerId);
     return back("connected");
   } catch (error) {

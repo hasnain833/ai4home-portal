@@ -4,7 +4,7 @@ import { encrypt, decrypt } from "../lib/crypto.js";
 
 const AUTH_URL = "https://auth.calendly.com/oauth";
 const API_URL = "https://api.calendly.com";
-const SCOPES = "users:read availability:read event_types:read scheduled_events:write webhooks:write";
+const SCOPES = "users:read availability:read event_types:read scheduled_events:read scheduled_events:write webhooks:read webhooks:write";
 const MAX_RANGE_MS = 7 * 24 * 60 * 60 * 1000; // user_busy_times caps a request at 7 days
 const REQUEST_TIMEOUT_MS = 2500; // the booking check runs inside a DB transaction
 const CACHE_MS = 2 * 60 * 1000;
@@ -12,7 +12,7 @@ const CACHE_MS = 2 * 60 * 1000;
 export const calendlyConfigured = () =>
   !!(process.env.CALENDLY_CLIENT_ID && process.env.CALENDLY_CLIENT_SECRET);
 
-const redirectUri = () => `${process.env.NEXT_PUBLIC_URL || ""}/api/trade/calendly/callback`;
+const redirectUri = () => process.env.CALENDLY_REDIRECT_URI || `${(process.env.NEXT_PUBLIC_URL || "").replace(/\/$/, "")}/api/integrations/calendly/callback`;
 
 // OAuth `state`: the user id, signed so a callback can't be replayed onto
 // someone else's account.
@@ -64,11 +64,11 @@ const tokenFields = (t) => ({
 });
 
 /** OAuth callback: trade the code for tokens and save the link. */
-export async function connectCalendly(userId, code) {
+export async function connectCalendly(userId, code, callbackUri = redirectUri()) {
   const tokens = await tokenRequest({
     grant_type: "authorization_code",
     code,
-    redirect_uri: redirectUri(),
+    redirect_uri: callbackUri,
   });
   const me = await fetch(`${API_URL}/users/me`, {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
@@ -81,12 +81,14 @@ export async function connectCalendly(userId, code) {
   const conn = await saveCalendlyConnection(userId, data, { create: true });
   busyCache.delete(userId);
 
-  // Without the webhook the link still works one way; it needs a paid plan.
+  // Booking still works without automatic updates. Missing permissions require
+  // reauthorization; a webhook failure is not necessarily a subscription issue.
   try {
     const webhookUri = await ensureWebhook(conn, me.resource.current_organization);
     await saveCalendlyConnection(userId, { webhookUri });
   } catch (err) {
-    console.error(`[Calendly] webhook not set up for user ${userId}:`, err.status, err.message);
+    console.error(`[Calendly] webhook not set up for user ${userId}:`, err.status, err.message,
+      err.requiredScopes?.length ? { requiredScopes: err.requiredScopes } : "");
   }
 
   // Without an event type, homeowners book from the builder's hours. With only
@@ -240,6 +242,8 @@ async function calendlyApi(conn, path, { method = "GET", body, timeout = 10000 }
   if (!res.ok) {
     const err = new Error(data.message || data.title || `Calendly ${method} ${path.split("?")[0]} ${res.status}`);
     err.status = res.status;
+    const requiredScopes = data.required_scopes || data.details?.required_scopes;
+    err.requiredScopes = Array.isArray(requiredScopes) ? requiredScopes.filter((scope) => typeof scope === "string") : [];
     throw err;
   }
   return data;

@@ -4,6 +4,7 @@ import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 import { PHONE_ERROR, sendSms, smsSent, toE164 } from "../services/sms.service.js";
 import { renderB2BStep } from "../inngest/functions/b2b-campaign.js";
 import { MailService } from "../services/mail-service.js";
+import { Templates } from "../services/templates.js";
 import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
 import { formatSlotLabel } from "../lib/scheduling.js";
 import { updatePlatformAppointment } from "../services/website-sales.js";
@@ -755,8 +756,18 @@ export const publicBook = wrap("Public book", async (req, res) => {
   const who = escapeHtml(lead.contactName || lead.companyName);
   const confirmationEmail = await MailService.sendEmail({
     to: lead.email,
-    subject: `Your meeting with ${MailService.SENDER_NAME} is confirmed`,
-    html: `<p>Hi ${who},</p><p>Thanks for booking a time with us. You're confirmed for <strong>${escapeHtml(label)}</strong> (${setting.slotDuration} minutes).</p><p>${setting.calendly ? "Calendly will email you the calendar invite with the joining details." : `${setting.meetingLink ? `Join here: ${escapeHtml(setting.meetingLink)}.` : "We'll reach out at this email or phone number."} A calendar invite is attached.`} Need to change it? Just reply to this email.</p>`,
+    fromName: "AI for Homebuilders",
+    subject: "Your Product Consultation is confirmed — AI for Homebuilders",
+    html: Templates.getB2BMeetingConfirmationEmail({
+      name: lead.contactName || lead.companyName,
+      companyName: lead.companyName,
+      label,
+      duration: setting.slotDuration,
+      timezone: setting.timezone,
+      calendly: setting.calendly,
+      meetingLink: setting.meetingLink,
+      contactEmail: process.env.SUPERADMIN_EMAIL,
+    }),
     replyTo: process.env.SUPERADMIN_EMAIL || undefined,
     source: "b2b-booking",
     // With Calendly connected, its own invite is the calendar entry; a second one would duplicate it.

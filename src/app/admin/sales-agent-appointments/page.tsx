@@ -330,7 +330,7 @@ function CalendlyCard() {
 
             {state.webhook === false && (
               <p className="rounded-lg bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
-                Calendly didn&apos;t accept our update subscription (it needs a paid Calendly plan). Bookings still work, but cancellations and reschedules made in Calendly won&apos;t show here.
+                Automatic appointment updates aren&apos;t enabled. Reconnect Calendly to grant the required permissions. Bookings still work, but cancellations and reschedules made in Calendly won&apos;t appear here until updates are enabled.
               </p>
             )}
           </>

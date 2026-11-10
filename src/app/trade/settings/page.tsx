@@ -79,7 +79,7 @@ function EventTypePicker({ current, onSaved }: { current: CalendlyStatus["eventT
       )}
       <p className="text-xs text-muted-foreground">
         {current
-          ? `Homeowners pick from the open times of "${current.name}" and the visit is booked straight into your Calendly. Online booking needs a paid Calendly plan (Standard or above).`
+          ? `Homeowners pick from the open times of "${current.name}" and the visit is booked straight into your Calendly.`
           : "Pick one so homeowners book from your Calendly openings. With none, they book from the builder's hours and your Calendly busy times are hidden."}
       </p>
       {types && types.length === 0 && (
