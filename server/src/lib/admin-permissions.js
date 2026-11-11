@@ -37,6 +37,10 @@ export const ADMIN_PERMISSIONS = {
     label: "Prompt Lab",
     description: "Edit and set live the Sales, Warranty and Help agent prompts and the platform KB.",
   },
+  salesforce: {
+    label: "Salesforce",
+    description: "Connect AI4Home's Salesforce org and run the Business Leads sync.",
+  },
   "sales-coach": {
     label: "Sales Coach",
     description: "Practise selling AI4Home with the AI role-play partner and ask the Coach.",

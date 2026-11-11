@@ -9,6 +9,7 @@ export type AdminPermission =
   | "support"
   | "costs"
   | "prompt-lab"
+  | "salesforce"
   | "sales-coach";
 
 type AdminUser = {

@@ -19,6 +19,7 @@ import {
   filterQueryableFields,
 } from "../services/salesforce-service.js";
 import { runIncrementalSync } from "../services/salesforce-sync.js";
+import { finishPlatformSalesforceConnect } from "../admin/platform-salesforce.controller.js";
 
 function getPortalUrl() {
   if (!process.env.NEXT_PUBLIC_URL) {
@@ -97,6 +98,9 @@ export const salesforceCallback = async (req, res) => {
     } catch {
       return res.redirect(`${baseUrl}/sales/settings?sf_error=invalid_state`);
     }
+
+    // Super Admin > Salesforce shares this callback (the URL the Connected App allows).
+    if (stateData.platform) return res.redirect(await finishPlatformSalesforceConnect(stateData, code));
 
     const { companyId, environment, codeVerifier } = stateData;
     const { clientId, clientSecret } = appCredentials();

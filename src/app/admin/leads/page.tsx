@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,6 +109,17 @@ export default function AdminLeadsPage() {
       setTimelineFor(null);
     }
   };
+
+  // ?lead=<id> (the link Salesforce shows) opens that lead's timeline once the list is in.
+  const linkedLead = useRef(typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("lead"));
+  useEffect(() => {
+    const id = linkedLead.current;
+    if (!id || loading) return;
+    linkedLead.current = null;
+    const lead = leads.find((l) => l.id === id);
+    if (lead) void openTimeline(lead);
+    else toast.error("That lead wasn't found. It may have been deleted.");
+  }, [loading, leads]);
 
   const setJourney = async (join: boolean) => {
     if (!timelineFor) return;

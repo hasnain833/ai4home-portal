@@ -963,6 +963,11 @@ model SalesAgentAppointment {
   b2bLead       B2BLead?  @relation(fields: [b2bLeadId], references: [id], onDelete: SetNull)
   reminderSentAt DateTime?
   calendlyEventUri String?
+  // Where to join (video link, address or phone), read from Calendly or the booking settings.
+  meetingUrl    String?
+  salesforceEventId  String?
+  salesforceHash     String?
+  salesforceSyncedAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -999,6 +1004,10 @@ model B2BLead {
   journeyHoldReason String?
   journeyEnteredAt DateTime?
   profile      Json?
+  // AI4Home's own Salesforce org (Super Admin > Salesforce). Synced = the updatedAt last sent or received.
+  salesforceId       String?   @unique
+  salesforceHash     String?
+  salesforceSyncedAt DateTime?
   messages     B2BMessage[]
   inquiries    B2BInquiry[]
   enrollments  B2BEnrollment[]
@@ -1008,6 +1017,15 @@ model B2BLead {
 
   @@index([status])
   @@index([journeyNextAt])
+}
+
+// Records deleted in the portal that still have to be deleted in AI4Home's Salesforce org.
+model SalesforceDeletion {
+  id        String   @id @default(cuid())
+  sobject   String
+  recordId  String   @unique
+  label     String?
+  createdAt DateTime @default(now())
 }
 
 model B2BCampaign {
@@ -1035,9 +1053,12 @@ model B2BMessage {
   note      String?
   handledAt DateTime?
   contentItemId String?
+  // Salesforce Task id once logged; "FAILED" when Salesforce rejected it for good.
+  salesforceTaskId String?
   createdAt DateTime  @default(now())
 
   @@index([leadId, createdAt])
+  @@index([salesforceTaskId])
   @@index([actor, createdAt])
 }
 

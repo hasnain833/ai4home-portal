@@ -370,6 +370,13 @@ export async function createCalendlyVisit(conn, { startTime, name, email, timezo
   }
 }
 
+/** Where to meet: the video link Calendly made, or the address or phone. `processing` while Calendly is still making the link. */
+export async function calendlyEventLocation(conn, eventUri) {
+  const data = await calendlyApi(conn, `/scheduled_events/${uuidOf(eventUri)}`);
+  const loc = data.resource?.location || {};
+  return { link: loc.join_url || loc.location || null, processing: loc.status === "processing" };
+}
+
 /** Best effort: the visit is cancelled on our side regardless. */
 export async function cancelCalendlyVisit(userId, eventUri, reason = "Cancelled from the warranty portal") {
   if (!userId || !eventUri || !calendlyConfigured()) return;

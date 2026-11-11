@@ -80,7 +80,7 @@ import {
   runAutomationRules,
   automationDateTriggers,
 } from "./inngest/functions/automation.js";
-import { salesforceSyncCron } from "./inngest/functions/salesforce-cron.js";
+import { salesforceSyncCron, platformSalesforceSync } from "./inngest/functions/salesforce-cron.js";
 import { ticketReminders } from "./inngest/functions/ticket-reminders.js";
 import { warrantyConversationRetention } from "./inngest/functions/warranty-conversation-retention.js";
 import { ticketAppointmentReminders } from "./inngest/functions/appointment-reminders.js";
@@ -232,6 +232,7 @@ app.use(
       runAutomationRules,
       automationDateTriggers,
       salesforceSyncCron,
+      platformSalesforceSync,
       ticketReminders,
       ticketAppointmentReminders,
       bookingNudges,

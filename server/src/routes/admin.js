@@ -42,6 +42,7 @@ import {
 import { listHandoffIssues, retryHandoffIssue, resolveHandoffIssue } from "../admin/handoffs.controller.js";
 import * as coach from "../admin/sales-coach.controller.js";
 import * as platformCalendly from "../admin/platform-calendly.controller.js";
+import * as platformSalesforce from "../admin/platform-salesforce.controller.js";
 import * as adminNews from "../admin/news.controller.js";
 import { createRateLimiter } from "../middlewares/rate-limit.js";
 import {
@@ -177,6 +178,15 @@ router.get("/platform-calendly", requireAuth, requireAdmin("appointments"), plat
 router.post("/platform-calendly/connect", requireAuth, requireAdmin("appointments"), platformCalendly.connectPlatformCalendly);
 router.put("/platform-calendly/event-type", requireAuth, requireAdmin("appointments"), platformCalendly.setPlatformEventType);
 router.delete("/platform-calendly", requireAuth, requireAdmin("appointments"), platformCalendly.disconnectPlatformCalendly);
+
+// AI4Home's own Salesforce org: Business Leads, meetings and conversations.
+router.get("/salesforce", requireAuth, requireAdmin("salesforce"), platformSalesforce.getPlatformSalesforce);
+router.post("/salesforce/connect", requireAuth, requireAdmin("salesforce"), platformSalesforce.connectPlatformSalesforce);
+router.delete("/salesforce", requireAuth, requireAdmin("salesforce"), platformSalesforce.disconnectPlatformSalesforce);
+router.get("/salesforce/access", requireAuth, requireAdmin("salesforce"), platformSalesforce.checkPlatformSalesforceAccess);
+router.put("/salesforce/settings", requireAuth, requireAdmin("salesforce"), platformSalesforce.updatePlatformSalesforceSettings);
+router.post("/salesforce/sync", requireAuth, requireAdmin("salesforce"), platformSalesforce.syncPlatformSalesforceNow);
+router.post("/salesforce/resync", requireAuth, requireAdmin("salesforce"), platformSalesforce.resyncPlatformSalesforce);
 const promptLabUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },

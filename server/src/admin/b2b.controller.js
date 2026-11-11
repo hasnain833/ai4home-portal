@@ -1,5 +1,6 @@
 import { bookB2BMeeting, getPlatformSlots as openSlots } from "../services/website-sales.js";
 import prisma from "../lib/prisma.js";
+import { queueSalesforceDeletion } from "../services/b2b-salesforce-sync.js";
 import { denyUnlessAdminAccess } from "../middlewares/auth.js";
 import { PHONE_ERROR, sendSms, smsSent, toE164 } from "../services/sms.service.js";
 import { renderB2BStep } from "../inngest/functions/b2b-campaign.js";
@@ -294,7 +295,9 @@ export const leadTimeline = wrap("Lead timeline", async (req, res) => {
 });
 
 export const deleteLead = wrap("Lead delete", async (req, res) => {
-  await prisma.b2BLead.delete({ where: { id: req.params.id } }).catch(() => null);
+  const deleted = await prisma.b2BLead.delete({ where: { id: req.params.id } }).catch(() => null);
+  // Deleted here means deleted in AI4Home's Salesforce too; its Events and Tasks go with it there.
+  if (deleted?.salesforceId) await queueSalesforceDeletion("Lead", deleted.salesforceId, deleted.companyName);
   await completeFinishedCampaigns();
   res.json({ success: true });
 });
