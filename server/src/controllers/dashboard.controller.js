@@ -54,9 +54,6 @@ export const getHomeownerSummary = async (req, res) => {
 export const getDashboardStats = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || (session.role !== "ADMIN" && session.role !== "STAFF")) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
 
     const period = req.query.period || "7d";
     const days = period === "30d" ? 30 : period === "90d" ? 90 : 7;

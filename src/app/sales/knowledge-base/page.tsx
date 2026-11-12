@@ -29,6 +29,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 type KbDoc = {
   id: string;
@@ -99,8 +100,7 @@ export default function SalesKnowledgeBasePage() {
 
   const loadDocs = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/kb");
-      if (res.ok) setDocs(await res.json());
+      setDocs(await api.get<typeof docs>("/api/sales/kb"));
     } catch {
       // surfaced via toast on actions
     } finally {
@@ -150,14 +150,10 @@ export default function SalesKnowledgeBasePage() {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("category", category);
-        const res = await fetch("/api/sales/kb/upload", { method: "POST", body: fd });
-        if (res.ok) ok++;
-        else {
-          const d = await res.json().catch(() => ({}));
-          toast.error(`${file.name}: ${d.message || "upload failed"}`);
-          fail++;
-        }
-      } catch {
+        await api.post("/api/sales/kb/upload", fd);
+        ok++;
+      } catch (e) {
+        toast.error(`${file.name}: ${errorMessage(e)}`);
         fail++;
       }
     }
@@ -177,16 +173,10 @@ export default function SalesKnowledgeBasePage() {
 
   const handleView = async (id: string) => {
     try {
-      const res = await fetch(`/api/sales/kb/${id}/download`);
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        toast.error(d.message || "Could not open that document.");
-        return;
-      }
-      const { url } = await res.json();
+      const { url } = await api.get<{ url: string }>(`/api/sales/kb/${id}/download`);
       window.open(url, "_blank", "noopener,noreferrer");
-    } catch {
-      toast.error("Network error.");
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   };
 
@@ -199,15 +189,11 @@ export default function SalesKnowledgeBasePage() {
       confirmText: "Remove",
     }))) return;
     try {
-      const res = await fetch(`/api/sales/kb/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        toast.success("Document removed.");
-        setDocs((prev) => prev.filter((d) => d.id !== id));
-      } else {
-        toast.error("Could not remove the document.");
-      }
-    } catch {
-      toast.error("Network error.");
+      await api.delete(`/api/sales/kb/${id}`);
+      toast.success("Document removed.");
+      setDocs((prev) => prev.filter((d) => d.id !== id));
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   };
 

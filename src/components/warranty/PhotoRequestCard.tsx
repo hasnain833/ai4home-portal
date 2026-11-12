@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { api, errorMessage } from "@/lib/api";
 import { Camera, Loader2, X, ImagePlus } from "lucide-react";
 
 export interface ChatPhoto {
@@ -65,12 +66,10 @@ export default function PhotoRequestCard({
       body.append("companyId", companyId);
       body.append("conversationId", conversationId);
       for (const file of await Promise.all(picked.map(shrink))) body.append("photos", file);
-      const res = await fetch(`${endpoint}/photos`,{ method: "POST", body });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not upload the photos");
-      setPhotos(data.photos || []);
+      const data = await api.post<{ photos?: ChatPhoto[] }>(`${endpoint}/photos`, body);
+      setPhotos(data?.photos || []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not upload the photos");
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -83,12 +82,10 @@ export default function PhotoRequestCard({
     setError("");
     try {
       const qs = new URLSearchParams({ companyId, conversationId });
-      const res = await fetch(`${endpoint}/photos/${photo.id}?${qs}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not remove the photo");
-      setPhotos(data.photos || []);
+      const data = await api.delete<{ photos?: ChatPhoto[] }>(`${endpoint}/photos/${photo.id}?${qs}`);
+      setPhotos(data?.photos || []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not remove the photo");
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

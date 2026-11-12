@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { use } from "react";
 import Link from "next/link";
+import { api, errorMessage } from "@/lib/api";
 
 interface PublicPost {
   title: string;
@@ -23,11 +24,9 @@ export default function PublicBlogPost({ params }: { params: Promise<{ companyId
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/public/blog/${companyId}/${slug}`);
-        if (!res.ok) throw new Error("Post not found");
-        setPost(await res.json());
-      } catch (e: any) {
-        setError(e.message || "Post not found");
+        setPost(await api.get<NonNullable<typeof post>>(`/api/public/blog/${companyId}/${slug}`));
+      } catch (e) {
+        setError(errorMessage(e));
       } finally {
         setLoading(false);
       }

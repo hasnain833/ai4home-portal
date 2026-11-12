@@ -1011,12 +1011,26 @@ model B2BLead {
   messages     B2BMessage[]
   inquiries    B2BInquiry[]
   enrollments  B2BEnrollment[]
+  shortLinks   B2BShortLink[]
   appointments SalesAgentAppointment[]
   createdAt    DateTime                @default(now())
   updatedAt    DateTime                @updatedAt
 
   @@index([status])
   @@index([journeyNextAt])
+}
+
+// The short link in a campaign text (/m/<code>). It stands for the lead's full booking link,
+// including which campaign and step it came from, so the redirect keeps click tracking.
+model B2BShortLink {
+  code       String   @id
+  leadId     String
+  lead       B2BLead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaignId String?
+  stepId     String?
+  createdAt  DateTime @default(now())
+
+  @@index([leadId, campaignId, stepId])
 }
 
 // Records deleted in the portal that still have to be deleted in AI4Home's Salesforce org.

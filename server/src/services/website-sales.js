@@ -5,7 +5,6 @@ import { cancelCalendlyVisit } from "./calendly.service.js";
 import { computeAvailableSlots, formatSlotLabel } from "../lib/scheduling.js";
 import { parseWebsiteInquiry, inquiryHash, WEBSITE_CONSENT_TEXT } from "../lib/website-inquiry.js";
 
-export const MEETING_SOURCES = ["CAMPAIGN", "WEBSITE_SALES"];
 export async function getPlatformSlots(setting, db = prisma) {
   const from = new Date(Date.now() + 60 * 60_000);
   // Calendly knows its own bookings, buffers and notice period.

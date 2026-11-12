@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 const statusColors: Record<string, string> = {
   New: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200/50",
@@ -141,13 +142,15 @@ export default function SalesDashboardPage() {
 
   async function fetchData() {
     try {
-      const [dashboardRes, leadsRes] = await Promise.all([
-        fetch("/api/sales/dashboard"),
-        fetch("/api/sales/leads?pageSize=5"),
+      // Each panel loads on its own, so one failing still shows the other.
+      const [data, leadsPayload] = await Promise.all([
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        api.get<any>("/api/sales/dashboard").catch(() => null),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        api.get<any>("/api/sales/leads?pageSize=5").catch(() => null),
       ]);
 
-      if (dashboardRes.ok) {
-        const data = await dashboardRes.json();
+      if (data) {
         const total = data.leads?.total || 0;
         setStats((s) => ({
           ...s,
@@ -174,8 +177,7 @@ export default function SalesDashboardPage() {
         );
       }
 
-      if (leadsRes.ok) {
-        const leadsPayload = await leadsRes.json();
+      if (leadsPayload) {
         const recentLeads = Array.isArray(leadsPayload)
           ? leadsPayload
           : leadsPayload.leads || [];
@@ -206,19 +208,11 @@ export default function SalesDashboardPage() {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const res = await fetch("/api/sales/salesforce/sync", { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        toast.success(data.message || "Salesforce sync complete.");
-        await fetchData();
-      } else {
-        toast.error(
-          data.message ||
-            "Salesforce is not connected. Configure it in Settings.",
-        );
-      }
-    } catch {
-      toast.error("Network error while syncing Salesforce.");
+      const data = await api.post<{ message?: string }>("/api/sales/salesforce/sync");
+      toast.success(data?.message || "Salesforce sync complete.");
+      await fetchData();
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setSyncing(false);
     }

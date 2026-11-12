@@ -3,7 +3,6 @@
 import prisma from "./prisma.js";
 
 export const TURN_LIMIT = 20;
-export const DAILY_SESSION_CAP = 15;
 export const ABANDON_AFTER_MS = 24 * 60 * 60 * 1000;
 export const PROMPT_VERSION = "default";
 
@@ -17,7 +16,6 @@ export const SKILLS = [
   { key: "value", label: "Value & urgency", weight: 10, five: "Links benefits to what the buyer said they want, in their numbers. Uses honest urgency.", one: "No link to needs, or false pressure." },
   { key: "closing", label: "Closing / next step", weight: 15, five: "Clearly asks for the demo or next meeting, offers specific times, and confirms details.", one: "Never asks, or ends with \"let me know\"." },
 ];
-const SKILL_KEYS = SKILLS.map((s) => s.key);
 
 /** Weighted total out of 100. Up to two emphasised skills count double, then weights renormalise (SRS 8.1). */
 export function overallScore(scores, emphasis = []) {
@@ -70,8 +68,6 @@ export function buildScorecard(scenario, raw, { goalReached, hintsUsed }) {
     rubricVersion: PROMPT_VERSION,
   };
 }
-
-export const isSkillKey = (k) => SKILL_KEYS.includes(k);
 
 // ─── Scenarios (Appendix A, Track B) ──────────────────────────────────────
 // ponytail: scenarios are code, not data; move to a CoachScenario table when Super Admin needs to edit them (FR-SN-04).

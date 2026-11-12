@@ -69,6 +69,15 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Who is signed in, or null when nobody is. A 401 here is the normal logged-out answer, so this
+ * stays a raw fetch rather than apiFetch, which would log it as an error. A dropped connection still throws.
+ */
+async function fetchMe(): Promise<User | null> {
+  const response = await fetch("/api/auth/me");
+  return response.ok ? response.json() : null;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -149,13 +158,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!mounted) return;
       setIsLoading(true);
       try {
-        const response = await fetch("/api/auth/me");
-        if (response.ok) {
-          const userData = await response.json();
-          if (mounted) setUser(userData);
-        } else {
-          if (mounted) setUser(null);
-        }
+        const userData = await fetchMe();
+        if (mounted) setUser(userData);
       } catch {
         if (mounted) setUser(null);
       } finally {
@@ -176,16 +180,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async function checkSuperadminOrLogout() {
       try {
-        const response = await fetch("/api/auth/me");
-        if (response.ok) {
-          const userData = await response.json();
-          if (userData.isSuperAdmin) {
-            if (mounted) {
-              setUser(userData);
-              setIsLoading(false);
-            }
-            return;
+        const userData = await fetchMe();
+        if (userData?.isSuperAdmin) {
+          if (mounted) {
+            setUser(userData);
+            setIsLoading(false);
           }
+          return;
         }
       } catch (e) {
         console.error(e);
@@ -210,11 +211,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [router]); 
 
   const enterSuperadminPortal = async () => {
-    const meResponse = await fetch("/api/auth/me");
-    if (meResponse.ok) {
-      const userData = await meResponse.json();
-      setUser(userData);
-    }
+    const userData = await fetchMe();
+    if (userData) setUser(userData);
     setIsLoading(false);
     router.push("/admin");
   };
@@ -373,9 +371,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = async (): Promise<User | null> => {
     try {
-      const response = await fetch("/api/auth/me");
-      if (response.ok) {
-        const userData = await response.json();
+      const userData = await fetchMe();
+      if (userData) {
         setUser(userData);
         return userData;
       }

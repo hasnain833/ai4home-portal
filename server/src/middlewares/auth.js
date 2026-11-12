@@ -365,3 +365,17 @@ export function denyUnlessAdminAccess(req, res) {
   }
   return false;
 }
+
+/**
+ * Builds a Super Admin route handler: checks access, then logs and answers 500 on an unexpected error.
+ * Usage: `const wrap = adminHandler("B2B Nurture"); wrap("Loading content", fn)`. Pass `{ admin: false }` for a public route.
+ */
+export const adminHandler = (tag) => (label, fn, { admin = true } = {}) => async (req, res) => {
+  try {
+    if (admin && denyUnlessAdminAccess(req, res)) return;
+    await fn(req, res);
+  } catch (error) {
+    console.error(`[${tag}] ${label} failed:`, error);
+    res.status(500).json({ message: `${label} failed. Please try again.` });
+  }
+};

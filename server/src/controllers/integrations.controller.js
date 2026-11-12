@@ -9,211 +9,171 @@ import { encrypt, decryptSafe } from "../lib/crypto.js";
 
 
 export const getIntegrations = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || session.role !== "ADMIN") {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
+  const session = req.user;
 
-    const platforms = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
-    const saved = await prisma.integration.findMany({
-      where: { companyId: session.companyId },
-      select: {
-        platform: true,
-        environment: true,
-        isActive: true,
-        apiKey: true,
-        updatedAt: true,
-      },
-    });
+  const platforms = ["BUILTOPIA", "BUILDERTREND", "HYPHEN"];
+  const saved = await prisma.integration.findMany({
+    where: { companyId: session.companyId },
+    select: {
+      platform: true,
+      environment: true,
+      isActive: true,
+      apiKey: true,
+      updatedAt: true,
+    },
+  });
 
-    const result = platforms.map((p) => {
-      const record = saved.find((s) => s.platform === p);
-      const apiKey = decryptSafe(record?.apiKey);
-      return {
-        platform: p,
-        configured: !!record,
-        environment: record?.environment ?? null,
-        apiKeyMasked: apiKey ? `••••${apiKey.slice(-4)}` : null,
-        isActive: record?.isActive ?? false,
-        lastUpdated: record?.updatedAt ?? null,
-      };
-    });
+  const result = platforms.map((p) => {
+    const record = saved.find((s) => s.platform === p);
+    const apiKey = decryptSafe(record?.apiKey);
+    return {
+      platform: p,
+      configured: !!record,
+      environment: record?.environment ?? null,
+      apiKeyMasked: apiKey ? `••••${apiKey.slice(-4)}` : null,
+      isActive: record?.isActive ?? false,
+      lastUpdated: record?.updatedAt ?? null,
+    };
+  });
 
-    return res.json(result);
-  } catch (error) {
-    console.error("[Integrations] GET failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  return res.json(result);
 };
 
 export const testIntegration = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || session.role !== "ADMIN") {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
+  const session = req.user;
 
-    const { platform } = req.body;
-    if (!platform) {
-      return res.status(400).json({ message: "Platform is required" });
-    }
-
-    const result = await testERPConnection(
-      session.companyId,
-      platform.toUpperCase(),
-    );
-    return res.json(result);
-  } catch (error) {
-    console.error("[Integrations] Test connection failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { platform } = req.body;
+  if (!platform) {
+    return res.status(400).json({ message: "Platform is required" });
   }
+
+  const result = await testERPConnection(
+    session.companyId,
+    platform.toUpperCase(),
+  );
+  return res.json(result);
 };
 
 export const getCredentials = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || session.role !== "ADMIN") {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
+  const session = req.user;
 
-    const integrations = await prisma.integration.findMany({
-      where: { companyId: session.companyId },
-      select: {
-        id: true,
-        platform: true,
-        environment: true,
-        isActive: true,
-        updatedAt: true,
-        apiKey: true,
-        secretKey: true,
-      },
-      orderBy: { updatedAt: "desc" },
-    });
+  const integrations = await prisma.integration.findMany({
+    where: { companyId: session.companyId },
+    select: {
+      id: true,
+      platform: true,
+      environment: true,
+      isActive: true,
+      updatedAt: true,
+      apiKey: true,
+      secretKey: true,
+    },
+    orderBy: { updatedAt: "desc" },
+  });
 
-    // Mask the keys before sending (decrypt first so the last-4 is meaningful)
-    const masked = integrations.map((i) => {
-      const apiKey = decryptSafe(i.apiKey);
-      const secretKey = decryptSafe(i.secretKey);
-      return {
-        ...i,
-        apiKey: apiKey ? `••••${apiKey.slice(-4)}` : null,
-        secretKey: secretKey ? `••••${secretKey.slice(-4)}` : null,
-      };
-    });
+  // Mask the keys before sending (decrypt first so the last-4 is meaningful)
+  const masked = integrations.map((i) => {
+    const apiKey = decryptSafe(i.apiKey);
+    const secretKey = decryptSafe(i.secretKey);
+    return {
+      ...i,
+      apiKey: apiKey ? `••••${apiKey.slice(-4)}` : null,
+      secretKey: secretKey ? `••••${secretKey.slice(-4)}` : null,
+    };
+  });
 
-    return res.json(masked);
-  } catch (error) {
-    console.error("[Integrations] GET credentials failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  return res.json(masked);
 };
 
 export const saveCredentials = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || session.role !== "ADMIN") {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
+  const session = req.user;
 
-    const { platform, apiKey, secretKey, environment } = req.body;
+  const { platform, apiKey, secretKey, environment } = req.body;
 
-    if (!platform || !apiKey) {
-      return res
-        .status(400)
-        .json({ message: "Platform and API Key are required" });
-    }
-    if (COMING_SOON_PLATFORMS.includes(platform.toUpperCase())) {
-      return res.status(400).json({ message: "This integration is coming soon." });
-    }
+  if (!platform || !apiKey) {
+    return res
+      .status(400)
+      .json({ message: "Platform and API Key are required" });
+  }
+  if (COMING_SOON_PLATFORMS.includes(platform.toUpperCase())) {
+    return res.status(400).json({ message: "This integration is coming soon." });
+  }
 
-    // Upsert: if a record already exists for this company+platform, update it
-    const existing = await prisma.integration.findFirst({
-      where: {
+  // Upsert: if a record already exists for this company+platform, update it
+  const existing = await prisma.integration.findFirst({
+    where: {
+      companyId: session.companyId,
+      platform: platform.toUpperCase(),
+    },
+  });
+
+  // Encrypt secrets at rest (NFR 6.3). Reads go through decryptSafe().
+  const encApiKey = encrypt(apiKey);
+  const encSecretKey = secretKey ? encrypt(secretKey) : null;
+
+  let integration;
+  if (existing) {
+    integration = await prisma.integration.update({
+      where: { id: existing.id },
+      data: {
+        apiKey: encApiKey,
+        secretKey: encSecretKey,
+        environment: environment || "sandbox",
+        isActive: true,
+      },
+    });
+  } else {
+    integration = await prisma.integration.create({
+      data: {
         companyId: session.companyId,
         platform: platform.toUpperCase(),
-      },
-    });
-
-    // Encrypt secrets at rest (NFR 6.3). Reads go through decryptSafe().
-    const encApiKey = encrypt(apiKey);
-    const encSecretKey = secretKey ? encrypt(secretKey) : null;
-
-    let integration;
-    if (existing) {
-      integration = await prisma.integration.update({
-        where: { id: existing.id },
-        data: {
-          apiKey: encApiKey,
-          secretKey: encSecretKey,
-          environment: environment || "sandbox",
-          isActive: true,
-        },
-      });
-    } else {
-      integration = await prisma.integration.create({
-        data: {
-          companyId: session.companyId,
-          platform: platform.toUpperCase(),
-          apiKey: encApiKey,
-          secretKey: encSecretKey,
-          environment: environment || "sandbox",
-          isActive: true,
-        },
-      });
-    }
-
-    await writeAuditLog({
-      req,
-      action: existing ? "ERP_RECONNECT" : "ERP_CONNECT",
-      companyId: session.companyId,
-      targetType: "Integration",
-      targetId: integration.id,
-      metadata: {
-        platform: platform.toUpperCase(),
+        apiKey: encApiKey,
+        secretKey: encSecretKey,
         environment: environment || "sandbox",
+        isActive: true,
       },
     });
-
-    return res.json({ success: true, id: integration.id });
-  } catch (error) {
-    console.error("[Integrations] POST credentials failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  await writeAuditLog({
+    req,
+    action: existing ? "ERP_RECONNECT" : "ERP_CONNECT",
+    companyId: session.companyId,
+    targetType: "Integration",
+    targetId: integration.id,
+    metadata: {
+      platform: platform.toUpperCase(),
+      environment: environment || "sandbox",
+    },
+  });
+
+  return res.json({ success: true, id: integration.id });
 };
 
 export const deleteCredentials = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || session.role !== "ADMIN") {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
+  const session = req.user;
 
-    const { platform } = req.body;
-    if (!platform) {
-      return res.status(400).json({ message: "Platform is required" });
-    }
-
-    await prisma.integration.deleteMany({
-      where: {
-        companyId: session.companyId,
-        platform: platform.toUpperCase(),
-      },
-    });
-
-    await writeAuditLog({
-      req,
-      action: "ERP_DISCONNECT",
-      companyId: session.companyId,
-      targetType: "Integration",
-      metadata: { platform: platform.toUpperCase() },
-    });
-
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("[Integrations] DELETE credentials failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { platform } = req.body;
+  if (!platform) {
+    return res.status(400).json({ message: "Platform is required" });
   }
+
+  await prisma.integration.deleteMany({
+    where: {
+      companyId: session.companyId,
+      platform: platform.toUpperCase(),
+    },
+  });
+
+  await writeAuditLog({
+    req,
+    action: "ERP_DISCONNECT",
+    companyId: session.companyId,
+    targetType: "Integration",
+    metadata: { platform: platform.toUpperCase() },
+  });
+
+  return res.json({ success: true });
 };
 
 export const syncIntegration = async (req, res) => {

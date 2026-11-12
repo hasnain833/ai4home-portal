@@ -1,6 +1,7 @@
 import prisma from "./prisma.js";
 import { b2bLeadTimezone, nextLocalSendTime, safeSendTime, sendHoursFor } from "./timezone.js";
-import { getZonedParts } from "./scheduling.js";
+import { formatSlotLabel, getZonedParts } from "./scheduling.js";
+import { Templates } from "../services/templates.js";
 import { escapeHtml } from "./utils.js";
 import { blockReason, sendStep, renderB2BStep } from "../inngest/functions/b2b-campaign.js";
 import { MailService } from "../services/mail-service.js";
@@ -9,8 +10,10 @@ import {
   B2B_CLOSED_STATUSES,
   B2B_REPLY_TAG,
   QUIET_AFTER,
+  appUrl,
   b2bEmailHtml,
   bookingLinkFor,
+  getB2BAvailability,
   getB2BJourneySettings,
   notifySuperAdmin,
   weeklyLimitReached,
@@ -31,6 +34,7 @@ const NO_RESPONSE_MAX_TOUCHES = 12;
 const UNOPENED_LIMIT = 6;
 const MAX_FAILURES = 3;
 const HOLD_ALERT_KEY = "b2b.journey.holdAlertAt";
+const UNMARKED_MEETING_ALERT_KEY = "b2b.journey.unmarkedMeetingAlertAt";
 
 /** Which channel this touch wants before consent and limits are checked. */
 export function plannedChannel(stage, touches) {
@@ -157,13 +161,43 @@ async function noOpensLately(leadId) {
   return sends.length >= UNOPENED_LIMIT && sends.every((s) => !s.openedAt && !s.clickedAt);
 }
 
-/** One alert a day is enough to say the library has run dry. */
-async function alertContentGap(reason) {
-  const row = await prisma.platformSetting.findUnique({ where: { key: HOLD_ALERT_KEY } });
-  if (row && Date.now() - new Date(row.value?.at).getTime() < DAY_MS) return;
+/** True at most once a day per key, so a standing problem doesn't flood the inbox. */
+async function onceADay(key) {
+  const row = await prisma.platformSetting.findUnique({ where: { key } });
+  if (row && Date.now() - new Date(row.value?.at).getTime() < DAY_MS) return false;
   const value = { at: new Date().toISOString() };
-  await prisma.platformSetting.upsert({ where: { key: HOLD_ALERT_KEY }, create: { key: HOLD_ALERT_KEY, value }, update: { value } });
+  await prisma.platformSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
+  return true;
+}
+
+async function alertContentGap(reason) {
+  if (!(await onceADay(HOLD_ALERT_KEY))) return;
   await notifySuperAdmin("Nurture journey is waiting for approved content", `<p>${escapeHtml(reason)}. Builders in this stage are on hold until staff approve more content on the Nurture page.</p>`);
+}
+
+/**
+ * The journey only moves on once staff mark a meeting Completed, No-show or Cancelled. A meeting
+ * left Confirmed after it happened parks the lead in Appointment booked for good, so say so daily.
+ */
+export async function alertUnmarkedMeetings(now = new Date()) {
+  const rows = await prisma.salesAgentAppointment.findMany({
+    where: { status: "CONFIRMED", b2bLeadId: { not: null }, startTime: { lt: new Date(now.getTime() - DAY_MS) } },
+    include: { b2bLead: { select: { companyName: true, contactName: true } } },
+    orderBy: { startTime: "asc" },
+    take: 50,
+  });
+  if (!rows.length || !(await onceADay(UNMARKED_MEETING_ALERT_KEY))) return rows.length;
+  const { timezone } = await getB2BAvailability();
+  const meetings = rows.map((a) => ({
+    company: a.b2bLead?.companyName || "Unknown company",
+    contact: a.b2bLead?.contactName || "",
+    when: formatSlotLabel(a.startTime, timezone),
+  }));
+  await notifySuperAdmin(
+    `${rows.length} business meeting${rows.length === 1 ? "" : "s"} need an outcome`,
+    Templates.getUnmarkedMeetingsEmail(meetings, `${appUrl()}/admin/sales-agent-appointments`),
+  );
+  return rows.length;
 }
 
 /** Whether a message may go out now. Every send checks this, however late or early its job ran. */

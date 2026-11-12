@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { api, ApiError, serverMessageOr } from "@/lib/api";
 
 type FormInfo = {
   companyName: string;
@@ -28,9 +29,9 @@ export default function LeadFormPage() {
   const [sent, setSent] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/public/lead-form/${companyId}`)
-      .then(async (r) => (r.ok ? setInfo(await r.json()) : setLoadError("This form is not available.")))
-      .catch(() => setLoadError("This form could not be loaded."));
+    api.get<NonNullable<typeof info>>(`/api/public/lead-form/${companyId}`).then(setInfo, (e) =>
+      setLoadError(e instanceof ApiError && e.status ? "This form is not available." : "This form could not be loaded."),
+    );
   }, [companyId]);
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -39,16 +40,11 @@ export default function LeadFormPage() {
     setError("");
     const data = Object.fromEntries(new FormData(e.currentTarget));
     try {
-      const res = await fetch(`/api/public/lead-form/${companyId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // The page embedding the iframe, so staff can see which page converted.
-        body: JSON.stringify({ ...data, page: document.referrer || window.location.href }),
-      });
-      if (res.ok) setSent(true);
-      else setError((await res.json().catch(() => null))?.message || "Something went wrong. Please try again.");
-    } catch {
-      setError("Something went wrong. Please try again.");
+      // The page embedding the iframe, so staff can see which page converted.
+      await api.post(`/api/public/lead-form/${companyId}`, { ...data, page: document.referrer || window.location.href });
+      setSent(true);
+    } catch (e) {
+      setError(serverMessageOr(e, "Something went wrong. Please try again."));
     } finally {
       setBusy(false);
     }

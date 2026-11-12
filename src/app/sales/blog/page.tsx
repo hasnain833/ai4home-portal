@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
+import { apiFetch, errorMessage } from "@/lib/api";
 
 type BlogStatus = "DRAFT" | "PENDING_REVIEW" | "APPROVED" | "SCHEDULED" | "PUBLISHED";
 
@@ -97,19 +98,9 @@ const staggerContainer = {
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
 };
 
-async function api(path: string, options?: RequestInit) {
-  const res = await fetch(`/api/sales/blog${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    let msg = "Request failed";
-    try {
-      msg = (await res.json())?.message || msg;
-    } catch {}
-    throw new Error(msg);
-  }
-  return res.json();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function api<T = any>(path: string, options?: RequestInit) {
+  return apiFetch<T>(`/api/sales/blog${path}`, { headers: { "Content-Type": "application/json" }, ...options });
 }
 
 export default function BlogDraftingPage() {
@@ -168,11 +159,8 @@ export default function BlogDraftingPage() {
     setAiModalOpen(true);
     setSelectedNewsIds([]);
     try {
-      const res = await fetch("/api/sales/news?limit=8");
-      if (res.ok) {
-        const json = await res.json();
-        setNews((json.data || []).map((n: any) => ({ id: n.id, title: n.title, summary: n.summary, originalUrl: n.originalUrl })));
-      }
+      const json = await apiFetch<{ data?: any[] }>("/api/sales/news?limit=8");
+      setNews((json?.data || []).map((n: any) => ({ id: n.id, title: n.title, summary: n.summary, originalUrl: n.originalUrl })));
     } catch {}
   };
 
@@ -249,8 +237,8 @@ export default function BlogDraftingPage() {
     try {
       setBusyId(id);
       await fn();
-    } catch (e: any) {
-      toast.error(e.message || "Action failed");
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setBusyId(null);
     }

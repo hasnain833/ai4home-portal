@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { api, errorMessage } from "@/lib/api";
 
 interface NewsSource {
   url: string;
@@ -41,15 +42,12 @@ export default function NewsSourcesDialog() {
     setOpen(true);
     setLoading(true);
     try {
-      const res = await fetch(API);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.message || "Could not load the sources.");
-        return;
-      }
+      const data = await api.get<{ sources?: NewsSource[]; isCustomized?: boolean }>(API);
       setError("");
-      setSources(data.sources || []);
-      setIsCustomized(!!data.isCustomized);
+      setSources(data?.sources || []);
+      setIsCustomized(!!data?.isCustomized);
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -68,13 +66,11 @@ export default function NewsSourcesDialog() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(API, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sources }) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Failed to save");
+      await api.put(API, { sources });
       toast.success("News sources saved.");
       setOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save");
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }

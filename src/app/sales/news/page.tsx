@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Newspaper, ExternalLink, Calendar, Loader2, RefreshCcw, Megaphone, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 interface ScrapedNews {
   id: string;
@@ -36,12 +37,9 @@ export default function SalesNewsPage() {
   const fetchNews = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/sales/news?limit=200");
-      if (res.ok) {
-        const json = await res.json();
-        setNews(json.data || []);
-        setPage(1);
-      }
+      const json = await api.get<{ data?: typeof news }>("/api/sales/news?limit=200");
+      setNews(json?.data || []);
+      setPage(1);
     } catch (err) {
       console.error("Failed to fetch news:", err);
     } finally {
@@ -56,22 +54,13 @@ export default function SalesNewsPage() {
   const createCampaignFromNews = async (item: ScrapedNews) => {
     setCreatingId(item.id);
     try {
-      const res = await fetch("/api/sales/campaigns/from-news", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newsId: item.id }),
+      await api.post("/api/sales/campaigns/from-news", { newsId: item.id });
+      toast.success("Campaign drafted in Nurture Campaigns", {
+        description: "Email + SMS steps were added. Enroll leads and launch it there.",
+        action: { label: "Open", onClick: () => router.push("/sales/campaigns") },
       });
-      if (res.ok) {
-        toast.success("Campaign drafted in Nurture Campaigns", {
-          description: "Email + SMS steps were added. Enroll leads and launch it there.",
-          action: { label: "Open", onClick: () => router.push("/sales/campaigns") },
-        });
-      } else {
-        const j = await res.json().catch(() => ({}));
-        toast.error(j.message || "Failed to create campaign.");
-      }
-    } catch {
-      toast.error("Error creating campaign.");
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setCreatingId(null);
     }

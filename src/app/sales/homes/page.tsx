@@ -43,6 +43,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 type Status = "AVAILABLE" | "COMING_SOON" | "UNDER_CONTRACT" | "SOLD";
 
@@ -144,11 +145,6 @@ const EMPTY_FORM: FormState = {
 const str = (v: string | number | null | undefined) => (v === null || v === undefined ? "" : String(v));
 const money = (n: number) => `$${n.toLocaleString("en-US")}`;
 
-async function readError(res: Response, fallback: string) {
-  const data = await res.json().catch(() => ({}));
-  return (data && data.message) || fallback;
-}
-
 export default function SalesHomesPage() {
   const { user } = useAuth();
   const confirm = useConfirm();
@@ -194,12 +190,15 @@ export default function SalesHomesPage() {
   // only after the requests come back.
   const fetchAll = useCallback(async () => {
     try {
-      const [h, c] = await Promise.all([fetch("/api/sales/homes"), fetch("/api/sales/communities")]);
-      if (h.ok) setHomes((await h.json()).homes || []);
-      else toast.error(await readError(h, "Could not load homes"));
-      if (c.ok) setCommunities((await c.json()).communities || []);
-    } catch {
-      toast.error("Could not reach the server");
+      // Communities are optional here; a failure there must not hide the homes.
+      const [h, c] = await Promise.all([
+        api.get<{ homes?: SalesHome[] }>("/api/sales/homes"),
+        api.get<{ communities?: Community[] }>("/api/sales/communities").catch(() => null),
+      ]);
+      setHomes(h?.homes || []);
+      if (c) setCommunities(c.communities || []);
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -279,19 +278,13 @@ export default function SalesHomesPage() {
     if (!name) return;
     setAddingCommunity(true);
     try {
-      const res = await fetch("/api/sales/communities", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      if (!res.ok) throw new Error(await readError(res, "Could not add community"));
-      const created: Community = await res.json();
+      const created = await api.post<Community>("/api/sales/communities", { name });
       setCommunities((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setForm((f) => ({ ...f, communityId: created.id }));
       setNewCommunity("");
       toast.success(`Added ${created.name}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not add community");
+      toast.error(errorMessage(e));
     } finally {
       setAddingCommunity(false);
     }
@@ -302,19 +295,15 @@ export default function SalesHomesPage() {
     if (!form.address.trim()) return toast.error("Address is required");
     setSaving(true);
     try {
-      const res = await fetch(editing ? `/api/sales/homes/${editing.id}` : "/api/sales/homes", {
-        method: editing ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (!res.ok) throw new Error(await readError(res, "Could not save home"));
-      const saved: SalesHome = await res.json();
+      const saved = await (editing
+        ? api.patch<SalesHome>(`/api/sales/homes/${editing.id}`, form)
+        : api.post<SalesHome>("/api/sales/homes", form));
       if (editing) replaceHome(saved);
       else setHomes((prev) => [...prev, saved]);
       setFormOpen(false);
       toast.success(editing ? "Home updated" : "Home added");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not save home");
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -327,20 +316,17 @@ export default function SalesHomesPage() {
       confirmText: "Delete",
     });
     if (!ok) return;
-    const res = await fetch(`/api/sales/homes/${h.id}`, { method: "DELETE" });
-    if (!res.ok) return toast.error(await readError(res, "Could not delete home"));
+    try {
+      await api.delete(`/api/sales/homes/${h.id}`);
+    } catch (e) {
+      return toast.error(errorMessage(e));
+    }
     setHomes((prev) => prev.filter((x) => x.id !== h.id));
     toast.success("Home deleted");
   };
 
   const quickStatus = async (h: SalesHome, status: Status) => {
-    const res = await fetch(`/api/sales/homes/${h.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    if (!res.ok) return toast.error(await readError(res, "Could not change status"));
-    replaceHome(await res.json());
+    await api.patch<SalesHome>(`/api/sales/homes/${h.id}`, { status }).then(replaceHome, (e) => toast.error(errorMessage(e)));
   };
 
   // --- Photos ---
@@ -351,12 +337,10 @@ export default function SalesHomesPage() {
     try {
       const body = new FormData();
       Array.from(files).forEach((f) => body.append("files", f));
-      const res = await fetch(`/api/sales/homes/${photoHome.id}/photos`, { method: "POST", body });
-      if (!res.ok) throw new Error(await readError(res, "Could not upload photos"));
-      replaceHome(await res.json());
+      replaceHome(await api.post<SalesHome>(`/api/sales/homes/${photoHome.id}/photos`, body));
       toast.success(`${files.length} photo${files.length === 1 ? "" : "s"} added`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not upload photos");
+      toast.error(errorMessage(e));
     } finally {
       setUploadingPhotos(false);
       if (photoInputRef.current) photoInputRef.current.value = "";
@@ -369,12 +353,10 @@ export default function SalesHomesPage() {
       const ok = await confirm({ title: "Delete this photo?", confirmText: "Delete" });
       if (!ok) return;
     }
-    const res = await fetch(
-      `/api/sales/homes/${photoHome.id}/photos/${photo.id}${action === "cover" ? "/cover" : ""}`,
-      { method: action === "cover" ? "POST" : "DELETE" },
+    const url = `/api/sales/homes/${photoHome.id}/photos/${photo.id}${action === "cover" ? "/cover" : ""}`;
+    await (action === "cover" ? api.post<SalesHome>(url) : api.delete<SalesHome>(url)).then(replaceHome, (e) =>
+      toast.error(errorMessage(e)),
     );
-    if (!res.ok) return toast.error(await readError(res, "Could not update photos"));
-    replaceHome(await res.json());
   };
 
   // --- Import ---
@@ -403,14 +385,12 @@ export default function SalesHomesPage() {
       const body = new FormData();
       body.append("file", importFile);
       if (importCommunity !== "none") body.append("communityId", importCommunity);
-      const res = await fetch("/api/sales/homes/import", { method: "POST", body });
-      if (!res.ok) throw new Error(await readError(res, "Import failed"));
-      const result = await res.json();
+      const result = await api.post<NonNullable<typeof importResult>>("/api/sales/homes/import", body);
       setImportResult(result);
       toast.success(`Imported: ${result.created} added, ${result.updated} updated`);
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Import failed");
+      toast.error(errorMessage(e));
     } finally {
       setImporting(false);
     }

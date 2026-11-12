@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BrandLogo } from "@/components/BrandLogo";
+import { api, errorMessage } from "@/lib/api";
 
 const getPasswordStrength = (password: string) => {
   let score = 0;
@@ -192,22 +193,11 @@ function AuthContainer() {
 
     setIsLoading(true);
     try {
-      const response = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: forgotEmail }),
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.message || "Failed to request password reset");
-        return;
-      }
-
+      await api.post("/api/auth/forgot-password", { email: forgotEmail });
       setSuccess("If that email has an account, a recovery link is on its way.");
       setForgotEmail("");
-    } catch {
-      setError("An unexpected error occurred. Please try again.");
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setIsLoading(false);
     }
@@ -226,31 +216,20 @@ function AuthContainer() {
 
     setIsLoading(true);
     try {
-      const response = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companyName,
-          companyEmail,
-          password: signupPassword,
-          companyPhone,
-          companyAddress,
-        }),
+      await api.post("/api/auth/signup", {
+        companyName,
+        companyEmail,
+        password: signupPassword,
+        companyPhone,
+        companyAddress,
       });
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.message || "Failed to create account");
-        return;
-      }
-
       setSuccess("Account created! We've sent a verification link to your email. Please check your inbox (and spam folder) to activate your account.");
 
       // Optionally switch to login mode so they can login after clicking the link
       setTimeout(() => setMode("login"), 5000);
 
-    } catch {
-      setError("An unexpected error occurred during account creation.");
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setIsLoading(false);
     }

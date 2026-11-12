@@ -38,6 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 const TIMEZONES = [
   { value: "America/New_York", label: "Eastern Time (ET)" },
@@ -131,10 +132,8 @@ export default function AppointmentsPage() {
   const fetchSlotPreview = useCallback(async () => {
     setSlotPreview((s) => ({ ...s, loading: true }));
     try {
-      const res = await fetch("/api/sales/scheduling/slots?days=14&limit=60");
-      if (!res.ok) throw new Error("failed");
-      const data = await res.json();
-      setSlotPreview({ loading: false, slots: data.slots || [] });
+      const data = await api.get<{ slots?: Slot[] }>("/api/sales/scheduling/slots?days=14&limit=60");
+      setSlotPreview({ loading: false, slots: data?.slots || [] });
     } catch {
       setSlotPreview({ loading: false, slots: [] });
     }
@@ -155,9 +154,8 @@ export default function AppointmentsPage() {
 
   const loadSettings = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/scheduling/settings");
-      if (!res.ok) return;
-      const data = await res.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.get<any>("/api/sales/scheduling/settings");
       const s = data.setting || {};
       setSettings({
         dayStart: s.dayStart || "09:00",
@@ -179,8 +177,7 @@ export default function AppointmentsPage() {
   const loadAppointments = useCallback(async () => {
     setLoadingAppts(true);
     try {
-      const res = await fetch("/api/sales/appointments");
-      if (res.ok) setAppointments(await res.json());
+      setAppointments(await api.get<Appointment[]>("/api/sales/appointments"));
     } catch {
       /* ignore */
     } finally {
@@ -211,27 +208,22 @@ export default function AppointmentsPage() {
     e.preventDefault();
     setSavingSettings(true);
     try {
-      const res = await fetch("/api/sales/scheduling/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dayStart: settings.dayStart,
-          dayEnd: settings.dayEnd,
-          bufferMinutes: Number(settings.bufferMinutes),
-          slotDuration: Number(settings.slotDuration),
-          workingDays: DAYS.filter((d) =>
-            settings.workingDays.includes(d),
-          ).join(","),
-          timezone: settings.timezone,
-          appointmentMode: settings.appointmentMode,
-        }),
+      await api.put("/api/sales/scheduling/settings", {
+        dayStart: settings.dayStart,
+        dayEnd: settings.dayEnd,
+        bufferMinutes: Number(settings.bufferMinutes),
+        slotDuration: Number(settings.slotDuration),
+        workingDays: DAYS.filter((d) =>
+          settings.workingDays.includes(d),
+        ).join(","),
+        timezone: settings.timezone,
+        appointmentMode: settings.appointmentMode,
       });
-      if (!res.ok) throw new Error((await res.json()).message || "Save failed");
       toast.success("Availability settings saved");
       // Reflect the new rules in the preview immediately.
       fetchSlotPreview();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed");
+      toast.error(errorMessage(err));
     } finally {
       setSavingSettings(false);
     }
@@ -240,11 +232,8 @@ export default function AppointmentsPage() {
   const openReschedule = async (appt: Appointment) => {
     setReschedule({ open: true, appt, slots: [], selected: "", loading: true });
     try {
-      const res = await fetch(
-        `/api/sales/scheduling/slots?leadId=${appt.leadId}&limit=24`,
-      );
-      const data = await res.json();
-      setReschedule((r) => ({ ...r, slots: data.slots || [], loading: false }));
+      const data = await api.get<{ slots?: Slot[] }>(`/api/sales/scheduling/slots?leadId=${appt.leadId}&limit=24`);
+      setReschedule((r) => ({ ...r, slots: data?.slots || [], loading: false }));
     } catch {
       setReschedule((r) => ({ ...r, loading: false }));
     }
@@ -253,17 +242,10 @@ export default function AppointmentsPage() {
   const doReschedule = async () => {
     if (!reschedule.appt || !reschedule.selected) return;
     try {
-      const res = await fetch("/api/sales/scheduling/reschedule", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          appointmentId: reschedule.appt.id,
-          startTime: reschedule.selected,
-        }),
+      await api.post("/api/sales/scheduling/reschedule", {
+        appointmentId: reschedule.appt.id,
+        startTime: reschedule.selected,
       });
-      const data = await res.json();
-      if (!res.ok)
-        throw new Error(data.message || data.reason || "Reschedule failed");
       toast.success("Appointment rescheduled");
       setReschedule({
         open: false,
@@ -274,7 +256,7 @@ export default function AppointmentsPage() {
       });
       loadAppointments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Reschedule failed");
+      toast.error(errorMessage(err));
     }
   };
 
@@ -291,16 +273,11 @@ export default function AppointmentsPage() {
     )
       return;
     try {
-      const res = await fetch("/api/sales/scheduling/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appointmentId: appt.id }),
-      });
-      if (!res.ok) throw new Error("Cancel failed");
+      await api.post("/api/sales/scheduling/cancel", { appointmentId: appt.id });
       toast.success("Appointment cancelled");
       loadAppointments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Cancel failed");
+      toast.error(errorMessage(err));
     }
   };
 

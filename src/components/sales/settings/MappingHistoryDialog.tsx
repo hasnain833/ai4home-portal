@@ -19,6 +19,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 interface MappingSnapshot {
   salesforceField: string;
@@ -61,17 +62,9 @@ export default function MappingHistoryDialog({
 
   const fetchVersions = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/salesforce/mappings/versions", {
-        credentials: "include",
-      });
-      if (res.ok) {
-        setVersions(await res.json());
-      } else {
-        toast.error("Could not load mapping history.");
-      }
+      setVersions(await api.get<typeof versions>("/api/sales/salesforce/mappings/versions"));
     } catch (error) {
-      console.error("Failed to fetch mapping versions:", error);
-      toast.error("Could not load mapping history.");
+      toast.error(errorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -92,24 +85,13 @@ export default function MappingHistoryDialog({
   const handleRollback = async (version: number) => {
     setRollingBack(version);
     try {
-      const res = await fetch("/api/sales/salesforce/mappings/rollback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ version }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        toast.success(data.message || `Restored version ${version}.`);
-        setConfirming(null);
-        await fetchVersions();
-        onRolledBack?.();
-      } else {
-        toast.error(data.message || "Rollback failed.");
-      }
+      const data = await api.post<{ message?: string }>("/api/sales/salesforce/mappings/rollback", { version });
+      toast.success(data?.message || `Restored version ${version}.`);
+      setConfirming(null);
+      await fetchVersions();
+      onRolledBack?.();
     } catch (error) {
-      console.error("Rollback failed:", error);
-      toast.error("Rollback failed.");
+      toast.error(errorMessage(error));
     } finally {
       setRollingBack(null);
     }

@@ -130,139 +130,124 @@ export const getUsers = async (req, res) => {
 };
 
 export const updateCompanyWorkspaces = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    const { companyId } = req.params;
-    const { warrantyEnabled, salesEnabled } = req.body;
-
-    if (warrantyEnabled === undefined && salesEnabled === undefined) {
-      return res
-        .status(400)
-        .json({ message: "No workspace settings provided" });
-    }
-
-    const updateData = {};
-    if (typeof warrantyEnabled === "boolean") {
-      updateData.warrantyEnabled = warrantyEnabled;
-    }
-    if (typeof salesEnabled === "boolean") {
-      updateData.salesEnabled = salesEnabled;
-    }
-
-    const company = await prisma.company.update({
-      where: { id: companyId },
-      data: updateData,
-    });
-
-    return res.json(company);
-  } catch (error) {
-    console.error("Failed to update company workspace settings:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const session = req.user;
+  if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
+    return res.status(403).json({ message: "Unauthorized" });
   }
+
+  const { companyId } = req.params;
+  const { warrantyEnabled, salesEnabled } = req.body;
+
+  if (warrantyEnabled === undefined && salesEnabled === undefined) {
+    return res
+      .status(400)
+      .json({ message: "No workspace settings provided" });
+  }
+
+  const updateData = {};
+  if (typeof warrantyEnabled === "boolean") {
+    updateData.warrantyEnabled = warrantyEnabled;
+  }
+  if (typeof salesEnabled === "boolean") {
+    updateData.salesEnabled = salesEnabled;
+  }
+
+  const company = await prisma.company.update({
+    where: { id: companyId },
+    data: updateData,
+  });
+
+  return res.json(company);
 };
 
 export const verifyCompany = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
+  const session = req.user;
+  if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
+    return res.status(403).json({ message: "Unauthorized" });
+  }
 
-    const { companyId } = req.params;
-    const { action } = req.body; 
+  const { companyId } = req.params;
+  const { action } = req.body; 
 
-    const existing = await prisma.company.findUnique({ where: { id: companyId } });
-    if (!existing) {
-      return res.status(404).json({ message: "Company not found" });
-    }
+  const existing = await prisma.company.findUnique({ where: { id: companyId } });
+  if (!existing) {
+    return res.status(404).json({ message: "Company not found" });
+  }
 
-    if (action === "reject") {
-      const company = await prisma.company.update({
-        where: { id: companyId },
-        data: {
-          verificationStatus: "PENDING",
-          verificationDocUrl: null,
-          verificationSubmittedAt: null,
-          verifiedAt: null,
-          agreementDocUrl: null,
-          agreementSubmittedAt: null,
-          agreementVersion: null,
-        },
-      });
-      return res.json(company);
-    }
-
+  if (action === "reject") {
     const company = await prisma.company.update({
       where: { id: companyId },
       data: {
-        verificationStatus: "VERIFIED",
-        verifiedAt: new Date(),
-        warrantyEnabled: true,
-        contractSignedAt: existing.contractSignedAt ?? new Date(),
+        verificationStatus: "PENDING",
+        verificationDocUrl: null,
+        verificationSubmittedAt: null,
+        verifiedAt: null,
+        agreementDocUrl: null,
+        agreementSubmittedAt: null,
+        agreementVersion: null,
       },
     });
-
-    try {
-      if (company.email) {
-        const portalUrl = `${process.env.NEXT_PUBLIC_URL || ""}/warranty/dashboard`;
-        await MailService.sendEmail({
-          to: company.email,
-          subject: "Your documents are verified – workspace active",
-          html: Templates.getWorkspaceActiveEmail(company.name, portalUrl),
-          companyId,
-          source: "workspace-activated",
-          noReply: true,
-        });
-      }
-    } catch (mailErr) {
-      console.error("[Verification] Failed to send activation email:", mailErr);
-    }
-
     return res.json(company);
-  } catch (error) {
-    console.error("Failed to verify company:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  const company = await prisma.company.update({
+    where: { id: companyId },
+    data: {
+      verificationStatus: "VERIFIED",
+      verifiedAt: new Date(),
+      warrantyEnabled: true,
+      contractSignedAt: existing.contractSignedAt ?? new Date(),
+    },
+  });
+
+  try {
+    if (company.email) {
+      const portalUrl = `${process.env.NEXT_PUBLIC_URL || ""}/warranty/dashboard`;
+      await MailService.sendEmail({
+        to: company.email,
+        subject: "Your documents are verified – workspace active",
+        html: Templates.getWorkspaceActiveEmail(company.name, portalUrl),
+        companyId,
+        source: "workspace-activated",
+        noReply: true,
+      });
+    }
+  } catch (mailErr) {
+    console.error("[Verification] Failed to send activation email:", mailErr);
+  }
+
+  return res.json(company);
 };
 
 export const updateUserAccess = async (req, res) => {
-  try {
-    const session = req.user;
-    if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    const { userId } = req.params;
-    const { hasWarrantyAccess, hasSalesAccess } = req.body;
-
-    if (hasWarrantyAccess === undefined && hasSalesAccess === undefined) {
-      return res
-        .status(400)
-        .json({ message: "No access settings provided" });
-    }
-
-    const updateData = {};
-    if (typeof hasWarrantyAccess === "boolean") {
-      updateData.hasWarrantyAccess = hasWarrantyAccess;
-    }
-    if (typeof hasSalesAccess === "boolean") {
-      updateData.hasSalesAccess = hasSalesAccess;
-    }
-
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-    });
-
-    return res.json(user);
-  } catch (error) {
-    console.error("Failed to update user access:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const session = req.user;
+  if (!session || !(session.isSuperAdmin || req.adminAccess === true)) {
+    return res.status(403).json({ message: "Unauthorized" });
   }
+
+  const { userId } = req.params;
+  const { hasWarrantyAccess, hasSalesAccess } = req.body;
+
+  if (hasWarrantyAccess === undefined && hasSalesAccess === undefined) {
+    return res
+      .status(400)
+      .json({ message: "No access settings provided" });
+  }
+
+  const updateData = {};
+  if (typeof hasWarrantyAccess === "boolean") {
+    updateData.hasWarrantyAccess = hasWarrantyAccess;
+  }
+  if (typeof hasSalesAccess === "boolean") {
+    updateData.hasSalesAccess = hasSalesAccess;
+  }
+
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: updateData,
+  });
+
+  return res.json(user);
 };
 
 /** Onboarding dates; time to go-live is reported against the SOP's 30-day target. */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { api } from "@/lib/api";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -164,21 +165,19 @@ export default function DashboardPage() {
   const fetchAdminStats = useCallback(async (p: Period) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/dashboard/stats?period=${p}`);
-      if (response.ok) {
-        const data = await response.json();
-        setKpis({
-          totalTickets: data.totalTickets,
-          openTickets: data.openTickets,
-          escalatedTickets: data.escalatedTickets,
-          resolvedThisPeriod: data.resolvedThisPeriod ?? 0,
-          resolutionRate: data.resolutionRate,
-          avgResolutionTime: data.avgResolutionTime,
-        });
-        setTickets(data.recentTickets);
-        if (data.systemHealth) {
-          setSystemHealth(data.systemHealth);
-        }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.get<Record<string, any>>(`/api/dashboard/stats?period=${p}`);
+      setKpis({
+        totalTickets: data.totalTickets,
+        openTickets: data.openTickets,
+        escalatedTickets: data.escalatedTickets,
+        resolvedThisPeriod: data.resolvedThisPeriod ?? 0,
+        resolutionRate: data.resolutionRate,
+        avgResolutionTime: data.avgResolutionTime,
+      });
+      setTickets(data.recentTickets);
+      if (data.systemHealth) {
+        setSystemHealth(data.systemHealth);
       }
     } catch (error) {
       console.error("Error fetching stats:", error);
@@ -191,31 +190,30 @@ export default function DashboardPage() {
   const fetchHomeownerData = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/dashboard/homeowner");
-      if (response.ok) {
-        const data = await response.json();
-        setClaimCounts({
-          total: data.totalClaims,
-          active: data.activeClaims,
-          resolved: data.resolvedClaims,
-        });
-        setTickets(
-          (data.recentTickets as Partial<Ticket>[]).map((t, index) => ({
-            id: t.id ?? `ticket-${index}`,
-            homeowner: {
-              name: t.homeowner?.name || user?.name || "Me",
-              email: t.homeowner?.email || "",
-            },
-            property: t.property ? { address: t.property.address } : undefined,
-            issueType: t.issueType ?? "Unknown issue",
-            ticketType: t.ticketType ?? undefined,
-            warrantyYear: t.warrantyYear ?? 1,
-            priority: (t.priority ?? "MEDIUM") as TicketPriority,
-            status: (t.status ?? "OPEN") as TicketStatus,
-            createdAt: t.createdAt ?? new Date().toISOString(),
-          })),
-        );
-      }
+      const data = await api.get<{ totalClaims: number; activeClaims: number; resolvedClaims: number; recentTickets: Partial<Ticket>[] }>(
+        "/api/dashboard/homeowner",
+      );
+      setClaimCounts({
+        total: data.totalClaims,
+        active: data.activeClaims,
+        resolved: data.resolvedClaims,
+      });
+      setTickets(
+        data.recentTickets.map((t, index) => ({
+          id: t.id ?? `ticket-${index}`,
+          homeowner: {
+            name: t.homeowner?.name || user?.name || "Me",
+            email: t.homeowner?.email || "",
+          },
+          property: t.property ? { address: t.property.address } : undefined,
+          issueType: t.issueType ?? "Unknown issue",
+          ticketType: t.ticketType ?? undefined,
+          warrantyYear: t.warrantyYear ?? 1,
+          priority: (t.priority ?? "MEDIUM") as TicketPriority,
+          status: (t.status ?? "OPEN") as TicketStatus,
+          createdAt: t.createdAt ?? new Date().toISOString(),
+        })),
+      );
     } catch (error) {
       console.error("Error fetching homeowner tickets:", error);
     } finally {

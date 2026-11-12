@@ -7,21 +7,18 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatVisit, type TradeJob } from "@/components/trade/jobs";
+import { api } from "@/lib/api";
+import { useQuery } from "@/lib/use-query";
 
 export default function TradeOverviewPage() {
   const { user } = useAuth();
-  const [jobs, setJobs] = useState<TradeJob[] | null>(null);
+  const { data: jobs, error: loadError } = useQuery<TradeJob[]>("/api/trade/jobs");
+  const error = loadError ? "Could not load your jobs." : "";
   // What the trade still has to do in Calendly: connect it, or pick the event type.
   const [calendlyTodo, setCalendlyTodo] = useState<"connect" | "event-type" | null>(null);
-  const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/trade/jobs")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setJobs)
-      .catch(() => setError("Could not load your jobs."));
-    fetch("/api/trade/calendly")
-      .then((r) => (r.ok ? r.json() : null))
+    api.get<{ available?: boolean; connected?: boolean; eventType?: unknown } | null>("/api/trade/calendly")
       .then((s) =>
         setCalendlyTodo(!s?.available ? null : !s.connected ? "connect" : !s.eventType ? "event-type" : null),
       )

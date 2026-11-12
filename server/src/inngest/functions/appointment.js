@@ -1,4 +1,4 @@
-import { toolCall } from "../../lib/llm.js";
+import { toAnthropicMessages, toolCall } from "../../lib/llm.js";
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
 import { MailService } from "../../services/mail-service.js";
@@ -123,17 +123,6 @@ async function resolveFlowConfig(lead, campaignId) {
   return { mode, maxTurns: RUNAWAY_TURN_BACKSTOP };
 }
 
-function toAnthropicMessages(transcript) {
-  const msgs = [];
-  for (const t of transcript) {
-    const role = t.role === "agent" ? "assistant" : "user";
-    const last = msgs[msgs.length - 1];
-    if (last && last.role === role) last.content += `\n${t.content}`;
-    else msgs.push({ role, content: t.content });
-  }
-  while (msgs.length && msgs[0].role !== "user") msgs.shift();
-  return msgs;
-}
 
 const RESPOND_TOOL = {
   name: "respond",

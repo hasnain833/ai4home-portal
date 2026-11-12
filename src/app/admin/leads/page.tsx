@@ -28,7 +28,7 @@ import { History, Loader2, Pencil, Plus, Search, Target, Trash2, UploadCloud } f
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { parseCsv } from "@/lib/csv";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
 import {
   B2B_API,
   B2B_LEAD_STATUSES,
@@ -73,7 +73,6 @@ const COLUMN_ALIASES: Record<string, string> = {
 const EMPTY_FORM = { companyName: "", contactName: "", email: "", phone: "", website: "", city: "", notes: "" };
 type LeadForm = typeof EMPTY_FORM;
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 
 export default function AdminLeadsPage() {
   const confirm = useConfirm();

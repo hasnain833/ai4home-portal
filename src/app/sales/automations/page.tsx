@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import { api, errorMessage } from "@/lib/api";
 
 interface AutomationRule {
   id: string;
@@ -150,12 +151,9 @@ export default function AutomationsPage() {
 
   const fetchRules = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/automations");
-      if (res.ok) {
-        const data = await res.json();
-        setRules(Array.isArray(data.rules) ? data.rules : []);
-        setKillSwitch(!!data.killSwitch);
-      }
+      const data = await api.get<{ rules?: typeof rules; killSwitch?: boolean }>("/api/sales/automations");
+      setRules(Array.isArray(data?.rules) ? data.rules : []);
+      setKillSwitch(!!data?.killSwitch);
     } catch {
       // surfaced on actions
     }
@@ -163,8 +161,7 @@ export default function AutomationsPage() {
 
   const fetchAnalytics = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/automations/analytics");
-      if (res.ok) setAnalytics(await res.json());
+      setAnalytics(await api.get<typeof analytics>("/api/sales/automations/analytics"));
     } catch {
       // analytics are non-critical — the page still works without them
     }
@@ -177,20 +174,11 @@ export default function AutomationsPage() {
 
   const toggleKillSwitch = async () => {
     try {
-      const res = await fetch("/api/sales/automations/kill-switch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ killSwitch: !killSwitch }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setKillSwitch(!!data.killSwitch);
-        toast.success(data.killSwitch ? "All automations paused (kill switch ON)." : "Kill switch OFF — automations resumed.");
-      } else {
-        toast.error("Could not update the kill switch.");
-      }
-    } catch {
-      toast.error("Network error.");
+      const data = await api.post<{ killSwitch?: boolean }>("/api/sales/automations/kill-switch", { killSwitch: !killSwitch });
+      setKillSwitch(!!data?.killSwitch);
+      toast.success(data?.killSwitch ? "All automations paused (kill switch ON)." : "Kill switch OFF — automations resumed.");
+    } catch (error) {
+      toast.error(errorMessage(error));
     }
   };
 
@@ -249,27 +237,14 @@ export default function AutomationsPage() {
     };
 
     try {
-      const res = selectedRule
-        ? await fetch(`/api/sales/automations/${selectedRule.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-        : await fetch("/api/sales/automations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.message || "Failed to save automation.");
-        return;
-      }
+      await (selectedRule
+        ? api.patch(`/api/sales/automations/${selectedRule.id}`, payload)
+        : api.post("/api/sales/automations", payload));
       toast.success(selectedRule ? "Automation updated." : "Automation created (inactive — activate it when ready).");
       setRuleModalOpen(false);
       fetchRules();
-    } catch {
-      toast.error("Network error while saving.");
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -284,35 +259,22 @@ export default function AutomationsPage() {
       confirmText: "Delete",
     }))) return;
     try {
-      const res = await fetch(`/api/sales/automations/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        toast.success("Automation deleted.");
-        setRuleModalOpen(false);
-        fetchRules();
-      } else {
-        toast.error("Could not delete the automation.");
-      }
-    } catch {
-      toast.error("Network error.");
+      await api.delete(`/api/sales/automations/${id}`);
+      toast.success("Automation deleted.");
+      setRuleModalOpen(false);
+      fetchRules();
+    } catch (error) {
+      toast.error(errorMessage(error));
     }
   };
 
   const toggleRuleActive = async (id: string) => {
     const rule = rules.find((r) => r.id === id);
     try {
-      const res = await fetch(`/api/sales/automations/${id}/toggle`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive: rule ? !rule.isActive : true }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.message || "Could not update the automation.");
-        return;
-      }
+      await api.post(`/api/sales/automations/${id}/toggle`, { isActive: rule ? !rule.isActive : true });
       fetchRules();
-    } catch {
-      toast.error("Network error.");
+    } catch (error) {
+      toast.error(errorMessage(error));
     }
   };
 

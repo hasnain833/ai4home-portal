@@ -42,6 +42,7 @@ import {
   Phone,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { api, errorMessage } from "@/lib/api";
 
 interface StaffMember {
   id: string;
@@ -104,9 +105,7 @@ export default function TeamManagementPage() {
   const fetchStaff = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch("/api/admin/staff");
-      if (!res.ok) throw new Error("Failed to load staff");
-      const data = await res.json();
+      const data = await api.get<StaffMember[] | { staff?: StaffMember[]; permissionCatalogue?: PermissionCatalogue }>("/api/admin/staff");
       if (Array.isArray(data)) {
         setStaffList(data);
       } else {
@@ -136,21 +135,14 @@ export default function TeamManagementPage() {
     }
 
     try {
-      const res = await fetch("/api/admin/staff", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newStaff),
-      });
-      const data = await res.json();
-      if (!res.ok) { setFormError(data.message || "Failed to create staff member"); return; }
-
-      setSuccess(data.notice || `Invite sent to ${newStaff.email}. They'll set their own password.`);
+      const data = await api.post<{ notice?: string }>("/api/admin/staff", newStaff);
+      setSuccess(data?.notice || `Invite sent to ${newStaff.email}. They'll set their own password.`);
       setNewStaff({ name: "", email: "", phone: "", password: "" });
       setIsDialogOpen(false);
       fetchStaff();
       setTimeout(() => setSuccess(""), 4000);
-    } catch {
-      setFormError("An unexpected error occurred.");
+    } catch (e) {
+      setFormError(errorMessage(e));
     }
   };
 
@@ -164,12 +156,7 @@ export default function TeamManagementPage() {
     }))) return;
 
     try {
-      const res = await fetch("/api/admin/staff", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ staffId }),
-      });
-      if (!res.ok) throw new Error("Failed to remove staff");
+      await api.delete("/api/admin/staff", { staffId });
       setSuccess(`${staffName}'s account has been removed.`);
       fetchStaff();
       setTimeout(() => setSuccess(""), 4000);
@@ -209,32 +196,21 @@ export default function TeamManagementPage() {
 
     setIsUpdating(true);
     try {
-      const res = await fetch("/api/admin/staff", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          staffId: editingStaff.id,
-          name: editForm.name,
-          email: editForm.email,
-          phone: editForm.phone,
-          password: editForm.password || undefined,
-          salesPermissions: editForm.salesPermissions,
-        }),
+      await api.put("/api/admin/staff", {
+        staffId: editingStaff.id,
+        name: editForm.name,
+        email: editForm.email,
+        phone: editForm.phone,
+        password: editForm.password || undefined,
+        salesPermissions: editForm.salesPermissions,
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setEditFormError(data.message || "Failed to update staff member");
-        return;
-      }
-
       setSuccess(`Staff account for ${editForm.name} updated successfully!`);
       setIsEditDialogOpen(false);
       setEditingStaff(null);
       fetchStaff();
       setTimeout(() => setSuccess(""), 4000);
-    } catch {
-      setEditFormError("An unexpected error occurred.");
+    } catch (e) {
+      setEditFormError(errorMessage(e));
     } finally {
       setIsUpdating(false);
     }

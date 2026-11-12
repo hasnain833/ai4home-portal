@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { writeAuditLog } from "../lib/audit.js";
-import { denyUnlessAdminAccess } from "../middlewares/auth.js";
+import { adminHandler } from "../middlewares/auth.js";
 import { hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { getB2BAvailability } from "../lib/b2b.js";
 import { getPlatformSlots } from "../services/website-sales.js";
@@ -13,15 +13,7 @@ const MAX_TEST_TURNS = 40;
 const SAMPLE_TIMEZONE = "America/Chicago";
 const clip = (value, n) => String(value || "").trim().slice(0, n);
 
-const wrap = (label, fn) => async (req, res) => {
-  try {
-    if (denyUnlessAdminAccess(req, res)) return;
-    await fn(req, res);
-  } catch (error) {
-    console.error(`[B2B Prompt Lab] ${label} failed:`, error);
-    res.status(500).json({ message: `${label} failed.` });
-  }
-};
+const wrap = adminHandler("B2B Prompt Lab");
 
 function normalizeDraft(body = {}) {
   const defaults = defaultsFor(AGENT_TYPES.B2B);

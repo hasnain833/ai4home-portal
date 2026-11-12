@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowRightLeft, CheckCircle2, Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { api, errorMessage } from "@/lib/api";
 
 interface HandoffIssue {
   id: string;
@@ -43,10 +44,7 @@ export default function HandoffIssuesPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const fetchIssues = useCallback(async () => {
-    const res = await fetch(`/api/admin/handoff-issues?status=${tab}`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || "Could not load issues");
-    return data as { issues: HandoffIssue[]; open: number };
+    return api.get<{ issues: HandoffIssue[]; open: number }>(`/api/admin/handoff-issues?status=${tab}`);
   }, [tab]);
 
   // Callers set loading first; state is only set after the fetch resolves.
@@ -81,13 +79,11 @@ export default function HandoffIssuesPage() {
   const act = async (issue: HandoffIssue, action: "retry" | "resolve") => {
     setBusy(issue.id);
     try {
-      const res = await fetch(`/api/admin/handoff-issues/${issue.id}/${action}`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "That did not work");
+      await api.post(`/api/admin/handoff-issues/${issue.id}/${action}`);
       toast.success(action === "retry" ? "Hand-off completed." : "Marked resolved.");
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "That did not work");
+      toast.error(errorMessage(e));
       await load();
     } finally {
       setBusy(null);

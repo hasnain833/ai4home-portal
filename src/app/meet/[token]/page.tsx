@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, use } from "react";
 import { useSearchParams } from "next/navigation";
 import { splitLabel } from "@/components/warranty/ScheduleShell";
 import { CalendarDays, Clock, CheckCircle2 } from "lucide-react";
+import { api, ApiError, isSlotTaken, serverMessageOr } from "@/lib/api";
 
 type Slot = { iso: string; label: string };
 type BookingData = {
@@ -31,9 +32,7 @@ export default function PlatformBookingPage({ params }: { params: Promise<{ toke
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/public/b2b/booking/${token}${stepId ? `?s=${encodeURIComponent(stepId)}` : ""}`);
-      if (!res.ok) return setNotFound(true);
-      setData(await res.json());
+      setData(await api.get<NonNullable<typeof data>>(`/api/public/b2b/booking/${token}${stepId ? `?s=${encodeURIComponent(stepId)}` : ""}`));
     } catch {
       setNotFound(true);
     } finally {
@@ -51,24 +50,22 @@ export default function PlatformBookingPage({ params }: { params: Promise<{ toke
     setBooking(true);
     setError("");
     try {
-      const res = await fetch(`/api/public/b2b/booking/${token}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startTime: selected, campaignId }),
+      const result = await api.post<{ label: string; confirmationEmailSent?: boolean }>(`/api/public/b2b/booking/${token}`, {
+        startTime: selected,
+        campaignId,
       });
-      const result = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(result.message || "Could not book that time.");
-        if (res.status === 409) {
-          setSelected("");
-          await load();
-        }
-        return;
-      }
       setConfirmed(result.label);
       setConfirmationEmailSent(typeof result.confirmationEmailSent === "boolean" ? result.confirmationEmailSent : null);
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status)) {
+        setError("Something went wrong. Please try again.");
+        return;
+      }
+      setError(serverMessageOr(e, "Could not book that time."));
+      if (isSlotTaken(e)) {
+        setSelected("");
+        await load();
+      }
     } finally {
       setBooking(false);
     }

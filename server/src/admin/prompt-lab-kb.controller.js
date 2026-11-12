@@ -26,6 +26,7 @@ import {
 } from "../services/warranty-vector.service.js";
 import { KB_SCOPES } from "../lib/sales-ai.js";
 import { denyUnlessAdminAccess } from "../middlewares/auth.js";
+import { formatFileSize } from "../lib/utils.js";
 
 
 const KB_BACKENDS = {
@@ -126,15 +127,6 @@ async function resolveTestCommunity(rawId, company) {
   return { communityId: community.id, community };
 }
 
-function formatFileSize(bytes) {
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
 
 function toSafeDoc(doc) {
   const { url, ...rest } = doc;

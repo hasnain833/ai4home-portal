@@ -489,88 +489,83 @@ async function copyReplyToTenant(companyId, lead, from, subject, body) {
 }
 
 export const processBrevoInboundEmail = async (req, res) => {
-  try {
-    const { items } = req.body;
-    if (!items || !Array.isArray(items)) {
-      return res.status(400).json({ message: "Invalid payload format. Expected 'items' array." });
-    }
-
-    let processedCount = 0;
-
-    for (const item of items) {
-      const fromEmail = item.From?.Address;
-      const textBody = item.RawTextBody || item.TextBody || item.ExtractedMarkdownMessage || "";
-      const htmlBody = item.RawHtmlBody || item.HtmlBody || "";
-
-      if (!fromEmail) {
-        console.warn("[Brevo Webhook] Item is missing From.Address, skipping.");
-        continue;
-      }
-
-      const normalizedEmail = fromEmail.trim().toLowerCase();
-
-      // Reply to a platform (B2B) campaign: no agent on that side, hand it to the super admin.
-      if (companyIdFromReplyAddress(item.To) === B2B_REPLY_TAG) {
-        await handleB2BReply({ channel: "EMAIL", sender: normalizedEmail, body: textBody || htmlBody, subject: item.Subject, headers: item.Headers });
-        processedCount++;
-        continue;
-      }
-
-      let companyId =
-        companyIdFromReplyAddress(item.To) ||
-        req.query.companyId ||
-        req.body.companyId ||
-        null;
-
-      if (!companyId) {
-        const resolution = await resolveInboundCompany(normalizedEmail, "EMAIL");
-        companyId = resolution.companyId;
-        if (!companyId) {
-          console.warn(
-            `[Brevo Webhook] \u26a0 Could not attribute reply from ${normalizedEmail} ` +
-              `(${resolution.reason}). Not routing it.`,
-          );
-          continue;
-        }
-        console.log(`[Brevo Webhook] attributed ${normalizedEmail} to ${companyId} (${resolution.reason}).`);
-      }
-
-      const leads = await prisma.lead.findMany({
-        where: {
-          companyId,
-          email: normalizedEmail,
-        },
-      });
-
-      if (leads.length === 0) {
-        console.warn(`[Brevo Webhook] \u26a0 No lead with email ${normalizedEmail} in company ${companyId}.`);
-      }
-
-      if (leads.length) await copyReplyToTenant(companyId, leads[0], normalizedEmail, item.Subject, textBody || htmlBody);
-
-      for (const lead of leads) {
-        const replyContent = textBody || htmlBody || "No body content";
-        const { inngest } = await import("../lib/inngest.js");
-        await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
-        await inngest.send({
-          name: "lead.reply.received",
-          data: { leadId: lead.id, companyId, channel: "EMAIL", body: replyContent, sender: normalizedEmail },
-        });
-        await markLeadEngaged(lead.id);
-        await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "EMAIL" } });
-      }
-
-      processedCount++;
-    }
-
-    return res.json({
-      success: true,
-      processedItems: processedCount,
-    });
-  } catch (error) {
-    console.error("[Brevo Webhook] Error processing inbound email:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { items } = req.body;
+  if (!items || !Array.isArray(items)) {
+    return res.status(400).json({ message: "Invalid payload format. Expected 'items' array." });
   }
+
+  let processedCount = 0;
+
+  for (const item of items) {
+    const fromEmail = item.From?.Address;
+    const textBody = item.RawTextBody || item.TextBody || item.ExtractedMarkdownMessage || "";
+    const htmlBody = item.RawHtmlBody || item.HtmlBody || "";
+
+    if (!fromEmail) {
+      console.warn("[Brevo Webhook] Item is missing From.Address, skipping.");
+      continue;
+    }
+
+    const normalizedEmail = fromEmail.trim().toLowerCase();
+
+    // Reply to a platform (B2B) campaign: no agent on that side, hand it to the super admin.
+    if (companyIdFromReplyAddress(item.To) === B2B_REPLY_TAG) {
+      await handleB2BReply({ channel: "EMAIL", sender: normalizedEmail, body: textBody || htmlBody, subject: item.Subject, headers: item.Headers });
+      processedCount++;
+      continue;
+    }
+
+    let companyId =
+      companyIdFromReplyAddress(item.To) ||
+      req.query.companyId ||
+      req.body.companyId ||
+      null;
+
+    if (!companyId) {
+      const resolution = await resolveInboundCompany(normalizedEmail, "EMAIL");
+      companyId = resolution.companyId;
+      if (!companyId) {
+        console.warn(
+          `[Brevo Webhook] \u26a0 Could not attribute reply from ${normalizedEmail} ` +
+            `(${resolution.reason}). Not routing it.`,
+        );
+        continue;
+      }
+      console.log(`[Brevo Webhook] attributed ${normalizedEmail} to ${companyId} (${resolution.reason}).`);
+    }
+
+    const leads = await prisma.lead.findMany({
+      where: {
+        companyId,
+        email: normalizedEmail,
+      },
+    });
+
+    if (leads.length === 0) {
+      console.warn(`[Brevo Webhook] \u26a0 No lead with email ${normalizedEmail} in company ${companyId}.`);
+    }
+
+    if (leads.length) await copyReplyToTenant(companyId, leads[0], normalizedEmail, item.Subject, textBody || htmlBody);
+
+    for (const lead of leads) {
+      const replyContent = textBody || htmlBody || "No body content";
+      const { inngest } = await import("../lib/inngest.js");
+      await inngest.send({ name: "campaign.exit", data: { leadId: lead.id, reason: "REPLY" } });
+      await inngest.send({
+        name: "lead.reply.received",
+        data: { leadId: lead.id, companyId, channel: "EMAIL", body: replyContent, sender: normalizedEmail },
+      });
+      await markLeadEngaged(lead.id);
+      await triggerAutomation({ companyId, leadId: lead.id, event: "LEAD_REPLIED", context: { channel: "EMAIL" } });
+    }
+
+    processedCount++;
+  }
+
+  return res.json({
+    success: true,
+    processedItems: processedCount,
+  });
 };
 
 const CONVERSATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;

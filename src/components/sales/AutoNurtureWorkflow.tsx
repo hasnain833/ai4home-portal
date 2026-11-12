@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { api, errorMessage } from "@/lib/api";
 import {
   Dialog,
   DialogContent,
@@ -67,20 +68,14 @@ function timing(at: number) {
 }
 
 async function rewriteWithAi(t: Touch) {
-  const res = await fetch("/api/sales/campaigns/generate-copy", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      stepType: t.type,
-      goal: `${t.theme}: ${t.goal}. Invite them to book a model-home visit or chat with a sales consultant.`,
-      audience: "New-home buyer leads who recently showed interest",
-      contextInfo:
-        `Rewrite this message for our company using facts from our knowledge base only. ` +
-        `Keep the booking link merge tag if it is present. Current message: ${t.body}`,
-    }),
+  const data = await api.post<{ subject?: string; body?: string }>("/api/sales/campaigns/generate-copy", {
+    stepType: t.type,
+    goal: `${t.theme}: ${t.goal}. Invite them to book a model-home visit or chat with a sales consultant.`,
+    audience: "New-home buyer leads who recently showed interest",
+    contextInfo:
+      `Rewrite this message for our company using facts from our knowledge base only. ` +
+      `Keep the booking link merge tag if it is present. Current message: ${t.body}`,
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || "AI rewrite failed");
   return { subject: data.subject || t.subject, body: data.body || t.body };
 }
 
@@ -96,13 +91,10 @@ export default function AutoNurtureWorkflow() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(API, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-      setWf(data);
+      setWf(await api.get<Workflow>(API));
       setError("");
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : "Could not load the automatic workflow.");
+      setError(errorMessage(e));
     }
   }, []);
 
@@ -111,13 +103,7 @@ export default function AutoNurtureWorkflow() {
   }, [load]);
 
   const patchStep = async (id: string, body: Record<string, unknown>) => {
-    const res = await fetch(`${API}/steps/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || "Could not save the step.");
+    const data = await api.patch<Touch>(`${API}/steps/${id}`, body);
     setWf((prev) => prev && { ...prev, touches: prev.touches.map((t) => (t.id === id ? { ...t, ...data } : t)) });
     return data;
   };
@@ -136,16 +122,11 @@ export default function AutoNurtureWorkflow() {
     }
     setToggling(true);
     try {
-      const res = await fetch(API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: next }),
-      });
-      if (!res.ok) throw new Error();
+      await api.put(API, { active: next });
       setWf({ ...wf, active: next });
       toast.success(next ? "Automatic workflow is on" : "Automatic workflow is off");
-    } catch {
-      toast.error("Could not update the workflow.");
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setToggling(false);
     }

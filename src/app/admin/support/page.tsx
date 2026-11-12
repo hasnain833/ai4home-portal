@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSupportContact } from "@/components/layout/HelpMenu";
 import { QUERY_KEYS, fetchKey } from "@/lib/use-query";
+import { api, errorMessage } from "@/lib/api";
 
 /** The support phone builders see in the Help menu and on Communities. */
 function SupportContactCard() {
@@ -35,17 +36,11 @@ function SupportContactCard() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/admin/support-contact", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Could not save");
+      await api.put("/api/admin/support-contact", { phone });
       await fetchKey(QUERY_KEYS.supportContact, { force: true });
       toast.success("Support contact updated");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not save");
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -124,20 +119,15 @@ export default function AdminSupportPage() {
 
   useEffect(() => {
     if (!isPlatformUser(user)) return;
-    (async () => {
-      const res = await fetch("/api/admin/companies");
-      if (res.ok) {
-        const data = await res.json();
-        setCompanies(
-          (data || []).map((c: CompanyOption) => ({ id: c.id, name: c.name })),
-        );
-      }
-    })();
+    api.get<CompanyOption[]>("/api/admin/companies").then(
+      (data) => setCompanies((data || []).map((c) => ({ id: c.id, name: c.name }))),
+      () => {},
+    );
   }, [user]);
 
   const loadLog = useCallback(async () => {
-    const res = await fetch("/api/admin/support/access-log");
-    if (res.ok) setLog(await res.json());
+    // Best effort: the log is a convenience, so a failed load leaves the old one on screen.
+    await api.get<AccessEntry[]>("/api/admin/support/access-log").then(setLog, () => {});
   }, []);
 
   useEffect(() => {
@@ -157,19 +147,14 @@ export default function AdminSupportPage() {
     try {
       const params = new URLSearchParams({ reason: reason.trim() });
       if (search.trim()) params.set("search", search.trim());
-      const res = await fetch(
+      const data = await api.get<{ leads?: typeof leads; total?: number; truncated?: boolean }>(
         `/api/admin/support/leads/${companyId}?${params}`,
       );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok)
-        throw new Error(data.message || "Could not open support view");
-      setLeads(data.leads || []);
-      setMeta({ total: data.total || 0, truncated: !!data.truncated });
+      setLeads(data?.leads || []);
+      setMeta({ total: data?.total || 0, truncated: !!data?.truncated });
       await loadLog();
     } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : "Could not open support view",
-      );
+      toast.error(errorMessage(e));
     } finally {
       setLoading(false);
     }

@@ -20,6 +20,7 @@ import {
 import PromptSuggestions from "@/components/warranty/PromptSuggestions";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SlotPicker, type Slot } from "@/components/warranty/ScheduleShell";
+import { api, ApiError, errorMessage } from "@/lib/api";
 
 export interface HomeCard {
   id: string;
@@ -369,23 +370,25 @@ function BookingForm({
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/sales/chat/book", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...pending, name, email, phone, homes }),
+      const data = await api.post<{ reply: string; booked?: Parameters<typeof onBooked>[1] }>("/api/sales/chat/book", {
+        ...pending,
+        name,
+        email,
+        phone,
+        homes,
       });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 409) {
-        const alt = Array.isArray(data.slots) && data.slots.length
-          ? ` Here are the next open times:\n${data.slots.map((s: { label: string }) => `• ${s.label}`).join("\n")}\nWhich one works?`
+      onBooked(data.reply, data.booked || null);
+    } catch (err) {
+      // 409: someone took the slot first; offer the next open times instead of an error.
+      if (err instanceof ApiError && err.status === 409) {
+        const slots = (err.body as { slots?: { label: string }[] } | null)?.slots;
+        const alt = Array.isArray(slots) && slots.length
+          ? ` Here are the next open times:\n${slots.map((s) => `• ${s.label}`).join("\n")}\nWhich one works?`
           : "";
         onBooked(`Sorry — that time was just taken.${alt}`, null);
         return;
       }
-      if (!res.ok) throw new Error(data.message || "Could not book the visit");
-      onBooked(data.reply, data.booked || null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not book the visit");
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -436,10 +439,9 @@ export default function SalesChat({
   // list hides the panel.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/sales/chat/suggestions")
-      .then((r) => (r.ok ? r.json() : { suggestions: [] }))
+    api.get<{ suggestions?: string[] }>("/api/sales/chat/suggestions")
       .then((d) => {
-        if (!cancelled) setSuggestions(Array.isArray(d.suggestions) ? d.suggestions : []);
+        if (!cancelled) setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []);
       })
       .catch(() => {
         // Cosmetic; the chat works without them.
@@ -480,19 +482,14 @@ export default function SalesChat({
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/sales/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: history.map((m) => ({
-            role: m.role,
-            content: m.content,
-            homeIds: (m.homes || []).map((h) => h.id),
-          })),
-        }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.post<any>("/api/sales/chat", {
+        messages: history.map((m) => ({
+          role: m.role,
+          content: m.content,
+          homeIds: (m.homes || []).map((h) => h.id),
+        })),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || "Failed to send message");
 
       if (data.contactPrefill) setPrefill(data.contactPrefill);
       appendAgent(data.reply, {
@@ -501,9 +498,9 @@ export default function SalesChat({
         slots: Array.isArray(data.slots) ? data.slots : [],
       });
     } catch (error) {
-      console.error("Sales chat error:", error);
+      // The server's own reason when it gave one; a dropped connection gets the friendly line.
       appendAgent(
-        error instanceof Error && error.message !== "Failed to send message"
+        error instanceof ApiError && error.status
           ? error.message
           : "Sorry, I'm having trouble connecting right now. Please try again.",
       );

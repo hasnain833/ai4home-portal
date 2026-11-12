@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
 import {
   B2B_API,
   B2B_LEAD_STATUSES,
@@ -83,7 +83,6 @@ const SEND_TIMES = Array.from({ length: 26 }, (_, i) => {
   return { value: `${String(hour).padStart(2, "0")}:${minute}`, label: `${hour % 12 || 12}:${minute} ${hour < 12 ? "AM" : "PM"}` };
 });
 const SEND_RIGHT_AWAY = "right-away";
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 const PLACEHOLDERS = ["{{firstName}}", "{{contactName}}", "{{companyName}}", "{{city}}", "{{bookingLink}}"];
 
 type LibraryPiece = { id: string; category: string; stage: string; channel: "EMAIL" | "SMS"; subject: string | null; body: string };

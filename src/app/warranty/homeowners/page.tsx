@@ -44,6 +44,7 @@ import {
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { invalidate, QUERY_KEYS } from "@/lib/use-query";
+import { api, errorMessage } from "@/lib/api";
 
 interface Homeowner {
   id: string;
@@ -114,20 +115,13 @@ export default function HomeownersManagementPage() {
     if (!phoneEdit) return;
     setPhoneError("");
     try {
-      const res = await fetch(`/api/homeowners/${phoneEdit.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ phone: phoneEdit.value }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setPhoneError(data.message || "Could not save phone number."); return; }
-      setHomeowners((prev) => prev.map((h) => (h.id === phoneEdit.id ? { ...h, phone: data.phone ?? null } : h)));
+      const data = await api.patch<{ phone?: string | null }>(`/api/homeowners/${phoneEdit.id}`, { phone: phoneEdit.value });
+      setHomeowners((prev) => prev.map((h) => (h.id === phoneEdit.id ? { ...h, phone: data?.phone ?? null } : h)));
       setSuccess(`Phone number updated for ${phoneEdit.name}.`);
       setPhoneEdit(null);
       setTimeout(() => setSuccess(""), 4000);
-    } catch {
-      setPhoneError("Could not save phone number.");
+    } catch (e) {
+      setPhoneError(errorMessage(e));
     }
   };
 
@@ -141,10 +135,7 @@ export default function HomeownersManagementPage() {
   const fetchHomeowners = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch("/api/homeowners");
-      if (!res.ok) throw new Error("Failed to load homeowners");
-      const data = await res.json();
-      setHomeowners(data);
+      setHomeowners(await api.get<Homeowner[]>("/api/homeowners"));
     } catch {
       setError("Could not load homeowners.");
     } finally {
@@ -168,33 +159,21 @@ export default function HomeownersManagementPage() {
     }
 
     try {
-      const res = await fetch("/api/homeowners", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newHomeowner),
-      });
-      const data = await res.json();
-      if (!res.ok) { setFormError(data.message || "Failed to create homeowner"); return; }
-
-      setSuccess(data.notice || `Homeowner ${newHomeowner.name} added. A welcome email with a set-password link is on its way.`);
+      const data = await api.post<{ notice?: string }>("/api/homeowners", newHomeowner);
+      setSuccess(data?.notice || `Homeowner ${newHomeowner.name} added. A welcome email with a set-password link is on its way.`);
       setNewHomeowner({ name: "", email: "", phone: "", password: "" });
       setIsDialogOpen(false);
       fetchHomeowners();
       invalidate(QUERY_KEYS.homeownerOptions);
       setTimeout(() => setSuccess(""), 5000);
-    } catch {
-      setFormError("An unexpected error occurred.");
+    } catch (e) {
+      setFormError(errorMessage(e));
     }
   };
 
   const handleDeleteHomeowner = async (homeownerId: string, homeownerName: string) => {
     try {
-      const res = await fetch("/api/homeowners", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ homeownerId }),
-      });
-      if (!res.ok) throw new Error("Failed to remove homeowner");
+      await api.delete("/api/homeowners", { homeownerId });
       setSuccess(`${homeownerName} has been removed.`);
       fetchHomeowners();
       invalidate(QUERY_KEYS.homeownerOptions);
@@ -215,26 +194,13 @@ export default function HomeownersManagementPage() {
       prev.map((h) => (h.id === homeowner.id ? { ...h, hasSalesAccess: next } : h)),
     );
     try {
-      const res = await fetch(`/api/homeowners/${homeowner.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ hasSalesAccess: next }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setHomeowners((prev) =>
-          prev.map((h) => (h.id === homeowner.id ? { ...h, hasSalesAccess: !next } : h)),
-        );
-        setError(data.message || "Could not change Sales access.");
-        return;
-      }
+      await api.patch(`/api/homeowners/${homeowner.id}`, { hasSalesAccess: next });
       setSuccess(`Sales access ${next ? "granted to" : "removed from"} ${homeowner.name}.`);
-    } catch {
+    } catch (e) {
       setHomeowners((prev) =>
         prev.map((h) => (h.id === homeowner.id ? { ...h, hasSalesAccess: !next } : h)),
       );
-      setError("Could not change Sales access.");
+      setError(errorMessage(e));
     } finally {
       setSavingAccessId(null);
     }
@@ -264,16 +230,15 @@ export default function HomeownersManagementPage() {
         body = new FormData();
         body.append("file", file);
       }
-      const res = await fetch(`/api/homeowners/${homeowner.id}/house-photo`, { method: file ? "POST" : "DELETE", body });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data.message || "Could not update the house photo."); return; }
+      const url = `/api/homeowners/${homeowner.id}/house-photo`;
+      const data = await (file ? api.post<Homeowner["property"]>(url, body) : api.delete<Homeowner["property"]>(url));
       setHomeowners((prev) => prev.map((h) => (h.id === homeowner.id ? { ...h, property: data } : h)));
       if (file) {
         setSuccess(`House photo saved for ${homeowner.name}.`);
         setTimeout(() => setSuccess(""), 4000);
       }
-    } catch {
-      setError("Could not update the house photo.");
+    } catch (e) {
+      setError(errorMessage(e));
     } finally {
       setPhotoBusyId(null);
     }

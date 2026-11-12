@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -29,20 +31,12 @@ export default function AIChatPage() {
   useEffect(() => {
     if (isLoading || !user) return;
 
-    const fetchCompanyData = async () => {
-      try {
-        const response = await fetch("/api/company", { cache: "no-store" });
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data.botColor) {
-            setThemeColor(data.botColor);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to fetch company details:", error);
-      }
-    };
-    fetchCompanyData();
+    // Shared with the company page, so the two never disagree.
+    fetchKey<{ botColor?: string }>(QUERY_KEYS.company)
+      .then((data) => {
+        if (data?.botColor) setThemeColor(data.botColor);
+      })
+      .catch(() => {});
   }, [user, isLoading]);
 
 
@@ -125,14 +119,8 @@ export default function AIChatPage() {
                             const newColor = e.target.value;
                             setThemeColor(newColor);
                             try {
-                              const response = await fetch("/api/company", {
-                                method: "PUT",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ botColor: newColor })
-                              });
-                              if (!response.ok) {
-                                throw new Error(`Save failed with status ${response.status}`);
-                              }
+                              await api.put("/api/company", { botColor: newColor });
+                              invalidate(QUERY_KEYS.company);
                             } catch (err) {
                               console.error("Failed to save bot color:", err);
                             }

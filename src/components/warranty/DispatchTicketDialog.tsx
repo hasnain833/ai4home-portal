@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { api, errorMessage } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -81,9 +82,8 @@ export function DispatchTicketDialog({
   // Loaded here so every page that opens the dialog offers trades.
   useEffect(() => {
     if (!ticket) return;
-    fetch("/api/trades")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: TradeOption[]) => setTrades(rows.filter((t) => t.isActive)))
+    api.get<TradeOption[]>("/api/trades")
+      .then((rows) => setTrades(rows.filter((t) => t.isActive)))
       .catch(() => setTrades([]));
   }, [ticket]);
 
@@ -108,28 +108,15 @@ export function DispatchTicketDialog({
 
     setDispatching(true);
     try {
-      const response = await fetch(`/api/tickets/${ticket.id}/dispatch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          staffId: form.staffId && form.staffId !== UNASSIGNED ? form.staffId : null,
-          category: form.category || null,
-          notes: form.notes.trim() || null,
-        }),
+      const data = await api.post<{ notice?: string }>(`/api/tickets/${ticket.id}/dispatch`, {
+        staffId: form.staffId && form.staffId !== UNASSIGNED ? form.staffId : null,
+        category: form.category || null,
+        notes: form.notes.trim() || null,
       });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        setError(data.message || "Failed to dispatch the ticket.");
-        return;
-      }
-
       close();
-      await onDispatched(data.notice);
+      await onDispatched(data?.notice);
     } catch (err) {
-      console.error("Error dispatching ticket:", err);
-      setError("Error connecting to server.");
+      setError(errorMessage(err));
     } finally {
       setDispatching(false);
     }

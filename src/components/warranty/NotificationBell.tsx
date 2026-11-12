@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCheck, MailWarning, Trash2, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,9 @@ type Notification = {
 
 const POLL_MS = 60_000;
 
+type Counts = { unreadCount?: number };
+type Listing = Counts & { notifications?: Notification[] };
+
 export function NotificationBell({
   expanded = false,
   className = "",
@@ -66,11 +70,7 @@ export function NotificationBell({
 
   const loadCount = useCallback(async () => {
     try {
-      const res = await fetch(`${apiBase}/unread-count`, {
-        credentials: "include",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await api.get<Counts>(`${apiBase}/unread-count`);
       setUnread(data.unreadCount ?? 0);
     } catch {
       // A failed poll is not worth surfacing — the next one will catch up.
@@ -80,11 +80,7 @@ export function NotificationBell({
   const loadList = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiBase}?limit=20&unreadOnly=true`, {
-        credentials: "include",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await api.get<Listing>(`${apiBase}?limit=20&unreadOnly=true`);
       setItems(data.notifications ?? []);
       setUnread(data.unreadCount ?? 0);
     } catch {
@@ -97,11 +93,7 @@ export function NotificationBell({
   const loadArchive = useCallback(async () => {
     setArchiveLoading(true);
     try {
-      const res = await fetch(`${apiBase}?limit=100`, {
-        credentials: "include",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await api.get<Listing>(`${apiBase}?limit=100`);
       setArchive(data.notifications ?? []);
       setUnread(data.unreadCount ?? 0);
     } catch {
@@ -115,11 +107,7 @@ export function NotificationBell({
     let cancelled = false;
     const tick = async () => {
       try {
-        const res = await fetch(`${apiBase}/unread-count`, {
-          credentials: "include",
-        });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
+        const data = await api.get<Counts>(`${apiBase}/unread-count`);
         if (!cancelled) setUnread(data.unreadCount ?? 0);
       } catch {
         // A failed poll is not worth surfacing — the next one will catch up.
@@ -150,10 +138,7 @@ export function NotificationBell({
     setArchive((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
     setUnread((c) => Math.max(0, c - 1));
     try {
-      await fetch(`${apiBase}/${id}/read`, {
-        method: "PATCH",
-        credentials: "include",
-      });
+      await api.patch(`${apiBase}/${id}/read`);
     } catch {
       loadCount();
     }
@@ -164,10 +149,7 @@ export function NotificationBell({
     setArchive((prev) => prev.map((n) => ({ ...n, isRead: true })));
     setUnread(0);
     try {
-      await fetch(`${apiBase}/read-all`, {
-        method: "PATCH",
-        credentials: "include",
-      });
+      await api.patch(`${apiBase}/read-all`);
     } catch {
       loadCount();
     }
@@ -180,13 +162,8 @@ export function NotificationBell({
     setItems((prev) => prev.filter((n) => n.id !== id));
     if (wasUnread) setUnread((c) => Math.max(0, c - 1));
     try {
-      const res = await fetch(`${apiBase}/${id}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("delete failed");
-      const data = await res.json().catch(() => ({}));
-      if (typeof data.unreadCount === "number") setUnread(data.unreadCount);
+      const data = await api.delete<Counts | null>(`${apiBase}/${id}`);
+      if (typeof data?.unreadCount === "number") setUnread(data.unreadCount);
     } catch {
       // Put it back rather than leaving the screen lying about what was deleted.
       await loadArchive();
@@ -200,11 +177,7 @@ export function NotificationBell({
     if (readOnes.length === 0) return;
     setArchive((prev) => prev.filter((n) => !n.isRead));
     try {
-      const res = await fetch(`${apiBase}/read`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error("clear failed");
+      await api.delete(`${apiBase}/read`);
     } catch {
       await loadArchive();
     }

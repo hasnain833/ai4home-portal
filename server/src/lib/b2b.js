@@ -1,4 +1,4 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import prisma from "./prisma.js";
 import { platformCalendly, platformCalendlyPointer } from "./platform-calendly.js";
 import { MailService } from "../services/mail-service.js";
@@ -58,6 +58,43 @@ export function appUrl() {
 export function bookingLinkFor(lead, campaignId, stepId) {
   const query = new URLSearchParams({ ...(campaignId ? { c: campaignId } : {}), ...(stepId ? { s: stepId } : {}) }).toString();
   return `${appUrl()}/meet/${encodeURIComponent(lead.bookingToken)}${query ? `?${query}` : ""}`;
+}
+
+// No 0/O, 1/l/I: the code is read off a phone screen.
+const SHORT_CODE_CHARS = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
+const SHORT_CODE_LENGTH = 6;
+const shortCode = () =>
+  Array.from(randomBytes(SHORT_CODE_LENGTH), (b) => SHORT_CODE_CHARS[b % SHORT_CODE_CHARS.length]).join("");
+
+/**
+ * A short /m/<code> link that redirects to bookingLinkFor(lead, campaignId, stepId), for texts,
+ * where every character counts. The same lead, campaign and step always reuse one code.
+ */
+export async function shortBookingLinkFor(lead, campaignId = null, stepId = null) {
+  const key = { leadId: lead.id, campaignId: campaignId || null, stepId: stepId || null };
+  const existing = await prisma.b2BShortLink.findFirst({ where: key, select: { code: true } });
+  if (existing) return `${appUrl()}/m/${existing.code}`;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = shortCode();
+    try {
+      await prisma.b2BShortLink.create({ data: { code, ...key } });
+      return `${appUrl()}/m/${code}`;
+    } catch (error) {
+      if (error?.code !== "P2002") throw error; // code taken: try another
+    }
+  }
+  return bookingLinkFor(lead, campaignId, stepId);
+}
+
+/** Where a short link goes, as a path on this site; null when the code is unknown. */
+export async function resolveShortLink(code) {
+  const link = await prisma.b2BShortLink.findUnique({
+    where: { code: String(code || "") },
+    include: { lead: { select: { bookingToken: true } } },
+  });
+  if (!link?.lead) return null;
+  const url = new URL(bookingLinkFor(link.lead, link.campaignId, link.stepId));
+  return url.pathname + url.search;
 }
 
 // ---------- Weekly limits and journey settings ----------
@@ -284,7 +321,9 @@ export async function notifySuperAdmin(subject, html, { replyTo } = {}) {
     console.warn(`[B2B] SUPERADMIN_EMAIL is not set — dropped notification: ${subject}`);
     return;
   }
-  await MailService.sendEmail({ to, subject, html, source: "b2b-notify", replyTo, noReply: !replyTo }).catch((e) =>
+  // Every notice gets the standard card; one already built from a template keeps its own.
+  const body = html.includes("<!--ai4hb-logo-->") ? html : Templates.getAdminNoticeEmail(subject, html);
+  await MailService.sendEmail({ to, subject, html: body, source: "b2b-notify", replyTo, noReply: !replyTo }).catch((e) =>
     console.error("[B2B] Super admin notification failed:", e.message),
   );
 }
@@ -322,6 +361,17 @@ export const NOT_INTERESTED_REASON = "the lead said they are not interested";
 export const isAgentPaused = (lead) =>
   !!lead.agentPausedAt && !(lead.agentPausedUntil && new Date(lead.agentPausedUntil) <= new Date());
 
+// The per-lead daily limit. It pauses the agent until the 24 hours are up.
+export const LEAD_DAILY_LIMIT = "the daily reply limit for this lead";
+export const pausedForDailyLimit = (lead) => isAgentPaused(lead) && lead.agentPauseReason === `it reached ${LEAD_DAILY_LIMIT}`;
+
+// A lead saying they're ready ("I'm interested", "how can I reach you") is the reply that matters
+// most, so it is answered even past the per-lead daily limit. The lifetime and platform limits still apply.
+const INTERESTED_RE =
+  /\binterested\b|\bsign (me|us) up\b|\bcount (me|us) in\b|\blet'?s (talk|chat|meet|book|schedule|do it)\b|\bbook (a|me|us)\b|\bset up a (call|demo|meeting)\b|\b(how|where) (can|do|should) (i|we) (contact|reach|call|book|sign up|get started|start)\b|\bget started\b|\bcall me\b|\bdemo\b/i;
+const NOT_INTERESTED_RE = /\bnot\s+(really\s+|very\s+)?interested\b|\bno longer interested\b/i;
+export const showsInterest = (text) => INTERESTED_RE.test(String(text || "")) && !NOT_INTERESTED_RE.test(String(text || ""));
+
 /** Keeps a business lead's SMS status in step with STOP and START texts on the shared number. */
 export async function setB2BSmsOptOut(contact, optedOut) {
   const digits = String(contact || "").replace(/\D/g, "").slice(-10);
@@ -347,9 +397,12 @@ const replyPlainText = (body) =>
   latestReplyText(body).replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/[ \t]+/g, " ").trim();
 
 /** Why the agent must not answer this lead on this channel, or null. */
-export async function agentBlockReason(lead, channel) {
+/** `interested`: the lead's latest message shows interest, which gets past the per-lead daily limit. */
+export async function agentBlockReason(lead, channel, { interested = false } = {}) {
   if (!hasLLM()) return "no AI provider is configured";
-  if (isAgentPaused(lead)) return `it is paused for this lead (${lead.agentPauseReason || "paused by the team"})`;
+  if (isAgentPaused(lead) && !(interested && pausedForDailyLimit(lead))) {
+    return `it is paused for this lead (${lead.agentPauseReason || "paused by the team"})`;
+  }
   if (B2B_CLOSED_STATUSES.includes(lead.status)) return `the lead is ${lead.status}`;
   if (channel === "EMAIL") return lead.emailOptOut ? "the lead opted out of email" : null;
   if (lead.smsOptOut) return "the lead opted out of SMS";
@@ -412,7 +465,7 @@ export async function handleB2BReply({ channel, sender, body, subject, headers }
     return true;
   }
 
-  await exitB2BEnrollments(lead.id, "REPLY");
+  const campaignsStopped = await exitB2BEnrollments(lead.id, "REPLY");
   await moveJourneyToResponded(lead.id);
   if (lead.status === "NEW") {
     await prisma.b2BLead.update({ where: { id: lead.id }, data: { status: "CONTACTED" } });
@@ -420,7 +473,7 @@ export async function handleB2BReply({ channel, sender, body, subject, headers }
 
   // The agent answers and reports the turn itself; otherwise a person gets the reply now.
   // While paused, keep the message open: a person can have the AI answer it on resume.
-  let blocked = await agentBlockReason(lead, channel);
+  let blocked = await agentBlockReason(lead, channel, { interested: showsInterest(text) });
   await record(blocked && !isAgentPaused(lead) ? new Date() : null);
   if (!blocked) {
     try {
@@ -435,7 +488,7 @@ export async function handleB2BReply({ channel, sender, body, subject, headers }
     `B2B lead reply from ${lead.companyName}${subject ? `: ${subject}` : ""}`,
     `<p><strong>${escapeHtml(lead.contactName || lead.companyName)}</strong> (${escapeHtml(lead.companyName)}, ` +
       `${escapeHtml(sender)}) replied by ${channel === "SMS" ? "text" : "email"}. ` +
-      `Their campaign messages have been stopped. AI did not reply: ${escapeHtml(blocked)}.</p>` +
+      `${campaignsStopped ? "Their campaign messages have been stopped. " : ""}AI did not reply: ${escapeHtml(blocked)}.</p>` +
       `<blockquote style="border-left:3px solid #ccc;margin:0;padding-left:12px;white-space:pre-wrap">${escapeHtml(text)}</blockquote>` +
       `<p><a href="${appUrl()}/admin/leads">Open Business Leads</a></p>`,
     { replyTo: channel === "EMAIL" ? lead.email : undefined },

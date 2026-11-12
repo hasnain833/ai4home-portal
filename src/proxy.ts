@@ -11,6 +11,7 @@ const publicRoutes = [
   "/bp-config",
   "/book",
   "/meet",
+  "/m", // short links in campaign texts; they redirect to /meet
   "/schedule",
   "/unsubscribe",
   "/lead-form",

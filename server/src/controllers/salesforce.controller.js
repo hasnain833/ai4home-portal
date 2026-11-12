@@ -33,41 +33,36 @@ function appCredentials() {
 }
 
 export const connectSalesforce = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const companyId = req.user.companyId;
-    const { environment } = req.body;
-    const { clientId, clientSecret } = appCredentials();
-
-    if (!clientId || !clientSecret) {
-      return res.status(500).json({ message: "Salesforce connect is not set up on this server yet." });
-    }
-
-    const env = environment === "production" ? "production" : "sandbox";
-    const baseUrl = getPortalUrl();
-    const redirectUri = `${baseUrl}/api/sales/salesforce/callback`;
-    const codeVerifier = generateCodeVerifier();
-    const codeChallenge = codeChallengeFromVerifier(codeVerifier);
-
-    // Encrypted so the callback can trust companyId.
-    const state = encrypt(JSON.stringify({ companyId, environment: env, codeVerifier }));
-
-    const authUrl = SalesforceClient.getAuthorizationUrl({
-      clientId,
-      redirectUri,
-      environment: env,
-      state,
-      codeChallenge,
-    });
-
-    return res.json({ authUrl });
-  } catch (error) {
-    console.error("[Salesforce Connect] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const companyId = req.user.companyId;
+  const { environment } = req.body;
+  const { clientId, clientSecret } = appCredentials();
+
+  if (!clientId || !clientSecret) {
+    return res.status(500).json({ message: "Salesforce connect is not set up on this server yet." });
+  }
+
+  const env = environment === "production" ? "production" : "sandbox";
+  const baseUrl = getPortalUrl();
+  const redirectUri = `${baseUrl}/api/sales/salesforce/callback`;
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = codeChallengeFromVerifier(codeVerifier);
+
+  // Encrypted so the callback can trust companyId.
+  const state = encrypt(JSON.stringify({ companyId, environment: env, codeVerifier }));
+
+  const authUrl = SalesforceClient.getAuthorizationUrl({
+    clientId,
+    redirectUri,
+    environment: env,
+    state,
+    codeChallenge,
+  });
+
+  return res.json({ authUrl });
 };
 
 export const salesforceCallback = async (req, res) => {
@@ -173,353 +168,308 @@ export const salesforceCallback = async (req, res) => {
 };
 
 export const disconnectSalesforce = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const companyId = req.user.companyId;
-
-    const connection = await prisma.salesforceConnection.findUnique({
-      where: { companyId },
-    });
-
-    if (!connection) {
-      return res.status(404).json({ message: "No Salesforce connection found" });
-    }
-
-    await prisma.salesforceConnection.update({
-      where: { companyId },
-      data: {
-        isActive: false,
-        accessToken: "",
-        refreshToken: "",
-      },
-    });
-
-    await prisma.syncLog.create({
-      data: {
-        companyId,
-        direction: "INBOUND",
-        action: "OAUTH_DISCONNECT",
-        status: "SUCCESS",
-        message: "Salesforce connection disconnected by admin.",
-      },
-    });
-
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("[Salesforce Disconnect] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const companyId = req.user.companyId;
+
+  const connection = await prisma.salesforceConnection.findUnique({
+    where: { companyId },
+  });
+
+  if (!connection) {
+    return res.status(404).json({ message: "No Salesforce connection found" });
+  }
+
+  await prisma.salesforceConnection.update({
+    where: { companyId },
+    data: {
+      isActive: false,
+      accessToken: "",
+      refreshToken: "",
+    },
+  });
+
+  await prisma.syncLog.create({
+    data: {
+      companyId,
+      direction: "INBOUND",
+      action: "OAUTH_DISCONNECT",
+      status: "SUCCESS",
+      message: "Salesforce connection disconnected by admin.",
+    },
+  });
+
+  return res.json({ success: true });
 };
 
 export const getSalesforceStatus = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const companyId = req.user.companyId;
-
-    const connection = await prisma.salesforceConnection.findUnique({
-      where: { companyId },
-      select: {
-        id: true,
-        instanceUrl: true,
-        environment: true,
-        syncInterval: true,
-        isActive: true,
-        lastSyncAt: true,
-        lastSyncStatus: true,
-        lastSyncMessage: true,
-        writeBackEnabled: true,
-        lastWriteBackAt: true,
-        clientId: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    if (!connection) {
-      return res.json({
-        connected: false,
-        environment: null,
-        syncInterval: 15,
-        lastSyncAt: null,
-        lastSyncStatus: null,
-        writeBackEnabled: false,
-        clientIdMasked: null,
-      });
-    }
-
-    const syncedLeadCount = await prisma.lead.count({
-      where: { companyId, source: "SALESFORCE" },
-    });
-
-    return res.json({
-      connected: connection.isActive,
-      environment: connection.environment,
-      instanceUrl: connection.instanceUrl,
-      syncInterval: connection.syncInterval,
-      lastSyncAt: connection.lastSyncAt,
-      lastSyncStatus: connection.lastSyncStatus,
-      lastSyncMessage: connection.lastSyncMessage,
-      writeBackEnabled: connection.writeBackEnabled,
-      lastWriteBackAt: connection.lastWriteBackAt,
-      clientIdMasked: connection.clientId
-        ? `${connection.clientId.slice(0, 8)}••••${connection.clientId.slice(-4)}`
-        : null,
-      syncedLeadCount,
-      connectedSince: connection.createdAt,
-    });
-  } catch (error) {
-    console.error("[Salesforce Status] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const companyId = req.user.companyId;
+
+  const connection = await prisma.salesforceConnection.findUnique({
+    where: { companyId },
+    select: {
+      id: true,
+      instanceUrl: true,
+      environment: true,
+      syncInterval: true,
+      isActive: true,
+      lastSyncAt: true,
+      lastSyncStatus: true,
+      lastSyncMessage: true,
+      writeBackEnabled: true,
+      lastWriteBackAt: true,
+      clientId: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!connection) {
+    return res.json({
+      connected: false,
+      environment: null,
+      syncInterval: 15,
+      lastSyncAt: null,
+      lastSyncStatus: null,
+      writeBackEnabled: false,
+      clientIdMasked: null,
+    });
+  }
+
+  const syncedLeadCount = await prisma.lead.count({
+    where: { companyId, source: "SALESFORCE" },
+  });
+
+  return res.json({
+    connected: connection.isActive,
+    environment: connection.environment,
+    instanceUrl: connection.instanceUrl,
+    syncInterval: connection.syncInterval,
+    lastSyncAt: connection.lastSyncAt,
+    lastSyncStatus: connection.lastSyncStatus,
+    lastSyncMessage: connection.lastSyncMessage,
+    writeBackEnabled: connection.writeBackEnabled,
+    lastWriteBackAt: connection.lastWriteBackAt,
+    clientIdMasked: connection.clientId
+      ? `${connection.clientId.slice(0, 8)}••••${connection.clientId.slice(-4)}`
+      : null,
+    syncedLeadCount,
+    connectedSince: connection.createdAt,
+  });
 };
 
 export const updateSalesforceStatus = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const companyId = req.user.companyId;
-    const { syncInterval, writeBackEnabled } = req.body;
-
-    const updateData = {};
-    if (syncInterval !== undefined) {
-      updateData.syncInterval = parseInt(syncInterval, 10);
-    }
-    // SW-CRM-008: per-tenant outbound write-back toggle (off by default).
-    if (writeBackEnabled !== undefined) {
-      updateData.writeBackEnabled = !!writeBackEnabled;
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({ message: "No fields to update" });
-    }
-
-    await prisma.salesforceConnection.update({
-      where: { companyId },
-      data: updateData,
-    });
-
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("[Salesforce Status PATCH] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const companyId = req.user.companyId;
+  const { syncInterval, writeBackEnabled } = req.body;
+
+  const updateData = {};
+  if (syncInterval !== undefined) {
+    updateData.syncInterval = parseInt(syncInterval, 10);
+  }
+  // SW-CRM-008: per-tenant outbound write-back toggle (off by default).
+  if (writeBackEnabled !== undefined) {
+    updateData.writeBackEnabled = !!writeBackEnabled;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return res.status(400).json({ message: "No fields to update" });
+  }
+
+  await prisma.salesforceConnection.update({
+    where: { companyId },
+    data: updateData,
+  });
+
+  return res.json({ success: true });
 };
 
 export const getMappings = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const companyId = req.user.companyId;
-
-    const mappings = await prisma.salesforceFieldMapping.findMany({
-      where: { companyId },
-      orderBy: { createdAt: "asc" },
-    });
-
-    return res.json(mappings);
-  } catch (error) {
-    console.error("[Salesforce Mappings] GET Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const companyId = req.user.companyId;
+
+  const mappings = await prisma.salesforceFieldMapping.findMany({
+    where: { companyId },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return res.json(mappings);
 };
 
 export const saveMapping = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
+  }
 
-    const companyId = req.user.companyId;
-    const { salesforceField, portalField, description, isActive, isConsentField } = req.body;
+  const companyId = req.user.companyId;
+  const { salesforceField, portalField, description, isActive, isConsentField } = req.body;
 
-    if (!salesforceField || !portalField) {
-      return res
-        .status(400)
-        .json({ message: "salesforceField and portalField are required" });
-    }
+  if (!salesforceField || !portalField) {
+    return res
+      .status(400)
+      .json({ message: "salesforceField and portalField are required" });
+  }
 
-    const existing = await prisma.salesforceFieldMapping.findUnique({
-      where: { companyId_salesforceField: { companyId, salesforceField } },
-      select: { id: true },
-    });
+  const existing = await prisma.salesforceFieldMapping.findUnique({
+    where: { companyId_salesforceField: { companyId, salesforceField } },
+    select: { id: true },
+  });
 
-    const mapping = await prisma.salesforceFieldMapping.upsert({
-      where: {
-        companyId_salesforceField: {
-          companyId,
-          salesforceField,
-        },
-      },
-      create: {
+  const mapping = await prisma.salesforceFieldMapping.upsert({
+    where: {
+      companyId_salesforceField: {
         companyId,
         salesforceField,
-        portalField,
-        description: description || null,
-        isActive: isActive !== undefined ? isActive : true,
-        isConsentField: isConsentField || false,
       },
-      update: {
-        portalField,
-        description: description || null,
-        isActive: isActive !== undefined ? isActive : true,
-        isConsentField: isConsentField || false,
-      },
-    });
+    },
+    create: {
+      companyId,
+      salesforceField,
+      portalField,
+      description: description || null,
+      isActive: isActive !== undefined ? isActive : true,
+      isConsentField: isConsentField || false,
+    },
+    update: {
+      portalField,
+      description: description || null,
+      isActive: isActive !== undefined ? isActive : true,
+      isConsentField: isConsentField || false,
+    },
+  });
 
-    // SW-CRM-004: record the resulting set as a new version. Never fails the save.
-    const version = await snapshotMappings(companyId, {
-      changeType: "SAVE",
-      note: `${existing ? "Updated" : "Added"} mapping ${salesforceField} → ${portalField}`,
-      userId: req.user.id || null,
-    });
+  // SW-CRM-004: record the resulting set as a new version. Never fails the save.
+  const version = await snapshotMappings(companyId, {
+    changeType: "SAVE",
+    note: `${existing ? "Updated" : "Added"} mapping ${salesforceField} → ${portalField}`,
+    userId: req.user.id || null,
+  });
 
-    return res.json({ ...mapping, version: version?.version ?? null });
-  } catch (error) {
-    console.error("[Salesforce Mappings] POST Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  return res.json({ ...mapping, version: version?.version ?? null });
 };
 
 export const deleteMapping = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const companyId = req.user.companyId;
-    const { id } = req.body;
-
-    if (!id) {
-      return res.status(400).json({ message: "Mapping id is required" });
-    }
-
-    const mapping = await prisma.salesforceFieldMapping.findFirst({
-      where: { id, companyId },
-    });
-
-    if (!mapping) {
-      return res.status(404).json({ message: "Mapping not found" });
-    }
-
-    await prisma.salesforceFieldMapping.delete({
-      where: { id },
-    });
-
-    // SW-CRM-004: snapshot after the delete so the version history can restore it.
-    const version = await snapshotMappings(companyId, {
-      changeType: "DELETE",
-      note: `Removed mapping ${mapping.salesforceField} → ${mapping.portalField}`,
-      userId: req.user.id || null,
-    });
-
-    return res.json({ success: true, version: version?.version ?? null });
-  } catch (error) {
-    console.error("[Salesforce Mappings] DELETE Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const companyId = req.user.companyId;
+  const { id } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ message: "Mapping id is required" });
+  }
+
+  const mapping = await prisma.salesforceFieldMapping.findFirst({
+    where: { id, companyId },
+  });
+
+  if (!mapping) {
+    return res.status(404).json({ message: "Mapping not found" });
+  }
+
+  await prisma.salesforceFieldMapping.delete({
+    where: { id },
+  });
+
+  // SW-CRM-004: snapshot after the delete so the version history can restore it.
+  const version = await snapshotMappings(companyId, {
+    changeType: "DELETE",
+    note: `Removed mapping ${mapping.salesforceField} → ${mapping.portalField}`,
+    userId: req.user.id || null,
+  });
+
+  return res.json({ success: true, version: version?.version ?? null });
 };
 
 // SW-CRM-004: mapping version history — what changed, when, and by whom.
 export const getMappingVersions = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const versions = await listVersions(req.user.companyId, req.query.limit);
-    return res.json(versions);
-  } catch (error) {
-    console.error("[Salesforce Mapping Versions] GET Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const versions = await listVersions(req.user.companyId, req.query.limit);
+  return res.json(versions);
 };
 
 // SW-CRM-004: restore a past mapping version. Takes effect on subsequent syncs —
 // an in-flight sync already snapshotted its mappings at the start of its run.
 export const rollbackMappingVersion = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const { version } = req.body;
-    if (version === undefined || version === null || Number.isNaN(Number(version))) {
-      return res.status(400).json({ message: "A numeric 'version' is required" });
-    }
-
-    const result = await rollbackToVersion(
-      req.user.companyId,
-      Number(version),
-      req.user.id || null,
-    );
-
-    if (!result.success) {
-      return res.status(404).json({ message: result.reason || "Rollback failed" });
-    }
-
-    return res.json({
-      success: true,
-      ...result,
-      message: `Restored mapping version ${result.restoredFrom}. Applies to subsequent syncs.`,
-    });
-  } catch (error) {
-    console.error("[Salesforce Mapping Rollback] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const { version } = req.body;
+  if (version === undefined || version === null || Number.isNaN(Number(version))) {
+    return res.status(400).json({ message: "A numeric 'version' is required" });
+  }
+
+  const result = await rollbackToVersion(
+    req.user.companyId,
+    Number(version),
+    req.user.id || null,
+  );
+
+  if (!result.success) {
+    return res.status(404).json({ message: result.reason || "Rollback failed" });
+  }
+
+  return res.json({
+    success: true,
+    ...result,
+    message: `Restored mapping version ${result.restoredFrom}. Applies to subsequent syncs.`,
+  });
 };
 
 export const getLogs = async (req, res) => {
-  try {
-    if (!req.user || !req.user.companyId) {
-      return res.status(403).json({ message: "No company associated" });
-    }
-
-    const companyId = req.user.companyId;
-    const page = parseInt(req.query.page || "1", 10);
-    const limit = Math.min(
-      parseInt(req.query.limit || "20", 10),
-      50
-    );
-    const direction = req.query.direction;
-
-    const where = { companyId };
-    if (direction && (direction === "INBOUND" || direction === "OUTBOUND")) {
-      where.direction = direction;
-    }
-
-    const [logs, total] = await Promise.all([
-      prisma.syncLog.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.syncLog.count({ where }),
-    ]);
-
-    return res.json({
-      logs,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    });
-  } catch (error) {
-    console.error("[Salesforce Logs] GET Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user || !req.user.companyId) {
+    return res.status(403).json({ message: "No company associated" });
   }
+
+  const companyId = req.user.companyId;
+  const page = parseInt(req.query.page || "1", 10);
+  const limit = Math.min(
+    parseInt(req.query.limit || "20", 10),
+    50
+  );
+  const direction = req.query.direction;
+
+  const where = { companyId };
+  if (direction && (direction === "INBOUND" || direction === "OUTBOUND")) {
+    where.direction = direction;
+  }
+
+  const [logs, total] = await Promise.all([
+    prisma.syncLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.syncLog.count({ where }),
+  ]);
+
+  return res.json({
+    logs,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+  });
 };
 
 export const manualSync = async (req, res) => {

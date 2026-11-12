@@ -1,5 +1,5 @@
 import express from "express";
-import { requireAuth } from "../middlewares/auth.js";
+import { requireAuth, requireRoles } from "../middlewares/auth.js";
 import {
   getProperties,
   createProperty,
@@ -12,7 +12,7 @@ const router = express.Router();
 
 router.get("/", requireAuth, getProperties);
 router.post("/", requireAuth, createProperty);
-router.post("/import", requireAuth, importProperties);
+router.post("/import", requireAuth, requireRoles(["ADMIN", "STAFF"]), importProperties);
 router.patch("/:id", requireAuth, updateProperty);
 router.delete("/:id", requireAuth, deleteProperty);
 

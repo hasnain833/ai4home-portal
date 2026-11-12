@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Check, Cloud, Loader2, RefreshCw, ShieldCheck, Unplug, X } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
 import { B2B_LEAD_STATUSES, sendJson, titleCase } from "@/lib/b2b-store";
 
 const API = "/api/admin/salesforce";
@@ -42,7 +42,6 @@ interface Access {
 }
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 const RUN_STYLE: Record<string, string> = {
   SUCCESS: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
   WARNING: "bg-amber-500/15 text-amber-600 dark:text-amber-400",

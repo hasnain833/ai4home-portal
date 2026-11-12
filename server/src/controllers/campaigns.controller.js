@@ -37,56 +37,51 @@ async function sendCampaignEnrollmentEvents(inngest, enrollments, campaignId, co
 }
 
 export const getCampaigns = async (req, res) => {
-  try {
-    const companyId = req.user.companyId;
-    const campaigns = await prisma.campaign.findMany({
-      // The built-in 180-day workflow has its own tab.
-      where: { companyId, kind: "MANUAL" },
-      include: {
-        _count: {
-          select: {
-            steps: true,
-          },
-        },
-        enrollments: {
-          select: { status: true, exitedReason: true },
+  const companyId = req.user.companyId;
+  const campaigns = await prisma.campaign.findMany({
+    // The built-in 180-day workflow has its own tab.
+    where: { companyId, kind: "MANUAL" },
+    include: {
+      _count: {
+        select: {
+          steps: true,
         },
       },
-      orderBy: { createdAt: "desc" },
-    });
+      enrollments: {
+        select: { status: true, exitedReason: true },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 
-    // Format metrics matches frontend format
-    const formatted = campaigns.map((seq) => {
-      const totalLeads = seq.enrollments.length;
-      const convertedLeads = seq.enrollments.filter(
-        (e) =>
-          e.status === "EXITED" &&
-          (e.exitedReason === "REPLY" || e.exitedReason === "APPOINTMENT"),
-      ).length;
+  // Format metrics matches frontend format
+  const formatted = campaigns.map((seq) => {
+    const totalLeads = seq.enrollments.length;
+    const convertedLeads = seq.enrollments.filter(
+      (e) =>
+        e.status === "EXITED" &&
+        (e.exitedReason === "REPLY" || e.exitedReason === "APPOINTMENT"),
+    ).length;
 
-      const conversionRate =
-        totalLeads > 0
-          ? ((convertedLeads / totalLeads) * 100).toFixed(1) + "%"
-          : "0.0%";
+    const conversionRate =
+      totalLeads > 0
+        ? ((convertedLeads / totalLeads) * 100).toFixed(1) + "%"
+        : "0.0%";
 
-      return {
-        id: seq.id,
-        name: seq.name,
-        description: seq.description,
-        status: seq.status,
-        channel: seq.channel,
-        stepsCount: seq._count.steps,
-        totalLeads: totalLeads,
-        conversionRate: conversionRate,
-        conversionCount: convertedLeads,
-      };
-    });
+    return {
+      id: seq.id,
+      name: seq.name,
+      description: seq.description,
+      status: seq.status,
+      channel: seq.channel,
+      stepsCount: seq._count.steps,
+      totalLeads: totalLeads,
+      conversionRate: conversionRate,
+      conversionCount: convertedLeads,
+    };
+  });
 
-    return res.json(formatted);
-  } catch (error) {
-    console.error("[Campaigns List] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  return res.json(formatted);
 };
 
 const ANALYTICS_DAYS = { "7d": 7, "30d": 30, "90d": 90, "180d": 180 };
@@ -152,160 +147,145 @@ export const getCampaignAnalytics = async (req, res) => {
 };
 
 export const getCampaignDetail = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId },
-      include: {
-        steps: {
-          orderBy: { position: "asc" },
-        },
-        enrollments: true,
+  const { id } = req.params;
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, companyId: req.user.companyId },
+    include: {
+      steps: {
+        orderBy: { position: "asc" },
       },
-    });
+      enrollments: true,
+    },
+  });
 
-    if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
-    }
-
-    const enrollments = campaign.enrollments;
-    const analytics = {
-      enrolled: enrollments.length,
-      active: enrollments.filter(
-        (e) => e.status === "ACTIVE" || e.status === "PAUSED",
-      ).length,
-      completed: enrollments.filter((e) => e.status === "COMPLETED").length,
-      exited: enrollments.filter((e) => e.status === "EXITED").length,
-      exitedByReason: {
-        REPLY: enrollments.filter(
-          (e) => e.status === "EXITED" && e.exitedReason === "REPLY",
-        ).length,
-        APPOINTMENT: enrollments.filter(
-          (e) => e.status === "EXITED" && e.exitedReason === "APPOINTMENT",
-        ).length,
-        UNSUBSCRIBE: enrollments.filter(
-          (e) => e.status === "EXITED" && e.exitedReason === "UNSUBSCRIBE",
-        ).length,
-        SUPPRESSED: enrollments.filter(
-          (e) => e.status === "EXITED" && e.exitedReason === "SUPPRESSED",
-        ).length,
-        NOT_CONFIGURED: enrollments.filter(
-          (e) => e.status === "EXITED" && e.exitedReason === "NOT_CONFIGURED",
-        ).length,
-      },
-    };
-
-    return res.json({
-      ...campaign,
-      analytics,
-    });
-  } catch (error) {
-    console.error("[Campaign Detail] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!campaign) {
+    return res.status(404).json({ message: "Campaign not found" });
   }
+
+  const enrollments = campaign.enrollments;
+  const analytics = {
+    enrolled: enrollments.length,
+    active: enrollments.filter(
+      (e) => e.status === "ACTIVE" || e.status === "PAUSED",
+    ).length,
+    completed: enrollments.filter((e) => e.status === "COMPLETED").length,
+    exited: enrollments.filter((e) => e.status === "EXITED").length,
+    exitedByReason: {
+      REPLY: enrollments.filter(
+        (e) => e.status === "EXITED" && e.exitedReason === "REPLY",
+      ).length,
+      APPOINTMENT: enrollments.filter(
+        (e) => e.status === "EXITED" && e.exitedReason === "APPOINTMENT",
+      ).length,
+      UNSUBSCRIBE: enrollments.filter(
+        (e) => e.status === "EXITED" && e.exitedReason === "UNSUBSCRIBE",
+      ).length,
+      SUPPRESSED: enrollments.filter(
+        (e) => e.status === "EXITED" && e.exitedReason === "SUPPRESSED",
+      ).length,
+      NOT_CONFIGURED: enrollments.filter(
+        (e) => e.status === "EXITED" && e.exitedReason === "NOT_CONFIGURED",
+      ).length,
+    },
+  };
+
+  return res.json({
+    ...campaign,
+    analytics,
+  });
 };
 
 export const createCampaign = async (req, res) => {
-  try {
-    const { name, description, channel } = req.body;
+  const { name, description, channel } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ message: "Campaign name is required" });
-    }
-
-    const company = await prisma.company.findUnique({
-      where: { id: req.user.companyId },
-      select: { campaignExitConditions: true, campaignVersionPolicy: true },
-    });
-
-    const campaign = await prisma.campaign.create({
-      data: {
-        companyId: req.user.companyId,
-        name,
-        description: description || null,
-        channel: channel || "Email & SMS",
-        status: "Draft",
-        exitConditions: company?.campaignExitConditions ?? undefined,
-        versionPolicy: company?.campaignVersionPolicy || "FINISH_OLD",
-      },
-    });
-
-    return res.status(201).json(campaign);
-  } catch (error) {
-    console.error("[Campaign Create] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!name) {
+    return res.status(400).json({ message: "Campaign name is required" });
   }
+
+  const company = await prisma.company.findUnique({
+    where: { id: req.user.companyId },
+    select: { campaignExitConditions: true, campaignVersionPolicy: true },
+  });
+
+  const campaign = await prisma.campaign.create({
+    data: {
+      companyId: req.user.companyId,
+      name,
+      description: description || null,
+      channel: channel || "Email & SMS",
+      status: "Draft",
+      exitConditions: company?.campaignExitConditions ?? undefined,
+      versionPolicy: company?.campaignVersionPolicy || "FINISH_OLD",
+    },
+  });
+
+  return res.status(201).json(campaign);
 };
 
 export const updateCampaign = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      name,
-      description,
-      channel,
-      status,
-      exitConditions,
-      versionPolicy,
-    } = req.body;
+  const { id } = req.params;
+  const {
+    name,
+    description,
+    channel,
+    status,
+    exitConditions,
+    versionPolicy,
+  } = req.body;
 
-    const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId, kind: "MANUAL" },
-      include: { steps: { select: { type: true } } },
-    });
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, companyId: req.user.companyId, kind: "MANUAL" },
+    include: { steps: { select: { type: true } } },
+  });
 
-    if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
+  if (!campaign) {
+    return res.status(404).json({ message: "Campaign not found" });
+  }
+
+  if (campaign.status !== "Active" && status === "Active") {
+    const missing = await missingChannelsForSteps(req.user.companyId, campaign.steps);
+    if (missing.length) {
+      return res.status(400).json({
+        message: notConfiguredMessage(missing, "this campaign"),
+        missingChannels: missing,
+      });
     }
+  }
 
-    if (campaign.status !== "Active" && status === "Active") {
-      const missing = await missingChannelsForSteps(req.user.companyId, campaign.steps);
-      if (missing.length) {
-        return res.status(400).json({
-          message: notConfiguredMessage(missing, "this campaign"),
-          missingChannels: missing,
-        });
-      }
-    }
+  const updated = await prisma.campaign.update({
+    where: { id },
+    data: {
+      name: name || campaign.name,
+      description:
+        description !== undefined ? description : campaign.description,
+      channel: channel || campaign.channel,
+      status: status || campaign.status,
+      exitConditions:
+        exitConditions !== undefined
+          ? exitConditions
+          : campaign.exitConditions,
+      versionPolicy:
+        versionPolicy !== undefined ? versionPolicy : campaign.versionPolicy,
+    },
+  });
 
-    const updated = await prisma.campaign.update({
-      where: { id },
-      data: {
-        name: name || campaign.name,
-        description:
-          description !== undefined ? description : campaign.description,
-        channel: channel || campaign.channel,
-        status: status || campaign.status,
-        exitConditions:
-          exitConditions !== undefined
-            ? exitConditions
-            : campaign.exitConditions,
-        versionPolicy:
-          versionPolicy !== undefined ? versionPolicy : campaign.versionPolicy,
+  const isLaunching = campaign.status !== "Active" && status === "Active";
+
+  if (isLaunching) {
+    const enrollments = await prisma.campaignEnrollment.findMany({
+      where: {
+        campaignId: id,
+        status: "ACTIVE",
       },
     });
 
-    const isLaunching = campaign.status !== "Active" && status === "Active";
-
-    if (isLaunching) {
-      const enrollments = await prisma.campaignEnrollment.findMany({
-        where: {
-          campaignId: id,
-          status: "ACTIVE",
-        },
-      });
-
-      if (enrollments.length > 0) {
-        const { inngest } = await import("../lib/inngest.js");
-        await sendCampaignEnrollmentEvents(inngest, enrollments, id, req.user.companyId);
-      }
+    if (enrollments.length > 0) {
+      const { inngest } = await import("../lib/inngest.js");
+      await sendCampaignEnrollmentEvents(inngest, enrollments, id, req.user.companyId);
     }
-
-    return res.json(updated);
-  } catch (error) {
-    console.error("[Campaign Update] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  return res.json(updated);
 };
 
 async function unsendableChannelWarnings(companyId, steps) {
@@ -330,373 +310,353 @@ async function unsendableChannelWarnings(companyId, steps) {
 }
 
 export const updateCampaignSteps = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { steps } = req.body;
+  const { id } = req.params;
+  const { steps } = req.body;
 
-    if (!Array.isArray(steps)) {
-      return res.status(400).json({ message: "Steps must be an array" });
-    }
+  if (!Array.isArray(steps)) {
+    return res.status(400).json({ message: "Steps must be an array" });
+  }
 
-    const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId, kind: "MANUAL" },
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, companyId: req.user.companyId, kind: "MANUAL" },
+  });
+
+  if (!campaign) {
+    return res.status(404).json({ message: "Campaign not found" });
+  }
+
+  if (steps.length > 50) {
+    return res
+      .status(400)
+      .json({ message: "A sequence can have at most 50 steps." });
+  }
+
+  const finalStatus =
+    campaign.status === "Draft" || campaign.status === "Ready"
+      ? steps.length > 0
+        ? "Ready"
+        : "Draft"
+      : campaign.status;
+
+  let targetCampaignId = id;
+
+  if (
+    campaign.status === "Active" &&
+    (campaign.versionPolicy || "FINISH_OLD") === "FINISH_OLD"
+  ) {
+    const newVersion = await prisma.campaign.create({
+      data: {
+        companyId: req.user.companyId,
+        name: `${campaign.name} (v2)`,
+        description: campaign.description,
+        channel: campaign.channel,
+        status: "Draft",
+      },
     });
+    targetCampaignId = newVersion.id;
 
-    if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
-    }
-
-    if (steps.length > 50) {
-      return res
-        .status(400)
-        .json({ message: "A sequence can have at most 50 steps." });
-    }
-
-    const finalStatus =
-      campaign.status === "Draft" || campaign.status === "Ready"
-        ? steps.length > 0
-          ? "Ready"
-          : "Draft"
-        : campaign.status;
-
-    let targetCampaignId = id;
-
-    if (
-      campaign.status === "Active" &&
-      (campaign.versionPolicy || "FINISH_OLD") === "FINISH_OLD"
-    ) {
-      const newVersion = await prisma.campaign.create({
-        data: {
-          companyId: req.user.companyId,
-          name: `${campaign.name} (v2)`,
-          description: campaign.description,
-          channel: campaign.channel,
-          status: "Draft",
-        },
-      });
-      targetCampaignId = newVersion.id;
-
-      await prisma.campaignStep.createMany({
-        data: steps.map((step, idx) => ({
-          campaignId: targetCampaignId,
-          type: step.type,
-          position: idx + 1,
-          delayValue:
-            step.delayValue !== undefined
-              ? parseInt(step.delayValue, 10)
-              : null,
-          delayUnit: step.delayUnit || null,
-          sendWindowDays: step.sendWindowDays || null,
-          sendWindowStart: step.sendWindowStart || null,
-          sendWindowEnd: step.sendWindowEnd || null,
-          subject: step.subject || null,
-          body: step.body || null,
-          templateId: step.templateId || null,
-        })),
-      });
-
-      const updatedCampaign = await prisma.campaign.findUnique({
-        where: { id: targetCampaignId },
-        include: { steps: { orderBy: { position: "asc" } } },
-      });
-      return res.json({
-        newVersion: true,
-        campaign: updatedCampaign,
-        warnings: await unsendableChannelWarnings(req.user.companyId, steps),
-      });
-    }
-
-   
-    if (campaign.status === "Active") {
-      const missing = await missingChannelsForSteps(req.user.companyId, steps);
-      if (missing.length) {
-        return res.status(400).json({
-          message: notConfiguredMessage(missing, "these steps"),
-          missingChannels: missing,
-        });
-      }
-    }
-
-    await prisma.$transaction([
-      prisma.campaign.update({
-        where: { id },
-        data: { status: finalStatus },
-      }),
-      prisma.campaignStep.deleteMany({ where: { campaignId: id } }),
-      prisma.campaignStep.createMany({
-        data: steps.map((step, idx) => ({
-          campaignId: id,
-          type: step.type,
-          position: idx + 1,
-          delayValue:
-            step.delayValue !== undefined
-              ? parseInt(step.delayValue, 10)
-              : null,
-          delayUnit: step.delayUnit || null,
-          sendWindowDays: step.sendWindowDays || null,
-          sendWindowStart: step.sendWindowStart || null,
-          sendWindowEnd: step.sendWindowEnd || null,
-          subject: step.subject || null,
-          body: step.body || null,
-          templateId: step.templateId || null,
-        })),
-      }),
-    ]);
+    await prisma.campaignStep.createMany({
+      data: steps.map((step, idx) => ({
+        campaignId: targetCampaignId,
+        type: step.type,
+        position: idx + 1,
+        delayValue:
+          step.delayValue !== undefined
+            ? parseInt(step.delayValue, 10)
+            : null,
+        delayUnit: step.delayUnit || null,
+        sendWindowDays: step.sendWindowDays || null,
+        sendWindowStart: step.sendWindowStart || null,
+        sendWindowEnd: step.sendWindowEnd || null,
+        subject: step.subject || null,
+        body: step.body || null,
+        templateId: step.templateId || null,
+      })),
+    });
 
     const updatedCampaign = await prisma.campaign.findUnique({
-      where: { id },
+      where: { id: targetCampaignId },
       include: { steps: { orderBy: { position: "asc" } } },
     });
-
     return res.json({
-      ...updatedCampaign,
+      newVersion: true,
+      campaign: updatedCampaign,
       warnings: await unsendableChannelWarnings(req.user.companyId, steps),
     });
-  } catch (error) {
-    console.error("[Campaign Steps Update] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+ 
+  if (campaign.status === "Active") {
+    const missing = await missingChannelsForSteps(req.user.companyId, steps);
+    if (missing.length) {
+      return res.status(400).json({
+        message: notConfiguredMessage(missing, "these steps"),
+        missingChannels: missing,
+      });
+    }
+  }
+
+  await prisma.$transaction([
+    prisma.campaign.update({
+      where: { id },
+      data: { status: finalStatus },
+    }),
+    prisma.campaignStep.deleteMany({ where: { campaignId: id } }),
+    prisma.campaignStep.createMany({
+      data: steps.map((step, idx) => ({
+        campaignId: id,
+        type: step.type,
+        position: idx + 1,
+        delayValue:
+          step.delayValue !== undefined
+            ? parseInt(step.delayValue, 10)
+            : null,
+        delayUnit: step.delayUnit || null,
+        sendWindowDays: step.sendWindowDays || null,
+        sendWindowStart: step.sendWindowStart || null,
+        sendWindowEnd: step.sendWindowEnd || null,
+        subject: step.subject || null,
+        body: step.body || null,
+        templateId: step.templateId || null,
+      })),
+    }),
+  ]);
+
+  const updatedCampaign = await prisma.campaign.findUnique({
+    where: { id },
+    include: { steps: { orderBy: { position: "asc" } } },
+  });
+
+  return res.json({
+    ...updatedCampaign,
+    warnings: await unsendableChannelWarnings(req.user.companyId, steps),
+  });
 };
 
 export const enrollCampaign = async (req, res) => {
-  try {
-    const { inngest } = await import("../lib/inngest.js");
+  const { inngest } = await import("../lib/inngest.js");
 
-    const { id } = req.params;
-    let { leadIds } = req.body;
-    const { segmentId } = req.body;
+  const { id } = req.params;
+  let { leadIds } = req.body;
+  const { segmentId } = req.body;
 
-    if (segmentId) {
-      const segment = await prisma.leadSegment.findFirst({
-        where: { id: segmentId, companyId: req.user.companyId },
-      });
-      if (!segment) {
-        return res.status(404).json({ message: "Segment not found" });
-      }
-      // SW-ANN-001: a segment resolves to active leads only.
-      const where = withActiveLeadFilter(
-        buildPrismaWhereClause(segment.filters, req.user.companyId),
-      );
-      const segLeads = await prisma.lead.findMany({
-        where,
-        select: { id: true },
-      });
-      leadIds = segLeads.map((l) => l.id);
-    }
-
-    if (!Array.isArray(leadIds) || leadIds.length === 0) {
-      return res.status(400).json({
-        message:
-          "Provide a non-empty leadIds array or a segmentId that matches leads.",
-      });
-    }
-
-    const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId, kind: "MANUAL" },
-      // Step types drive the "this channel will not be delivered" warning below.
-      include: { steps: { select: { type: true } } },
+  if (segmentId) {
+    const segment = await prisma.leadSegment.findFirst({
+      where: { id: segmentId, companyId: req.user.companyId },
     });
-
-    if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
+    if (!segment) {
+      return res.status(404).json({ message: "Segment not found" });
     }
-
-    // Same gate as launching: enrolling into a campaign this workspace cannot
-    // deliver on would consume the leads without sending anything.
-    const missingEnrollChannels = await missingChannelsForSteps(
-      req.user.companyId,
-      campaign.steps,
+    // SW-ANN-001: a segment resolves to active leads only.
+    const where = withActiveLeadFilter(
+      buildPrismaWhereClause(segment.filters, req.user.companyId),
     );
-    if (missingEnrollChannels.length) {
-      return res.status(400).json({
-        message: notConfiguredMessage(missingEnrollChannels, "this campaign"),
-        missingChannels: missingEnrollChannels,
-      });
-    }
+    const segLeads = await prisma.lead.findMany({
+      where,
+      select: { id: true },
+    });
+    leadIds = segLeads.map((l) => l.id);
+  }
 
-    const uniqueLeadIds = Array.from(new Set(leadIds));
-    let enrolledCount = 0;
-    const skippedDuplicates = [];
-    const skippedInactive = [];
-    const concurrentWarnings = [];
-    const enrollmentsToStart = [];
+  if (!Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({
+      message:
+        "Provide a non-empty leadIds array or a segmentId that matches leads.",
+    });
+  }
 
-    for (let i = 0; i < uniqueLeadIds.length; i += CAMPAIGN_BATCH_SIZE) {
-      const batchIds = uniqueLeadIds.slice(i, i + CAMPAIGN_BATCH_SIZE);
-      const [leads, existingEnrollments, otherActiveEnrollments] = await Promise.all([
-        prisma.lead.findMany({
-          where: { id: { in: batchIds }, companyId: req.user.companyId },
-        }),
-        prisma.campaignEnrollment.findMany({
-          where: { campaignId: id, leadId: { in: batchIds } },
-        }),
-        prisma.campaignEnrollment.findMany({
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, companyId: req.user.companyId, kind: "MANUAL" },
+    // Step types drive the "this channel will not be delivered" warning below.
+    include: { steps: { select: { type: true } } },
+  });
+
+  if (!campaign) {
+    return res.status(404).json({ message: "Campaign not found" });
+  }
+
+  // Same gate as launching: enrolling into a campaign this workspace cannot
+  // deliver on would consume the leads without sending anything.
+  const missingEnrollChannels = await missingChannelsForSteps(
+    req.user.companyId,
+    campaign.steps,
+  );
+  if (missingEnrollChannels.length) {
+    return res.status(400).json({
+      message: notConfiguredMessage(missingEnrollChannels, "this campaign"),
+      missingChannels: missingEnrollChannels,
+    });
+  }
+
+  const uniqueLeadIds = Array.from(new Set(leadIds));
+  let enrolledCount = 0;
+  const skippedDuplicates = [];
+  const skippedInactive = [];
+  const concurrentWarnings = [];
+  const enrollmentsToStart = [];
+
+  for (let i = 0; i < uniqueLeadIds.length; i += CAMPAIGN_BATCH_SIZE) {
+    const batchIds = uniqueLeadIds.slice(i, i + CAMPAIGN_BATCH_SIZE);
+    const [leads, existingEnrollments, otherActiveEnrollments] = await Promise.all([
+      prisma.lead.findMany({
+        where: { id: { in: batchIds }, companyId: req.user.companyId },
+      }),
+      prisma.campaignEnrollment.findMany({
+        where: { campaignId: id, leadId: { in: batchIds } },
+      }),
+      prisma.campaignEnrollment.findMany({
+        where: {
+          leadId: { in: batchIds },
+          status: { in: ["ACTIVE", "PAUSED"] },
+          campaignId: { not: id },
+        },
+        select: { leadId: true },
+      }),
+    ]);
+
+    const leadsById = new Map(leads.map((lead) => [lead.id, lead]));
+    const existingByLeadId = new Map(existingEnrollments.map((enrollment) => [enrollment.leadId, enrollment]));
+    const concurrentLeadIds = new Set(otherActiveEnrollments.map((enrollment) => enrollment.leadId));
+    const newlyEnrolledLeadIds = [];
+
+    for (const leadId of batchIds) {
+      try {
+        const lead = leadsById.get(leadId);
+        if (!lead) continue;
+
+        if (!isActiveLead(lead)) {
+          skippedInactive.push(leadId);
+          continue;
+        }
+
+        const existingEnrollment = existingByLeadId.get(leadId);
+        if (
+          existingEnrollment &&
+          (existingEnrollment.status === "ACTIVE" ||
+            existingEnrollment.status === "PAUSED")
+        ) {
+          skippedDuplicates.push(leadId);
+          continue;
+        }
+
+        if (concurrentLeadIds.has(leadId)) {
+          concurrentWarnings.push(leadId);
+        }
+
+        const enrollment = await prisma.campaignEnrollment.upsert({
           where: {
-            leadId: { in: batchIds },
-            status: { in: ["ACTIVE", "PAUSED"] },
-            campaignId: { not: id },
-          },
-          select: { leadId: true },
-        }),
-      ]);
-
-      const leadsById = new Map(leads.map((lead) => [lead.id, lead]));
-      const existingByLeadId = new Map(existingEnrollments.map((enrollment) => [enrollment.leadId, enrollment]));
-      const concurrentLeadIds = new Set(otherActiveEnrollments.map((enrollment) => enrollment.leadId));
-      const newlyEnrolledLeadIds = [];
-
-      for (const leadId of batchIds) {
-        try {
-          const lead = leadsById.get(leadId);
-          if (!lead) continue;
-
-          if (!isActiveLead(lead)) {
-            skippedInactive.push(leadId);
-            continue;
-          }
-
-          const existingEnrollment = existingByLeadId.get(leadId);
-          if (
-            existingEnrollment &&
-            (existingEnrollment.status === "ACTIVE" ||
-              existingEnrollment.status === "PAUSED")
-          ) {
-            skippedDuplicates.push(leadId);
-            continue;
-          }
-
-          if (concurrentLeadIds.has(leadId)) {
-            concurrentWarnings.push(leadId);
-          }
-
-          const enrollment = await prisma.campaignEnrollment.upsert({
-            where: {
-              leadId_campaignId: {
-                leadId,
-                campaignId: id,
-              },
-            },
-            create: {
+            leadId_campaignId: {
               leadId,
               campaignId: id,
-              status: "ACTIVE",
-              currentStepPosition: 1,
             },
-            update: {
-              status: "ACTIVE",
-              currentStepPosition: 1,
-              exitedReason: null,
-            },
-          });
-
-          if (campaign.status === "Active") {
-            enrollmentsToStart.push(enrollment);
-          }
-
-          newlyEnrolledLeadIds.push(leadId);
-
-          enrolledCount++;
-        } catch (err) {
-          console.error(`Failed to enroll lead ${leadId}:`, err);
-        }
-      }
-
-      if (newlyEnrolledLeadIds.length > 0) {
-        await prisma.lead.updateMany({
-          where: { id: { in: newlyEnrolledLeadIds }, companyId: req.user.companyId, status: LEAD_STATUS.NEW },
-          data: { status: LEAD_STATUS.NURTURING },
+          },
+          create: {
+            leadId,
+            campaignId: id,
+            status: "ACTIVE",
+            currentStepPosition: 1,
+          },
+          update: {
+            status: "ACTIVE",
+            currentStepPosition: 1,
+            exitedReason: null,
+          },
         });
+
+        if (campaign.status === "Active") {
+          enrollmentsToStart.push(enrollment);
+        }
+
+        newlyEnrolledLeadIds.push(leadId);
+
+        enrolledCount++;
+      } catch (err) {
+        console.error(`Failed to enroll lead ${leadId}:`, err);
       }
     }
 
-    if (campaign.status === "Active" && enrollmentsToStart.length > 0) {
-      console.log(
-        `[Campaign Controller] Sending campaign enrollment events for ${enrollmentsToStart.length} leads in batches.`,
-      );
-      await sendCampaignEnrollmentEvents(inngest, enrollmentsToStart, id, req.user.companyId);
+    if (newlyEnrolledLeadIds.length > 0) {
+      await prisma.lead.updateMany({
+        where: { id: { in: newlyEnrolledLeadIds }, companyId: req.user.companyId, status: LEAD_STATUS.NEW },
+        data: { status: LEAD_STATUS.NURTURING },
+      });
     }
-    return res.json({
-      success: true,
-      enrolledCount,
-      warnings: await unsendableChannelWarnings(req.user.companyId, campaign.steps),
-      skippedDuplicatesCount: skippedDuplicates.length,
-      // SW-ANN-001: archived or closed/unsubscribed leads dropped from this enroll.
-      skippedInactiveCount: skippedInactive.length,
-      concurrentWarningsCount: concurrentWarnings.length,
-      skippedDuplicates,
-      skippedInactive,
-      concurrentWarnings,
-    });
-  } catch (error) {
-    console.error("[Campaign Enroll] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  if (campaign.status === "Active" && enrollmentsToStart.length > 0) {
+    console.log(
+      `[Campaign Controller] Sending campaign enrollment events for ${enrollmentsToStart.length} leads in batches.`,
+    );
+    await sendCampaignEnrollmentEvents(inngest, enrollmentsToStart, id, req.user.companyId);
+  }
+  return res.json({
+    success: true,
+    enrolledCount,
+    warnings: await unsendableChannelWarnings(req.user.companyId, campaign.steps),
+    skippedDuplicatesCount: skippedDuplicates.length,
+    // SW-ANN-001: archived or closed/unsubscribed leads dropped from this enroll.
+    skippedInactiveCount: skippedInactive.length,
+    concurrentWarningsCount: concurrentWarnings.length,
+    skippedDuplicates,
+    skippedInactive,
+    concurrentWarnings,
+  });
 };
 
 export const unenrollCampaign = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { leadIds } = req.body;
+  const { id } = req.params;
+  const { leadIds } = req.body;
 
-    if (!Array.isArray(leadIds) || leadIds.length === 0) {
-      return res.status(400).json({ message: "leadIds array is required" });
-    }
-
-    const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId },
-    });
-    if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
-    }
-
-    const result = await prisma.campaignEnrollment.updateMany({
-      where: {
-        campaignId: id,
-        leadId: { in: leadIds },
-        status: { in: ["ACTIVE", "PAUSED"] },
-      },
-      data: { status: "EXITED", exitedReason: "MANUAL" },
-    });
-
-    const activeCount = await prisma.campaignEnrollment.count({
-      where: { campaignId: id, status: { in: ["ACTIVE", "PAUSED"] } },
-    });
-    if (activeCount === 0 && campaign.status === "Active" && campaign.kind === "MANUAL") {
-      await prisma.campaign.update({
-        where: { id },
-        data: { status: "Completed" },
-      });
-    }
-
-    return res.json({ success: true, removed: result.count });
-  } catch (error) {
-    console.error("[Campaign Unenroll] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({ message: "leadIds array is required" });
   }
+
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, companyId: req.user.companyId },
+  });
+  if (!campaign) {
+    return res.status(404).json({ message: "Campaign not found" });
+  }
+
+  const result = await prisma.campaignEnrollment.updateMany({
+    where: {
+      campaignId: id,
+      leadId: { in: leadIds },
+      status: { in: ["ACTIVE", "PAUSED"] },
+    },
+    data: { status: "EXITED", exitedReason: "MANUAL" },
+  });
+
+  const activeCount = await prisma.campaignEnrollment.count({
+    where: { campaignId: id, status: { in: ["ACTIVE", "PAUSED"] } },
+  });
+  if (activeCount === 0 && campaign.status === "Active" && campaign.kind === "MANUAL") {
+    await prisma.campaign.update({
+      where: { id },
+      data: { status: "Completed" },
+    });
+  }
+
+  return res.json({ success: true, removed: result.count });
 };
 
 export const deleteCampaign = async (req, res) => {
-  try {
-    const { id } = req.params;
+  const { id } = req.params;
 
-    const campaign = await prisma.campaign.findFirst({
-      where: { id, companyId: req.user.companyId, kind: "MANUAL" },
-    });
+  const campaign = await prisma.campaign.findFirst({
+    where: { id, companyId: req.user.companyId, kind: "MANUAL" },
+  });
 
-    if (!campaign) {
-      return res.status(404).json({ message: "Campaign not found" });
-    }
-
-    await prisma.campaign.delete({ where: { id } });
-
-    return res.json({
-      success: true,
-      message: "Campaign deleted successfully",
-    });
-  } catch (error) {
-    console.error("[Campaign Delete] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!campaign) {
+    return res.status(404).json({ message: "Campaign not found" });
   }
+
+  await prisma.campaign.delete({ where: { id } });
+
+  return res.json({
+    success: true,
+    message: "Campaign deleted successfully",
+  });
 };
 
 
@@ -798,65 +758,60 @@ async function generateNewsCampaignCopy(news, company) {
 }
 
 export const createCampaignFromNews = async (req, res) => {
-  try {
-    const { newsId } = req.body;
-    if (!newsId) {
-      return res.status(400).json({ message: "newsId is required" });
-    }
-
-    const companyId = req.user.companyId;
-
-    const news = await prisma.newsPost.findFirst({
-      where: { id: String(newsId), status: "PUBLISHED" },
-    });
-    if (!news) {
-      return res.status(404).json({ message: "News article not found" });
-    }
-
-    const company = await prisma.company.findUnique({
-      where: { id: companyId },
-      select: {
-        name: true,
-        voiceProfile: true,
-        salesBrandProfile: true,
-      },
-    });
-
-    const copy = await generateNewsCampaignCopy(news, company);
-
-    const shortTitle =
-      news.title.length > 60 ? news.title.slice(0, 57) + "..." : news.title;
-
-    const campaign = await prisma.campaign.create({
-      data: {
-        companyId,
-        name: `News: ${shortTitle}`,
-        description: `Auto-drafted from market news: ${news.title}`,
-        channel: "Email & SMS",
-        status: "Ready", // has steps -> ready to enroll & launch
-        steps: {
-          // Immediate send — no wait between the email and the follow-up SMS.
-          create: [
-            {
-              type: "EMAIL",
-              position: 1,
-              subject: copy.emailSubject,
-              body: copy.emailBody,
-            },
-            { type: "SMS", position: 2, body: copy.smsBody },
-          ],
-        },
-      },
-      include: { steps: { orderBy: { position: "asc" } } },
-    });
-
-    return res
-      .status(201)
-      .json({ success: true, campaign, aiGenerated: copy.aiGenerated });
-  } catch (error) {
-    console.error("[Campaign From News] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { newsId } = req.body;
+  if (!newsId) {
+    return res.status(400).json({ message: "newsId is required" });
   }
+
+  const companyId = req.user.companyId;
+
+  const news = await prisma.newsPost.findFirst({
+    where: { id: String(newsId), status: "PUBLISHED" },
+  });
+  if (!news) {
+    return res.status(404).json({ message: "News article not found" });
+  }
+
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    select: {
+      name: true,
+      voiceProfile: true,
+      salesBrandProfile: true,
+    },
+  });
+
+  const copy = await generateNewsCampaignCopy(news, company);
+
+  const shortTitle =
+    news.title.length > 60 ? news.title.slice(0, 57) + "..." : news.title;
+
+  const campaign = await prisma.campaign.create({
+    data: {
+      companyId,
+      name: `News: ${shortTitle}`,
+      description: `Auto-drafted from market news: ${news.title}`,
+      channel: "Email & SMS",
+      status: "Ready", // has steps -> ready to enroll & launch
+      steps: {
+        // Immediate send — no wait between the email and the follow-up SMS.
+        create: [
+          {
+            type: "EMAIL",
+            position: 1,
+            subject: copy.emailSubject,
+            body: copy.emailBody,
+          },
+          { type: "SMS", position: 2, body: copy.smsBody },
+        ],
+      },
+    },
+    include: { steps: { orderBy: { position: "asc" } } },
+  });
+
+  return res
+    .status(201)
+    .json({ success: true, campaign, aiGenerated: copy.aiGenerated });
 };
 
 export const generateCampaignCopy = async (req, res) => {

@@ -22,6 +22,7 @@ import {
   type CommunityInfo,
   type CommunityType,
 } from "@/components/warranty/CommunitiesPanel";
+import { apiFetch, errorMessage } from "@/lib/api";
 
 const TYPE_KEYS = Object.keys(COMMUNITY_TYPE_LABELS) as CommunityType[];
 
@@ -40,9 +41,7 @@ export default function CommunitiesPage({ workspace }: { workspace: "warranty" |
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(api);
-      if (!res.ok) throw new Error();
-      const payload = await res.json();
+      const payload = await apiFetch<{ communities?: CommunityInfo[]; maxHomes?: number }>(api);
       setCommunities(payload.communities ?? []);
       if (payload.maxHomes) setMaxHomes(payload.maxHomes);
     } catch {
@@ -60,20 +59,12 @@ export default function CommunitiesPage({ workspace }: { workspace: "warranty" |
   const send = async (url: string, init: RequestInit, done: string) => {
     setBusy(true);
     try {
-      const res = await fetch(url, {
-        ...init,
-        headers: init.body ? { "Content-Type": "application/json" } : undefined,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "Something went wrong");
-        return false;
-      }
+      await apiFetch(url, { ...init, headers: init.body ? { "Content-Type": "application/json" } : undefined });
       toast.success(done);
       await load();
       return true;
-    } catch {
-      toast.error("Server error. Please try again.");
+    } catch (e) {
+      toast.error(errorMessage(e));
       return false;
     } finally {
       setBusy(false);

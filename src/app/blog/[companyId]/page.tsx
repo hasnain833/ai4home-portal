@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { use } from "react";
 import Link from "next/link";
+import { api, errorMessage } from "@/lib/api";
 
 interface PublicPost {
   id: string;
@@ -23,11 +24,9 @@ export default function PublicBlogList({ params }: { params: Promise<{ companyId
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/public/blog/${companyId}`);
-        if (!res.ok) throw new Error("Unable to load blog");
-        setPosts(await res.json());
-      } catch (e: any) {
-        setError(e.message || "Unable to load blog");
+        setPosts(await api.get<typeof posts>(`/api/public/blog/${companyId}`));
+      } catch (e) {
+        setError(errorMessage(e));
       } finally {
         setLoading(false);
       }

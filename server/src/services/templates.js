@@ -55,15 +55,27 @@ export function bookingButtonsInEmail(html) {
   });
 }
 
-export function prepareOutgoingEmail(html, { companyId = null, source = null, branding } = {}) {
+/** Builder emails carry the builder's logo; platform emails, and builders with no logo, carry ours. */
+export const isPlatformEmail = ({ companyId = null, source = null, branding } = {}) =>
+  branding ? branding === "platform" : !companyId || PLATFORM_EMAIL_SOURCES.has(source);
+
+/** `builder` is the sending company's { name, logo }, looked up by the caller for builder emails. */
+export function prepareOutgoingEmail(html, { companyId = null, source = null, branding, builder = null } = {}) {
   const content = bookingButtonsInEmail(html);
-  const platform = branding ? branding === "platform" : !companyId || PLATFORM_EMAIL_SOURCES.has(source);
-  if (!platform) return content.replaceAll("<!--ai4hb-logo-->", "");
-  if (/<img\b[^>]*\bsrc\s*=\s*["'](?:[^"']*\/logo-email\.png(?:[?"'])|cid:ai4hb-logo["'])/i.test(content)) return content.replaceAll("<!--ai4hb-logo-->", "");
-  const origin = new URL(process.env.NEXT_PUBLIC_URL || "http://localhost:3000").origin;
-  const logo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-ai4hb-brand="platform"><tr><td align="center" style="padding:20px;background:#ffffff"><a href="https://www.aiforhomebuilders.com"><img src="${escapeHtml(origin)}/logo-email.png" width="210" height="162" alt="AI for Homebuilders" style="display:block;border:0;width:210px;max-width:100%;height:auto"></a></td></tr></table>`;
-  // Branded templates reserve a slot inside their card. Only untemplated
-  // platform messages need the generic prepend fallback.
+  const strip = () => content.replaceAll("<!--ai4hb-logo-->", "");
+  const builderLogo = !isPlatformEmail({ companyId, source, branding }) && /^https?:\/\//i.test(String(builder?.logo || "")) ? builder.logo : null;
+  let logo;
+  if (builderLogo) {
+    // Already there (a retried send): don't add it twice.
+    if (content.includes(builderLogo) || content.includes(escapeHtml(builderLogo))) return strip();
+    // A fixed height keeps any logo shape tidy, Outlook included.
+    logo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-ai4hb-brand="builder"><tr><td align="center" style="padding:20px;background:#ffffff"><img src="${escapeHtml(builderLogo)}" height="72" alt="${escapeHtml(builder.name || "")}" style="display:block;border:0;height:72px;width:auto;max-width:240px"></td></tr></table>`;
+  } else {
+    if (/<img\b[^>]*\bsrc\s*=\s*["'](?:[^"']*\/logo-email\.png(?:[?"'])|cid:ai4hb-logo["'])/i.test(content)) return strip();
+    const origin = new URL(process.env.NEXT_PUBLIC_URL || "http://localhost:3000").origin;
+    logo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-ai4hb-brand="platform"><tr><td align="center" style="padding:20px;background:#ffffff"><a href="https://www.aiforhomebuilders.com"><img src="${escapeHtml(origin)}/logo-email.png" width="210" height="162" alt="AI for Homebuilders" style="display:block;border:0;width:210px;max-width:100%;height:auto"></a></td></tr></table>`;
+  }
+  // Templates reserve a slot inside their card. Untemplated messages get the logo prepended.
   if (content.includes("<!--ai4hb-logo-->")) return content.replace("<!--ai4hb-logo-->", logo).replaceAll("<!--ai4hb-logo-->", "");
   if (/<body\b[^>]*>/i.test(content)) return content.replace(/<body\b[^>]*>/i, (body) => body + logo);
   return logo + content;
@@ -612,6 +624,22 @@ export const Templates = {
     `;
     return wrapEmail(content, "Workspace Activated");
   },
+
+  getUnmarkedMeetingsEmail: (meetings, adminUrl) => {
+    const rows = meetings
+      .map((m, i) => `<tr style="${i < meetings.length - 1 ? `border-bottom: 1px solid ${COLORS.border};` : ""}"><td style="padding: 12px 12px 12px 0; font-weight: 600;">${escapeHtml(m.company)}${m.contact ? `<br><span style="font-weight: 400; color: ${COLORS.textMuted}; font-size: 14px;">${escapeHtml(m.contact)}</span>` : ""}</td><td style="padding: 12px 0; text-align: right;">${escapeHtml(m.when)}</td></tr>`)
+      .join("");
+    const content = `
+      <p style="margin-top: 0;">These meetings have passed but are still marked <strong>Confirmed</strong>, so each builder's nurture journey is paused until you record what happened.</p>
+      <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">${rows}</table>
+      <p>Mark each one Completed, No-show or Cancelled. A no-show gets a rebooking email, and a cancelled one goes back into nurture.</p>
+      ${emailButton(adminUrl, "Open Appointments")}
+    `;
+    return wrapEmail(content, `${meetings.length} Meeting${meetings.length === 1 ? "" : "s"} Need an Outcome`);
+  },
+
+  /** Any Super Admin notice: its own HTML inside the standard card. */
+  getAdminNoticeEmail: (title, contentHtml) => wrapEmail(`<div style="font-size: 15px;">${contentHtml}</div>`, escapeHtml(title)),
 
   getAdminVerificationDocEmail: (companyName, adminUrl) => {
     const content = `

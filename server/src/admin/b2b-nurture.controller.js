@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import prisma from "../lib/prisma.js";
-import { denyUnlessAdminAccess } from "../middlewares/auth.js";
+import { adminHandler } from "../middlewares/auth.js";
 import { inngest } from "../lib/inngest.js";
 import { toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { JOURNEY_DEFAULTS, endB2BJourney, getB2BJourneySettings, saveB2BJourneySettings, unknownPlaceholders, validSendTime } from "../lib/b2b.js";
@@ -22,15 +22,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const clip = (value, n) => String(value || "").trim().slice(0, n);
 const who = (req) => req.user?.name || req.user?.email || "Staff";
 
-const wrap = (label, fn) => async (req, res) => {
-  try {
-    if (denyUnlessAdminAccess(req, res)) return;
-    await fn(req, res);
-  } catch (error) {
-    console.error(`[B2B Nurture] ${label} failed:`, error);
-    res.status(500).json({ message: `${label} failed. Please try again.` });
-  }
-};
+const wrap = adminHandler("B2B Nurture");
 
 const sourceText = async () => (await prisma.b2BContentSource.findMany({ where: { active: true }, select: { text: true } })).map((s) => s.text).join(" ");
 

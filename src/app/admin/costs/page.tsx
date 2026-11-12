@@ -27,6 +27,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 interface ChannelUsage {
   units: number;
@@ -130,16 +131,11 @@ export default function AdminCostsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/messaging/spend");
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(body.message || "Failed to load messaging spend");
-        return;
-      }
+      const body = await api.get<SpendData>("/api/admin/messaging/spend");
       setData(body);
       setRates(body.pricing);
-    } catch {
-      toast.error("Could not reach the server");
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -155,20 +151,11 @@ export default function AdminCostsPage() {
     if (!rates) return;
     setSavingRates(true);
     try {
-      const res = await fetch("/api/admin/messaging/pricing", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pricing: rates }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(body.message || "Could not save rates");
-        return;
-      }
+      await api.patch("/api/admin/messaging/pricing", { pricing: rates });
       toast.success("Rates updated");
       await load();
-    } catch {
-      toast.error("Could not reach the server");
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setSavingRates(false);
     }

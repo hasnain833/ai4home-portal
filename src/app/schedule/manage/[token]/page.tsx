@@ -3,6 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { CalendarClock, CheckCircle2, MapPin, Wrench, XCircle } from "lucide-react";
 import { ScheduleShell, SlotPicker, type Slot } from "@/components/warranty/ScheduleShell";
+import { api, ApiError, isSlotTaken, serverMessageOr } from "@/lib/api";
 
 type ManageData = {
   ticketId: string;
@@ -41,14 +42,16 @@ export default function ManageVisitPage({ params }: { params: Promise<{ token: s
   const [done, setDone] = useState<{ kind: "moved" | "cancelled"; label?: string } | null>(null);
 
   const load = async () => {
-    const res = await fetch(`/api/ticket-scheduling/public/manage/${token}`);
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setBlocked(payload.message || "This link is no longer valid.");
+    try {
+      const payload = await api.get<ManageData>(`/api/ticket-scheduling/public/manage/${token}`);
+      setData(payload);
+      return payload;
+    } catch (e) {
+      // A refused link is shown as such; a dropped connection falls to the caller's "try again".
+      if (!(e instanceof ApiError && e.status)) throw e;
+      setBlocked(serverMessageOr(e, "This link is no longer valid."));
       return null;
     }
-    setData(payload);
-    return payload as ManageData;
   };
 
   useEffect(() => {
@@ -69,26 +72,17 @@ export default function ManageVisitPage({ params }: { params: Promise<{ token: s
     setWorking(true);
     setError("");
     try {
-      const res = await fetch("/api/ticket-scheduling/public/reschedule", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, startTime: selected }),
-      });
-      const result = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 409) {
-          setError(result.message || "That time was just taken. Please pick another.");
-          setSelected("");
-          await load();
-        } else {
-          setError(result.message || "Could not move that visit.");
-        }
-        return;
-      }
+      await api.post("/api/ticket-scheduling/public/reschedule", { token, startTime: selected });
       const slot = data?.slots.find((s) => s.iso === selected);
       setDone({ kind: "moved", label: slot?.label || formatWhen(selected) });
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (e) {
+      if (isSlotTaken(e)) {
+        setError(serverMessageOr(e, "That time was just taken. Please pick another."));
+        setSelected("");
+        await load();
+      } else {
+        setError(serverMessageOr(e, "Could not move that visit."));
+      }
     } finally {
       setWorking(false);
     }
@@ -98,19 +92,10 @@ export default function ManageVisitPage({ params }: { params: Promise<{ token: s
     setWorking(true);
     setError("");
     try {
-      const res = await fetch("/api/ticket-scheduling/public/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      });
-      const result = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(result.message || "Could not cancel that visit.");
-        return;
-      }
+      await api.post("/api/ticket-scheduling/public/cancel", { token });
       setDone({ kind: "cancelled" });
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (e) {
+      setError(serverMessageOr(e, "Could not cancel that visit."));
     } finally {
       setWorking(false);
     }

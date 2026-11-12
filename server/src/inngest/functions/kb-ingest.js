@@ -64,7 +64,7 @@ export async function extractTextFromBuffer(buffer, name) {
   return buffer.toString("utf-8");
 }
 
-async function buildChunks(sourceUrl, name) {
+export async function buildChunks(sourceUrl, name) {
   if (isSpreadsheetFile(name)) {
     const sheets = readSheets(await fetchBuffer(sourceUrl));
     const rows = chunkSheets(sheets);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { api, ApiError } from "@/lib/api";
 import { Loader2, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,21 +74,14 @@ export function HomesCsvImport({
         showToast("That file has no rows.");
         return;
       }
-      const res = await fetch("/api/properties/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setImportErrors(data.errors ?? []);
-        showToast(data.message || "Import failed.");
-        return;
-      }
+      const data = await api.post<{ created: number }>("/api/properties/import", { rows });
       showToast(`Imported ${data.created} home${data.created === 1 ? "" : "s"}.`);
       onImported();
-    } catch {
-      showToast("Could not read that file.");
+    } catch (e) {
+      // A rejected import lists the bad rows; anything else is the file itself.
+      const body = e instanceof ApiError ? (e.body as { errors?: { line: number; message: string }[] } | null) : null;
+      setImportErrors(body?.errors ?? []);
+      showToast(e instanceof ApiError ? e.message : "Could not read that file.");
     } finally {
       setImporting(false);
       if (fileRef.current) fileRef.current.value = "";

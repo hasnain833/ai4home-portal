@@ -41,9 +41,6 @@ export const getCompany = async (req, res) => {
 export const updateCompany = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
 
     const companyId = session.companyId;
     const SETTINGS_FIELDS = [
@@ -148,36 +145,31 @@ export const updateCompany = async (req, res) => {
   }
 };
 export const getCompanyBranding = async (req, res) => {
-  try {
-    const id = req.query.id;
+  const id = req.query.id;
 
-    if (!id) {
-      return res.status(400).json({ message: "Missing company id" });
-    }
-
-    const company = await prisma.company.findUnique({
-      where: { id: id },
-      select: {
-        name: true,
-        logo: true,
-        botColor: true,
-      }
-    });
-
-    if (!company) {
-      return res.status(404).json({ message: "Company not found" });
-    }
-
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-
-    return res.json(company);
-  } catch (error) {
-    console.error("Error fetching company branding:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!id) {
+    return res.status(400).json({ message: "Missing company id" });
   }
+
+  const company = await prisma.company.findUnique({
+    where: { id: id },
+    select: {
+      name: true,
+      logo: true,
+      botColor: true,
+    }
+  });
+
+  if (!company) {
+    return res.status(404).json({ message: "Company not found" });
+  }
+
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+
+  return res.json(company);
 };
 
 function nextVerificationStatus(current, { verificationDocUrl, agreementDocUrl }) {

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Database, Zap, Plug, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { api } from "@/lib/api";
 
 // All three are placeholders until we have real vendor API access; the server
 // refuses to save keys for them (COMING_SOON_PLATFORMS in erp-service.js).
@@ -24,9 +25,7 @@ export default function ErpIntegrationsCard() {
   // Admin-only endpoint; for other roles this fails quietly and the cards just show "Coming soon".
   const load = async () => {
     try {
-      const res = await fetch("/api/integrations");
-      if (!res.ok) return;
-      const data: { platform: string; configured: boolean }[] = await res.json();
+      const data = await api.get<{ platform: string; configured: boolean }[]>("/api/integrations");
       setConfigured(data.filter((d) => d.configured).map((d) => d.platform));
     } catch {
       // silent
@@ -44,12 +43,7 @@ export default function ErpIntegrationsCard() {
     }))) return;
     setDeleting(id);
     try {
-      const res = await fetch("/api/integrations/credentials", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: id }),
-      });
-      if (!res.ok) throw new Error();
+      await api.delete("/api/integrations/credentials", { platform: id });
       toast.success(`${label} keys removed.`);
       await load();
     } catch {

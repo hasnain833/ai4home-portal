@@ -4,7 +4,7 @@ import { formatSlotLabel } from "../../lib/scheduling.js";
 import { b2bLeadTimezone } from "../../lib/timezone.js";
 import { toolCall } from "../../lib/llm.js";
 import { notifySuperAdmin, unknownPlaceholders, getB2BAvailability } from "../../lib/b2b.js";
-import { autoJoinWebsiteLeads, insideSendWindow, journeyTouch, sendMeetingReminder, CONTENT_CATEGORIES, CONTENT_STAGES } from "../../lib/b2b-journey.js";
+import { alertUnmarkedMeetings, autoJoinWebsiteLeads, insideSendWindow, journeyTouch, sendMeetingReminder, CONTENT_CATEGORIES, CONTENT_STAGES } from "../../lib/b2b-journey.js";
 import { B2B_CONTENT_SYSTEM } from "../../prompts/content.js";
 import { WEBSITE_PRODUCT_GUIDE } from "../../prompts/help-agent.js";
 import { queryB2BKb } from "../../services/vector-store.service.js";
@@ -187,6 +187,7 @@ export const runB2BJourney = inngest.createFunction(
   { id: "b2b-journey-scheduler", triggers: [{ cron: "*/15 * * * *" }] },
   async ({ step }) => {
     const joined = await step.run("auto-join", () => autoJoinWebsiteLeads());
+    await step.run("unmarked-meetings", () => alertUnmarkedMeetings());
     const due = await step.run("find-due", async () => {
       const rows = await prisma.b2BLead.findMany({
         where: { journeyStage: { not: null }, journeyNextAt: { lte: new Date() } },

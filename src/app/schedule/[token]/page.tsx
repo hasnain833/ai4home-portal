@@ -3,6 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { CalendarDays, CheckCircle2, MapPin, Wrench } from "lucide-react";
 import { ScheduleShell, SlotPicker, type Slot } from "@/components/warranty/ScheduleShell";
+import { api, ApiError, isSlotTaken, serverMessageOr } from "@/lib/api";
 
 type BookingData = {
   ticketId: string;
@@ -31,14 +32,16 @@ export default function TicketBookingPage({
   const [error, setError] = useState("");
 
   const loadSlots = async () => {
-    const res = await fetch(`/api/ticket-scheduling/public/${token}`);
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setBlocked(payload.message || "This booking link is no longer valid.");
+    try {
+      const payload = await api.get<BookingData>(`/api/ticket-scheduling/public/${token}`);
+      setData(payload);
+      return payload;
+    } catch (e) {
+      // A refused link is shown as such; a dropped connection falls to the caller's "try again".
+      if (!(e instanceof ApiError && e.status)) throw e;
+      setBlocked(serverMessageOr(e, "This booking link is no longer valid."));
       return null;
     }
-    setData(payload);
-    return payload as BookingData;
   };
 
   useEffect(() => {
@@ -60,33 +63,22 @@ export default function TicketBookingPage({
     setBooking(true);
     setError("");
     try {
-      const res = await fetch("/api/ticket-scheduling/public/book", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, startTime: selected }),
-      });
-      const result = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        // 409 means somebody took the slot while this page was open — the times
-        // on screen are stale, so they get refreshed rather than re-submitted.
-        if (res.status === 409) {
-          setError(result.message || "That time was just taken. Please pick another.");
-          setSelected("");
-          await loadSlots();
-        } else {
-          setError(result.message || "Could not book that time.");
-        }
-        return;
-      }
-
+      const result = await api.post<{ manageToken: string }>("/api/ticket-scheduling/public/book", { token, startTime: selected });
       const slot = data?.slots.find((s) => s.iso === selected);
       setConfirmed({
         label: slot?.label || new Date(selected).toLocaleString(),
         manageToken: result.manageToken,
       });
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (e) {
+      // 409 means somebody took the slot while this page was open — the times
+      // on screen are stale, so they get refreshed rather than re-submitted.
+      if (isSlotTaken(e)) {
+        setError(serverMessageOr(e, "That time was just taken. Please pick another."));
+        setSelected("");
+        await loadSlots();
+      } else {
+        setError(serverMessageOr(e, "Could not book that time."));
+      }
     } finally {
       setBooking(false);
     }

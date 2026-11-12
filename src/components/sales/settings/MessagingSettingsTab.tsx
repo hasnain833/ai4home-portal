@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Mail, MessageSquare, Sparkles } from "lucide-react";
 import { useMessagingCapabilities } from "@/lib/use-messaging-capabilities";
+import { api } from "@/lib/api";
 
 interface UsageRow {
   channel: string;
@@ -37,8 +38,8 @@ export default function MessagingSettingsTab() {
 
     (async () => {
       try {
-        const res = await fetch("/api/sales/settings/messaging");
-        if (!cancelled && res.ok) setSettings(await res.json());
+        const data = await api.get<typeof settings>("/api/sales/settings/messaging");
+        if (!cancelled) setSettings(data);
       } catch (error) {
         console.error("Failed to load messaging settings:", error);
       } finally {

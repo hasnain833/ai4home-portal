@@ -26,14 +26,8 @@ import {
   EMAIL_LENGTH_RULE,
   DEFAULT_AUDIENCE,
 } from "../prompts/index.js";
+import { formatFileSize } from "../lib/utils.js";
 
-function formatFileSize(bytes) {
-  if (!bytes) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
 
 export const getSalesKB = async (req, res) => {
   try {

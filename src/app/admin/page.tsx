@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 
 interface CompanyOverview {
   id: string;
@@ -73,12 +74,13 @@ export default function SuperAdminOverviewPage() {
     const fetchOverview = async () => {
       setLoading(true);
       try {
-        const [overviewResponse, messagingResponse] = await Promise.all([
-          fetch("/api/admin/companies-overview"),
-          fetch("/api/admin/messaging/spend"),
+        // Each panel loads on its own, so one failing still shows the other.
+        const [overviewData, messagingData] = await Promise.all([
+          api.get<CompaniesOverview>("/api/admin/companies-overview").catch(() => null),
+          api.get<MessagingOverview>("/api/admin/messaging/spend").catch(() => null),
         ]);
-        if (overviewResponse.ok) setOverview(await overviewResponse.json());
-        if (messagingResponse.ok) setMessaging(await messagingResponse.json());
+        if (overviewData) setOverview(overviewData);
+        if (messagingData) setMessaging(messagingData);
       } catch (error) {
         console.error("Failed to load super admin overview:", error);
       } finally {

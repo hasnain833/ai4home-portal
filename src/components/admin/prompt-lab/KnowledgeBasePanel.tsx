@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { api, errorMessage } from "@/lib/api";
 
 export type KbDocument = {
   id: string;
@@ -126,12 +127,11 @@ export default function KnowledgeBasePanel({
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.get<any>(
         `/api/admin/prompt-lab/kb?agent=${encodeURIComponent(agent)}` +
           `&communityId=${encodeURIComponent(communityId)}`,
       );
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed to load");
-      const data = await res.json();
       setDocuments(Array.isArray(data.documents) ? data.documents : []);
       setCommunityDocs(Array.isArray(data.communityDocuments) ? data.communityDocuments : []);
       setCommunities(Array.isArray(data.communities) ? data.communities : []);
@@ -139,7 +139,7 @@ export default function KnowledgeBasePanel({
       setTestCompany(data.testCompany || null);
       setRetrieval(data.retrieval || null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load documents");
+      toast.error(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -164,10 +164,7 @@ export default function KnowledgeBasePanel({
     // Uploading while a community is selected files the document against that
     // community as a sandbox document, rather than into the platform tier.
     body.append("communityId", communityId);
-    const res = await fetch("/api/admin/prompt-lab/kb/upload", { method: "POST", body });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || "Upload failed");
-    return data;
+    return api.post("/api/admin/prompt-lab/kb/upload", body);
   };
 
   const uploadMany = async (files: File[]) => {
@@ -212,25 +209,21 @@ export default function KnowledgeBasePanel({
     });
     if (!ok) return;
     try {
-      const res = await fetch(`/api/admin/prompt-lab/kb/${doc.id}?agent=${agent}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Delete failed");
+      await api.delete(`/api/admin/prompt-lab/kb/${doc.id}?agent=${agent}`);
       toast.success("Document deleted");
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Delete failed");
+      toast.error(errorMessage(e));
     }
   };
 
   const reindex = async (doc: KbDocument) => {
     try {
-      const res = await fetch(`/api/admin/prompt-lab/kb/${doc.id}/reindex?agent=${agent}`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Reindex failed");
+      await api.post(`/api/admin/prompt-lab/kb/${doc.id}/reindex?agent=${agent}`);
       toast.success(`Reindexing ${doc.name}`);
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Reindex failed");
+      toast.error(errorMessage(e));
     }
   };
 
@@ -238,19 +231,14 @@ export default function KnowledgeBasePanel({
     const tab = window.open("about:blank", "_blank");
     if (tab) tab.opener = null;
     try {
-      const res = await fetch(
-        `/api/admin/prompt-lab/kb/${doc.id}/url?agent=${encodeURIComponent(agent)}`,
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.url) {
-        throw new Error(data.message || "Could not open that document.");
-      }
+      const data = await api.get<{ url?: string }>(`/api/admin/prompt-lab/kb/${doc.id}/url?agent=${encodeURIComponent(agent)}`);
+      if (!data?.url) throw new Error("Could not open that document.");
       // A blocked popup leaves nothing to navigate; fall back to this tab.
       if (tab) tab.location.replace(data.url);
       else window.location.assign(data.url);
     } catch (e) {
       tab?.close();
-      toast.error(e instanceof Error ? e.message : "Could not open that document.");
+      toast.error(errorMessage(e));
     }
   };
 
@@ -262,17 +250,15 @@ export default function KnowledgeBasePanel({
     if (!question) return;
     setProbing(true);
     try {
-      const res = await fetch("/api/admin/prompt-lab/kb/probe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent, question, communityId }),
+      const data = await api.post<{ results?: KbProbeResult[]; method?: string }>("/api/admin/prompt-lab/kb/probe", {
+        agent,
+        question,
+        communityId,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Retrieval test failed");
-      setProbeResults(data.results || []);
-      setProbeMethod(data.method || null);
+      setProbeResults(data?.results || []);
+      setProbeMethod(data?.method || null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Retrieval test failed");
+      toast.error(errorMessage(e));
     } finally {
       setProbing(false);
     }

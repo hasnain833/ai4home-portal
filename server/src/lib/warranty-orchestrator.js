@@ -1,4 +1,4 @@
-import { toolCall } from "./llm.js";
+import { toAnthropicMessages, toolCall } from "./llm.js";
 import { countConversationPhotos, MAX_PHOTOS_PER_CLAIM } from "../services/warranty-photos.service.js";
 import { effortForPhase } from "./ai-config.js";
 import prisma from "./prisma.js";
@@ -94,17 +94,6 @@ const ORCHESTRATOR_TOOLS = {
   },
 };
 
-function toAnthropicMessages(transcript) {
-  const msgs = [];
-  for (const t of transcript) {
-    const role = t.role === "agent" ? "assistant" : "user";
-    const last = msgs[msgs.length - 1];
-    if (last && last.role === role) last.content += `\n${t.content}`;
-    else msgs.push({ role, content: t.content });
-  }
-  while (msgs.length && msgs[0].role !== "user") msgs.shift();
-  return msgs;
-}
 
 function recentContext(transcript, turns = 6) {
   return (transcript || [])

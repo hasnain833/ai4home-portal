@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
+import { api, errorMessage } from "@/lib/api";
 
 type Placeholder = { token: string; description: string; required: boolean };
 type CoachPrompt = {
@@ -31,14 +32,12 @@ export default function SalesCoachLab() {
   const [saving, setSaving] = useState(false);
 
   const load = () =>
-    fetch(API)
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Could not load the Sales Coach prompts");
+    api.get<{ prompts: CoachPrompt[] }>(API)
+      .then((data) => {
         setSaved(data.prompts);
-        setDrafts(Object.fromEntries(data.prompts.map((p: CoachPrompt) => [p.key, p.prompt])));
+        setDrafts(Object.fromEntries(data.prompts.map((p) => [p.key, p.prompt])));
       })
-      .catch((e) => toast.error(e.message));
+      .catch((e) => toast.error(errorMessage(e)));
 
   useEffect(() => {
     void load();
@@ -50,17 +49,11 @@ export default function SalesCoachLab() {
   const save = async (prompts: Record<string, string>) => {
     setSaving(true);
     try {
-      const res = await fetch(API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompts }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Could not save");
+      await api.put(API, { prompts });
       toast.success("Saved — the next role-play message uses it");
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not save");
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }

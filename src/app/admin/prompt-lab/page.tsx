@@ -48,6 +48,7 @@ import WebsiteAgentLab from "@/components/admin/prompt-lab/WebsiteAgentLab";
 import B2BAgentLab from "@/components/admin/prompt-lab/B2BAgentLab";
 import SalesCoachLab from "@/components/admin/prompt-lab/SalesCoachLab";
 import LiveStatus from "@/components/admin/prompt-lab/LiveStatus";
+import { api, ApiError, errorMessage } from "@/lib/api";
 
 type Draft = {
   systemTemplate: string;
@@ -148,6 +149,10 @@ const PHASE_DESCRIPTIONS: Record<WarrantyPhaseKey, string> = {
   RESOLVE: "Confirms the issue and files a warranty ticket.",
 };
 
+/** The JSON body a failed request returned. Saves and set-live put errors, warnings and acknowledgements there. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const failedBody = (e: unknown): Record<string, any> => (e instanceof ApiError && e.body && typeof e.body === "object" ? e.body : {});
+
 export default function PromptLabPage() {
   const { user } = useAuth();
   const confirm = useConfirm();
@@ -215,12 +220,8 @@ export default function PromptLabPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const labRes = await fetch("/api/admin/prompt-lab");
-      const lab = await labRes.json().catch(() => ({}));
-      if (!labRes.ok) {
-        toast.error(lab.message || "Could not load the prompt lab.");
-        return;
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const lab = await api.get<any>("/api/admin/prompt-lab");
       setDefaults(lab.defaults);
       setPlaceholders(lab.placeholders || []);
       setVersions(lab.versions || []);
@@ -235,6 +236,8 @@ export default function PromptLabPage() {
             }
           : lab.defaults,
       );
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -243,9 +246,8 @@ export default function PromptLabPage() {
   const loadWarranty = useCallback(async () => {
     setWLoading(true);
     try {
-      const res = await fetch("/api/admin/warranty-prompt-lab");
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(data.message || "Could not load the warranty prompt lab."); return; }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.get<any>("/api/admin/warranty-prompt-lab");
       setWDefaults(data.defaults || EMPTY_WARRANTY_DRAFT);
       setWVersions(data.versions || []);
       setWLive(data.live || null);
@@ -256,6 +258,8 @@ export default function PromptLabPage() {
         DIAGNOSE: data.currentDraft.DIAGNOSE,
         RESOLVE: data.currentDraft.RESOLVE,
       } : data.defaults || EMPTY_WARRANTY_DRAFT);
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setWLoading(false);
     }
@@ -324,22 +328,12 @@ export default function PromptLabPage() {
     setSending(true);
 
     try {
-      const res = await fetch("/api/admin/prompt-lab/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draft,
-          leadFirstName,
-          messages: transcript.map((m) => ({ role: m.role, content: m.content })),
-        }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.post<any>("/api/admin/prompt-lab/chat", {
+        draft,
+        leadFirstName,
+        messages: transcript.map((m) => ({ role: m.role, content: m.content })),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "The agent could not reply.");
-        setMessages((prev) => prev.slice(0, -1));
-        setInput(text);
-        return;
-      }
       setMessages((prev) => [
         ...prev,
         {
@@ -355,8 +349,8 @@ export default function PromptLabPage() {
           retrieved: data.retrieved || [],
         },
       ]);
-    } catch {
-      toast.error("Could not reach the agent.");
+    } catch (e) {
+      toast.error(errorMessage(e));
       setMessages((prev) => prev.slice(0, -1));
       setInput(text);
     } finally {
@@ -369,25 +363,19 @@ export default function PromptLabPage() {
     setPreviewOpen(true);
     try {
       const lastUser = [...messages].reverse().find((m) => m.role === "user");
-      const res = await fetch("/api/admin/prompt-lab/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draft,
-          leadFirstName,
-          question: lastUser?.content || "",
-        }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.post<any>("/api/admin/prompt-lab/preview", {
+        draft,
+        leadFirstName,
+        question: lastUser?.content || "",
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "Could not render the prompt.");
-        setPreviewOpen(false);
-        return;
-      }
       setPreviewText(data.system || "");
       setPreviewMeta(data.context || null);
       setErrors(data.validation?.errors || []);
       setWarnings(data.validation?.warnings || []);
+    } catch (e) {
+      toast.error(errorMessage(e));
+      setPreviewOpen(false);
     } finally {
       setPreviewLoading(false);
     }
@@ -396,18 +384,7 @@ export default function PromptLabPage() {
   const saveVersion = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/admin/prompt-lab/versions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...draft, label: versionLabel }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setErrors(data.errors || [data.message || "Could not save."]);
-        setWarnings(data.warnings || []);
-        toast.error(data.message || "Could not save this version.");
-        return;
-      }
+      const data = await api.post<{ warnings?: string[] }>("/api/admin/prompt-lab/versions", { ...draft, label: versionLabel });
       setErrors([]);
       setWarnings(data.warnings || []);
       setVersionLabel("");
@@ -416,6 +393,11 @@ export default function PromptLabPage() {
         toast.warning(`Saved with ${data.warnings.length} warning(s) — check the editor.`);
       }
       await load();
+    } catch (e) {
+      const body = failedBody(e);
+      setErrors(body.errors || [errorMessage(e)]);
+      setWarnings(body.warnings || []);
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -434,10 +416,10 @@ export default function PromptLabPage() {
   };
 
   const setCurrentVersion = async (v: PromptVersion) => {
-    const res = await fetch(`/api/admin/prompt-lab/versions/${v.id}/set-current`, { method: "POST" });
-    if (!res.ok) {
-      toast.error("Could not set that version as current.");
-      return;
+    try {
+      await api.post(`/api/admin/prompt-lab/versions/${v.id}/set-current`);
+    } catch (e) {
+      return toast.error(errorMessage(e));
     }
     toast.success("Set as the current draft.");
     await load();
@@ -447,14 +429,19 @@ export default function PromptLabPage() {
   const setVersionLive = async (v: PromptVersion, acknowledgeWarnings = false) => {
     setSettingLive(true);
     try {
-      const res = await fetch(`/api/admin/prompt-lab/versions/${v.id}/set-live`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acknowledgeWarnings }),
-      });
-      const data = await res.json().catch(() => ({}));
+      let data = {} as ReturnType<typeof failedBody>;
+      try {
+        await api.post(`/api/admin/prompt-lab/versions/${v.id}/set-live`, { acknowledgeWarnings });
+      } catch (e) {
+        data = failedBody(e);
+        if (!(e instanceof ApiError && e.status === 409 && data.needsAcknowledgement)) {
+          toast.error(errorMessage(e));
+          if (data.errors?.length) setErrors(data.errors);
+          return;
+        }
+      }
 
-      if (res.status === 409 && data.needsAcknowledgement) {
+      if (data.needsAcknowledgement) {
         const ok = await confirm({
           title: "Put this version live with warnings?",
           description: (
@@ -472,11 +459,6 @@ export default function PromptLabPage() {
           destructive: true,
         });
         if (ok) await setVersionLive(v, true);
-        return;
-      }
-      if (!res.ok) {
-        toast.error(data.message || "Could not put that version live.");
-        if (data.errors?.length) setErrors(data.errors);
         return;
       }
 
@@ -498,24 +480,21 @@ export default function PromptLabPage() {
     if (!ok) return;
     setSettingLive(true);
     try {
-      const res = await fetch("/api/admin/prompt-lab/revert-to-defaults", { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "Could not revert.");
-        return;
-      }
-      toast.success(data.message || "Reverted to the code defaults.");
+      const data = await api.post<{ message?: string }>("/api/admin/prompt-lab/revert-to-defaults");
+      toast.success(data?.message || "Reverted to the code defaults.");
       await load();
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setSettingLive(false);
     }
   };
 
   const deleteVersion = async (v: PromptVersion) => {
-    const res = await fetch(`/api/admin/prompt-lab/versions/${v.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      toast.error("Could not delete that version.");
-      return;
+    try {
+      await api.delete(`/api/admin/prompt-lab/versions/${v.id}`);
+    } catch (e) {
+      return toast.error(errorMessage(e));
     }
     toast.success("Version deleted.");
     await load();
@@ -558,24 +537,14 @@ export default function PromptLabPage() {
     setWSending(true);
 
     try {
-      const res = await fetch("/api/admin/warranty-prompt-lab/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draft: wDraft,
-          phase: wChatPhase,
-          issueState: wIssueState,
-          communityId: wCommunityId,
-          messages: transcript.map((m) => ({ role: m.role, content: m.content })),
-        }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.post<any>("/api/admin/warranty-prompt-lab/chat", {
+        draft: wDraft,
+        phase: wChatPhase,
+        issueState: wIssueState,
+        communityId: wCommunityId,
+        messages: transcript.map((m) => ({ role: m.role, content: m.content })),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "The warranty agent could not reply.");
-        setWMessages((prev) => prev.slice(0, -1));
-        setWInput(text);
-        return;
-      }
       if (data.phase) setWChatPhase(data.phase);
       if (data.issueState) setWIssueState(data.issueState);
       setWMessages((prev) => [
@@ -585,8 +554,8 @@ export default function PromptLabPage() {
           retrieved: Array.isArray(data.retrieved) ? data.retrieved : [],
           options: Array.isArray(data.options) ? data.options : [] },
       ]);
-    } catch {
-      toast.error("Could not reach the warranty agent.");
+    } catch (e) {
+      toast.error(errorMessage(e));
       setWMessages((prev) => prev.slice(0, -1));
       setWInput(text);
     } finally {
@@ -597,23 +566,17 @@ export default function PromptLabPage() {
   const saveWarrantyVersion = async () => {
     setWSaving(true);
     try {
-      const res = await fetch("/api/admin/warranty-prompt-lab/versions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...wDraft, label: wVersionLabel }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setWErrors(data.errors || [data.message || "Could not save."]);
-        setWWarnings(data.warnings || []);
-        toast.error(data.message || "Could not save this version.");
-        return;
-      }
+      const data = await api.post<{ warnings?: string[] }>("/api/admin/warranty-prompt-lab/versions", { ...wDraft, label: wVersionLabel });
       setWErrors([]);
       setWWarnings(data.warnings || []);
       setWVersionLabel("");
       toast.success("Version saved.");
       await loadWarranty();
+    } catch (e) {
+      const body = failedBody(e);
+      setWErrors(body.errors || [errorMessage(e)]);
+      setWWarnings(body.warnings || []);
+      toast.error(errorMessage(e));
     } finally {
       setWSaving(false);
     }
@@ -631,12 +594,17 @@ export default function PromptLabPage() {
   const setWarrantyVersionLive = async (v: PromptVersion, acknowledgeWarnings = false) => {
     setWSettingLive(true);
     try {
-      const res = await fetch(`/api/admin/warranty-prompt-lab/versions/${v.id}/set-live`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ acknowledgeWarnings }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.needsAcknowledgement) {
+      let data = {} as ReturnType<typeof failedBody>;
+      try {
+        await api.post(`/api/admin/warranty-prompt-lab/versions/${v.id}/set-live`, { acknowledgeWarnings });
+      } catch (e) {
+        data = failedBody(e);
+        if (!(e instanceof ApiError && e.status === 409 && data.needsAcknowledgement)) {
+          toast.error(errorMessage(e));
+          return;
+        }
+      }
+      if (data.needsAcknowledgement) {
         const ok = await confirm({
           title: "Put this version live with warnings?",
           description: (<div className="space-y-1.5"><p>This prompt goes live with warnings:</p>
@@ -647,7 +615,6 @@ export default function PromptLabPage() {
         if (ok) await setWarrantyVersionLive(v, true);
         return;
       }
-      if (!res.ok) { toast.error(data.message || "Could not put that version live."); return; }
       toast.success(`"${v.label || "Version"}" is now live.`);
       setWHistoryOpen(false);
       await loadWarranty();
@@ -663,17 +630,20 @@ export default function PromptLabPage() {
     if (!ok) return;
     setWSettingLive(true);
     try {
-      const res = await fetch("/api/admin/warranty-prompt-lab/revert-to-defaults", { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) { toast.error(data.message || "Could not revert."); return; }
-      toast.success(data.message || "Reverted to code defaults.");
+      const data = await api.post<{ message?: string }>("/api/admin/warranty-prompt-lab/revert-to-defaults");
+      toast.success(data?.message || "Reverted to code defaults.");
       await loadWarranty();
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally { setWSettingLive(false); }
   };
 
   const deleteWarrantyVersion = async (v: PromptVersion) => {
-    const res = await fetch(`/api/admin/warranty-prompt-lab/versions/${v.id}`, { method: "DELETE" });
-    if (!res.ok) { toast.error("Could not delete that version."); return; }
+    try {
+      await api.delete(`/api/admin/warranty-prompt-lab/versions/${v.id}`);
+    } catch (e) {
+      return toast.error(errorMessage(e));
+    }
     toast.success("Version deleted.");
     await loadWarranty();
   };

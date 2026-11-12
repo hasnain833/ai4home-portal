@@ -37,151 +37,141 @@ function buildCampaignMetrics(campaigns, enrollmentGroups, convertedGroups) {
 const PERIOD_DAYS = { "7d": 7, "30d": 30, "90d": 90 };
 
 export const getAgentPerformance = async (req, res) => {
-  try {
-    const companyId = req.user.companyId;
-    const days = PERIOD_DAYS[req.query.period] || 30;
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const companyId = req.user.companyId;
+  const days = PERIOD_DAYS[req.query.period] || 30;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    const [interactions, nurturedTouches, booked, newLeads, newLeadsBooked] = await Promise.all([
-      prisma.schedulingConversation.count({ where: { lead: { companyId }, createdAt: { gte: since } } }),
-      prisma.messageUsage.count({ where: { companyId, source: "nurture", outcome: "sent", createdAt: { gte: since } } }),
-      prisma.salesAppointment.count({ where: { lead: { companyId }, createdAt: { gte: since } } }),
-      prisma.lead.count({ where: { companyId, createdAt: { gte: since } } }),
-      prisma.lead.count({ where: { companyId, createdAt: { gte: since }, appointments: { some: {} } } }),
-    ]);
+  const [interactions, nurturedTouches, booked, newLeads, newLeadsBooked] = await Promise.all([
+    prisma.schedulingConversation.count({ where: { lead: { companyId }, createdAt: { gte: since } } }),
+    prisma.messageUsage.count({ where: { companyId, source: "nurture", outcome: "sent", createdAt: { gte: since } } }),
+    prisma.salesAppointment.count({ where: { lead: { companyId }, createdAt: { gte: since } } }),
+    prisma.lead.count({ where: { companyId, createdAt: { gte: since } } }),
+    prisma.lead.count({ where: { companyId, createdAt: { gte: since }, appointments: { some: {} } } }),
+  ]);
 
-    return res.json({
-      period: `${days}d`,
-      interactions,
-      nurturedTouches,
-      bookedAppointments: booked,
-      newLeads,
-      successRate: newLeads > 0 ? round1((newLeadsBooked / newLeads) * 100) : null,
-    });
-  } catch (error) {
-    console.error("Sales agent performance error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  return res.json({
+    period: `${days}d`,
+    interactions,
+    nurturedTouches,
+    bookedAppointments: booked,
+    newLeads,
+    successRate: newLeads > 0 ? round1((newLeadsBooked / newLeads) * 100) : null,
+  });
 };
 
 export const getDashboardStats = async (req, res) => {
-  try {
-    const companyId = req.user.companyId;
-    const now = new Date();
+  const companyId = req.user.companyId;
+  const now = new Date();
 
-    const isHomeowner = String(req.user.role || "").toUpperCase() === "HOMEOWNER";
-    const leadWhere = isHomeowner
-      ? { companyId, ownerId: req.user.id }
-      : { companyId };
-    const [
-      leadStatusCounts,
-      activeCampaignsCount,
-      upcomingAppointments,
-      salesforceConnection,
-      activeCampaigns,
-      upcomingCalendarItems,
+  const isHomeowner = String(req.user.role || "").toUpperCase() === "HOMEOWNER";
+  const leadWhere = isHomeowner
+    ? { companyId, ownerId: req.user.id }
+    : { companyId };
+  const [
+    leadStatusCounts,
+    activeCampaignsCount,
+    upcomingAppointments,
+    salesforceConnection,
+    activeCampaigns,
+    upcomingCalendarItems,
+    totalEnrolled,
+    upcomingCount,
+  ] = await Promise.all([
+    prisma.lead.groupBy({ by: ["status"], where: leadWhere, _count: { _all: true } }),
+    prisma.campaign.count({ where: { companyId, status: "Active" } }),
+    prisma.salesAppointment.findMany({
+      where: {
+        lead: leadWhere,
+        time: { gte: now },
+        status: "CONFIRMED",
+      },
+      take: DASHBOARD_LIST_LIMIT,
+      orderBy: { time: "asc" },
+      include: { lead: { select: { firstName: true, lastName: true } } },
+    }),
+    prisma.salesforceConnection.findUnique({
+      where: { companyId },
+      select: { lastSyncAt: true, lastSyncStatus: true, isActive: true },
+    }),
+    prisma.campaign.findMany({
+      where: { companyId, status: "Active" },
+      take: DASHBOARD_LIST_LIMIT,
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, name: true, channel: true, status: true },
+    }),
+    prisma.contentCalendar.findMany({
+      where: {
+        companyId,
+        ...(isHomeowner ? { ownerId: req.user.id } : {}),
+        scheduledAt: { gte: now },
+        status: { in: UPCOMING_CALENDAR_STATUSES },
+      },
+      take: DASHBOARD_LIST_LIMIT,
+      orderBy: { scheduledAt: "asc" },
+      select: {
+        id: true,
+        title: true,
+        channel: true,
+        scheduledAt: true,
+        status: true,
+        isAiSuggested: true,
+      },
+    }),
+    prisma.campaignEnrollment.count({ where: { campaign: { companyId } } }),
+    prisma.salesAppointment.count({ where: { lead: leadWhere, time: { gte: now }, status: "CONFIRMED" } }),
+  ]);
+
+  const leadsByStatus = Object.fromEntries(
+    leadStatusCounts.map((r) => [r.status, r._count._all]),
+  );
+  const totalLeads = leadStatusCounts.reduce((n, r) => n + r._count._all, 0);
+  const newLeads = leadsByStatus.New || 0;
+  const nurturingLeads = leadsByStatus[LEAD_STATUS.NURTURING] || 0;
+  const appointmentSetLeads = leadsByStatus[LEAD_STATUS.APPOINTMENT_SET] || 0;
+  const closedWonLeads = leadsByStatus[LEAD_STATUS.CLOSED_WON] || 0;
+
+  const campaignIds = activeCampaigns.map((c) => c.id);
+  const [enrollmentGroups, convertedGroups] = campaignIds.length
+    ? await Promise.all([
+        prisma.campaignEnrollment.groupBy({
+          by: ["campaignId", "status"],
+          where: { campaignId: { in: campaignIds } },
+          _count: { _all: true },
+        }),
+        prisma.campaignEnrollment.groupBy({
+          by: ["campaignId"],
+          where: {
+            campaignId: { in: campaignIds },
+            status: "EXITED",
+            exitedReason: { in: CONVERSION_EXIT_REASONS },
+          },
+          _count: { _all: true },
+        }),
+      ])
+    : [[], []];
+
+  return res.json({
+    leads: {
+      total: totalLeads,
+      new: newLeads,
+      nurturing: nurturingLeads,
+      appointmentSet: appointmentSetLeads,
+      closedWon: closedWonLeads,
+    },
+    campaigns: {
+      activeCount: activeCampaignsCount,
       totalEnrolled,
-      upcomingCount,
-    ] = await Promise.all([
-      prisma.lead.groupBy({ by: ["status"], where: leadWhere, _count: { _all: true } }),
-      prisma.campaign.count({ where: { companyId, status: "Active" } }),
-      prisma.salesAppointment.findMany({
-        where: {
-          lead: leadWhere,
-          time: { gte: now },
-          status: "CONFIRMED",
-        },
-        take: DASHBOARD_LIST_LIMIT,
-        orderBy: { time: "asc" },
-        include: { lead: { select: { firstName: true, lastName: true } } },
-      }),
-      prisma.salesforceConnection.findUnique({
-        where: { companyId },
-        select: { lastSyncAt: true, lastSyncStatus: true, isActive: true },
-      }),
-      prisma.campaign.findMany({
-        where: { companyId, status: "Active" },
-        take: DASHBOARD_LIST_LIMIT,
-        orderBy: { updatedAt: "desc" },
-        select: { id: true, name: true, channel: true, status: true },
-      }),
-      prisma.contentCalendar.findMany({
-        where: {
-          companyId,
-          ...(isHomeowner ? { ownerId: req.user.id } : {}),
-          scheduledAt: { gte: now },
-          status: { in: UPCOMING_CALENDAR_STATUSES },
-        },
-        take: DASHBOARD_LIST_LIMIT,
-        orderBy: { scheduledAt: "asc" },
-        select: {
-          id: true,
-          title: true,
-          channel: true,
-          scheduledAt: true,
-          status: true,
-          isAiSuggested: true,
-        },
-      }),
-      prisma.campaignEnrollment.count({ where: { campaign: { companyId } } }),
-      prisma.salesAppointment.count({ where: { lead: leadWhere, time: { gte: now }, status: "CONFIRMED" } }),
-    ]);
-
-    const leadsByStatus = Object.fromEntries(
-      leadStatusCounts.map((r) => [r.status, r._count._all]),
-    );
-    const totalLeads = leadStatusCounts.reduce((n, r) => n + r._count._all, 0);
-    const newLeads = leadsByStatus.New || 0;
-    const nurturingLeads = leadsByStatus[LEAD_STATUS.NURTURING] || 0;
-    const appointmentSetLeads = leadsByStatus[LEAD_STATUS.APPOINTMENT_SET] || 0;
-    const closedWonLeads = leadsByStatus[LEAD_STATUS.CLOSED_WON] || 0;
-
-    const campaignIds = activeCampaigns.map((c) => c.id);
-    const [enrollmentGroups, convertedGroups] = campaignIds.length
-      ? await Promise.all([
-          prisma.campaignEnrollment.groupBy({
-            by: ["campaignId", "status"],
-            where: { campaignId: { in: campaignIds } },
-            _count: { _all: true },
-          }),
-          prisma.campaignEnrollment.groupBy({
-            by: ["campaignId"],
-            where: {
-              campaignId: { in: campaignIds },
-              status: "EXITED",
-              exitedReason: { in: CONVERSION_EXIT_REASONS },
-            },
-            _count: { _all: true },
-          }),
-        ])
-      : [[], []];
-
-    return res.json({
-      leads: {
-        total: totalLeads,
-        new: newLeads,
-        nurturing: nurturingLeads,
-        appointmentSet: appointmentSetLeads,
-        closedWon: closedWonLeads,
-      },
-      campaigns: {
-        activeCount: activeCampaignsCount,
-        totalEnrolled,
-        active: buildCampaignMetrics(
-          activeCampaigns,
-          enrollmentGroups,
-          convertedGroups,
-        ),
-      },
-      upcomingAppointments,
-      upcomingCount,
-      upcomingCalendarItems,
-      crmSyncHealth: salesforceConnection || null,
-    });
-  } catch (error) {
-    console.error("Sales dashboard error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+      active: buildCampaignMetrics(
+        activeCampaigns,
+        enrollmentGroups,
+        convertedGroups,
+      ),
+    },
+    upcomingAppointments,
+    upcomingCount,
+    upcomingCalendarItems,
+    crmSyncHealth: salesforceConnection || null,
+  });
 };
 
 const EXPORT_PAGE_SIZE = 1000;

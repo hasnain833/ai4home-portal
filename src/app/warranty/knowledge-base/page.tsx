@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -24,8 +26,6 @@ import {
   Trash2,
   Search,
   Loader2,
-  CheckCircle2,
-  X,
   File,
   Plus,
 } from "lucide-react";
@@ -75,10 +75,6 @@ export default function KnowledgeBasePage() {
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("");
   const [isDragActive, setIsDragActive] = useState(false);
 
-  const [toastMessage, setToastMessage] = useState<{
-    type: "success" | "error" | "info";
-    text: string;
-  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Delete Confirmation State
@@ -88,13 +84,13 @@ export default function KnowledgeBasePage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [docsRes, commsRes] = await Promise.all([
-        fetch("/api/knowledge-base"),
-        fetch("/api/communities"),
+      // Each list loads on its own, so one failing still shows the other.
+      const [data, payload] = await Promise.all([
+        api.get<any[]>("/api/knowledge-base").catch(() => null),
+        api.get<Community[] | { communities?: Community[] }>("/api/communities").catch(() => null),
       ]);
 
-      if (docsRes.ok) {
-        const data: any[] = await docsRes.json();
+      if (data) {
         setDocuments(
           data.map((d: any) => ({
             id: d.id,
@@ -107,10 +103,9 @@ export default function KnowledgeBasePage() {
         );
       }
 
-      if (commsRes.ok) {
+      if (payload) {
         // The endpoint now returns { communities, types, maxHomes }; older
         // deployments returned a bare array.
-        const payload = await commsRes.json();
         setCommunities(Array.isArray(payload) ? payload : (payload.communities ?? []));
       }
     } catch (error) {
@@ -131,8 +126,7 @@ export default function KnowledgeBasePage() {
   );
 
   const showToast = (type: "success" | "error" | "info", text: string) => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3000);
+    toast[type](text);
   };
 
   const handleMultipleFilesUpload = async (files: FileList | File[]) => {
@@ -175,27 +169,18 @@ export default function KnowledgeBasePage() {
         formData.append("file", file);
         formData.append("communityId", selectedCommunityId);
 
-        const response = await fetch("/api/knowledge-base", {
-          method: "POST",
-          body: formData,
-        });
+        const d = await api.post<Omit<Document, "sizeBytes" | "uploaded"> & { createdAt: string }>("/api/knowledge-base", formData);
+        const newDoc: Document = {
+          id: d.id,
+          name: d.name,
+          size: d.size,
+          sizeBytes: file.size,
+          uploaded: new Date(d.createdAt).toLocaleDateString(),
+          community: d.community,
+        };
 
-        if (response.ok) {
-          const d = await response.json();
-          const newDoc: Document = {
-            id: d.id,
-            name: d.name,
-            size: d.size,
-            sizeBytes: file.size,
-            uploaded: new Date(d.createdAt).toLocaleDateString(),
-            community: d.community,
-          };
-
-          setDocuments((prev) => [newDoc, ...prev]);
-          successCount++;
-        } else {
-          failCount++;
-        }
+        setDocuments((prev) => [newDoc, ...prev]);
+        successCount++;
       } catch (error) {
         console.error("[warranty/knowledge-base]", error);
         failCount++;
@@ -221,16 +206,11 @@ export default function KnowledgeBasePage() {
   const handleDeleteDocument = async (id: string, name: string) => {
     if (isAdmin) return;
     try {
-      const response = await fetch(`/api/knowledge-base?id=${id}`, {
-        method: "DELETE",
-      });
-      if (response.ok) {
-        setDocuments((prev) => prev.filter((doc) => doc.id !== id));
-        showToast("info", `${name} has been deleted`);
-      }
+      await api.delete(`/api/knowledge-base?id=${id}`);
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      showToast("info", `${name} has been deleted`);
     } catch (error) {
-      console.error("[warranty/knowledge-base]", error);
-      showToast("error", "Error connecting to server");
+      showToast("error", errorMessage(error));
     }
   };
 
@@ -262,29 +242,6 @@ export default function KnowledgeBasePage() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
       <PortalLayout>
-        {/* Toast */}
-        <AnimatePresence>
-          {toastMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: -50, x: "-50%" }}
-              animate={{ opacity: 1, y: 0, x: "-50%" }}
-              exit={{ opacity: 0, y: -50, x: "-50%" }}
-              className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${
-                toastMessage.type === "success"
-                  ? "bg-green-50 text-green-800"
-                  : toastMessage.type === "error"
-                    ? "bg-red-50 text-red-800"
-                    : "bg-blue-50 text-blue-800"
-              }`}>
-              {toastMessage.type === "success" && (
-                <CheckCircle2 className="h-5 w-5" />
-              )}
-              {toastMessage.type === "error" && <X className="h-5 w-5" />}
-              {toastMessage.type === "info" && <FileText className="h-5 w-5" />}
-              <span className="text-sm font-medium">{toastMessage.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <div className="space-y-6 p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">

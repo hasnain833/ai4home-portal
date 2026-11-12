@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -12,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
+import { api, errorMessage } from "@/lib/api";
 import {
   Table,
   TableBody,
@@ -32,7 +34,6 @@ import {
   Plus,
   Search,
   Calendar,
-  CheckCircle2,
   X,
   Loader2,
   Pencil,
@@ -148,18 +149,12 @@ export default function PropertiesPage() {
   // Form state
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState("");
-  const [toast, setToast] = useState<string | null>(null);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const fetchProperties = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/properties");
-      if (res.ok) setProperties(await res.json());
+      setProperties(await api.get<Property[]>("/api/properties"));
     } catch (e) {
       console.error(e);
     } finally {
@@ -252,39 +247,21 @@ export default function PropertiesPage() {
     };
 
     try {
-      let res: Response;
+      const saved = editingProperty
+        ? await api.patch<Property>(`/api/properties/${editingProperty.id}`, body)
+        : await api.post<Property>("/api/properties", body);
       if (editingProperty) {
-        res = await fetch(`/api/properties/${editingProperty.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        setProperties((prev) => prev.map((p) => (p.id === saved.id ? saved : p)));
+        toast.success("Property updated successfully!");
       } else {
-        res = await fetch("/api/properties", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        setProperties((prev) => [saved, ...prev]);
+        toast.success("Property registered successfully!");
       }
-
-      if (res.ok) {
-        const saved: Property = await res.json();
-        if (editingProperty) {
-          setProperties((prev) => prev.map((p) => (p.id === saved.id ? saved : p)));
-          showToast("Property updated successfully!");
-        } else {
-          setProperties((prev) => [saved, ...prev]);
-          showToast("Property registered successfully!");
-        }
-        closeModal();
-        // A home moving in or out changes the n/50 counts.
-        afterPropertyChange();
-      } else {
-        const err = await res.json();
-        setFormError(err.message || "Failed to save property.");
-      }
-    } catch {
-      setFormError("Server error. Please try again.");
+      closeModal();
+      // A home moving in or out changes the n/50 counts.
+      afterPropertyChange();
+    } catch (e) {
+      setFormError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }
@@ -294,15 +271,13 @@ export default function PropertiesPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/properties/${deleteTarget.id}`, { method: "DELETE" });
-      if (res.ok) {
-        setProperties((prev) => prev.filter((p) => p.id !== deleteTarget.id));
-        showToast("Property deleted.");
-        setDeleteTarget(null);
-        afterPropertyChange();
-      }
+      await api.delete(`/api/properties/${deleteTarget.id}`);
+      setProperties((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+      toast.success("Property deleted.");
+      setDeleteTarget(null);
+      afterPropertyChange();
     } catch (e) {
-      console.error(e);
+      toast.error(errorMessage(e));
     } finally {
       setDeleting(false);
     }
@@ -339,20 +314,6 @@ export default function PropertiesPage() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout>
-        {/* Toast */}
-        <AnimatePresence>
-          {toast && (
-            <motion.div
-              initial={{ opacity: 0, y: -50, x: "-50%" }}
-              animate={{ opacity: 1, y: 0, x: "-50%" }}
-              exit={{ opacity: 0, y: -50, x: "-50%" }}
-              className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
-            >
-              <CheckCircle2 className="h-5 w-5" />
-              <span className="text-sm font-medium">{toast}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <motion.div
           variants={staggerContainer}
@@ -380,7 +341,7 @@ export default function PropertiesPage() {
                   void fetchProperties();
                   afterPropertyChange();
                 }}
-                showToast={showToast}
+                showToast={toast.success}
               />
             )}
             {(isHomeowner || canManage) && (

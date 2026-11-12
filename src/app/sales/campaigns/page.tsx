@@ -51,6 +51,7 @@ import AutoNurtureWorkflow from "@/components/sales/AutoNurtureWorkflow";
 import { toast } from "sonner";
 import { describeSmsCost } from "@/lib/sms-segments";
 import { useAuth } from "@/contexts/AuthContext";
+import { api, errorMessage } from "@/lib/api";
 
 const DEFAULT_EMAIL_SUBJECT = "Checking in from {companyName}";
 const DEFAULT_EMAIL_BODY = `Hi {firstName},
@@ -131,13 +132,11 @@ export default function CampaignsPage() {
   const fetchCampaigns = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/sales/campaigns");
-      if (res.ok) {
-        const data = await res.json();
-        setCampaigns(data);
-        if (data.length > 0 && !activeSeq) {
-          setActiveSeq(data[0]);
-        }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.get<any[]>("/api/sales/campaigns");
+      setCampaigns(data);
+      if (data.length > 0 && !activeSeq) {
+        setActiveSeq(data[0]);
       }
     } catch (e) {
       console.error(e);
@@ -155,11 +154,7 @@ export default function CampaignsPage() {
     const fetchDetail = async () => {
       setLoadingDetail(true);
       try {
-        const res = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
-        if (res.ok) {
-          const detail = await res.json();
-          setActiveSeqDetail(detail);
-        }
+        setActiveSeqDetail(await api.get(`/api/sales/campaigns/${activeSeq.id}`));
       } catch (e) {
         console.error(e);
       } finally {
@@ -174,8 +169,8 @@ export default function CampaignsPage() {
     let interval: NodeJS.Timeout;
     if (activeSeq && (activeSeq.status === "Active" || activeSeq.status === "Paused")) {
       interval = setInterval(() => {
-        fetch(`/api/sales/campaigns/${activeSeq.id}`)
-          .then(res => res.json())
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        api.get<any>(`/api/sales/campaigns/${activeSeq.id}`)
           .then(detail => {
             setActiveSeqDetail(detail);
             // If the campaign finished, update main state too
@@ -193,40 +188,26 @@ export default function CampaignsPage() {
   const confirmCreateCampaign = async () => {
     if (!newSeqName) return;
     try {
-      const res = await fetch("/api/sales/campaigns", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newSeqName, channel: "Email & SMS" })
-      });
-      if (res.ok) {
-        setCreateModalOpen(false);
-        setNewSeqName("");
-        fetchCampaigns();
-        toast.success("Campaign created successfully.");
-      } else {
-        toast.error("Failed to create campaign.");
-      }
+      await api.post("/api/sales/campaigns", { name: newSeqName, channel: "Email & SMS" });
+      setCreateModalOpen(false);
+      setNewSeqName("");
+      fetchCampaigns();
+      toast.success("Campaign created successfully.");
     } catch (error) {
-      console.error("[sales/campaigns]", error);
-      toast.error("Error creating campaign.");
+      toast.error(errorMessage(error));
     }
   };
 
   const confirmDeleteCampaign = async () => {
     if (!seqToDelete) return;
     try {
-      const res = await fetch(`/api/sales/campaigns/${seqToDelete.id}`, { method: "DELETE" });
-      if (res.ok) {
-        setSeqToDelete(null);
-        if (activeSeq?.id === seqToDelete.id) setActiveSeq(null);
-        fetchCampaigns();
-        toast.success("Campaign deleted.");
-      } else {
-        toast.error("Failed to delete campaign.");
-      }
+      await api.delete(`/api/sales/campaigns/${seqToDelete.id}`);
+      setSeqToDelete(null);
+      if (activeSeq?.id === seqToDelete.id) setActiveSeq(null);
+      fetchCampaigns();
+      toast.success("Campaign deleted.");
     } catch (error) {
-      console.error("[sales/campaigns]", error);
-      toast.error("Error deleting campaign.");
+      toast.error(errorMessage(error));
     }
   };
 
@@ -241,35 +222,21 @@ export default function CampaignsPage() {
     }
 
     try {
-      const res = await fetch(`/api/sales/campaigns/${activeSeq.id}/steps`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ steps: newSteps })
-      });
-      if (res.ok) {
-        const saved = await res.json().catch(() => ({}));
-        setAddStepModalOpen(false);
-        setEditingStepIndex(null);
-        setNewStep(buildDefaultEmailStep());
-        // Refetch campaign detail and list to update steps count
-        const resDetail = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
-        if (resDetail.ok) {
-          setActiveSeqDetail(await resDetail.json());
-        }
-        fetchCampaigns();
-        toast.success(editingStepIndex !== null ? "Step updated successfully." : "Step added successfully.");
-        // Saving is never blocked — a tenant can draft SMS steps before SMS
-        // exists — but they are told the step will not be delivered.
-        for (const w of saved.warnings || []) toast.warning(w, { duration: 8000 });
-      } else {
-        // Editing steps on a running campaign is refused when the new steps need
-        // a channel the platform cannot currently deliver on.
-        const data = await res.json().catch(() => ({}));
-        toast.error(data?.message || "Failed to save step.", { duration: 10000 });
-      }
+      const saved = await api.post<{ warnings?: string[] }>(`/api/sales/campaigns/${activeSeq.id}/steps`, { steps: newSteps });
+      setAddStepModalOpen(false);
+      setEditingStepIndex(null);
+      setNewStep(buildDefaultEmailStep());
+      // Refetch campaign detail and list to update steps count
+      setActiveSeqDetail(await api.get(`/api/sales/campaigns/${activeSeq.id}`));
+      fetchCampaigns();
+      toast.success(editingStepIndex !== null ? "Step updated successfully." : "Step added successfully.");
+      // Saving is never blocked — a tenant can draft SMS steps before SMS
+      // exists — but they are told the step will not be delivered.
+      for (const w of saved?.warnings || []) toast.warning(w, { duration: 8000 });
     } catch (error) {
-      console.error("[sales/campaigns]", error);
-      toast.error("Error saving step.");
+      // Editing steps on a running campaign is refused when the new steps need
+      // a channel the platform cannot currently deliver on; the message says so.
+      toast.error(errorMessage(error), { duration: 10000 });
     }
   };
 
@@ -278,27 +245,16 @@ export default function CampaignsPage() {
 
     setGeneratingStepCopy(true);
     try {
-      const res = await fetch("/api/sales/campaigns/generate-copy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          goal: `Write a ${newStep.type === "SMS" ? "short SMS" : "nurture email"} for the campaign named "${activeSeq.name}".`,
-          audience: "Sales leads, homebuyers, and existing homeowner prospects",
-          stepType: newStep.type,
-          contextInfo: [
-            `Campaign name: ${activeSeq.name}`,
-            activeSeq.description ? `Campaign description: ${activeSeq.description}` : null,
-            newStep.body ? `Current draft to improve: ${newStep.body}` : null,
-          ].filter(Boolean).join("\n"),
-        }),
+      const data = await api.post<{ subject?: string; body?: string; draft?: string }>("/api/sales/campaigns/generate-copy", {
+        goal: `Write a ${newStep.type === "SMS" ? "short SMS" : "nurture email"} for the campaign named "${activeSeq.name}".`,
+        audience: "Sales leads, homebuyers, and existing homeowner prospects",
+        stepType: newStep.type,
+        contextInfo: [
+          `Campaign name: ${activeSeq.name}`,
+          activeSeq.description ? `Campaign description: ${activeSeq.description}` : null,
+          newStep.body ? `Current draft to improve: ${newStep.body}` : null,
+        ].filter(Boolean).join("\n"),
       });
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        toast.error(data?.message || "Failed to generate AI copy.");
-        return;
-      }
-
       setNewStep((prev: any) => ({
         ...prev,
         subject: prev.type === "EMAIL" ? (data.subject || prev.subject) : prev.subject,
@@ -306,8 +262,7 @@ export default function CampaignsPage() {
       }));
       toast.success("AI copy generated.");
     } catch (error) {
-      console.error("[sales/campaigns] generate copy", error);
-      toast.error("Error generating AI copy.");
+      toast.error(errorMessage(error));
     } finally {
       setGeneratingStepCopy(false);
     }
@@ -317,22 +272,12 @@ export default function CampaignsPage() {
     if (!activeSeq || !activeSeqDetail) return;
     const newSteps = activeSeqDetail.steps.filter((_: any, i: number) => i !== indexToRemove);
     try {
-      const res = await fetch(`/api/sales/campaigns/${activeSeq.id}/steps`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ steps: newSteps })
-      });
-      if (res.ok) {
-        const resDetail = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
-        if (resDetail.ok) setActiveSeqDetail(await resDetail.json());
-        fetchCampaigns();
-        toast.success("Step deleted.");
-      } else {
-        toast.error("Failed to delete step.");
-      }
+      await api.post(`/api/sales/campaigns/${activeSeq.id}/steps`, { steps: newSteps });
+      setActiveSeqDetail(await api.get(`/api/sales/campaigns/${activeSeq.id}`));
+      fetchCampaigns();
+      toast.success("Step deleted.");
     } catch (e) {
-      console.error("[sales/campaigns]", e);
-      toast.error("Error deleting step.");
+      toast.error(errorMessage(e));
     }
   };
 
@@ -351,24 +296,14 @@ export default function CampaignsPage() {
   const launchCampaign = async () => {
     if (!activeSeq) return;
     try {
-      const res = await fetch(`/api/sales/campaigns/${activeSeq.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "Active" })
-      });
-      if (res.ok) {
-        fetchCampaigns();
-        setActiveSeq({ ...activeSeq, status: "Active" });
-        toast.success("Campaign launched.");
-      } else {
-        // A launch refused for missing email/SMS credentials explains itself and
-        // names the fix, so show the server's message rather than a generic one.
-        const data = await res.json().catch(() => ({}));
-        toast.error(data?.message || "Failed to launch campaign.", { duration: 10000 });
-      }
+      await api.put(`/api/sales/campaigns/${activeSeq.id}`, { status: "Active" });
+      fetchCampaigns();
+      setActiveSeq({ ...activeSeq, status: "Active" });
+      toast.success("Campaign launched.");
     } catch (e) {
-      console.error("[sales/campaigns]", e);
-      toast.error("Error launching campaign.");
+      // A launch refused for missing email/SMS credentials explains itself and
+      // names the fix, so show the server's message rather than a generic one.
+      toast.error(errorMessage(e), { duration: 10000 });
     }
   };
 
@@ -376,21 +311,12 @@ export default function CampaignsPage() {
   const pauseCampaign = async () => {
     if (!activeSeq) return;
     try {
-      const res = await fetch(`/api/sales/campaigns/${activeSeq.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "Paused" })
-      });
-      if (res.ok) {
-        fetchCampaigns();
-        setActiveSeq({ ...activeSeq, status: "Paused" });
-        toast.success("Campaign paused.");
-      } else {
-        toast.error("Failed to pause campaign.");
-      }
+      await api.put(`/api/sales/campaigns/${activeSeq.id}`, { status: "Paused" });
+      fetchCampaigns();
+      setActiveSeq({ ...activeSeq, status: "Paused" });
+      toast.success("Campaign paused.");
     } catch (e) {
-      console.error("[sales/campaigns]", e);
-      toast.error("Error pausing campaign.");
+      toast.error(errorMessage(e));
     }
   };
 
@@ -443,31 +369,22 @@ export default function CampaignsPage() {
 
     setEnrolling(true);
     try {
-      const res = await fetch(`/api/sales/campaigns/${activeSeq.id}/enroll`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const r = await res.json().catch(() => ({}));
-        setEnrollModalOpen(false);
-        setSelectedLeadIds([]);
-        setSelectedSegmentId("");
-        const enrolled = r.enrolledCount ?? 0;
-        const skipped = r.skippedDuplicatesCount ?? 0;
-        toast.success(`Enrolled ${enrolled} lead${enrolled === 1 ? "" : "s"}${skipped ? ` (${skipped} already enrolled, skipped)` : ""}.`);
-        // The campaign may contain steps on a channel this workspace cannot send.
-        for (const w of r.warnings || []) toast.warning(w, { duration: 8000 });
-        fetchCampaigns();
-        const rd = await fetch(`/api/sales/campaigns/${activeSeq.id}`);
-        if (rd.ok) setActiveSeqDetail(await rd.json());
-      } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data?.message || "Failed to enroll leads.", { duration: 10000 });
-      }
+      const r = await api.post<{ enrolledCount?: number; skippedDuplicatesCount?: number; warnings?: string[] }>(
+        `/api/sales/campaigns/${activeSeq.id}/enroll`,
+        payload,
+      );
+      setEnrollModalOpen(false);
+      setSelectedLeadIds([]);
+      setSelectedSegmentId("");
+      const enrolled = r?.enrolledCount ?? 0;
+      const skipped = r?.skippedDuplicatesCount ?? 0;
+      toast.success(`Enrolled ${enrolled} lead${enrolled === 1 ? "" : "s"}${skipped ? ` (${skipped} already enrolled, skipped)` : ""}.`);
+      // The campaign may contain steps on a channel this workspace cannot send.
+      for (const w of r?.warnings || []) toast.warning(w, { duration: 8000 });
+      fetchCampaigns();
+      setActiveSeqDetail(await api.get(`/api/sales/campaigns/${activeSeq.id}`));
     } catch (e) {
-      console.error("[sales/campaigns]", e);
-      toast.error("Error enrolling leads.");
+      toast.error(errorMessage(e), { duration: 10000 });
     } finally {
       setEnrolling(false);
     }

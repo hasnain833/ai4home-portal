@@ -3,6 +3,7 @@
 import { useEffect, useState, use } from "react";
 import { splitLabel } from "@/components/warranty/ScheduleShell";
 import { CalendarDays, Clock, CheckCircle2 } from "lucide-react";
+import { api, ApiError, isSlotTaken } from "@/lib/api";
 
 type Slot = { iso: string; label: string };
 type BookingData = {
@@ -29,12 +30,7 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/sales/scheduling/public/lead/${bookingToken}`);
-        if (!res.ok) {
-          setNotFound(true);
-          return;
-        }
-        setData(await res.json());
+        setData(await api.get<NonNullable<typeof data>>(`/api/sales/scheduling/public/lead/${bookingToken}`));
       } catch {
         setNotFound(true);
       } finally {
@@ -48,31 +44,26 @@ export default function PublicBookingPage({ params }: { params: Promise<{ leadId
     setBooking(true);
     setError("");
     try {
-      const res = await fetch("/api/sales/scheduling/public/book", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bookingToken, startTime: selected, locationType: "ONSITE", title: "Model Home Visit" }),
+      const result = await api.post<{ appointment: { manageToken: string } }>("/api/sales/scheduling/public/book", {
+        bookingToken,
+        startTime: selected,
+        locationType: "ONSITE",
+        title: "Model Home Visit",
       });
-      const result = await res.json();
-      if (!res.ok) {
-        // 409 = slot just taken; refresh availability.
-        if (res.status === 409) {
-          setError("Sorry, that time was just taken. Please pick another.");
-          const refresh = await fetch(`/api/sales/scheduling/public/lead/${bookingToken}`);
-          if (refresh.ok) setData(await refresh.json());
-          setSelected("");
-        } else {
-          setError(result.reason || result.message || "Could not book that slot.");
-        }
-        return;
-      }
       const slot = data?.slots.find((s) => s.iso === selected);
       setConfirmed({
         label: slot?.label || new Date(selected).toLocaleString(),
-        manageToken: result.appointment?.manageToken,
+        manageToken: result.appointment.manageToken,
       });
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (e) {
+      // 409 = slot just taken; refresh availability.
+      if (isSlotTaken(e)) {
+        setError("Sorry, that time was just taken. Please pick another.");
+        await api.get<NonNullable<typeof data>>(`/api/sales/scheduling/public/lead/${bookingToken}`).then(setData, () => {});
+        setSelected("");
+      } else {
+        setError(e instanceof ApiError && e.status ? e.message : "Something went wrong. Please try again.");
+      }
     } finally {
       setBooking(false);
     }

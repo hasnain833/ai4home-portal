@@ -27,6 +27,7 @@ import {
   CheckCircle2
 } from "lucide-react";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 type CalendarEvent = {
   id: string;
@@ -93,12 +94,9 @@ export default function ContentCalendarPage() {
 
   const fetchEvents = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/calendar");
-      if (res.ok) {
-        const data = await res.json();
-        setEvents(data);
-        setSuggestions(data.filter((e: CalendarEvent) => e.status === "Suggested"));
-      }
+      const data = await api.get<CalendarEvent[]>("/api/sales/calendar");
+      setEvents(data);
+      setSuggestions(data.filter((e) => e.status === "Suggested"));
     } catch (err) {
       console.error("Failed to fetch calendar events", err);
     }
@@ -114,14 +112,10 @@ export default function ContentCalendarPage() {
   const handleGenerateSuggestions = async () => {
     setIsGenerating(true);
     try {
-      const res = await fetch("/api/sales/calendar/suggestions", { method: "POST" });
-      if (res.ok) {
-        await fetchEvents();
-      } else {
-        toast.error("Failed to generate suggestions.");
-      }
+      await api.post("/api/sales/calendar/suggestions");
+      await fetchEvents();
     } catch (err) {
-      console.error(err);
+      toast.error(errorMessage(err));
     } finally {
       setIsGenerating(false);
     }
@@ -130,43 +124,26 @@ export default function ContentCalendarPage() {
   const handleApproveSuggestion = async (id: string) => {
     try {
       const suggestion = suggestions.find((s) => s.id === id);
-      const res = await fetch(`/api/sales/calendar/${id}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "Draft" })
-      });
-      if (res.ok) {
-        const updated = await res.json().catch(() => null);
-        const approvedDate = updated?.scheduledAt || suggestion?.scheduledAt;
-        if (approvedDate && !isNaN(new Date(approvedDate).getTime())) {
-          setCurrentDate(new Date(approvedDate));
-        }
-        setView("list");
-        setShowSuggestions(false);
-        toast.success("Suggestion approved as a draft on the calendar.");
-        await fetchEvents();
-      } else {
-        toast.error("Failed to approve suggestion.");
+      const updated = await api.patch<{ scheduledAt?: string } | null>(`/api/sales/calendar/${id}/status`, { status: "Draft" });
+      const approvedDate = updated?.scheduledAt || suggestion?.scheduledAt;
+      if (approvedDate && !isNaN(new Date(approvedDate).getTime())) {
+        setCurrentDate(new Date(approvedDate));
       }
+      setView("list");
+      setShowSuggestions(false);
+      toast.success("Suggestion approved as a draft on the calendar.");
+      await fetchEvents();
     } catch (err) {
-      console.error(err);
+      toast.error(errorMessage(err));
     }
   };
 
   const handleDismissSuggestion = async (id: string) => {
     try {
-      const res = await fetch(`/api/sales/calendar/${id}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "Dismissed" })
-      });
-      if (res.ok) {
-        fetchEvents();
-      } else {
-        toast.error("Failed to dismiss suggestion.");
-      }
+      await api.patch(`/api/sales/calendar/${id}/status`, { status: "Dismissed" });
+      fetchEvents();
     } catch (err) {
-      console.error(err);
+      toast.error(errorMessage(err));
     }
   };
   const handleDropOnDay = async (targetDay: Date) => {
@@ -188,19 +165,10 @@ export default function ContentCalendarPage() {
     setEvents((prev) => prev.map((e) => (e.id === id ? { ...e, scheduledAt: iso } : e)));
 
     try {
-      const res = await fetch(`/api/sales/calendar/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scheduledAt: iso })
-      });
-      if (res.ok) {
-        toast.success(`Rescheduled to ${target.toLocaleDateString()}`);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.message || "Could not reschedule that item.");
-      }
-    } catch {
-      toast.error("Could not reschedule that item.");
+      await api.patch(`/api/sales/calendar/${id}`, { scheduledAt: iso });
+      toast.success(`Rescheduled to ${target.toLocaleDateString()}`);
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
       fetchEvents();
     }

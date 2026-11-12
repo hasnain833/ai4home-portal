@@ -22,6 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle, Mail, Pencil, Phone, Plus, Send, Trash2, Wrench } from "lucide-react";
 import { TRADE_CATEGORIES } from "@/components/warranty/DispatchTicketDialog";
+import { api, errorMessage } from "@/lib/api";
+import { useQuery } from "@/lib/use-query";
 
 interface Trade {
   id: string;
@@ -43,8 +45,6 @@ export default function TradesPage() {
   const confirm = useConfirm();
   const isAdmin = user?.role === "admin";
 
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -64,19 +64,12 @@ export default function TradesPage() {
     setTimeout(() => setMessage(null), 5000);
   };
 
-  // Bumped after every change to refetch the list.
-  const [version, setVersion] = useState(0);
-  const load = () => setVersion((v) => v + 1);
   const canView = user?.role === "admin" || user?.role === "staff";
+  const { data: trades = [], loading, error, refresh: load } = useQuery<Trade[]>(canView ? "/api/trades" : null);
 
-  useEffect(() => {
-    if (!canView) return;
-    fetch("/api/trades")
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then(setTrades)
-      .catch(() => flash("error", "Could not load trades."))
-      .finally(() => setLoading(false));
-  }, [canView, version]);
+
+  // A failed load shows like any other error, without copying it into state.
+  const notice = message ?? (error ? { type: "error" as const, text: "Could not load trades." } : null);
 
   const tradeTypes = useMemo(() => [...new Set(trades.map((t) => t.tradeType))].sort(), [trades]);
   const shown = filter === "all" ? trades : trades.filter((t) => t.tradeType === filter);
@@ -110,40 +103,31 @@ export default function TradesPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch(editing ? `/api/trades/${editing.id}` : "/api/trades", {
-        method: editing ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          editing ? { tradeType: form.tradeType, businessName: form.businessName } : form,
-        ),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setFormError(data.message || "Could not save the trade.");
-        return;
-      }
+      const data = await (editing
+        ? api.patch<{ notice?: string }>(`/api/trades/${editing.id}`, { tradeType: form.tradeType, businessName: form.businessName })
+        : api.post<{ notice?: string }>("/api/trades", form));
       setDialogOpen(false);
-      flash("success", data.notice || (editing ? "Trade updated." : `Invite sent to ${form.email}.`));
+      flash("success", data?.notice || (editing ? "Trade updated." : `Invite sent to ${form.email}.`));
       load();
-    } catch {
-      setFormError("Error connecting to server.");
+    } catch (e) {
+      setFormError(errorMessage(e));
     } finally {
       setSaving(false);
     }
   };
 
-  const act = async (request: RequestInit & { url: string }, done: string) => {
-    const { url, ...init } = request;
-    const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return flash("error", data.message || "Something went wrong.");
-    flash("success", done);
-    load();
-  };
+  const act = (request: Promise<unknown>, done: string) =>
+    request.then(
+      () => {
+        flash("success", done);
+        load();
+      },
+      (e) => flash("error", errorMessage(e)),
+    );
 
   const toggleActive = (t: Trade) =>
     act(
-      { url: `/api/trades/${t.id}`, method: "PATCH", body: JSON.stringify({ isActive: !t.isActive }) },
+      api.patch(`/api/trades/${t.id}`, { isActive: !t.isActive }),
       t.isActive ? `${t.user.name} deactivated.` : `${t.user.name} reactivated.`,
     );
 
@@ -153,7 +137,7 @@ export default function TradesPage() {
       description: `${t.user.name} will no longer be on your list. Their login stays for any other builders they work with.`,
       confirmText: "Remove",
     }))) return;
-    act({ url: `/api/trades/${t.id}`, method: "DELETE" }, `${t.user.name} removed.`);
+    act(api.delete(`/api/trades/${t.id}`), `${t.user.name} removed.`);
   };
 
   if (!user || (user.role !== "admin" && user.role !== "staff")) return null;
@@ -180,13 +164,13 @@ export default function TradesPage() {
           )}
         </div>
 
-        {message && (
+        {notice && (
           <Alert
-            variant={message.type === "error" ? "destructive" : "default"}
-            className={message.type === "success" ? "mb-6 border-green-500 bg-green-50 dark:bg-green-950/30" : "mb-6"}
+            variant={notice.type === "error" ? "destructive" : "default"}
+            className={notice.type === "success" ? "mb-6 border-green-500 bg-green-50 dark:bg-green-950/30" : "mb-6"}
           >
-            {message.type === "success" && <CheckCircle className="h-4 w-4 text-green-600" />}
-            <AlertDescription>{message.text}</AlertDescription>
+            {notice.type === "success" && <CheckCircle className="h-4 w-4 text-green-600" />}
+            <AlertDescription>{notice.text}</AlertDescription>
           </Alert>
         )}
 
@@ -253,7 +237,7 @@ export default function TradesPage() {
                           size="sm"
                           variant="outline"
                           className="gap-1.5"
-                          onClick={() => act({ url: `/api/trades/${t.id}/invite`, method: "POST" }, `Invite re-sent to ${t.user.email}.`)}
+                          onClick={() => act(api.post(`/api/trades/${t.id}/invite`), `Invite re-sent to ${t.user.email}.`)}
                         >
                           <Send className="h-3.5 w-3.5" /> Resend invite
                         </Button>

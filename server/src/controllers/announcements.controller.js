@@ -25,338 +25,288 @@ function sanitizeGeoFilter(geo) {
 }
 
 export const getAnnouncements = async (req, res) => {
-  try {
-    const announcements = await prisma.announcement.findMany({
-      where: { companyId: req.user.companyId },
-      orderBy: { createdAt: "desc" },
-    });
+  const announcements = await prisma.announcement.findMany({
+    where: { companyId: req.user.companyId },
+    orderBy: { createdAt: "desc" },
+  });
 
-    const formatted = announcements.map((a) => ({
-      id: a.id,
-      title: a.title,
-      subject: a.subject,
-      channel: a.channel,
-      status: a.status,
-      audienceType: a.audienceType,
-      segmentId: a.segmentId,
-      scheduledAt: a.scheduledAt,
-      sentAt: a.sentAt,
-      audienceCount: a.audienceCount,
-      createdAt: a.createdAt,
-    }));
+  const formatted = announcements.map((a) => ({
+    id: a.id,
+    title: a.title,
+    subject: a.subject,
+    channel: a.channel,
+    status: a.status,
+    audienceType: a.audienceType,
+    segmentId: a.segmentId,
+    scheduledAt: a.scheduledAt,
+    sentAt: a.sentAt,
+    audienceCount: a.audienceCount,
+    createdAt: a.createdAt,
+  }));
 
-    return res.json(formatted);
-  } catch (error) {
-    console.error("[Announcements List] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  return res.json(formatted);
 };
 
 export const getAnnouncementDetail = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const announcement = await prisma.announcement.findFirst({
-      where: { id, companyId: req.user.companyId },
-    });
-    if (!announcement) {
-      return res.status(404).json({ message: "Announcement not found" });
-    }
-    return res.json(announcement);
-  } catch (error) {
-    console.error("[Announcement Detail] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { id } = req.params;
+  const announcement = await prisma.announcement.findFirst({
+    where: { id, companyId: req.user.companyId },
+  });
+  if (!announcement) {
+    return res.status(404).json({ message: "Announcement not found" });
   }
+  return res.json(announcement);
 };
 
 export const previewAudience = async (req, res) => {
-  try {
-    const { audienceType = "ALL", segmentId = null, geoFilter = null, channel = "EMAIL" } = req.body;
-    const leads = await resolveAnnouncementAudience({
-      companyId: req.user.companyId,
-      channel: normalizeChannel(channel),
-      audienceType,
-      segmentId,
-      geoFilter: sanitizeGeoFilter(geoFilter),
-    });
-    return res.json({ count: leads.length });
-  } catch (error) {
-    console.error("[Announcement Preview] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  const { audienceType = "ALL", segmentId = null, geoFilter = null, channel = "EMAIL" } = req.body;
+  const leads = await resolveAnnouncementAudience({
+    companyId: req.user.companyId,
+    channel: normalizeChannel(channel),
+    audienceType,
+    segmentId,
+    geoFilter: sanitizeGeoFilter(geoFilter),
+  });
+  return res.json({ count: leads.length });
 };
 export const createAnnouncement = async (req, res) => {
-  try {
-    const {
-      title,
-      subject,
-      body,
-      ctaLink = null,
-      channel = "EMAIL",
-      audienceType = "ALL",
-      segmentId = null,
-      geoFilter = null,
-      scheduledAt = null,
-      action = "draft",
-    } = req.body;
+  const {
+    title,
+    subject,
+    body,
+    ctaLink = null,
+    channel = "EMAIL",
+    audienceType = "ALL",
+    segmentId = null,
+    geoFilter = null,
+    scheduledAt = null,
+    action = "draft",
+  } = req.body;
 
-    const resolvedChannel = normalizeChannel(channel);
+  const resolvedChannel = normalizeChannel(channel);
 
-    if (!title || !body) {
-      return res.status(400).json({ message: "Title and body are required" });
-    }
-    if (action === "send" && channelIncludesEmail(resolvedChannel) && !subject) {
-      return res.status(400).json({ message: "Subject is required to send an email announcement" });
-    }
-
-    const wantsSchedule = action === "schedule" && scheduledAt;
-    const scheduledDate = wantsSchedule ? new Date(scheduledAt) : null;
-    if (wantsSchedule && (isNaN(scheduledDate) || scheduledDate.getTime() <= Date.now())) {
-      return res.status(400).json({ message: "scheduledAt must be a valid future date" });
-    }
-
-    // Checked before anything is queued: a send on a channel the tenant cannot
-    // deliver on would otherwise churn the whole audience and report zeros.
-    if (action === "send" || wantsSchedule) {
-      const missing = await missingChannelsFor(req.user.companyId, resolvedChannel);
-      if (missing.length) {
-        return res.status(400).json({
-          message:
-            `${missing.join(" and ")} is not configured, so this announcement cannot be ` +
-            `delivered. Set it up in Settings > Messaging, or save this as a draft.`,
-          missingChannels: missing,
-        });
-      }
-    }
-
-    let status = "Draft";
-    if (action === "send") status = "Queued";
-    else if (wantsSchedule) status = "Scheduled";
-
-    const announcement = await prisma.announcement.create({
-      data: {
-        companyId: req.user.companyId,
-        title,
-        subject: subject || title,
-        body: sanitizeAnnouncementHtml(body),
-        ctaLink: ctaLink || null,
-        channel: resolvedChannel,
-        audienceType: audienceType === "SEGMENT" ? "SEGMENT" : "ALL",
-        segmentId: audienceType === "SEGMENT" ? segmentId : null,
-        geoFilter: sanitizeGeoFilter(geoFilter),
-        scheduledAt: scheduledDate,
-        status,
-        createdById: req.user.id || null,
-      },
-    });
-
-    if (action === "send" || wantsSchedule) {
-      const { inngest } = await import("../lib/inngest.js");
-      await inngest.send({
-        name: "announcement.send",
-        data: { announcementId: announcement.id, companyId: req.user.companyId },
-      });
-    }
-
-    return res.status(201).json(announcement);
-  } catch (error) {
-    console.error("[Announcement Create] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!title || !body) {
+    return res.status(400).json({ message: "Title and body are required" });
   }
-};
-
-export const updateAnnouncement = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const existing = await prisma.announcement.findFirst({
-      where: { id, companyId: req.user.companyId },
-    });
-    if (!existing) {
-      return res.status(404).json({ message: "Announcement not found" });
-    }
-    if (!["Draft", "Scheduled"].includes(existing.status)) {
-      return res.status(400).json({ message: `Cannot edit an announcement that is ${existing.status}` });
-    }
-
-    const { title, subject, body, ctaLink, audienceType, segmentId, geoFilter } = req.body;
-    const updated = await prisma.announcement.update({
-      where: { id },
-      data: {
-        title: title ?? existing.title,
-        subject: subject ?? existing.subject,
-        body: body !== undefined ? sanitizeAnnouncementHtml(body) : existing.body,
-        ctaLink: ctaLink !== undefined ? ctaLink : existing.ctaLink,
-        audienceType: audienceType ? (audienceType === "SEGMENT" ? "SEGMENT" : "ALL") : existing.audienceType,
-        segmentId: audienceType === "SEGMENT" ? (segmentId ?? existing.segmentId) : audienceType === "ALL" ? null : existing.segmentId,
-        geoFilter: geoFilter !== undefined ? sanitizeGeoFilter(geoFilter) : existing.geoFilter,
-      },
-    });
-    return res.json(updated);
-  } catch (error) {
-    console.error("[Announcement Update] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (action === "send" && channelIncludesEmail(resolvedChannel) && !subject) {
+    return res.status(400).json({ message: "Subject is required to send an email announcement" });
   }
-};
 
-// Send a previously-created Draft, immediately or scheduled.
-export const sendAnnouncement = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { scheduledAt = null } = req.body;
+  const wantsSchedule = action === "schedule" && scheduledAt;
+  const scheduledDate = wantsSchedule ? new Date(scheduledAt) : null;
+  if (wantsSchedule && (isNaN(scheduledDate) || scheduledDate.getTime() <= Date.now())) {
+    return res.status(400).json({ message: "scheduledAt must be a valid future date" });
+  }
 
-    const announcement = await prisma.announcement.findFirst({
-      where: { id, companyId: req.user.companyId },
-    });
-    if (!announcement) {
-      return res.status(404).json({ message: "Announcement not found" });
-    }
-    if (!["Draft", "Scheduled"].includes(announcement.status)) {
-      return res.status(400).json({ message: `Announcement is already ${announcement.status}` });
-    }
-    if (!announcement.subject) {
-      return res.status(400).json({ message: "Subject is required to send" });
-    }
-
-    const scheduledDate = scheduledAt ? new Date(scheduledAt) : null;
-    if (scheduledDate && (isNaN(scheduledDate) || scheduledDate.getTime() <= Date.now())) {
-      return res.status(400).json({ message: "scheduledAt must be a valid future date" });
-    }
-
-    const missing = await missingChannelsFor(req.user.companyId, announcement.channel);
+  // Checked before anything is queued: a send on a channel the tenant cannot
+  // deliver on would otherwise churn the whole audience and report zeros.
+  if (action === "send" || wantsSchedule) {
+    const missing = await missingChannelsFor(req.user.companyId, resolvedChannel);
     if (missing.length) {
       return res.status(400).json({
         message:
           `${missing.join(" and ")} is not configured, so this announcement cannot be ` +
-          `delivered. Set it up in Settings > Messaging.`,
+          `delivered. Set it up in Settings > Messaging, or save this as a draft.`,
         missingChannels: missing,
       });
     }
+  }
 
-    const updated = await prisma.announcement.update({
-      where: { id },
-      data: {
-        status: scheduledDate ? "Scheduled" : "Queued",
-        scheduledAt: scheduledDate,
-      },
-    });
+  let status = "Draft";
+  if (action === "send") status = "Queued";
+  else if (wantsSchedule) status = "Scheduled";
 
+  const announcement = await prisma.announcement.create({
+    data: {
+      companyId: req.user.companyId,
+      title,
+      subject: subject || title,
+      body: sanitizeAnnouncementHtml(body),
+      ctaLink: ctaLink || null,
+      channel: resolvedChannel,
+      audienceType: audienceType === "SEGMENT" ? "SEGMENT" : "ALL",
+      segmentId: audienceType === "SEGMENT" ? segmentId : null,
+      geoFilter: sanitizeGeoFilter(geoFilter),
+      scheduledAt: scheduledDate,
+      status,
+      createdById: req.user.id || null,
+    },
+  });
+
+  if (action === "send" || wantsSchedule) {
     const { inngest } = await import("../lib/inngest.js");
     await inngest.send({
       name: "announcement.send",
-      data: { announcementId: id, companyId: req.user.companyId },
+      data: { announcementId: announcement.id, companyId: req.user.companyId },
     });
-
-    return res.json({ success: true, announcement: updated });
-  } catch (error) {
-    console.error("[Announcement Send] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  return res.status(201).json(announcement);
+};
+
+export const updateAnnouncement = async (req, res) => {
+  const { id } = req.params;
+  const existing = await prisma.announcement.findFirst({
+    where: { id, companyId: req.user.companyId },
+  });
+  if (!existing) {
+    return res.status(404).json({ message: "Announcement not found" });
+  }
+  if (!["Draft", "Scheduled"].includes(existing.status)) {
+    return res.status(400).json({ message: `Cannot edit an announcement that is ${existing.status}` });
+  }
+
+  const { title, subject, body, ctaLink, audienceType, segmentId, geoFilter } = req.body;
+  const updated = await prisma.announcement.update({
+    where: { id },
+    data: {
+      title: title ?? existing.title,
+      subject: subject ?? existing.subject,
+      body: body !== undefined ? sanitizeAnnouncementHtml(body) : existing.body,
+      ctaLink: ctaLink !== undefined ? ctaLink : existing.ctaLink,
+      audienceType: audienceType ? (audienceType === "SEGMENT" ? "SEGMENT" : "ALL") : existing.audienceType,
+      segmentId: audienceType === "SEGMENT" ? (segmentId ?? existing.segmentId) : audienceType === "ALL" ? null : existing.segmentId,
+      geoFilter: geoFilter !== undefined ? sanitizeGeoFilter(geoFilter) : existing.geoFilter,
+    },
+  });
+  return res.json(updated);
+};
+
+// Send a previously-created Draft, immediately or scheduled.
+export const sendAnnouncement = async (req, res) => {
+  const { id } = req.params;
+  const { scheduledAt = null } = req.body;
+
+  const announcement = await prisma.announcement.findFirst({
+    where: { id, companyId: req.user.companyId },
+  });
+  if (!announcement) {
+    return res.status(404).json({ message: "Announcement not found" });
+  }
+  if (!["Draft", "Scheduled"].includes(announcement.status)) {
+    return res.status(400).json({ message: `Announcement is already ${announcement.status}` });
+  }
+  if (!announcement.subject) {
+    return res.status(400).json({ message: "Subject is required to send" });
+  }
+
+  const scheduledDate = scheduledAt ? new Date(scheduledAt) : null;
+  if (scheduledDate && (isNaN(scheduledDate) || scheduledDate.getTime() <= Date.now())) {
+    return res.status(400).json({ message: "scheduledAt must be a valid future date" });
+  }
+
+  const missing = await missingChannelsFor(req.user.companyId, announcement.channel);
+  if (missing.length) {
+    return res.status(400).json({
+      message:
+        `${missing.join(" and ")} is not configured, so this announcement cannot be ` +
+        `delivered. Set it up in Settings > Messaging.`,
+      missingChannels: missing,
+    });
+  }
+
+  const updated = await prisma.announcement.update({
+    where: { id },
+    data: {
+      status: scheduledDate ? "Scheduled" : "Queued",
+      scheduledAt: scheduledDate,
+    },
+  });
+
+  const { inngest } = await import("../lib/inngest.js");
+  await inngest.send({
+    name: "announcement.send",
+    data: { announcementId: id, companyId: req.user.companyId },
+  });
+
+  return res.json({ success: true, announcement: updated });
 };
 
 // SW-ANN-003: cancel a scheduled send before the batch pipeline starts.
 export const cancelAnnouncement = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const announcement = await prisma.announcement.findFirst({
-      where: { id, companyId: req.user.companyId },
-    });
-    if (!announcement) {
-      return res.status(404).json({ message: "Announcement not found" });
-    }
-    if (!["Scheduled", "Sending"].includes(announcement.status)) {
-      return res.status(400).json({ message: `Cannot cancel an announcement that is ${announcement.status}` });
-    }
-
-    const { inngest } = await import("../lib/inngest.js");
-    await inngest.send({
-      name: "announcement.cancel",
-      data: { announcementId: id, companyId: req.user.companyId },
-    });
-
-    const updated = await prisma.announcement.update({
-      where: { id },
-      data: { status: "Cancelled" },
-    });
-
-    return res.json({ success: true, announcement: updated });
-  } catch (error) {
-    console.error("[Announcement Cancel] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { id } = req.params;
+  const announcement = await prisma.announcement.findFirst({
+    where: { id, companyId: req.user.companyId },
+  });
+  if (!announcement) {
+    return res.status(404).json({ message: "Announcement not found" });
   }
+  if (!["Scheduled", "Sending"].includes(announcement.status)) {
+    return res.status(400).json({ message: `Cannot cancel an announcement that is ${announcement.status}` });
+  }
+
+  const { inngest } = await import("../lib/inngest.js");
+  await inngest.send({
+    name: "announcement.cancel",
+    data: { announcementId: id, companyId: req.user.companyId },
+  });
+
+  const updated = await prisma.announcement.update({
+    where: { id },
+    data: { status: "Cancelled" },
+  });
+
+  return res.json({ success: true, announcement: updated });
 };
 
 export const deleteAnnouncement = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const announcement = await prisma.announcement.findFirst({
-      where: { id, companyId: req.user.companyId },
-    });
-    if (!announcement) {
-      return res.status(404).json({ message: "Announcement not found" });
-    }
-    if (announcement.status === "Sending") {
-      return res.status(400).json({ message: "Cannot delete an announcement while it is sending" });
-    }
-    await prisma.announcement.delete({ where: { id } });
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("[Announcement Delete] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { id } = req.params;
+  const announcement = await prisma.announcement.findFirst({
+    where: { id, companyId: req.user.companyId },
+  });
+  if (!announcement) {
+    return res.status(404).json({ message: "Announcement not found" });
   }
+  if (announcement.status === "Sending") {
+    return res.status(400).json({ message: "Cannot delete an announcement while it is sending" });
+  }
+  await prisma.announcement.delete({ where: { id } });
+  return res.json({ success: true });
 };
 
 export const getAnnouncementFailures = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const announcement = await prisma.announcement.findFirst({
-      where: { id, companyId: req.user.companyId },
-    });
-    if (!announcement) {
-      return res.status(404).json({ message: "Announcement not found" });
-    }
-
-    return res.json({
-      announcementId: id,
-      failedCount: announcement.failedCount,
-      status: announcement.status,
-      failures: [],
-    });
-  } catch (error) {
-    console.error("[Announcement Failures] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { id } = req.params;
+  const announcement = await prisma.announcement.findFirst({
+    where: { id, companyId: req.user.companyId },
+  });
+  if (!announcement) {
+    return res.status(404).json({ message: "Announcement not found" });
   }
+
+  return res.json({
+    announcementId: id,
+    failedCount: announcement.failedCount,
+    status: announcement.status,
+    failures: [],
+  });
 };
 export const retryAnnouncement = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const announcement = await prisma.announcement.findFirst({
-      where: { id, companyId: req.user.companyId },
-    });
-    if (!announcement) {
-      return res.status(404).json({ message: "Announcement not found" });
-    }
-    if (!["Sent", "Failed"].includes(announcement.status)) {
-      return res.status(400).json({
-        message: `Can only retry an announcement that has finished sending (currently ${announcement.status}).`,
-      });
-    }
-    if (!announcement.failedCount) {
-      return res.status(400).json({ message: "This announcement has no failed sends to retry." });
-    }
-
-    await prisma.announcement.update({
-      where: { id },
-      data: { status: "Queued", scheduledAt: null, failedCount: 0 },
-    });
-
-    const { inngest } = await import("../lib/inngest.js");
-    await inngest.send({
-      name: "announcement.send",
-      data: { announcementId: id, companyId: req.user.companyId },
-    });
-
-    return res.json({ success: true, message: "Retrying failed sends." });
-  } catch (error) {
-    console.error("[Announcement Retry] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { id } = req.params;
+  const announcement = await prisma.announcement.findFirst({
+    where: { id, companyId: req.user.companyId },
+  });
+  if (!announcement) {
+    return res.status(404).json({ message: "Announcement not found" });
   }
+  if (!["Sent", "Failed"].includes(announcement.status)) {
+    return res.status(400).json({
+      message: `Can only retry an announcement that has finished sending (currently ${announcement.status}).`,
+    });
+  }
+  if (!announcement.failedCount) {
+    return res.status(400).json({ message: "This announcement has no failed sends to retry." });
+  }
+
+  await prisma.announcement.update({
+    where: { id },
+    data: { status: "Queued", scheduledAt: null, failedCount: 0 },
+  });
+
+  const { inngest } = await import("../lib/inngest.js");
+  await inngest.send({
+    name: "announcement.send",
+    data: { announcementId: id, companyId: req.user.companyId },
+  });
+
+  return res.json({ success: true, message: "Retrying failed sends." });
 };

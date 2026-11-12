@@ -28,184 +28,174 @@ const safeEqual = (a, b) => {
 // Initialize Supabase Admin client
 
 export const getMe = async (req, res) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
 
-    if (req.user.isSuperAdmin && req.user.id === "env-superadmin") {
-      return res.json({
-        id: "env-superadmin",
-        email: req.user.email,
-        name: req.user.name || "Super Admin",
-        role: "admin",
-        isSuperAdmin: true,
-        adminPermissions: effectiveAdminPermissions({ isSuperAdmin: true }),
-        salesPermissions: effectiveSalesPermissions({ role: "ADMIN", isSuperAdmin: true }),
-        hasWarrantyAccess: true,
-        hasSalesAccess: true,
-        verificationStatus: "VERIFIED",
-        verificationDocUrl: null,
-        companyLogo: null,
-        companyName: "System Administration",
-        avatar: null,
-        online: true,
-      });
-    }
-
-    const dbUser = await prisma.user.findUnique({
-      where: { email: req.user.email },
-      include: { company: true, properties: true },
-    });
-
-    if (!dbUser) {
-      return res
-        .status(404)
-        .json({ message: "User profile not found in local database." });
-    }
-
-    if (dbUser.role === "SUPER_STAFF") {
-      return res.json({
-        id: dbUser.id,
-        email: dbUser.email,
-        name: dbUser.name,
-        phone: dbUser.phone,
-        role: "super_staff",
-        isSuperAdmin: false,
-        isSuperStaff: true,
-        adminPermissions: effectiveAdminPermissions({ isSuperStaff: true, adminPermissions: dbUser.adminPermissions }),
-        salesPermissions: [],
-        hasWarrantyAccess: false,
-        hasSalesAccess: false,
-        verificationStatus: "VERIFIED",
-        companyName: "Aiforhomebuilder",
-        avatar: dbUser.avatar || null,
-        online: true,
-      });
-    }
-
-    const isAdmin = dbUser.role === "ADMIN" || dbUser.role === "SUPER_ADMIN";
-    const isSuperAdmin = dbUser.role === "SUPER_ADMIN";
-    const isStaff = dbUser.role === "STAFF";
-    const avatarUrl = isAdmin
-      ? dbUser.company?.logo || null
-      : dbUser.avatar || null;
-
-    const companyWarrantyEnabled = dbUser.company?.warrantyEnabled ?? true;
-    const companySalesEnabled = dbUser.company?.salesEnabled ?? true;
-
-    const isTrade = dbUser.role === "TRADE";
-    const hasWarrantyAccess = isSuperAdmin
-      ? true
-      : !isTrade &&
-        (isAdmin || isStaff || dbUser.hasWarrantyAccess) &&
-        companyWarrantyEnabled;
-    const hasSalesAccess = isSuperAdmin
-      ? true
-      : !isTrade &&
-        (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
-
-    const verificationStatus = isSuperAdmin
-      ? "VERIFIED"
-      : dbUser.company?.verificationStatus || "VERIFIED";
-
-    const {
-      password: _password,
-      emailChangeTokenHash: _emailChangeTokenHash,
-      company: _company,
-      ...safeUser
-    } = dbUser;
-    const canSeeCompanyDocs = isAdmin || isStaff;
-
+  if (req.user.isSuperAdmin && req.user.id === "env-superadmin") {
     return res.json({
-      ...safeUser,
-      salesPermissions: effectiveSalesPermissions({
-        role: isSuperAdmin ? "ADMIN" : dbUser.role,
-        isSuperAdmin,
-        salesPermissions: dbUser.salesPermissions,
-      }),
-      hasWarrantyAccess,
-      hasSalesAccess,
-      verificationStatus,
-      verificationDocUrl: canSeeCompanyDocs
-        ? await resolveDownloadUrl(dbUser.company?.verificationDocUrl)
-        : null,
-      agreementDocUrl: canSeeCompanyDocs
-        ? await resolveDownloadUrl(dbUser.company?.agreementDocUrl)
-        : null,
-      agreementVersion: dbUser.company?.agreementVersion || null,
-      avatar: avatarUrl,
-      companyLogo: dbUser.company?.logo || null,
-      companyName: dbUser.company?.name || null,
-      role: isSuperAdmin ? "admin" : dbUser.role.toLowerCase(),
-      isSuperAdmin,
-      adminPermissions: effectiveAdminPermissions({ isSuperAdmin }),
+      id: "env-superadmin",
+      email: req.user.email,
+      name: req.user.name || "Super Admin",
+      role: "admin",
+      isSuperAdmin: true,
+      adminPermissions: effectiveAdminPermissions({ isSuperAdmin: true }),
+      salesPermissions: effectiveSalesPermissions({ role: "ADMIN", isSuperAdmin: true }),
+      hasWarrantyAccess: true,
+      hasSalesAccess: true,
+      verificationStatus: "VERIFIED",
+      verificationDocUrl: null,
+      companyLogo: null,
+      companyName: "System Administration",
+      avatar: null,
       online: true,
     });
-  } catch (error) {
-    console.error("Auth me error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { email: req.user.email },
+    include: { company: true, properties: true },
+  });
+
+  if (!dbUser) {
+    return res
+      .status(404)
+      .json({ message: "User profile not found in local database." });
+  }
+
+  if (dbUser.role === "SUPER_STAFF") {
+    return res.json({
+      id: dbUser.id,
+      email: dbUser.email,
+      name: dbUser.name,
+      phone: dbUser.phone,
+      role: "super_staff",
+      isSuperAdmin: false,
+      isSuperStaff: true,
+      adminPermissions: effectiveAdminPermissions({ isSuperStaff: true, adminPermissions: dbUser.adminPermissions }),
+      salesPermissions: [],
+      hasWarrantyAccess: false,
+      hasSalesAccess: false,
+      verificationStatus: "VERIFIED",
+      companyName: "Aiforhomebuilder",
+      avatar: dbUser.avatar || null,
+      online: true,
+    });
+  }
+
+  const isAdmin = dbUser.role === "ADMIN" || dbUser.role === "SUPER_ADMIN";
+  const isSuperAdmin = dbUser.role === "SUPER_ADMIN";
+  const isStaff = dbUser.role === "STAFF";
+  const avatarUrl = isAdmin
+    ? dbUser.company?.logo || null
+    : dbUser.avatar || null;
+
+  const companyWarrantyEnabled = dbUser.company?.warrantyEnabled ?? true;
+  const companySalesEnabled = dbUser.company?.salesEnabled ?? true;
+
+  const isTrade = dbUser.role === "TRADE";
+  const hasWarrantyAccess = isSuperAdmin
+    ? true
+    : !isTrade &&
+      (isAdmin || isStaff || dbUser.hasWarrantyAccess) &&
+      companyWarrantyEnabled;
+  const hasSalesAccess = isSuperAdmin
+    ? true
+    : !isTrade &&
+      (isAdmin || isStaff || dbUser.hasSalesAccess) && companySalesEnabled;
+
+  const verificationStatus = isSuperAdmin
+    ? "VERIFIED"
+    : dbUser.company?.verificationStatus || "VERIFIED";
+
+  const {
+    password: _password,
+    emailChangeTokenHash: _emailChangeTokenHash,
+    company: _company,
+    ...safeUser
+  } = dbUser;
+  const canSeeCompanyDocs = isAdmin || isStaff;
+
+  return res.json({
+    ...safeUser,
+    salesPermissions: effectiveSalesPermissions({
+      role: isSuperAdmin ? "ADMIN" : dbUser.role,
+      isSuperAdmin,
+      salesPermissions: dbUser.salesPermissions,
+    }),
+    hasWarrantyAccess,
+    hasSalesAccess,
+    verificationStatus,
+    verificationDocUrl: canSeeCompanyDocs
+      ? await resolveDownloadUrl(dbUser.company?.verificationDocUrl)
+      : null,
+    agreementDocUrl: canSeeCompanyDocs
+      ? await resolveDownloadUrl(dbUser.company?.agreementDocUrl)
+      : null,
+    agreementVersion: dbUser.company?.agreementVersion || null,
+    avatar: avatarUrl,
+    companyLogo: dbUser.company?.logo || null,
+    companyName: dbUser.company?.name || null,
+    role: isSuperAdmin ? "admin" : dbUser.role.toLowerCase(),
+    isSuperAdmin,
+    adminPermissions: effectiveAdminPermissions({ isSuperAdmin }),
+    online: true,
+  });
 };
 
 export const updateProfile = async (req, res) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const { name, avatar, email, lastActiveWorkspace } = req.body;
-
-    const updateData = {};
-    if (name) updateData.name = name;
-    if (req.body.phone !== undefined) {
-      const phone = toE164(req.body.phone);
-      if (phone === undefined) {
-        return res.status(400).json({ message: PHONE_ERROR });
-      }
-      updateData.phone = phone;
-    }
-    if (avatar !== undefined) updateData.avatar = avatar;
-    if (lastActiveWorkspace) {
-      if (!["warranty", "sales"].includes(lastActiveWorkspace)) {
-        return res.status(400).json({ message: "Unknown workspace" });
-      }
-      updateData.lastActiveWorkspace = lastActiveWorkspace;
-    }
-
-    if (email && email.toLowerCase() !== String(req.user.email || "").toLowerCase()) {
-      return res.status(400).json({
-        message: "Use POST /api/auth/email-change to change your sign-in email — it must be confirmed from the new address.",
-      });
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return res.status(200).json({ message: "No db fields updated" });
-    }
-
-    const updatedDbUser = await prisma.user.update({
-      where: { email: req.user.email },
-      data: updateData,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        companyId: true,
-        avatar: true,
-        phone: true,
-        lastActiveWorkspace: true,
-      },
-    });
-
-    return res.json({
-      ...updatedDbUser,
-      role: updatedDbUser.role.toLowerCase(),
-    });
-  } catch (error) {
-    console.error("Profile update error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!req.user) {
+    return res.status(401).json({ message: "Unauthorized" });
   }
+
+  const { name, avatar, email, lastActiveWorkspace } = req.body;
+
+  const updateData = {};
+  if (name) updateData.name = name;
+  if (req.body.phone !== undefined) {
+    const phone = toE164(req.body.phone);
+    if (phone === undefined) {
+      return res.status(400).json({ message: PHONE_ERROR });
+    }
+    updateData.phone = phone;
+  }
+  if (avatar !== undefined) updateData.avatar = avatar;
+  if (lastActiveWorkspace) {
+    if (!["warranty", "sales"].includes(lastActiveWorkspace)) {
+      return res.status(400).json({ message: "Unknown workspace" });
+    }
+    updateData.lastActiveWorkspace = lastActiveWorkspace;
+  }
+
+  if (email && email.toLowerCase() !== String(req.user.email || "").toLowerCase()) {
+    return res.status(400).json({
+      message: "Use POST /api/auth/email-change to change your sign-in email — it must be confirmed from the new address.",
+    });
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    return res.status(200).json({ message: "No db fields updated" });
+  }
+
+  const updatedDbUser = await prisma.user.update({
+    where: { email: req.user.email },
+    data: updateData,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      companyId: true,
+      avatar: true,
+      phone: true,
+      lastActiveWorkspace: true,
+    },
+  });
+
+  return res.json({
+    ...updatedDbUser,
+    role: updatedDbUser.role.toLowerCase(),
+  });
 };
 
 const EMAIL_CHANGE_TTL_HOURS = 24;
@@ -227,106 +217,101 @@ const findSupabaseUserByEmail = async (supabaseAdmin, email) => {
 };
 
 export const requestEmailChange = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
-    if (req.user.isSuperAdmin && req.user.id === "env-superadmin") {
-      return res.status(400).json({
-        message:
-          "The environment super-admin address is set in configuration and cannot be changed here.",
-      });
-    }
+  if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+  if (req.user.isSuperAdmin && req.user.id === "env-superadmin") {
+    return res.status(400).json({
+      message:
+        "The environment super-admin address is set in configuration and cannot be changed here.",
+    });
+  }
 
-    const newEmail = String(req.body?.email || "").trim().toLowerCase();
-    const currentEmail = String(req.user.email || "").toLowerCase();
+  const newEmail = String(req.body?.email || "").trim().toLowerCase();
+  const currentEmail = String(req.user.email || "").toLowerCase();
 
-    if (!newEmail) return res.status(400).json({ message: "Email is required" });
-    if (!EMAIL_RE.test(newEmail)) return res.status(400).json({ message: "Invalid email format" });
-    if (newEmail === currentEmail) {
-      return res.status(400).json({ message: "That is already your sign-in email" });
-    }
+  if (!newEmail) return res.status(400).json({ message: "Email is required" });
+  if (!EMAIL_RE.test(newEmail)) return res.status(400).json({ message: "Invalid email format" });
+  if (newEmail === currentEmail) {
+    return res.status(400).json({ message: "That is already your sign-in email" });
+  }
 
-    const taken = await prisma.user.findUnique({ where: { email: newEmail } });
-    if (taken) {
-      return res.status(400).json({ message: "An account with this email already exists" });
-    }
+  const taken = await prisma.user.findUnique({ where: { email: newEmail } });
+  if (taken) {
+    return res.status(400).json({ message: "An account with this email already exists" });
+  }
 
-    const user = await prisma.user.findUnique({ where: { email: currentEmail } });
-    if (!user) return res.status(404).json({ message: "User profile not found" });
+  const user = await prisma.user.findUnique({ where: { email: currentEmail } });
+  if (!user) return res.status(404).json({ message: "User profile not found" });
 
-    if (!MailService.hasPlatformSender()) {
-      return res.status(503).json({
-        message:
-          "Email is not configured on this deployment, so the confirmation link cannot be sent. " +
-          "Set SMTP_USER and SMTP_PASS and try again.",
-      });
-    }
+  if (!MailService.hasPlatformSender()) {
+    return res.status(503).json({
+      message:
+        "Email is not configured on this deployment, so the confirmation link cannot be sent. " +
+        "Set SMTP_USER and SMTP_PASS and try again.",
+    });
+  }
 
-    const rawToken = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TTL_HOURS * 60 * 60 * 1000);
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TTL_HOURS * 60 * 60 * 1000);
 
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      pendingEmail: newEmail,
+      emailChangeTokenHash: hashToken(rawToken),
+      emailChangeExpiresAt: expiresAt,
+    },
+  });
+
+  const confirmUrl = `${process.env.NEXT_PUBLIC_URL}/api/auth/email-change/confirm?token=${rawToken}`;
+
+  const verify = await MailService.sendEmail({
+    to: newEmail,
+    subject: "Confirm your new sign-in email",
+    companyId: user.companyId,
+    source: "email-change",
+    noReply: true,
+    html: Templates.getEmailChangeVerifyEmail(
+      user.name,
+      currentEmail,
+      newEmail,
+      confirmUrl,
+      EMAIL_CHANGE_TTL_HOURS,
+    ),
+  });
+
+  if (!verify?.success) {
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        pendingEmail: newEmail,
-        emailChangeTokenHash: hashToken(rawToken),
-        emailChangeExpiresAt: expiresAt,
-      },
+      data: { pendingEmail: null, emailChangeTokenHash: null, emailChangeExpiresAt: null },
     });
+    console.error("[Auth] Email-change verification mail failed:", verify?.error);
+    return res
+      .status(502)
+      .json({ message: "Could not send the confirmation email. Please try again." });
+  }
 
-    const confirmUrl = `${process.env.NEXT_PUBLIC_URL}/api/auth/email-change/confirm?token=${rawToken}`;
-
-    const verify = await MailService.sendEmail({
-      to: newEmail,
-      subject: "Confirm your new sign-in email",
-      companyId: user.companyId,
-      source: "email-change",
-      noReply: true,
-      html: Templates.getEmailChangeVerifyEmail(
+  try {
+    await MailService.sendEmail({
+      to: currentEmail,
+      subject: "Sign-in email change requested",
+      html: Templates.getEmailChangeNoticeEmail(
         user.name,
         currentEmail,
         newEmail,
-        confirmUrl,
         EMAIL_CHANGE_TTL_HOURS,
       ),
+      companyId: user.companyId,
+      source: "email-change-notice",
     });
-
-    if (!verify?.success) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { pendingEmail: null, emailChangeTokenHash: null, emailChangeExpiresAt: null },
-      });
-      console.error("[Auth] Email-change verification mail failed:", verify?.error);
-      return res
-        .status(502)
-        .json({ message: "Could not send the confirmation email. Please try again." });
-    }
-
-    try {
-      await MailService.sendEmail({
-        to: currentEmail,
-        subject: "Sign-in email change requested",
-        html: Templates.getEmailChangeNoticeEmail(
-          user.name,
-          currentEmail,
-          newEmail,
-          EMAIL_CHANGE_TTL_HOURS,
-        ),
-        companyId: user.companyId,
-        source: "email-change-notice",
-      });
-    } catch (noticeError) {
-      console.error("[Auth] Email-change notice to the old address failed:", noticeError.message);
-    }
-
-    return res.json({
-      message: `Confirmation sent to ${newEmail}. Your sign-in email changes once you open that link.`,
-      pendingEmail: newEmail,
-      expiresAt,
-    });
-  } catch (error) {
-    console.error("[Auth] Email change request failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  } catch (noticeError) {
+    console.error("[Auth] Email-change notice to the old address failed:", noticeError.message);
   }
+
+  return res.json({
+    message: `Confirmation sent to ${newEmail}. Your sign-in email changes once you open that link.`,
+    pendingEmail: newEmail,
+    expiresAt,
+  });
 };
 
 export const confirmEmailChange = async (req, res) => {
@@ -398,17 +383,12 @@ export const confirmEmailChange = async (req, res) => {
 
 /// Drops a pending change so the field stops showing "awaiting confirmation".
 export const cancelEmailChange = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
-    await prisma.user.updateMany({
-      where: { email: String(req.user.email || "").toLowerCase() },
-      data: { pendingEmail: null, emailChangeTokenHash: null, emailChangeExpiresAt: null },
-    });
-    return res.json({ message: "Pending email change cancelled" });
-  } catch (error) {
-    console.error("[Auth] Cancel email change failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+  await prisma.user.updateMany({
+    where: { email: String(req.user.email || "").toLowerCase() },
+    data: { pendingEmail: null, emailChangeTokenHash: null, emailChangeExpiresAt: null },
+  });
+  return res.json({ message: "Pending email change cancelled" });
 };
 
 function startSuperadminSession(res, claims) {
@@ -444,88 +424,78 @@ async function challengeSuperadmin(res, claims) {
 }
 
 export const superadminVerifyCode = async (req, res) => {
-  try {
-    const { challenge, code } = req.body || {};
-    const verified = verifySuperadminChallenge(challenge, String(code ?? "").trim());
-    if (!verified) {
-      return res.status(401).json({ message: "That code is incorrect or has expired." });
-    }
-
-    // Single use: the primary key refuses a second claim on the same challenge.
-    try {
-      await prisma.rateLimit.create({
-        data: {
-          key: `superadmin-mfa:${verified.jti}`,
-          count: 1,
-          resetAt: new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000),
-        },
-      });
-    } catch (err) {
-      if (err?.code !== "P2002") throw err;
-      return res.status(401).json({ message: "That code is incorrect or has expired." });
-    }
-
-    return startSuperadminSession(res, verified.claims);
-  } catch (error) {
-    console.error("Superadmin code check error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { challenge, code } = req.body || {};
+  const verified = verifySuperadminChallenge(challenge, String(code ?? "").trim());
+  if (!verified) {
+    return res.status(401).json({ message: "That code is incorrect or has expired." });
   }
+
+  // Single use: the primary key refuses a second claim on the same challenge.
+  try {
+    await prisma.rateLimit.create({
+      data: {
+        key: `superadmin-mfa:${verified.jti}`,
+        count: 1,
+        resetAt: new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000),
+      },
+    });
+  } catch (err) {
+    if (err?.code !== "P2002") throw err;
+    return res.status(401).json({ message: "That code is incorrect or has expired." });
+  }
+
+  return startSuperadminSession(res, verified.claims);
 };
 
 export const superadminLogin = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res
-        .status(400)
-        .json({ message: "Email and password are required" });
-    }
-
-    const envEmail = process.env.SUPERADMIN_EMAIL;
-    const envPassword = process.env.SUPERADMIN_PASSWORD;
-    const emailMatches =
-      !!envEmail &&
-      String(email).trim().toLowerCase() === envEmail.trim().toLowerCase();
-
-    if (
-      envEmail &&
-      envPassword &&
-      emailMatches &&
-      safeEqual(password, envPassword)
-    ) {
-      return await challengeSuperadmin(res, {
-        id: "env-superadmin",
-        email: envEmail.trim(),
-        name: "Super Admin",
-        role: "SUPER_ADMIN",
-        companyId: null,
-      });
-    }
-
-    const dbUser = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
-
-    if (!dbUser || dbUser.role !== "SUPER_ADMIN") {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const passwordMatch = await bcrypt.compare(password, dbUser.password);
-    if (!passwordMatch) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    return await challengeSuperadmin(res, {
-      id: dbUser.id,
-      email: dbUser.email,
-      name: dbUser.name || "Super Admin",
-      role: dbUser.role,
-      companyId: dbUser.companyId || null,
-    });
-  } catch (error) {
-    console.error("Superadmin login error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res
+      .status(400)
+      .json({ message: "Email and password are required" });
   }
+
+  const envEmail = process.env.SUPERADMIN_EMAIL;
+  const envPassword = process.env.SUPERADMIN_PASSWORD;
+  const emailMatches =
+    !!envEmail &&
+    String(email).trim().toLowerCase() === envEmail.trim().toLowerCase();
+
+  if (
+    envEmail &&
+    envPassword &&
+    emailMatches &&
+    safeEqual(password, envPassword)
+  ) {
+    return await challengeSuperadmin(res, {
+      id: "env-superadmin",
+      email: envEmail.trim(),
+      name: "Super Admin",
+      role: "SUPER_ADMIN",
+      companyId: null,
+    });
+  }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { email: email.toLowerCase() },
+  });
+
+  if (!dbUser || dbUser.role !== "SUPER_ADMIN") {
+    return res.status(401).json({ message: "Invalid credentials" });
+  }
+
+  const passwordMatch = await bcrypt.compare(password, dbUser.password);
+  if (!passwordMatch) {
+    return res.status(401).json({ message: "Invalid credentials" });
+  }
+
+  return await challengeSuperadmin(res, {
+    id: dbUser.id,
+    email: dbUser.email,
+    name: dbUser.name || "Super Admin",
+    role: dbUser.role,
+    companyId: dbUser.companyId || null,
+  });
 };
 
 export const logout = async (req, res) => {

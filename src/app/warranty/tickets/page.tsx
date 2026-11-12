@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PortalLayout from "@/components/layout/PortalLayout";
@@ -9,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DispatchTicketDialog } from "@/components/warranty/DispatchTicketDialog";
 import { cn, ticketRef } from "@/lib/utils";
 import { useQuery, QUERY_KEYS } from "@/lib/use-query";
+import { api, errorMessage } from "@/lib/api";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -216,7 +218,6 @@ function TicketsPageInner() {
   const [totalPages, setTotalPages] = useState(0);
   const debouncedSearch = useDebouncedValue(search);
   const latestRequest = useRef(0);
-  const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const itemsPerPage = 10;
 
   // Role-based filtering
@@ -231,8 +232,7 @@ function TicketsPageInner() {
   const [dispatchTarget, setDispatchTarget] = useState<Ticket | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const showToast = (type: "success" | "error", text: string) => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3000);
+    toast[type](text);
   };
 
   const fetchTickets = useCallback(async () => {
@@ -245,21 +245,14 @@ function TicketsPageInner() {
       if (dateRange !== "all") params.set("dateRange", dateRange);
       if (!isHomeowner && propertyFilter) params.set("propertyId", propertyFilter);
 
-      const response = await fetch(`/api/tickets?${params}`);
+      const data = await api.get<{ tickets: Ticket[]; total: number; totalPages: number }>(`/api/tickets?${params}`);
       // A slower, older request must not overwrite a newer one.
       if (requestId !== latestRequest.current) return;
-      if (response.ok) {
-        const data = await response.json();
-        if (requestId !== latestRequest.current) return;
-        setTickets(data.tickets);
-        setTotalTickets(data.total);
-        setTotalPages(data.totalPages);
-      } else {
-        showToast("error", "Failed to fetch tickets");
-      }
+      setTickets(data.tickets);
+      setTotalTickets(data.total);
+      setTotalPages(data.totalPages);
     } catch (error) {
-      console.error("Error fetching tickets:", error);
-      showToast("error", "Error connecting to server");
+      if (requestId === latestRequest.current) showToast("error", errorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -337,34 +330,21 @@ function TicketsPageInner() {
 
     setCreating(true);
     try {
-      const response = await fetch("/api/tickets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          homeownerId: createForm.homeownerId,
-          propertyId: createForm.propertyId,
-          issueType: createForm.issueType,
-          ticketType: createForm.ticketType.trim() || null,
-          description: createForm.description.trim() || null,
-          priority: createForm.isEmergency ? "URGENT" : createForm.priority,
-          isEmergency: createForm.isEmergency,
-          notifyHomeowner: createForm.notifyHomeowner,
-        }),
+      const data = await api.post<{ notice?: string }>("/api/tickets", {
+        homeownerId: createForm.homeownerId,
+        propertyId: createForm.propertyId,
+        issueType: createForm.issueType,
+        ticketType: createForm.ticketType.trim() || null,
+        description: createForm.description.trim() || null,
+        priority: createForm.isEmergency ? "URGENT" : createForm.priority,
+        isEmergency: createForm.isEmergency,
+        notifyHomeowner: createForm.notifyHomeowner,
       });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        setCreateError(data.message || "Failed to create ticket.");
-        return;
-      }
-
       closeCreateModal();
       await fetchTickets();
-      showToast(data.notice ? "error" : "success", data.notice || "Ticket created");
+      showToast(data?.notice ? "error" : "success", data?.notice || "Ticket created");
     } catch (error) {
-      console.error("Error creating ticket:", error);
-      setCreateError("Error connecting to server.");
+      setCreateError(errorMessage(error));
     } finally {
       setCreating(false);
     }
@@ -381,24 +361,11 @@ function TicketsPageInner() {
   const handleResolve = async (ticket: Ticket) => {
     setResolvingId(ticket.id);
     try {
-      const response = await fetch(`/api/tickets/${ticket.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "RESOLVED" }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        showToast("error", data.message || "Failed to resolve the ticket.");
-        return;
-      }
-
+      const data = await api.patch<{ notice?: string }>(`/api/tickets/${ticket.id}`, { status: "RESOLVED" });
       await fetchTickets();
-      showToast(data.notice ? "error" : "success", data.notice || "Ticket resolved");
+      showToast(data?.notice ? "error" : "success", data?.notice || "Ticket resolved");
     } catch (error) {
-      console.error("Error resolving ticket:", error);
-      showToast("error", "Error connecting to server");
+      showToast("error", errorMessage(error));
     } finally {
       setResolvingId(null);
     }
@@ -492,29 +459,6 @@ function TicketsPageInner() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff", "homeowner"]}>
       <PortalLayout>
-        {/* Toast Notification */}
-        <AnimatePresence>
-          {toastMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: -50, x: "-50%" }}
-              animate={{ opacity: 1, y: 0, x: "-50%" }}
-              exit={{ opacity: 0, y: -50, x: "-50%" }}
-              className={cn(
-                "fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 border max-w-md",
-                toastMessage.type === "error"
-                  ? "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border-red-200"
-                  : "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border-green-200",
-              )}
-            >
-              {toastMessage.type === "error" ? (
-                <AlertCircle className="h-5 w-5 shrink-0" />
-              ) : (
-                <CheckCircle2 className="h-5 w-5 shrink-0" />
-              )}
-              <span className="text-sm font-medium">{toastMessage.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <motion.div
           variants={containerVariants}

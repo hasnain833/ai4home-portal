@@ -1,5 +1,5 @@
 import express from "express";
-import { requireAuth } from "../middlewares/auth.js";
+import { requireAuth, requireRoles } from "../middlewares/auth.js";
 import {
   getIntegrations,
   testIntegration,
@@ -12,14 +12,14 @@ import {
 const router = express.Router();
 
 // GET /api/integrations
-router.get("/", requireAuth, getIntegrations);
+router.get("/", requireAuth, requireRoles(["ADMIN"]), getIntegrations);
 // POST /api/integrations
-router.post("/", requireAuth, testIntegration);
+router.post("/", requireAuth, requireRoles(["ADMIN"]), testIntegration);
 
 // Credentials
-router.get("/credentials", requireAuth, getCredentials);
-router.post("/credentials", requireAuth, saveCredentials);
-router.delete("/credentials", requireAuth, deleteCredentials);
+router.get("/credentials", requireAuth, requireRoles(["ADMIN"]), getCredentials);
+router.post("/credentials", requireAuth, requireRoles(["ADMIN"]), saveCredentials);
+router.delete("/credentials", requireAuth, requireRoles(["ADMIN"]), deleteCredentials);
 
 // ERP sync
 router.post("/sync", requireAuth, syncIntegration);

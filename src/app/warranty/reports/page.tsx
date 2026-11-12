@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { toast } from "sonner";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,12 +19,12 @@ import {
   Ticket,
   Loader2,
   CheckCircle2,
-  AlertCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { AgentMetricsGrid } from "@/components/reports/AgentMetricsGrid";
 import { Bot } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { api, errorMessage } from "@/lib/api";
 
 // Types
 type Period = "7d" | "30d" | "90d" | "custom";
@@ -182,10 +183,6 @@ export default function ReportsPage() {
   });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [toastMessage, setToastMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
 
   // Animated values
   const animatedTotalTickets = useCountUp(metrics.totalTickets, 600);
@@ -204,8 +201,7 @@ export default function ReportsPage() {
   };
 
   const showToast = useCallback((type: "success" | "error", text: string) => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3000);
+    toast[type](text);
   }, []);
 
   // Load reports data from backend endpoint
@@ -217,37 +213,32 @@ export default function ReportsPage() {
         url += `&startDate=${start}`;
         if (end) url += `&endDate=${end}`;
       }
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setMetrics({
-          totalTickets: data.totalTickets ?? 0,
-          resolvedTickets: data.resolvedTickets ?? 0,
-          openTickets: data.openTickets ?? 0,
-          escalatedTickets: data.escalatedTickets ?? 0,
-          resolutionRate: data.resolutionRate ?? 0,
-          escalationRate: data.escalationRate ?? 0,
-          avgResponseTime: data.avgResponseTime ?? 0,
-          avgResolutionTime: data.avgResolutionTime ?? 0,
-          issueBreakdown: data.issueBreakdown ?? [],
-          agentPerformance: data.agentPerformance ?? [],
-          autoResolutionRate: data.autoResolutionRate ?? 0,
-          tradeResolutionRate: data.tradeResolutionRate ?? 0,
-          dispatchedTickets: data.dispatchedTickets ?? 0,
-          homeownerEngagement: data.homeownerEngagement ?? 0,
-          engagementTarget: data.engagementTarget ?? 98,
-          erpAvailable: !!data.erpAvailable,
-          erpSyncSuccessRate: data.erpSyncSuccessRate ?? 100,
-          erpSyncedCount: data.erpSyncedCount ?? 0,
-          erpFailedCount: data.erpFailedCount ?? 0,
-          agentMetrics: data.agentMetrics ?? null,
-        });
-      } else {
-        showToast("error", "Failed to retrieve reports data.");
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.get<Record<string, any>>(url);
+      setMetrics({
+        totalTickets: data.totalTickets ?? 0,
+        resolvedTickets: data.resolvedTickets ?? 0,
+        openTickets: data.openTickets ?? 0,
+        escalatedTickets: data.escalatedTickets ?? 0,
+        resolutionRate: data.resolutionRate ?? 0,
+        escalationRate: data.escalationRate ?? 0,
+        avgResponseTime: data.avgResponseTime ?? 0,
+        avgResolutionTime: data.avgResolutionTime ?? 0,
+        issueBreakdown: data.issueBreakdown ?? [],
+        agentPerformance: data.agentPerformance ?? [],
+        autoResolutionRate: data.autoResolutionRate ?? 0,
+        tradeResolutionRate: data.tradeResolutionRate ?? 0,
+        dispatchedTickets: data.dispatchedTickets ?? 0,
+        homeownerEngagement: data.homeownerEngagement ?? 0,
+        engagementTarget: data.engagementTarget ?? 98,
+        erpAvailable: !!data.erpAvailable,
+        erpSyncSuccessRate: data.erpSyncSuccessRate ?? 100,
+        erpSyncedCount: data.erpSyncedCount ?? 0,
+        erpFailedCount: data.erpFailedCount ?? 0,
+        agentMetrics: data.agentMetrics ?? null,
+      });
     } catch (error) {
-      console.error("Error loading analytics:", error);
-      showToast("error", "Error contacting the reports server.");
+      showToast("error", errorMessage(error));
     } finally {
       if (!skipLoader) setLoading(false);
     }
@@ -326,27 +317,6 @@ export default function ReportsPage() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
       <PortalLayout>
-        {/* Toast Notifications */}
-        <AnimatePresence>
-          {toastMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: -50, x: "-50%" }}
-              animate={{ opacity: 1, y: 0, x: "-50%" }}
-              exit={{ opacity: 0, y: -50, x: "-50%" }}
-              className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${toastMessage.type === "success"
-                ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
-                : "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
-                }`}
-            >
-              {toastMessage.type === "success" ? (
-                <CheckCircle2 className="h-5 w-5" />
-              ) : (
-                <AlertCircle className="h-5 w-5" />
-              )}
-              <span className="text-sm font-medium">{toastMessage.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <motion.div
           variants={containerVariants}

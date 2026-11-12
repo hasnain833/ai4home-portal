@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Bot, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { api, errorMessage } from "@/lib/api";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -47,16 +48,15 @@ export function HelpChatPanel({ draftPrompt, className = "h-[60vh]" }: { draftPr
     setError(null);
     setBusy(true);
     try {
-      const res = await fetch("/api/admin/help-agent/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next, page, ...(draftPrompt ? { draftPrompt } : {}) }),
+      const data = await api.post<{ reply?: string }>("/api/admin/help-agent/chat", {
+        messages: next,
+        page,
+        ...(draftPrompt ? { draftPrompt } : {}),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.reply) throw new Error(data.message || "The assistant couldn't answer just now.");
+      if (!data?.reply) throw new Error("The assistant couldn't answer just now.");
       setMessages([...next, { role: "assistant", content: data.reply }]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

@@ -1,5 +1,5 @@
 import express from "express";
-import { requireAuth, requireAdmin } from "../middlewares/auth.js";
+import { requireAuth, requireAdmin, requireRoles } from "../middlewares/auth.js";
 import { getHelpAgent, saveHelpAgent, helpChat } from "../admin/help-agent.controller.js";
 import {
   getStaff,
@@ -115,10 +115,10 @@ router.get("/help-agent", requireAuth, requireAdmin("prompt-lab"), getHelpAgent)
 router.put("/help-agent", requireAuth, requireAdmin("prompt-lab"), saveHelpAgent);
 router.post("/help-agent/chat", requireAuth, helpChat);
 router.get("/security-posture", requireAuth, requireAdmin("integrations"), getSecurityPosture);
-router.get("/staff", requireAuth, getStaff);
-router.post("/staff", requireAuth, createStaff);
-router.put("/staff", requireAuth, updateStaff);
-router.delete("/staff", requireAuth, deleteStaff);
+router.get("/staff", requireAuth, requireRoles(["ADMIN", "STAFF"]), getStaff);
+router.post("/staff", requireAuth, requireRoles(["ADMIN"]), createStaff);
+router.put("/staff", requireAuth, requireRoles(["ADMIN"]), updateStaff);
+router.delete("/staff", requireAuth, requireRoles(["ADMIN"]), deleteStaff);
 // Super Staff (AI4HB team): Super Admin only, enforced in the controller.
 router.get("/super-staff", requireAuth, listSuperStaff);
 router.post("/super-staff", requireAuth, inviteSuperStaff);

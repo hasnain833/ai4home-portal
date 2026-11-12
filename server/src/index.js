@@ -255,6 +255,15 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "healthy", timestamp: new Date() });
 });
 
+// Express 5 sends anything a route throws (async included) here, so routes need no try/catch
+// just to answer 500. Only errors marked safe to show (bad JSON, body too large) keep their 4xx.
+app.use((err, req, res, _next) => {
+  const status = err.expose && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status === 500) console.error(`[API] ${req.method} ${req.originalUrl} failed:`, err);
+  if (res.headersSent) return;
+  res.status(status).json({ message: status === 500 ? "Internal server error" : err.message });
+});
+
 let httpServer = null;
 
 if (process.env.VERCEL || process.env.NODE_ENV === "test") {

@@ -4,6 +4,7 @@ import { useEffect, useState, use } from "react";
 import { splitLabel } from "@/components/warranty/ScheduleShell";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { CalendarDays, CheckCircle2, XCircle } from "lucide-react";
+import { api, ApiError, isSlotTaken } from "@/lib/api";
 
 type Slot = { iso: string; label: string };
 type ManageData = {
@@ -27,12 +28,7 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
 
   const load = async () => {
     try {
-      const res = await fetch(`/api/sales/scheduling/public/manage/${token}`);
-      if (!res.ok) {
-        setNotFound(true);
-        return;
-      }
-      setData(await res.json());
+      setData(await api.get<NonNullable<typeof data>>(`/api/sales/scheduling/public/manage/${token}`));
     } catch {
       setNotFound(true);
     } finally {
@@ -50,20 +46,15 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/sales/scheduling/public/reschedule", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, startTime: selected }),
-      });
-      const r = await res.json();
-      if (!res.ok) {
-        setError(res.status === 409 ? "That time was just taken. Please pick another." : r.message || r.reason || "Reschedule failed");
-        if (res.status === 409) load();
-        return;
-      }
+      await api.post("/api/sales/scheduling/public/reschedule", { token, startTime: selected });
       setResult("rescheduled");
-    } catch {
-      setError("Something went wrong.");
+    } catch (e) {
+      if (isSlotTaken(e)) {
+        setError("That time was just taken. Please pick another.");
+        load();
+      } else {
+        setError(e instanceof ApiError && e.status ? e.message : "Something went wrong.");
+      }
     } finally {
       setBusy(false);
     }
@@ -79,13 +70,8 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
     }))) return;
     setBusy(true);
     try {
-      const res = await fetch("/api/sales/scheduling/public/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: data.appointment.cancelToken }),
-      });
-      if (res.ok) setResult("cancelled");
-      else setError("Cancel failed.");
+      await api.post("/api/sales/scheduling/public/cancel", { token: data.appointment.cancelToken });
+      setResult("cancelled");
     } catch {
       setError("Cancel failed.");
     } finally {

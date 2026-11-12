@@ -38,7 +38,6 @@ import {
   Plug,
   Shield,
   Database,
-  CheckCircle2,
   AlertCircle,
   RefreshCw,
   Plus,
@@ -50,6 +49,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 interface ConnectionStatus {
   connected: boolean;
@@ -167,20 +168,14 @@ function SettingsPageContent() {
   const [suppressionSearch, setSuppressionSearch] = useState("");
   const [suppressionPage, setSuppressionPage] = useState(1);
   const [suppressionTotalPages, setSuppressionTotalPages] = useState(1);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+    toast[type](message);
   };
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/salesforce/status");
-      if (res.ok) {
-        const data = await res.json();
-        setConnectionStatus(data);
-      }
+      setConnectionStatus(await api.get<typeof connectionStatus>("/api/sales/salesforce/status"));
     } catch (error) {
       console.error("Failed to fetch SF status:", error);
     } finally {
@@ -191,11 +186,7 @@ function SettingsPageContent() {
   const fetchMappings = useCallback(async () => {
     setLoadingMappings(true);
     try {
-      const res = await fetch("/api/sales/salesforce/mappings");
-      if (res.ok) {
-        const data = await res.json();
-        setMappings(data);
-      }
+      setMappings(await api.get<typeof mappings>("/api/sales/salesforce/mappings"));
     } catch (error) {
       console.error("Failed to fetch mappings:", error);
     } finally {
@@ -205,11 +196,8 @@ function SettingsPageContent() {
   const fetchLogs = useCallback(async () => {
     setLoadingLogs(true);
     try {
-      const res = await fetch("/api/sales/salesforce/logs?limit=10");
-      if (res.ok) {
-        const data = await res.json();
-        setSyncLogs(data.logs || []);
-      }
+      const data = await api.get<{ logs?: typeof syncLogs }>("/api/sales/salesforce/logs?limit=10");
+      setSyncLogs(data?.logs || []);
     } catch (error) {
       console.error("Failed to fetch logs:", error);
     } finally {
@@ -256,13 +244,12 @@ function SettingsPageContent() {
   const fetchSuppressionList = useCallback(async (page = 1, search = "") => {
     setLoadingSuppression(true);
     try {
-      const res = await fetch(`/api/sales/compliance/suppression?page=${page}&limit=5&search=${encodeURIComponent(search)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSuppressionList(data.suppressedItems || []);
-        setSuppressionTotalPages(data.pagination?.totalPages || 1);
-        setSuppressionPage(data.pagination?.page || 1);
-      }
+      const data = await api.get<{ suppressedItems?: typeof suppressionList; pagination?: { totalPages?: number; page?: number } }>(
+        `/api/sales/compliance/suppression?page=${page}&limit=5&search=${encodeURIComponent(search)}`,
+      );
+      setSuppressionList(data?.suppressedItems || []);
+      setSuppressionTotalPages(data?.pagination?.totalPages || 1);
+      setSuppressionPage(data?.pagination?.page || 1);
     } catch (error) {
       console.error("Failed to fetch suppression list:", error);
     } finally {
@@ -273,30 +260,19 @@ function SettingsPageContent() {
   const handleSaveOutreachSettings = async () => {
     setSavingOutreach(true);
     try {
-      const res = await fetch("/api/company", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          defaultLeadOwner: defaultOwner,
-          voiceProfile,
-          complianceOptInRequired,
-          smsQuietHoursEnabled,
-          quietHoursStart,
-          quietHoursEnd,
-          quietHoursTimezone: quietHoursTimezone || null,
-        }),
+      await api.put("/api/company", {
+        defaultLeadOwner: defaultOwner,
+        voiceProfile,
+        complianceOptInRequired,
+        smsQuietHoursEnabled,
+        quietHoursStart,
+        quietHoursEnd,
+        quietHoursTimezone: quietHoursTimezone || null,
       });
-
-      if (res.ok) {
-        invalidate(QUERY_KEYS.company);
-        showToast("Outreach and compliance settings saved successfully.");
-      } else {
-        const data = await res.json();
-        showToast(data.message || "Failed to save settings", "error");
-      }
+      invalidate(QUERY_KEYS.company);
+      showToast("Outreach and compliance settings saved successfully.");
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Error saving outreach settings", "error");
+      showToast(errorMessage(error), "error");
     } finally {
       setSavingOutreach(false);
     }
@@ -309,26 +285,12 @@ function SettingsPageContent() {
     }
     setAddingSuppression(true);
     try {
-      const res = await fetch("/api/sales/compliance/suppression", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          value: newSuppressValue,
-          reason: newSuppressReason,
-        }),
-      });
-
-      if (res.ok) {
-        showToast("Successfully added to suppression list");
-        setNewSuppressValue("");
-        fetchSuppressionList(1, suppressionSearch);
-      } else {
-        const data = await res.json();
-        showToast(data.message || "Failed to add to suppression list", "error");
-      }
+      await api.post("/api/sales/compliance/suppression", { value: newSuppressValue, reason: newSuppressReason });
+      showToast("Successfully added to suppression list");
+      setNewSuppressValue("");
+      fetchSuppressionList(1, suppressionSearch);
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Error adding to suppression list", "error");
+      showToast(errorMessage(error), "error");
     } finally {
       setAddingSuppression(false);
     }
@@ -343,22 +305,11 @@ function SettingsPageContent() {
       confirmText: "Remove",
     }))) return;
     try {
-      const res = await fetch("/api/sales/compliance/suppression", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-
-      if (res.ok) {
-        showToast("Removed from suppression list");
-        fetchSuppressionList(suppressionPage, suppressionSearch);
-      } else {
-        const data = await res.json();
-        showToast(data.message || "Failed to delete", "error");
-      }
+      await api.delete("/api/sales/compliance/suppression", { id });
+      showToast("Removed from suppression list");
+      fetchSuppressionList(suppressionPage, suppressionSearch);
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Error deleting suppression item", "error");
+      showToast(errorMessage(error), "error");
     }
   };
 
@@ -395,20 +346,11 @@ function SettingsPageContent() {
   const handleConnectSF = async () => {
     setConnecting(true);
     try {
-      const res = await fetch("/api/sales/salesforce/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ environment: sfEnvironment }),
-      });
-      const data = await res.json();
-      if (res.ok && data.authUrl) {
-        window.location.href = data.authUrl;
-      } else {
-        showToast(data.message || "Failed to initiate OAuth", "error");
-      }
+      const data = await api.post<{ authUrl?: string }>("/api/sales/salesforce/connect", { environment: sfEnvironment });
+      if (data?.authUrl) window.location.href = data.authUrl;
+      else showToast("Failed to initiate OAuth", "error");
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Failed to connect to Salesforce", "error");
+      showToast(errorMessage(error), "error");
     } finally {
       setConnecting(false);
     }
@@ -422,20 +364,12 @@ function SettingsPageContent() {
     }))) return;
     setDisconnecting(true);
     try {
-      const res = await fetch("/api/sales/salesforce/disconnect", {
-        method: "POST",
-      });
-      if (res.ok) {
-        showToast("Salesforce disconnected successfully");
-        fetchStatus();
-        fetchLogs();
-      } else {
-        const data = await res.json();
-        showToast(data.message || "Disconnect failed", "error");
-      }
+      await api.post("/api/sales/salesforce/disconnect");
+      showToast("Salesforce disconnected successfully");
+      fetchStatus();
+      fetchLogs();
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Disconnect failed", "error");
+      showToast(errorMessage(error), "error");
     } finally {
       setDisconnecting(false);
     }
@@ -444,24 +378,16 @@ function SettingsPageContent() {
   const handleBulkIngest = async () => {
     setBulkIngesting(true);
     try {
-      const res = await fetch("/api/sales/salesforce/bulk-import", {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        showToast(
-          `Bulk import complete! Created: ${data.createdCount}, Updated: ${data.updatedCount}${data.errorCount > 0 ? `, Errors: ${data.errorCount}` : ""}`,
-          data.errorCount > 0 ? "error" : "success"
-        );
-        fetchStatus();
-        fetchLogs();
-      } else {
-        showToast(data.message || "Bulk import failed", "error");
-        fetchLogs();
-      }
+      const data = await api.post<{ createdCount: number; updatedCount: number; errorCount: number }>("/api/sales/salesforce/bulk-import");
+      showToast(
+        `Bulk import complete! Created: ${data.createdCount}, Updated: ${data.updatedCount}${data.errorCount > 0 ? `, Errors: ${data.errorCount}` : ""}`,
+        data.errorCount > 0 ? "error" : "success"
+      );
+      fetchStatus();
+      fetchLogs();
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Bulk import failed — check console for details", "error");
+      showToast(errorMessage(error), "error");
+      fetchLogs();
     } finally {
       setBulkIngesting(false);
     }
@@ -470,21 +396,13 @@ function SettingsPageContent() {
   const handleIncrementalSync = async () => {
     setSyncingIncremental(true);
     try {
-      const res = await fetch("/api/sales/salesforce/sync", {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        showToast(data.message || "Incremental sync complete");
-        fetchStatus();
-        fetchLogs();
-      } else {
-        showToast(data.message || "Sync failed", "error");
-        fetchLogs();
-      }
+      const data = await api.post<{ message?: string }>("/api/sales/salesforce/sync");
+      showToast(data?.message || "Incremental sync complete");
+      fetchStatus();
+      fetchLogs();
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Sync failed", "error");
+      showToast(errorMessage(error), "error");
+      fetchLogs();
     } finally {
       setSyncingIncremental(false);
     }
@@ -492,11 +410,7 @@ function SettingsPageContent() {
 
   const handleSyncIntervalChange = async (value: string) => {
     try {
-      await fetch("/api/sales/salesforce/status", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ syncInterval: value }),
-      });
+      await api.patch("/api/sales/salesforce/status", { syncInterval: value });
       fetchStatus();
     } catch (error) {
       console.error("Failed to update sync interval:", error);
@@ -506,12 +420,7 @@ function SettingsPageContent() {
   const handleWriteBackToggle = async (enabled: boolean) => {
     setConnectionStatus((prev) => (prev ? { ...prev, writeBackEnabled: enabled } : prev));
     try {
-      const res = await fetch("/api/sales/salesforce/status", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ writeBackEnabled: enabled }),
-      });
-      if (!res.ok) throw new Error("request failed");
+      await api.patch("/api/sales/salesforce/status", { writeBackEnabled: enabled });
       showToast(
         enabled ? "Salesforce write-back enabled." : "Salesforce write-back disabled.",
       );
@@ -528,31 +437,21 @@ function SettingsPageContent() {
     if (!newSfField.trim() || !newPortalField.trim()) return;
     setSavingMapping(true);
     try {
-      const res = await fetch("/api/sales/salesforce/mappings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          salesforceField: newSfField,
-          portalField: newPortalField,
-          description: newDescription || null,
-          isConsentField: newIsConsent,
-        }),
+      await api.post("/api/sales/salesforce/mappings", {
+        salesforceField: newSfField,
+        portalField: newPortalField,
+        description: newDescription || null,
+        isConsentField: newIsConsent,
       });
-      if (res.ok) {
-        showToast("Field mapping added");
-        setNewSfField("");
-        setNewPortalField("");
-        setNewDescription("");
-        setNewIsConsent(false);
-        setAddMappingOpen(false);
-        fetchMappings();
-      } else {
-        const data = await res.json();
-        showToast(data.message || "Failed to save mapping", "error");
-      }
+      showToast("Field mapping added");
+      setNewSfField("");
+      setNewPortalField("");
+      setNewDescription("");
+      setNewIsConsent(false);
+      setAddMappingOpen(false);
+      fetchMappings();
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Failed to save mapping", "error");
+      showToast(errorMessage(error), "error");
     } finally {
       setSavingMapping(false);
     }
@@ -560,18 +459,11 @@ function SettingsPageContent() {
 
   const handleDeleteMapping = async (id: string) => {
     try {
-      const res = await fetch("/api/sales/salesforce/mappings", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      if (res.ok) {
-        showToast("Mapping removed");
-        fetchMappings();
-      }
+      await api.delete("/api/sales/salesforce/mappings", { id });
+      showToast("Mapping removed");
+      fetchMappings();
     } catch (error) {
-      console.error("[sales/settings]", error);
-      showToast("Failed to delete mapping", "error");
+      showToast(errorMessage(error), "error");
     }
   };
 
@@ -608,24 +500,6 @@ function SettingsPageContent() {
           animate="visible"
           className="space-y-6 max-w-7xl mx-auto"
         >
-          {/* Toast Notification */}
-          {toast && (
-            <motion.div
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className={`fixed top-4 right-4 z-100 max-w-md px-4 py-3 rounded-xl shadow-lg border text-sm font-medium ${toast.type === "success"
-                ? "bg-green-50 text-green-800 border-green-200 dark:bg-green-950/80 dark:text-green-300 dark:border-green-800"
-                : "bg-red-50 text-red-800 border-red-200 dark:bg-red-950/80 dark:text-red-300 dark:border-red-800"
-                }`}
-            >
-              <div className="flex items-center gap-2">
-                {toast.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                {toast.message}
-              </div>
-            </motion.div>
-          )}
-
           {/* Header */}
           <motion.div variants={fadeInUp} className="flex justify-between items-center">
             <div>

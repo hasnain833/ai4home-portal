@@ -42,6 +42,7 @@ function onboardingBadge(c: { contractSignedAt: string | null; goLiveAt: string 
   return { text: `Day ${day} of ${GO_LIVE_TARGET_DAYS}`, late: day > GO_LIVE_TARGET_DAYS };
 }
 import { useAuth } from "@/contexts/AuthContext";
+import { api, errorMessage } from "@/lib/api";
 
 interface CompanyRecord {
   id: string;
@@ -84,9 +85,9 @@ export default function AdminCompaniesPage() {
   const fetchCompanies = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/companies");
-      const data = await response.json();
-      if (response.ok) setCompanies(data);
+      setCompanies(await api.get<CompanyRecord[]>("/api/admin/companies"));
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -104,15 +105,10 @@ export default function AdminCompaniesPage() {
   const verify = async (id: string, action: "approve" | "reject") => {
     setActingId(id);
     try {
-      const res = await fetch(`/api/admin/companies/${id}/verify`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Could not update verification");
+      await api.patch(`/api/admin/companies/${id}/verify`, { action });
       await fetchCompanies();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not update verification");
+      toast.error(errorMessage(e));
     } finally {
       setActingId(null);
     }
@@ -123,15 +119,10 @@ export default function AdminCompaniesPage() {
     const next = { warrantyEnabled: company.warrantyEnabled, salesEnabled: company.salesEnabled, [field]: !company[field] };
     setCompanies((list) => list.map((c) => (c.id === company.id ? { ...c, ...next } : c)));
     try {
-      const res = await fetch(`/api/admin/companies/${company.id}/workspaces`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Could not save");
+      await api.patch(`/api/admin/companies/${company.id}/workspaces`, next);
     } catch (e) {
       setCompanies(previous);
-      toast.error(e instanceof Error ? e.message : "Could not save");
+      toast.error(errorMessage(e));
     }
   };
 
@@ -154,17 +145,13 @@ export default function AdminCompaniesPage() {
     }
     setActingId(company.id);
     try {
-      const res = await fetch(`/api/admin/companies/${company.id}/suspension`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ suspended }),
+      const { suspendedAt } = await api.patch<{ suspendedAt: string | null }>(`/api/admin/companies/${company.id}/suspension`, {
+        suspended,
       });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Could not update the company");
-      const { suspendedAt } = await res.json();
       setCompanies((list) => list.map((c) => (c.id === company.id ? { ...c, suspendedAt } : c)));
       toast.success(suspended ? `${company.name} suspended.` : `${company.name} reactivated.`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not update the company");
+      toast.error(errorMessage(e));
     } finally {
       setActingId(null);
     }
@@ -174,15 +161,10 @@ export default function AdminCompaniesPage() {
     const previous = companies;
     setCompanies((list) => list.map((c) => (c.id === id ? { ...c, [field]: value || null } : c)));
     try {
-      const res = await fetch(`/api/admin/companies/${id}/onboarding`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: value || null }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Could not save");
+      await api.patch(`/api/admin/companies/${id}/onboarding`, { [field]: value || null });
     } catch (e) {
       setCompanies(previous);
-      toast.error(e instanceof Error ? e.message : "Could not save");
+      toast.error(errorMessage(e));
     }
   };
 

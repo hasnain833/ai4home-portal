@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import prisma from "../lib/prisma.js";
 import { chat, toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
-import { denyUnlessAdminAccess } from "../middlewares/auth.js";
+import { adminHandler } from "../middlewares/auth.js";
 import { effectiveAdminPermissions } from "../lib/admin-permissions.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { checkTokens, renderTemplate } from "../prompts/template.js";
@@ -42,15 +42,7 @@ async function livePrompts() {
 const MAX_MESSAGE_CHARS = 2000;
 const MAX_ASK_TURNS = 20;
 
-const wrap = (label, fn) => async (req, res) => {
-  try {
-    if (denyUnlessAdminAccess(req, res)) return;
-    await fn(req, res);
-  } catch (error) {
-    console.error(`[Sales Coach ${label}] Error:`, error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
+const wrap = adminHandler("Sales Coach");
 
 const bullets = (items) => items.map((i) => `- ${i}`).join("\n") || "(none)";
 

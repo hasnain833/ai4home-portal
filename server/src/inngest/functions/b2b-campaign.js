@@ -11,6 +11,7 @@ import {
   B2B_REPLY_TAG,
   b2bEmailHtml,
   bookingLinkFor,
+  shortBookingLinkFor,
   exitB2BEnrollments,
   completeFinishedCampaigns,
   getB2BJourneySettings,
@@ -27,9 +28,10 @@ const RETRY_DELAYS_MS = [15 * 60 * 1000, 60 * 60 * 1000];
 /** First word of the contact name, for "Hi {{firstName}}". */
 const firstNameOf = (lead) => (lead.contactName || "").trim().split(/\s+/)[0] || "there";
 
-export function renderB2BStep(step, lead, campaignId, stepId) {
+/** `link` overrides the booking link, e.g. with a short one for a text. */
+export function renderB2BStep(step, lead, campaignId, stepId, link) {
   // Email clicks come from Brevo. A text's link carries the step, so opening it counts as a click.
-  const bookingLink = bookingLinkFor(lead, campaignId, step.channel === "SMS" ? stepId : undefined);
+  const bookingLink = link || bookingLinkFor(lead, campaignId, step.channel === "SMS" ? stepId : undefined);
   const vars = {
     firstName: firstNameOf(lead),
     contactName: lead.contactName || "",
@@ -79,7 +81,9 @@ export async function blockReason(lead, channel) {
 }
 
 export async function sendStep(step, lead, campaignId, stepId) {
-  const msg = renderB2BStep(step, lead, campaignId, stepId);
+  // A text is billed per 160 characters, so it carries the short link; the redirect keeps the tracking.
+  const link = step.channel === "SMS" && !step.noBookingLink ? await shortBookingLinkFor(lead, campaignId, stepId) : null;
+  const msg = renderB2BStep(step, lead, campaignId, stepId, link);
   const track = { leadId: lead.id, campaignId, stepId };
   if (step.channel === "SMS") {
     const r = await sendSms({ to: lead.phone, body: msg.body, source: "b2b-campaign", brand: false, track });

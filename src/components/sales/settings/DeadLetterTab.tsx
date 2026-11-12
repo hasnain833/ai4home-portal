@@ -21,6 +21,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 
 interface DeadLetterRow {
   id: string;
@@ -56,17 +57,11 @@ export default function DeadLetterTab() {
   const loadRows = useCallback(async (status: Filter) => {
     try {
       const qs = status === "ALL" ? "" : `?status=${status}`;
-      const res = await fetch(`/api/sales/dead-letters${qs}`, { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        setRows(data.deadLetters || []);
-        setCounts(data.counts || {});
-      } else {
-        toast.error("Could not load the dead-letter queue.");
-      }
+      const data = await api.get<{ deadLetters?: typeof rows; counts?: typeof counts }>(`/api/sales/dead-letters${qs}`);
+      setRows(data?.deadLetters || []);
+      setCounts(data?.counts || {});
     } catch (error) {
-      console.error("Failed to fetch dead letters:", error);
-      toast.error("Could not load the dead-letter queue.");
+      toast.error(errorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -81,20 +76,12 @@ export default function DeadLetterTab() {
   const act = async (id: string, action: "replay" | "discard") => {
     setBusyId(id);
     try {
-      const res = await fetch(`/api/sales/dead-letters/${id}/${action}`, {
-        method: "POST",
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        toast.success(data.message || "Done.");
-      } else {
-        toast.error(data.message || "Action failed.");
-      }
+      const data = await api.post<{ message?: string }>(`/api/sales/dead-letters/${id}/${action}`);
+      toast.success(data?.message || "Done.");
       await loadRows(filter);
     } catch (error) {
-      console.error(`Dead letter ${action} failed:`, error);
-      toast.error("Action failed.");
+      toast.error(errorMessage(error));
+      await loadRows(filter);
     } finally {
       setBusyId(null);
     }

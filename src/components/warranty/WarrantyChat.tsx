@@ -1,6 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { api } from "@/lib/api";
+
+type ChatReply = {
+  conversationId?: string;
+  reply: string;
+  options?: string[];
+  photoRequest?: { max: number } | null;
+};
 import { Send, Bot, User, Loader2, Plus } from "lucide-react";
 import PromptSuggestions from "./PromptSuggestions";
 import PhotoRequestCard from "./PhotoRequestCard";
@@ -107,25 +115,13 @@ export default function WarrantyChat({
     setIsLoading(true);
 
     try {
-      const response = await fetch(chatEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          companyId,
-          conversationId,
-          message: userMessage.content,
-          homeownerId,
-          photoStepDone,
-        }),
+      const data = await api.post<ChatReply>(chatEndpoint, {
+        companyId,
+        conversationId,
+        message: userMessage.content,
+        homeownerId,
+        photoStepDone,
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to send message");
-      }
-
-      const data = await response.json();
 
       if (data.conversationId && data.conversationId !== conversationId) {
         setConversationId(data.conversationId);

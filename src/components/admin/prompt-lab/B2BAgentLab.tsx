@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
 
 const API = "/api/admin/b2b-prompt-lab";
@@ -49,7 +49,6 @@ type Props = {
 
 const EMPTY_DRAFT: Draft = { systemTemplate: "", toolDescription: "", kbEmptyText: "" };
 const ACTION_LABELS: Record<string, string> = { reply: "Reply", book: "Book meeting", handoff: "Hand off to a person", not_interested: "Not interested" };
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 const post = <T,>(path: string, body: object = {}) =>
   apiFetch<T>(`${API}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const pickDraft = ({ systemTemplate, toolDescription, kbEmptyText }: Draft): Draft => ({ systemTemplate, toolDescription, kbEmptyText });

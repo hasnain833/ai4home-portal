@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api, errorMessage } from "@/lib/api";
 
 export default function UnsubscribePage() {
   const params = useParams();
@@ -25,18 +26,17 @@ export default function UnsubscribePage() {
     setState("loading");
     try {
       const url = isB2B ? `/api/public/b2b/unsubscribe/${leadId}` : `/api/sales/compliance/unsubscribe-link/${leadId}`;
-      const res = await fetch(url, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
+      const data = await api.post<{ success?: boolean; companyName?: string; email?: string; message?: string }>(url);
+      if (data?.success) {
         setCompanyName(data.companyName || null);
         setEmail(data.email || null);
         setState("success");
       } else {
-        setMessage(data.message || "We couldn't process your request.");
+        setMessage(data?.message || "We couldn't process your request.");
         setState("error");
       }
-    } catch {
-      setMessage("Network error. Please try again.");
+    } catch (e) {
+      setMessage(errorMessage(e));
       setState("error");
     }
   };

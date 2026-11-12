@@ -1,7 +1,7 @@
 import { bookB2BMeeting, getPlatformSlots as openSlots } from "../services/website-sales.js";
 import prisma from "../lib/prisma.js";
 import { queueSalesforceDeletion } from "../services/b2b-salesforce-sync.js";
-import { denyUnlessAdminAccess } from "../middlewares/auth.js";
+import { adminHandler } from "../middlewares/auth.js";
 import { PHONE_ERROR, sendSms, smsSent, toE164 } from "../services/sms.service.js";
 import { renderB2BStep } from "../inngest/functions/b2b-campaign.js";
 import { MailService } from "../services/mail-service.js";
@@ -35,21 +35,14 @@ import {
   exitB2BEnrollments,
   completeFinishedCampaigns,
   notifySuperAdmin,
+  resolveShortLink,
 } from "../lib/b2b.js";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 
-const wrap = (label, fn, { admin = true } = {}) => async (req, res) => {
-  try {
-    if (admin && denyUnlessAdminAccess(req, res)) return;
-    await fn(req, res);
-  } catch (error) {
-    console.error(`[B2B ${label}] Error:`, error);
-    res.status(500).json({ message: "Internal server error" });
-  }
-};
+const wrap = adminHandler("B2B");
 
 /** Normalises a lead payload; returns { data } or { error }. */
 function leadData(body, { partial = false } = {}) {
@@ -714,6 +707,13 @@ export const updateAppointmentStatus = wrap("Appointment status", async (req, re
 
 
 const findByToken = (token) => prisma.b2BLead.findUnique({ where: { bookingToken: String(token || "") } });
+
+/** A text's short link (/m/<code>): where it leads. The web app turns this into a redirect. */
+export const publicShortLink = wrap("Short link", async (req, res) => {
+  const path = await resolveShortLink(req.params.code);
+  if (!path) return res.status(404).json({ message: "This link is no longer valid." });
+  res.json({ path });
+}, { admin: false });
 
 export const publicGetBooking = wrap("Public booking", async (req, res) => {
   const lead = await findByToken(req.params.token);

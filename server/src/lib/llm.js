@@ -116,3 +116,16 @@ export async function toolCall({
     return null;
   }
 }
+
+/** Chat transcript -> Anthropic messages: merges back-to-back turns and starts on a user turn. */
+export function toAnthropicMessages(transcript) {
+  const msgs = [];
+  for (const t of transcript) {
+    const role = t.role === "agent" ? "assistant" : "user";
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === role) last.content += `\n${t.content}`;
+    else msgs.push({ role, content: t.content });
+  }
+  while (msgs.length && msgs[0].role !== "user") msgs.shift();
+  return msgs;
+}

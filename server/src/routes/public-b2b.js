@@ -4,7 +4,7 @@ import { websiteSales } from "../controllers/website-sales.controller.js";
 import { Router } from "express";
 import { websiteGuard } from "../controllers/website-guard.controller.js";
 import { createRateLimiter } from "../middlewares/rate-limit.js";
-import { publicGetBooking, publicBook, publicUnsubscribe } from "../admin/b2b.controller.js";
+import { publicGetBooking, publicBook, publicShortLink, publicUnsubscribe } from "../admin/b2b.controller.js";
 
 
 const phoneBookingLimit = createRateLimiter({ max: 3, windowMs: 600_000, keyFn: (req) => "phone:" + String(req.body?.phone || "").replace(/\D/g, "").slice(-10) });
@@ -20,6 +20,7 @@ router.post("/intake", requireWebsiteIntakeSecret, createRateLimiter({ max: 100,
 const limit = (label) => createRateLimiter({ max: 20, windowMs: 60_000, label });
 
 router.get("/booking/:token", limit("B2B booking"), publicGetBooking);
+router.get("/short/:code", limit("B2B short link"), publicShortLink);
 router.post("/booking/:token", limit("B2B booking"), publicBook);
 router.post("/unsubscribe/:token", limit("B2B unsubscribe"), publicUnsubscribe);
 

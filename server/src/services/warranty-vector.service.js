@@ -1,22 +1,13 @@
 import prisma from "../lib/prisma.js";
-import { embedText, embedBatch } from "./embedding.service.js";
-import { saveEmbeddings } from "./vector-store.service.js";
+import { embedText } from "./embedding.service.js";
+import { embedChunks, retrievalStatus, saveEmbeddings, searchWithFallback, toSearchResult } from "./vector-store.service.js";
 
 const FTS_LANG = "english";
 const MAX_CHUNK_CHARS = 8000;
 
 export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
   if (!chunks.length) return 0;
-
-  let embeddings;
-  try {
-    embeddings = await embedBatch(chunks);
-    const embedded = embeddings.filter(Boolean).length;
-    console.log(`[Vector Store] Generated embeddings for ${embedded}/${chunks.length} chunks.`);
-  } catch (err) {
-    console.error("[Vector Store] Batch embedding failed, storing without embeddings:", err.message);
-    embeddings = new Array(chunks.length).fill(null);
-  }
+  const embeddings = await embedChunks(chunks);
 
   await prisma.warrantyKBChunk.deleteMany({ where: { documentId } });
 
@@ -51,65 +42,15 @@ export async function deleteDocument(companyId, documentId) {
   await prisma.warrantyKBChunk.deleteMany({ where: { documentId } });
 }
 
-export async function queryDetailed(companyId, text, k = 5, categories = null, communityId = null, includeSandbox = false) {
-  const q = (text || "").trim();
-  if (!q) return { method: "empty", results: [] };
-  const limit = Math.min(Number(k) || 5, 20);
+export const queryDetailed = (companyId, text, k = 5, categories = null, communityId = null, includeSandbox = false) =>
+  searchWithFallback(
+    text,
+    k,
+    (q, limit) => semanticQuery(companyId, q, limit, categories, communityId, includeSandbox),
+    (q, limit) => ftsQuery(companyId, q, limit, categories, communityId, includeSandbox),
+  );
 
-  const semanticResults = await semanticQuery(companyId, q, limit, categories, communityId, includeSandbox);
-  if (semanticResults && semanticResults.length > 0) {
-    return { method: "semantic", results: semanticResults };
-  }
-
-  const method = semanticResults === null ? "fts (semantic unavailable)" : "fts (no semantic match)";
-  console.log(`[Vector Store] Using ${method} for query.`);
-  const results = await ftsQuery(companyId, q, limit, categories, communityId, includeSandbox);
-  return { method, results };
-}
-
-export async function getRetrievalStatus(companyId) {
-  let pgvectorReady = false;
-  let embeddedChunks = 0;
-  let totalChunks = 0;
-  let detail = null;
-
-  try {
-    totalChunks = await prisma.warrantyKBChunk.count({
-      where: { OR: [{ scope: "PLATFORM" }, { companyId }] },
-    });
-  } catch (err) {
-    detail = `Could not count chunks: ${err.message}`;
-  }
-
-  try {
-    const rows = await prisma.$queryRawUnsafe(
-      `SELECT COUNT(*)::int AS n FROM "WarrantyKBChunk"
-        WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NOT NULL`,
-      companyId,
-    );
-    embeddedChunks = rows?.[0]?.n ?? 0;
-    pgvectorReady = true;
-  } catch (err) {
-    pgvectorReady = false;
-    detail = err.message;
-  }
-
-  const coverage = totalChunks > 0 ? embeddedChunks / totalChunks : 0;
-  let status = "SEMANTIC";
-  if (!pgvectorReady) status = "UNAVAILABLE";
-  else if (totalChunks === 0) status = "EMPTY";
-  else if (embeddedChunks === 0) status = "UNAVAILABLE";
-  else if (coverage < 1) status = "PARTIAL";
-
-  return {
-    status,
-    pgvectorReady,
-    totalChunks,
-    embeddedChunks,
-    coverage: Math.round(coverage * 100),
-    detail,
-  };
-}
+export const getRetrievalStatus = (companyId) => retrievalStatus("WarrantyKBChunk", companyId);
 
 
 async function semanticQuery(companyId, text, limit, categories, communityId = null, includeSandbox = false) {
@@ -172,16 +113,7 @@ async function semanticQuery(companyId, text, limit, categories, communityId = n
         ...communityArgs,
       );
 
-    return rows
-      .filter((r) => Number(r.score) >= 0.3)
-      .map((r) => ({
-        documentId: r.documentId,
-        name: r.name || "",
-        category: r.category || "General",
-        scope: r.scope || "COMPANY",
-        text: r.content || "",
-        score: Number(r.score) || 0,
-      }));
+    return rows.filter((r) => Number(r.score) >= 0.3).map(toSearchResult);
   } catch (err) {
     console.error("[Vector Store] Semantic query failed (pgvector may not be set up):", err.message);
     return null;
@@ -217,12 +149,5 @@ async function ftsQuery(companyId, text, limit, categories, communityId = null, 
         ORDER BY score DESC
         LIMIT ${limit}`;
 
-  return rows.map((r) => ({
-    documentId: r.documentId,
-    name: r.name || "",
-    category: r.category || "General",
-    scope: r.scope || "COMPANY",
-    text: r.content || "",
-    score: Number(r.score) || 0,
-  }));
+  return rows.map(toSearchResult);
 }

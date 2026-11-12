@@ -27,18 +27,85 @@ export async function saveEmbeddings(table, rows) {
   return ready.length;
 }
 
-export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
-  if (!chunks.length) return 0;
-
-  let embeddings;
+/** Embeds every chunk. If embedding fails the chunks are still stored, just without vectors. */
+export async function embedChunks(chunks) {
   try {
-    embeddings = await embedBatch(chunks);
-    const embedded = embeddings.filter(Boolean).length;
-    console.log(`[Vector Store] Generated embeddings for ${embedded}/${chunks.length} chunks.`);
+    const embeddings = await embedBatch(chunks);
+    console.log(`[Vector Store] Generated embeddings for ${embeddings.filter(Boolean).length}/${chunks.length} chunks.`);
+    return embeddings;
   } catch (err) {
     console.error("[Vector Store] Batch embedding failed, storing without embeddings:", err.message);
-    embeddings = new Array(chunks.length).fill(null);
+    return new Array(chunks.length).fill(null);
   }
+}
+
+export const toSearchResult = (r) => ({
+  documentId: r.documentId,
+  name: r.name || "",
+  category: r.category || "General",
+  scope: r.scope || "COMPANY",
+  text: r.content || "",
+  score: Number(r.score) || 0,
+});
+
+/** Semantic search first; keyword search when it is unavailable or finds nothing. */
+export async function searchWithFallback(text, k, semantic, fts) {
+  const q = (text || "").trim();
+  if (!q) return { method: "empty", results: [] };
+  const limit = Math.min(Number(k) || 5, 20);
+
+  const semanticResults = await semantic(q, limit);
+  if (semanticResults && semanticResults.length > 0) {
+    return { method: "semantic", results: semanticResults };
+  }
+
+  const method = semanticResults === null ? "fts (semantic unavailable)" : "fts (no semantic match)";
+  console.log(`[Vector Store] Using ${method} for query.`);
+  return { method, results: await fts(q, limit) };
+}
+
+/** How much of a company's (plus platform) knowledge base has embeddings. `table` is SalesKBChunk or WarrantyKBChunk. */
+export async function retrievalStatus(table, companyId) {
+  if (!EMBEDDING_TABLES.has(table)) throw new Error(`retrievalStatus: unknown table ${table}`);
+  let pgvectorReady = false;
+  let embeddedChunks = 0;
+  let totalChunks = 0;
+  let detail = null;
+
+  try {
+    totalChunks = await prisma[table[0].toLowerCase() + table.slice(1)].count({
+      where: { OR: [{ scope: "PLATFORM" }, { companyId }] },
+    });
+  } catch (err) {
+    detail = `Could not count chunks: ${err.message}`;
+  }
+
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS n FROM "${table}"
+        WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NOT NULL`,
+      companyId,
+    );
+    embeddedChunks = rows?.[0]?.n ?? 0;
+    pgvectorReady = true;
+  } catch (err) {
+    pgvectorReady = false;
+    detail = err.message;
+  }
+
+  const coverage = totalChunks > 0 ? embeddedChunks / totalChunks : 0;
+  let status = "SEMANTIC";
+  if (!pgvectorReady) status = "UNAVAILABLE";
+  else if (totalChunks === 0) status = "EMPTY";
+  else if (embeddedChunks === 0) status = "UNAVAILABLE";
+  else if (coverage < 1) status = "PARTIAL";
+
+  return { status, pgvectorReady, totalChunks, embeddedChunks, coverage: Math.round(coverage * 100), detail };
+}
+
+export async function upsertChunks(companyId, documentId, chunks, meta = {}) {
+  if (!chunks.length) return 0;
+  const embeddings = await embedChunks(chunks);
 
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 
@@ -74,21 +141,13 @@ export async function deleteDocument(companyId, documentId) {
   await prisma.salesKBChunk.deleteMany({ where: { documentId } });
 }
 
-export async function queryDetailed(companyId, text, k = 5, categories = null) {
-  const q = (text || "").trim();
-  if (!q) return { method: "empty", results: [] };
-  const limit = Math.min(Number(k) || 5, 20);
-
-  const semanticResults = await semanticQuery(companyId, q, limit, categories);
-  if (semanticResults && semanticResults.length > 0) {
-    return { method: "semantic", results: semanticResults };
-  }
-
-  const method = semanticResults === null ? "fts (semantic unavailable)" : "fts (no semantic match)";
-  console.log(`[Vector Store] Using ${method} for query.`);
-  const results = await ftsQuery(companyId, q, limit, categories);
-  return { method, results };
-}
+export const queryDetailed = (companyId, text, k = 5, categories = null) =>
+  searchWithFallback(
+    text,
+    k,
+    (q, limit) => semanticQuery(companyId, q, limit, categories),
+    (q, limit) => ftsQuery(companyId, q, limit, categories),
+  );
 
 export async function query(companyId, text, k = 5, categories = null, context = "unknown") {
   const { method, results } = await queryDetailed(companyId, text, k, categories);
@@ -101,49 +160,7 @@ export async function query(companyId, text, k = 5, categories = null, context =
   return results;
 }
 
-export async function getRetrievalStatus(companyId) {
-  let pgvectorReady = false;
-  let embeddedChunks = 0;
-  let totalChunks = 0;
-  let detail = null;
-
-  try {
-    totalChunks = await prisma.salesKBChunk.count({
-      where: { OR: [{ scope: "PLATFORM" }, { companyId }] },
-    });
-  } catch (err) {
-    detail = `Could not count chunks: ${err.message}`;
-  }
-
-  try {
-    const rows = await prisma.$queryRawUnsafe(
-      `SELECT COUNT(*)::int AS n FROM "SalesKBChunk"
-        WHERE (scope = 'PLATFORM' OR "companyId" = $1) AND embedding IS NOT NULL`,
-      companyId,
-    );
-    embeddedChunks = rows?.[0]?.n ?? 0;
-    pgvectorReady = true;
-  } catch (err) {
-    pgvectorReady = false;
-    detail = err.message;
-  }
-
-  const coverage = totalChunks > 0 ? embeddedChunks / totalChunks : 0;
-  let status = "SEMANTIC";
-  if (!pgvectorReady) status = "UNAVAILABLE";
-  else if (totalChunks === 0) status = "EMPTY";
-  else if (embeddedChunks === 0) status = "UNAVAILABLE";
-  else if (coverage < 1) status = "PARTIAL";
-
-  return {
-    status,
-    pgvectorReady,
-    totalChunks,
-    embeddedChunks,
-    coverage: Math.round(coverage * 100),
-    detail,
-  };
-}
+export const getRetrievalStatus = (companyId) => retrievalStatus("SalesKBChunk", companyId);
 
 
 async function semanticQuery(companyId, text, limit, categories) {
@@ -188,16 +205,7 @@ async function semanticQuery(companyId, text, limit, categories) {
         limit,
       );
 
-    return rows
-      .filter((r) => Number(r.score) >= 0.3)
-      .map((r) => ({
-        documentId: r.documentId,
-        name: r.name || "",
-        category: r.category || "General",
-        scope: r.scope || "COMPANY",
-        text: r.content || "",
-        score: Number(r.score) || 0,
-      }));
+    return rows.filter((r) => Number(r.score) >= 0.3).map(toSearchResult);
   } catch (err) {
     console.error("[Vector Store] Semantic query failed (pgvector may not be set up):", err.message);
     return null;
@@ -227,14 +235,7 @@ async function ftsQuery(companyId, text, limit, categories) {
         ORDER BY score DESC
         LIMIT ${limit}`;
 
-  return rows.map((r) => ({
-    documentId: r.documentId,
-    name: r.name || "",
-    category: r.category || "General",
-    scope: r.scope || "COMPANY",
-    text: r.content || "",
-    score: Number(r.score) || 0,
-  }));
+  return rows.map(toSearchResult);
 }
 
 export async function backfillEmbeddings(companyId, batchSize = 50) {

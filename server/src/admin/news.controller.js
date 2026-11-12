@@ -1,7 +1,7 @@
 // Super Admin → News: review scraped candidates, combine them with AI, write and publish posts.
 // Builders see only PUBLISHED posts (GET /api/sales/news).
 import prisma from "../lib/prisma.js";
-import { denyUnlessAdminAccess } from "../middlewares/auth.js";
+import { adminHandler } from "../middlewares/auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { combineNews, scrapePlatformNews } from "../services/news-service.js";
@@ -10,15 +10,7 @@ const STATUSES = ["CANDIDATE", "DRAFT", "PUBLISHED", "REJECTED"];
 const clip = (v, n) => String(v ?? "").trim().slice(0, n);
 const validUrl = (v) => /^https?:\/\/\S+$/i.test(String(v || "").trim());
 
-const wrap = (label, fn) => async (req, res) => {
-  try {
-    if (denyUnlessAdminAccess(req, res)) return;
-    await fn(req, res);
-  } catch (error) {
-    console.error(`[Admin News] ${label} failed:`, error);
-    res.status(500).json({ message: `${label} failed.` });
-  }
-};
+const wrap = adminHandler("Admin News");
 
 export const listNews = wrap("Loading news", async (req, res) => {
   const status = STATUSES.includes(req.query.status) ? req.query.status : "CANDIDATE";

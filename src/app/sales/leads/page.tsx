@@ -59,6 +59,7 @@ import {
   UserRoundPlus,
 } from "lucide-react";
 import LeadFormEmbedDialog from "@/components/sales/LeadFormEmbedDialog";
+import { api, errorMessage } from "@/lib/api";
 
 type SegmentFilter = {
   field: string;
@@ -156,9 +157,8 @@ export default function LeadsPage() {
       const entries = await Promise.all(
         data.map(async (seg) => {
           try {
-            const r = await fetch(`/api/sales/segments/${seg.id}/evaluate`);
-            if (!r.ok) return [seg.id, -1] as const;
-            return [seg.id, (await r.json()).count as number] as const;
+            const { count } = await api.get<{ count: number }>(`/api/sales/segments/${seg.id}/evaluate`);
+            return [seg.id, count] as const;
           } catch {
             return [seg.id, -1] as const;
           }
@@ -174,19 +174,14 @@ export default function LeadsPage() {
     if (!segmentName.trim() || activeSegmentFilters.length === 0) return;
     setSavingSegment(true);
     try {
-      const res = await fetch("/api/sales/segments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: segmentName.trim(), filters: activeSegmentFilters }),
-      });
-      if (!res.ok) throw new Error((await res.json()).message || "Failed to save segment");
+      await api.post("/api/sales/segments", { name: segmentName.trim(), filters: activeSegmentFilters });
       toast.success(`Segment "${segmentName.trim()}" saved`);
       setSaveSegmentOpen(false);
       setSegmentName("");
       invalidate(QUERY_KEYS.segments);
       fetchSegments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save segment");
+      toast.error(errorMessage(err));
     } finally {
       setSavingSegment(false);
     }
@@ -194,13 +189,12 @@ export default function LeadsPage() {
 
   const deleteSegment = async (seg: Segment) => {
     try {
-      const res = await fetch(`/api/sales/segments/${seg.id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete segment");
+      await api.delete(`/api/sales/segments/${seg.id}`);
       toast.success(`Segment "${seg.name}" deleted`);
       invalidate(QUERY_KEYS.segments);
       fetchSegments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete segment");
+      toast.error(errorMessage(err));
     }
   };
 
@@ -281,22 +275,20 @@ export default function LeadsPage() {
         page: String(currentPage),
         pageSize: String(ITEMS_PER_PAGE),
       });
-      const res = await fetch(`/api/sales/leads?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (isStale()) return;
-        setLeads(data.leads || []);
-        setTotalLeads(data.total || 0);
-        setTotalPages(data.totalPages || 1);
-        setServerTags(data.availableTags || []);
-        if (data.total > 0 && currentPage > (data.totalPages || 1)) {
-          setCurrentPage(data.totalPages || 1);
-        }
+      const data = await api.get<{ leads?: Lead[]; total?: number; totalPages?: number; availableTags?: string[] }>(
+        `/api/sales/leads?${params.toString()}`,
+      );
+      if (isStale()) return;
+      setLeads(data.leads || []);
+      setTotalLeads(data.total || 0);
+      setTotalPages(data.totalPages || 1);
+      setServerTags(data.availableTags || []);
+      if ((data.total || 0) > 0 && currentPage > (data.totalPages || 1)) {
+        setCurrentPage(data.totalPages || 1);
       }
     } catch (error) {
       if (isStale()) return;
-      console.error("[sales/leads]", error);
-      showToast("Error loading leads");
+      toast.error(errorMessage(error));
     } finally {
       if (!isStale()) setLoading(false);
     }
@@ -327,17 +319,11 @@ export default function LeadsPage() {
   const confirmDeleteLead = async () => {
     if (!leadToDelete) return;
     try {
-      const res = await fetch(`/api/sales/leads/${leadToDelete}`, { method: "DELETE" });
-      if (res.ok) {
-        showToast("Lead deleted successfully.");
-        fetchLeads();
-      } else {
-        const err = await res.json();
-        showToast(err.message || "Failed to delete lead.");
-      }
+      await api.delete(`/api/sales/leads/${leadToDelete}`);
+      toast.success("Lead deleted successfully.");
+      fetchLeads();
     } catch (error) {
-      console.error("[sales/leads]", error);
-      showToast("Error deleting lead.");
+      toast.error(errorMessage(error));
     } finally {
       setLeadToDelete(null);
     }
@@ -359,12 +345,10 @@ export default function LeadsPage() {
     setSelectedStaffId(appointment.agent?.role === "STAFF" ? appointment.agent.id : "");
     setLoadingStaff(true);
     try {
-      const response = await fetch(`/api/sales/appointments/${appointment.id}/available-staff`);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || "Could not load available staff.");
-      setAvailableStaff(Array.isArray(data.staff) ? data.staff : []);
+      const data = await api.get<{ staff?: typeof availableStaff }>(`/api/sales/appointments/${appointment.id}/available-staff`);
+      setAvailableStaff(Array.isArray(data?.staff) ? data.staff : []);
     } catch (error) {
-      setAssignmentError(error instanceof Error ? error.message : "Could not load available staff.");
+      setAssignmentError(errorMessage(error));
     } finally {
       setLoadingStaff(false);
     }
@@ -376,18 +360,15 @@ export default function LeadsPage() {
     setAssigningStaff(true);
     setAssignmentError("");
     try {
-      const response = await fetch(`/api/sales/appointments/${appointment.id}/assign`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ staffId: selectedStaffId }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || "Could not assign staff.");
+      const data = await api.patch<{ agent?: { name?: string | null; email?: string } }>(
+        `/api/sales/appointments/${appointment.id}/assign`,
+        { staffId: selectedStaffId },
+      );
       closeAssignment();
       await fetchLeads();
-      toast.success(`Appointment assigned to ${data.agent?.name || data.agent?.email || "staff"}.`);
+      toast.success(`Appointment assigned to ${data?.agent?.name || data?.agent?.email || "staff"}.`);
     } catch (error) {
-      setAssignmentError(error instanceof Error ? error.message : "Could not assign staff.");
+      setAssignmentError(errorMessage(error));
     } finally {
       setAssigningStaff(false);
     }
@@ -402,38 +383,29 @@ export default function LeadsPage() {
     }
     setSubmittingManual(true);
     try {
-      const res = await fetch("/api/sales/leads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...manualForm,
-          tags: manualForm.tagsString ? manualForm.tagsString.split(",").map(t => t.trim()).filter(Boolean) : [],
-        }),
+      await api.post("/api/sales/leads", {
+        ...manualForm,
+        tags: manualForm.tagsString ? manualForm.tagsString.split(",").map(t => t.trim()).filter(Boolean) : [],
       });
-      if (res.ok) {
-        showToast("Lead added manually.");
-        setManualModalOpen(false);
-        setManualForm({
-          firstName: "",
-          lastName: "",
-          email: "",
-          phone: "",
-          street: "",
-          city: "",
-          state: "",
-          zipCode: "",
-          status: "New",
-          tagsString: "",
-          emailOptIn: false,
-          smsOptIn: false,
-        });
-        fetchLeads();
-      } else {
-        const err = await res.json();
-        showToast(err.message || "Failed to add lead.");
-      }
-    } catch {
-      showToast("Error adding lead.");
+      toast.success("Lead added manually.");
+      setManualModalOpen(false);
+      setManualForm({
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        street: "",
+        city: "",
+        state: "",
+        zipCode: "",
+        status: "New",
+        tagsString: "",
+        emailOptIn: false,
+        smsOptIn: false,
+      });
+      fetchLeads();
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setSubmittingManual(false);
     }
@@ -447,22 +419,14 @@ export default function LeadsPage() {
     }
 
     try {
-      const res = await fetch("/api/sales/csv/parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: csvRawText }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showToast(data.message || "Could not read that CSV.");
-        return;
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.post<any>("/api/sales/csv/parse", { text: csvRawText });
       setCsvHeaders(data.headers);
       setCsvRows(data.rows);
       setCsvMapping(data.mapping);
       setCsvStep(2);
-    } catch {
-      showToast("Error reading the CSV.");
+    } catch (error) {
+      toast.error(errorMessage(error));
     }
   };
 
@@ -472,16 +436,9 @@ export default function LeadsPage() {
     setValidating(true);
     setValidation(null);
     try {
-      const res = await fetch("/api/sales/csv/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(csvImportBody()),
-      });
-      const data = await res.json();
-      if (res.ok) setValidation(data);
-      else showToast(data.message || "Validation failed.");
-    } catch {
-      showToast("Error validating rows.");
+      setValidation(await api.post<typeof validation>("/api/sales/csv/validate", csvImportBody()));
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setValidating(false);
     }
@@ -513,8 +470,7 @@ export default function LeadsPage() {
 
   const fetchCsvTemplates = async () => {
     try {
-      const res = await fetch("/api/sales/csv/templates");
-      if (res.ok) setCsvTemplates(await res.json());
+      setCsvTemplates(await api.get<typeof csvTemplates>("/api/sales/csv/templates"));
     } catch {
       /* ignore */
     }
@@ -524,19 +480,12 @@ export default function LeadsPage() {
     if (!newTemplateName.trim()) { showToast("Enter a template name."); return; }
     setSavingTemplate(true);
     try {
-      const res = await fetch("/api/sales/csv/templates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newTemplateName.trim(), mapping: csvMapping }),
-      });
-      if (res.ok) {
-        setNewTemplateName("");
-        showToast("Mapping template saved.");
-        fetchCsvTemplates();
-      } else {
-        const d = await res.json().catch(() => ({}));
-        showToast(d.message || "Failed to save template.");
-      }
+      await api.post("/api/sales/csv/templates", { name: newTemplateName.trim(), mapping: csvMapping });
+      setNewTemplateName("");
+      toast.success("Mapping template saved.");
+      fetchCsvTemplates();
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setSavingTemplate(false);
     }
@@ -553,8 +502,8 @@ export default function LeadsPage() {
 
   const deleteCsvTemplate = async (id: string) => {
     try {
-      const res = await fetch(`/api/sales/csv/templates/${id}`, { method: "DELETE" });
-      if (res.ok) fetchCsvTemplates();
+      await api.delete(`/api/sales/csv/templates/${id}`);
+      fetchCsvTemplates();
     } catch {
       /* ignore */
     } 
@@ -563,37 +512,27 @@ export default function LeadsPage() {
   const handleCSVImportExecute = async () => {
     setImporting(true);
     try {
-      const res = await fetch("/api/sales/csv/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...csvImportBody(),
-          mergeStrategy,
-          attested: consentAttested,
-        }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await api.post<any>("/api/sales/csv/upload", {
+        ...csvImportBody(),
+        mergeStrategy,
+        attested: consentAttested,
       });
-
-      const data = await res.json();
-      if (res.ok) {
-        setImportResults(data);
-        setImportJobStatus({
-          id: data.jobId,
-          status: "QUEUED",
-          totalRows: data.rowCount,
-          processedRows: 0,
-          createdCount: 0,
-          updatedCount: 0,
-          skippedCount: 0,
-          errorCount: 0,
-        });
-        setCsvStep(5);
-        fetchLeads();
-      } else {
-        showToast(data.message || "Failed to parse import.");
-      }
+      setImportResults(data);
+      setImportJobStatus({
+        id: data.jobId,
+        status: "QUEUED",
+        totalRows: data.rowCount,
+        processedRows: 0,
+        createdCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        errorCount: 0,
+      });
+      setCsvStep(5);
+      fetchLeads();
     } catch (err) {
-      console.error("[sales/leads]", err);
-      showToast("Error executing leads import.");
+      toast.error(errorMessage(err));
     } finally {
       setImporting(false);
     }
@@ -620,9 +559,8 @@ export default function LeadsPage() {
     let cancelled = false;
     const poll = async () => {
       try {
-        const res = await fetch(`/api/sales/csv/imports/${importResults.jobId}`);
-        if (!res.ok) return;
-        const data = await res.json();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = await api.get<any>(`/api/sales/csv/imports/${importResults.jobId}`);
         if (cancelled) return;
         setImportJobStatus(data);
         if (data.status === "COMPLETED") {

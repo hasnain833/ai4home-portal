@@ -57,163 +57,143 @@ export const getSettings = async (req, res) => {
 };
 
 export const updateSettings = async (req, res) => {
-  try {
-    if (!req.user?.companyId)
-      return res.status(403).json({ message: "No company associated" });
-    const companyId = req.user.companyId;
-    const {
-      dayStart,
-      dayEnd,
-      bufferMinutes,
-      slotDuration,
-      workingDays,
-      timezone,
-      reminderHours,
-      appointmentMode,
-      agentMaxTurns,
-    } = req.body;
+  if (!req.user?.companyId)
+    return res.status(403).json({ message: "No company associated" });
+  const companyId = req.user.companyId;
+  const {
+    dayStart,
+    dayEnd,
+    bufferMinutes,
+    slotDuration,
+    workingDays,
+    timezone,
+    reminderHours,
+    appointmentMode,
+    agentMaxTurns,
+  } = req.body;
 
-    if (dayStart && !TIME_RE.test(dayStart))
-      return res.status(400).json({ message: "dayStart must be HH:mm" });
-    if (dayEnd && !TIME_RE.test(dayEnd))
-      return res.status(400).json({ message: "dayEnd must be HH:mm" });
+  if (dayStart && !TIME_RE.test(dayStart))
+    return res.status(400).json({ message: "dayStart must be HH:mm" });
+  if (dayEnd && !TIME_RE.test(dayEnd))
+    return res.status(400).json({ message: "dayEnd must be HH:mm" });
 
-    const data = {};
-    if (dayStart !== undefined) data.dayStart = dayStart;
-    if (dayEnd !== undefined) data.dayEnd = dayEnd;
-    if (bufferMinutes !== undefined)
-      data.bufferMinutes = Math.max(0, parseInt(bufferMinutes, 10) || 0);
-    if (slotDuration !== undefined)
-      data.slotDuration = Math.max(5, parseInt(slotDuration, 10) || 30);
-    if (workingDays !== undefined) data.workingDays = workingDays;
-    if (timezone !== undefined) data.timezone = timezone;
-    if (Array.isArray(reminderHours))
-      data.reminderHours = reminderHours.map(Number).filter((n) => n > 0);
+  const data = {};
+  if (dayStart !== undefined) data.dayStart = dayStart;
+  if (dayEnd !== undefined) data.dayEnd = dayEnd;
+  if (bufferMinutes !== undefined)
+    data.bufferMinutes = Math.max(0, parseInt(bufferMinutes, 10) || 0);
+  if (slotDuration !== undefined)
+    data.slotDuration = Math.max(5, parseInt(slotDuration, 10) || 30);
+  if (workingDays !== undefined) data.workingDays = workingDays;
+  if (timezone !== undefined) data.timezone = timezone;
+  if (Array.isArray(reminderHours))
+    data.reminderHours = reminderHours.map(Number).filter((n) => n > 0);
 
-    const setting = await prisma.availabilitySetting.upsert({
-      where: { companyId },
-      create: { companyId, ...AVAILABILITY_DEFAULTS, ...data },
-      update: data,
-    });
+  const setting = await prisma.availabilitySetting.upsert({
+    where: { companyId },
+    create: { companyId, ...AVAILABILITY_DEFAULTS, ...data },
+    update: data,
+  });
 
-    const companyData = {};
-    if (appointmentMode && ["OFF", "SIMPLE", "AI"].includes(appointmentMode)) {
-      companyData.appointmentMode = appointmentMode;
-    }
-    if (agentMaxTurns !== undefined) {
-      companyData.agentMaxTurns = clampMaxTurns(agentMaxTurns);
-    }
-    if (Object.keys(companyData).length > 0) {
-      await prisma.company.update({
-        where: { id: companyId },
-        data: companyData,
-      });
-      // SW-KB-007: snapshot the updated agent toggles for rollback.
-      await snapshotSalesConfig(companyId, {
-        changeType: "SAVE",
-        note: "Agent behavior toggles updated",
-        userId: req.user.id,
-      });
-    }
-
-    return res.json({
-      setting,
-      appointmentMode: companyData.appointmentMode,
-      agentMaxTurns: companyData.agentMaxTurns,
-    });
-  } catch (error) {
-    console.error("[Scheduling updateSettings] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const companyData = {};
+  if (appointmentMode && ["OFF", "SIMPLE", "AI"].includes(appointmentMode)) {
+    companyData.appointmentMode = appointmentMode;
   }
+  if (agentMaxTurns !== undefined) {
+    companyData.agentMaxTurns = clampMaxTurns(agentMaxTurns);
+  }
+  if (Object.keys(companyData).length > 0) {
+    await prisma.company.update({
+      where: { id: companyId },
+      data: companyData,
+    });
+    // SW-KB-007: snapshot the updated agent toggles for rollback.
+    await snapshotSalesConfig(companyId, {
+      changeType: "SAVE",
+      note: "Agent behavior toggles updated",
+      userId: req.user.id,
+    });
+  }
+
+  return res.json({
+    setting,
+    appointmentMode: companyData.appointmentMode,
+    agentMaxTurns: companyData.agentMaxTurns,
+  });
 };
 
 export const getSlots = async (req, res) => {
-  try {
-    if (!req.user?.companyId)
-      return res.status(403).json({ message: "No company associated" });
-    const { leadId, days, limit } = req.query;
-    let agentId = isHomeowner(req) ? req.user.id : req.query.agentId;
-    let displayTz;
-    if (leadId) {
-      const lead = await prisma.lead.findFirst({
-        where: { id: leadId, ...leadScope(req) },
-      });
-      if (lead) {
-        agentId = agentId || (await resolveAgentId(lead));
-        const setting = await getAvailabilitySetting(req.user.companyId);
-        displayTz = leadTimezone(lead, setting);
-      }
-    }
-
-    const slots = await getAvailableSlots({
-      companyId: req.user.companyId,
-      agentId,
-      days: days ? parseInt(days, 10) : 14,
-      limit: limit ? parseInt(limit, 10) : 24,
-      displayTz,
+  if (!req.user?.companyId)
+    return res.status(403).json({ message: "No company associated" });
+  const { leadId, days, limit } = req.query;
+  let agentId = isHomeowner(req) ? req.user.id : req.query.agentId;
+  let displayTz;
+  if (leadId) {
+    const lead = await prisma.lead.findFirst({
+      where: { id: leadId, ...leadScope(req) },
     });
-    return res.json({ slots });
-  } catch (error) {
-    console.error("[Scheduling getSlots] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    if (lead) {
+      agentId = agentId || (await resolveAgentId(lead));
+      const setting = await getAvailabilitySetting(req.user.companyId);
+      displayTz = leadTimezone(lead, setting);
+    }
   }
+
+  const slots = await getAvailableSlots({
+    companyId: req.user.companyId,
+    agentId,
+    days: days ? parseInt(days, 10) : 14,
+    limit: limit ? parseInt(limit, 10) : 24,
+    displayTz,
+  });
+  return res.json({ slots });
 };
 
 export const staffReschedule = async (req, res) => {
-  try {
-    if (!req.user?.companyId)
-      return res.status(403).json({ message: "No company associated" });
-    const { appointmentId, startTime, durationMinutes } = req.body;
-    if (!appointmentId || !startTime)
-      return res
-        .status(400)
-        .json({ message: "appointmentId and startTime required" });
+  if (!req.user?.companyId)
+    return res.status(403).json({ message: "No company associated" });
+  const { appointmentId, startTime, durationMinutes } = req.body;
+  if (!appointmentId || !startTime)
+    return res
+      .status(400)
+      .json({ message: "appointmentId and startTime required" });
 
-    const appt = await prisma.salesAppointment.findFirst({
-      where: { id: appointmentId, lead: leadScope(req) },
-    });
-    if (!appt)
-      return res.status(404).json({ message: "Appointment not found" });
+  const appt = await prisma.salesAppointment.findFirst({
+    where: { id: appointmentId, lead: leadScope(req) },
+  });
+  if (!appt)
+    return res.status(404).json({ message: "Appointment not found" });
 
-    const result = await rescheduleAppointment({
-      appointmentId,
-      newStartTime: startTime,
-      durationMinutes,
-    });
-    if (!result.success)
-      return res.status(result.conflict ? 409 : 400).json(result);
-    return res.json(result);
-  } catch (error) {
-    console.error("[Scheduling staffReschedule] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  const result = await rescheduleAppointment({
+    appointmentId,
+    newStartTime: startTime,
+    durationMinutes,
+  });
+  if (!result.success)
+    return res.status(result.conflict ? 409 : 400).json(result);
+  return res.json(result);
 };
 
 export const staffCancel = async (req, res) => {
-  try {
-    if (!req.user?.companyId)
-      return res.status(403).json({ message: "No company associated" });
-    const { appointmentId, reason } = req.body;
-    if (!appointmentId)
-      return res.status(400).json({ message: "appointmentId required" });
+  if (!req.user?.companyId)
+    return res.status(403).json({ message: "No company associated" });
+  const { appointmentId, reason } = req.body;
+  if (!appointmentId)
+    return res.status(400).json({ message: "appointmentId required" });
 
-    const appt = await prisma.salesAppointment.findFirst({
-      where: { id: appointmentId, lead: leadScope(req) },
-    });
-    if (!appt)
-      return res.status(404).json({ message: "Appointment not found" });
+  const appt = await prisma.salesAppointment.findFirst({
+    where: { id: appointmentId, lead: leadScope(req) },
+  });
+  if (!appt)
+    return res.status(404).json({ message: "Appointment not found" });
 
-    const result = await cancelAppointment({
-      appointmentId,
-      reason:
-        reason ||
-        (isHomeowner(req) ? "Cancelled by lead owner" : "Cancelled by staff"),
-    });
-    return res.json(result);
-  } catch (error) {
-    console.error("[Scheduling staffCancel] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  const result = await cancelAppointment({
+    appointmentId,
+    reason:
+      reason ||
+      (isHomeowner(req) ? "Cancelled by lead owner" : "Cancelled by staff"),
+  });
+  return res.json(result);
 };
 
 export const publicGetBooking = async (req, res) => {
@@ -250,77 +230,67 @@ export const publicGetBooking = async (req, res) => {
 };
 
 export const publicBook = async (req, res) => {
-  try {
-    const { bookingToken, startTime, locationType, title } = req.body;
-    if (!bookingToken || !startTime)
-      return res.status(400).json({ message: "bookingToken and startTime required" });
+  const { bookingToken, startTime, locationType, title } = req.body;
+  if (!bookingToken || !startTime)
+    return res.status(400).json({ message: "bookingToken and startTime required" });
 
-    const lead = await prisma.lead.findUnique({
-      where: { bookingToken },
-      select: { id: true },
-    });
-    if (!lead) return res.status(404).json({ message: "Booking not found" });
+  const lead = await prisma.lead.findUnique({
+    where: { bookingToken },
+    select: { id: true },
+  });
+  if (!lead) return res.status(404).json({ message: "Booking not found" });
 
-    const result = await bookSlot({
-      leadId: lead.id,
-      startTime,
-      title: title || "Model Home Visit",
-      locationType: locationType || "ONSITE",
+  const result = await bookSlot({
+    leadId: lead.id,
+    startTime,
+    title: title || "Model Home Visit",
+    locationType: locationType || "ONSITE",
       bookedVia: "SELF",
-    });
-    if (!result.success)
-      return res.status(result.conflict ? 409 : 400).json(result);
-    return res.status(201).json({
-      success: true,
-      appointment: {
-        id: result.appointment.id,
-        time: result.appointment.time,
-        title: result.appointment.title,
-        manageToken: result.appointment.rescheduleToken,
+  });
+  if (!result.success)
+    return res.status(result.conflict ? 409 : 400).json(result);
+  return res.status(201).json({
+    success: true,
+    appointment: {
+      id: result.appointment.id,
+      time: result.appointment.time,
+      title: result.appointment.title,
+      manageToken: result.appointment.rescheduleToken,
       },
-    });
-  } catch (error) {
-    console.error("[Scheduling publicBook] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  });
 };
 
 export const publicGetManage = async (req, res) => {
-  try {
-    const { token } = req.params;
-    const appt = await prisma.salesAppointment.findUnique({
-      where: { rescheduleToken: token },
-      include: { lead: { include: { company: { select: { name: true } } } } },
-    });
-    if (!appt)
-      return res.status(404).json({ message: "Appointment not found" });
+  const { token } = req.params;
+  const appt = await prisma.salesAppointment.findUnique({
+    where: { rescheduleToken: token },
+    include: { lead: { include: { company: { select: { name: true } } } } },
+  });
+  if (!appt)
+    return res.status(404).json({ message: "Appointment not found" });
 
-    const setting = await getAvailabilitySetting(appt.lead.companyId);
-    const displayTz = appt.leadTimezone || leadTimezone(appt.lead, setting);
-    const slots = await getAvailableSlots({
-      companyId: appt.lead.companyId,
-      agentId: appt.agentId,
-      days: 14,
-      limit: 30,
-      displayTz,
-    });
+  const setting = await getAvailabilitySetting(appt.lead.companyId);
+  const displayTz = appt.leadTimezone || leadTimezone(appt.lead, setting);
+  const slots = await getAvailableSlots({
+    companyId: appt.lead.companyId,
+    agentId: appt.agentId,
+    days: 14,
+    limit: 30,
+    displayTz,
+  });
 
-    return res.json({
-      appointment: {
-        id: appt.id,
-        title: appt.title,
-        time: appt.time,
-        cancelToken: appt.cancelToken,
+  return res.json({
+    appointment: {
+      id: appt.id,
+      title: appt.title,
+      time: appt.time,
+      cancelToken: appt.cancelToken,
         status: appt.status,
-      },
-      company: { name: appt.lead.company?.name || "Our team" },
-      timezone: displayTz,
-      slots,
-    });
-  } catch (error) {
-    console.error("[Scheduling publicGetManage] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+    },
+    company: { name: appt.lead.company?.name || "Our team" },
+    timezone: displayTz,
+    slots,
+  });
 };
 
 export const publicReschedule = async (req, res) => {
@@ -345,17 +315,12 @@ export const publicReschedule = async (req, res) => {
 };
 
 export const publicCancel = async (req, res) => {
-  try {
-    const { token } = req.body;
-    if (!token) return res.status(400).json({ message: "token required" });
-    const result = await cancelAppointment({
-      cancelToken: token,
-      reason: "Cancelled by lead",
-    });
-    if (!result.success) return res.status(404).json(result);
-    return res.json({ success: true });
-  } catch (error) {
-    console.error("[Scheduling publicCancel] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ message: "token required" });
+  const result = await cancelAppointment({
+    cancelToken: token,
+    reason: "Cancelled by lead",
+  });
+  if (!result.success) return res.status(404).json(result);
+  return res.json({ success: true });
 };

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { formatVisit, jobStage, type TradeJob } from "@/components/trade/jobs";
+import { api, ApiError, errorMessage } from "@/lib/api";
 
 type JobDetail = TradeJob & { photos?: { id: string; url: string | null; fileName: string }[] };
 
@@ -24,24 +25,22 @@ export default function TradeJobPage() {
   const load = () => setVersion((v) => v + 1);
 
   useEffect(() => {
-    fetch(`/api/trade/jobs/${id}`).then(async (r) => {
-      if (r.ok) setJob(await r.json());
-      else setError(r.status === 404 ? "This job isn't assigned to you." : "Could not load this job.");
-    });
+    api.get<JobDetail>(`/api/trade/jobs/${id}`).then(setJob, (e) =>
+      setError(e instanceof ApiError && e.status === 404 ? "This job isn't assigned to you." : "Could not load this job."),
+    );
   }, [id, version]);
 
   const markDone = async () => {
     setSaving(true);
     setError("");
-    const r = await fetch(`/api/trade/jobs/${id}/done`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes }),
-    });
-    const data = await r.json().catch(() => ({}));
-    setSaving(false);
-    if (!r.ok) return setError(data.message || "Could not mark this job done.");
-    load();
+    try {
+      await api.post(`/api/trade/jobs/${id}/done`, { notes });
+      load();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (error && !job) {

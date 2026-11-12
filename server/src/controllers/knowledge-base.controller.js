@@ -1,21 +1,12 @@
 import prisma from "../lib/prisma.js";
 import { createClient } from "@supabase/supabase-js";
 import { inngest } from "../lib/inngest.js";
+import { formatFileSize } from "../lib/utils.js";
 
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-};
 
 export const getKnowledgeBaseDocs = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || (session.role !== "ADMIN" && session.role !== "STAFF")) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
 
     const docs = await prisma.warrantyKB.findMany({
       // scope pins this to the company tier — a null companyId would otherwise
@@ -34,9 +25,6 @@ export const getKnowledgeBaseDocs = async (req, res) => {
 export const uploadKnowledgeBaseDoc = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
 
     const file = req.file;
 
@@ -155,9 +143,6 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
 export const deleteKnowledgeBaseDoc = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || (session.role !== "STAFF" && session.role !== "ADMIN")) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
 
     const id = req.query.id;
 

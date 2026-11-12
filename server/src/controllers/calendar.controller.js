@@ -116,508 +116,483 @@ function ownerScope(req) {
 }
 
 export const getCalendarEvents = async (req, res) => {
-  try {
-    const homeowner = isHomeowner(req);
+  const homeowner = isHomeowner(req);
 
-    const manualEvents = await prisma.contentCalendar.findMany({
-      where: { companyId: req.user.companyId, ...ownerScope(req) },
-      orderBy: { scheduledAt: "asc" },
-    });
+  const manualEvents = await prisma.contentCalendar.findMany({
+    where: { companyId: req.user.companyId, ...ownerScope(req) },
+    orderBy: { scheduledAt: "asc" },
+  });
 
-    const activeEnrollments = await prisma.campaignEnrollment.findMany({
-      where: {
-        campaign: { companyId: req.user.companyId },
-        ...(homeowner ? { lead: { ownerId: req.user.id } } : {}),
-        status: "ACTIVE",
-        nextRunAt: { not: null },
-      },
-      include: {
-        campaign: {
-          include: {
-            steps: {
-              orderBy: { position: "asc" },
-            },
+  const activeEnrollments = await prisma.campaignEnrollment.findMany({
+    where: {
+      campaign: { companyId: req.user.companyId },
+      ...(homeowner ? { lead: { ownerId: req.user.id } } : {}),
+      status: "ACTIVE",
+      nextRunAt: { not: null },
+    },
+    include: {
+      campaign: {
+        include: {
+          steps: {
+            orderBy: { position: "asc" },
           },
         },
       },
-    });
+    },
+  });
 
-    const groupedCampaigns = {};
+  const groupedCampaigns = {};
 
-    for (const enrollment of activeEnrollments) {
-      if (!enrollment.createdAt) continue;
-      let currentSimTime = new Date(enrollment.createdAt);
+  for (const enrollment of activeEnrollments) {
+    if (!enrollment.createdAt) continue;
+    let currentSimTime = new Date(enrollment.createdAt);
 
-      for (const step of enrollment.campaign.steps) {
-        if (step.type === "DELAY") {
-          if (step.delayUnit === "DAYS") {
-            currentSimTime.setDate(
-              currentSimTime.getDate() + (step.delayValue || 0),
-            );
-          } else if (step.delayUnit === "HOURS") {
-            currentSimTime.setHours(
-              currentSimTime.getHours() + (step.delayValue || 0),
-            );
-          } else if (step.delayUnit === "MINUTES") {
-            currentSimTime.setMinutes(
-              currentSimTime.getMinutes() + (step.delayValue || 0),
-            );
-          }
+    for (const step of enrollment.campaign.steps) {
+      if (step.type === "DELAY") {
+        if (step.delayUnit === "DAYS") {
+          currentSimTime.setDate(
+            currentSimTime.getDate() + (step.delayValue || 0),
+          );
+        } else if (step.delayUnit === "HOURS") {
+          currentSimTime.setHours(
+            currentSimTime.getHours() + (step.delayValue || 0),
+          );
+        } else if (step.delayUnit === "MINUTES") {
+          currentSimTime.setMinutes(
+            currentSimTime.getMinutes() + (step.delayValue || 0),
+          );
+        }
+      } else {
+        const dateString = currentSimTime.toISOString().split("T")[0];
+        // currentStepPosition is the next step to run, so anything before it is done.
+        const isCompleted = step.position < enrollment.currentStepPosition;
+        const key = `${enrollment.campaignId}_${step.id}_${dateString}_${isCompleted}`;
+
+        if (!groupedCampaigns[key]) {
+          groupedCampaigns[key] = {
+            id: key,
+            title: `${enrollment.campaign.name} - Step ${step.position} (1 Send)`,
+            count: 1,
+            channel: step.type === "EMAIL" ? "Email" : "SMS",
+            scheduledAt: new Date(dateString),
+            isAiSuggested: false,
+            type: "campaign_aggregation",
+            isCompleted: isCompleted,
+          };
         } else {
-          const dateString = currentSimTime.toISOString().split("T")[0];
-          // currentStepPosition is the next step to run, so anything before it is done.
-          const isCompleted = step.position < enrollment.currentStepPosition;
-          const key = `${enrollment.campaignId}_${step.id}_${dateString}_${isCompleted}`;
-
-          if (!groupedCampaigns[key]) {
-            groupedCampaigns[key] = {
-              id: key,
-              title: `${enrollment.campaign.name} - Step ${step.position} (1 Send)`,
-              count: 1,
-              channel: step.type === "EMAIL" ? "Email" : "SMS",
-              scheduledAt: new Date(dateString),
-              isAiSuggested: false,
-              type: "campaign_aggregation",
-              isCompleted: isCompleted,
-            };
-          } else {
-            groupedCampaigns[key].count += 1;
-            groupedCampaigns[key].title =
-              `${enrollment.campaign.name} - Step ${step.position} (${groupedCampaigns[key].count} Sends)`;
-          }
+          groupedCampaigns[key].count += 1;
+          groupedCampaigns[key].title =
+            `${enrollment.campaign.name} - Step ${step.position} (${groupedCampaigns[key].count} Sends)`;
         }
       }
     }
-
-    const campaignEvents = Object.values(groupedCampaigns);
-
-    const announcements = homeowner
-      ? []
-      : await prisma.announcement.findMany({
-          where: {
-            companyId: req.user.companyId,
-            OR: [{ scheduledAt: { not: null } }, { sentAt: { not: null } }],
-          },
-          select: {
-            id: true,
-            title: true,
-            channel: true,
-            status: true,
-            scheduledAt: true,
-            sentAt: true,
-          },
-        });
-
-    const announcementEvents = announcements
-      .map((a) => {
-        const when = a.sentAt || a.scheduledAt;
-        if (!when) return null;
-        const channel =
-          a.channel === "SMS"
-            ? "SMS"
-            : a.channel === "BOTH"
-              ? "Email/SMS"
-              : "Email";
-        return {
-          id: `announcement_${a.id}`,
-          title: a.title,
-          channel,
-          scheduledAt: when,
-          type: "announcement",
-          status: a.status,
-          isCompleted: !!a.sentAt || a.status === "Sent",
-        };
-      })
-      .filter(Boolean);
-
-    const allEvents = [
-      ...manualEvents,
-      ...campaignEvents,
-      ...announcementEvents,
-    ];
-
-    allEvents.sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
-
-    return res.json(allEvents);
-  } catch (error) {
-    console.error("[Calendar GET] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  const campaignEvents = Object.values(groupedCampaigns);
+
+  const announcements = homeowner
+    ? []
+    : await prisma.announcement.findMany({
+        where: {
+          companyId: req.user.companyId,
+          OR: [{ scheduledAt: { not: null } }, { sentAt: { not: null } }],
+        },
+        select: {
+          id: true,
+          title: true,
+          channel: true,
+          status: true,
+          scheduledAt: true,
+          sentAt: true,
+        },
+      });
+
+  const announcementEvents = announcements
+    .map((a) => {
+      const when = a.sentAt || a.scheduledAt;
+      if (!when) return null;
+      const channel =
+        a.channel === "SMS"
+          ? "SMS"
+          : a.channel === "BOTH"
+            ? "Email/SMS"
+            : "Email";
+      return {
+        id: `announcement_${a.id}`,
+        title: a.title,
+        channel,
+        scheduledAt: when,
+        type: "announcement",
+        status: a.status,
+        isCompleted: !!a.sentAt || a.status === "Sent",
+      };
+    })
+    .filter(Boolean);
+
+  const allEvents = [
+    ...manualEvents,
+    ...campaignEvents,
+    ...announcementEvents,
+  ];
+
+  allEvents.sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
+
+  return res.json(allEvents);
 };
 
 export const createCalendarEvent = async (req, res) => {
-  try {
-    const {
+  const {
+    title,
+    channel,
+    scheduledAt,
+    content,
+    subject,
+    reason,
+    outline,
+    isAiSuggested,
+    status,
+  } = req.body;
+
+  if (!title || !channel || !scheduledAt || !content) {
+    return res
+      .status(400)
+      .json({
+        message:
+          "Missing required fields: title, channel, scheduledAt, content",
+      });
+  }
+
+  const scheduledDate = new Date(scheduledAt);
+  if (isNaN(scheduledDate.getTime())) {
+    return res.status(400).json({ message: "Invalid scheduledAt date" });
+  }
+
+  const initialStatus = status || (isAiSuggested ? "Suggested" : "Draft");
+  if (!VALID_STATUSES.includes(initialStatus)) {
+    return res
+      .status(400)
+      .json({
+        message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`,
+      });
+  }
+
+  if (initialStatus === "Scheduled" && channel === "SMS") {
+    const windowError = checkSmsWindow(scheduledDate);
+    if (windowError) return res.status(422).json(windowError);
+  }
+
+  const event = await prisma.contentCalendar.create({
+    data: {
+      companyId: req.user.companyId,
       title,
       channel,
-      scheduledAt,
+      scheduledAt: scheduledDate,
       content,
-      subject,
-      reason,
-      outline,
-      isAiSuggested,
-      status,
-    } = req.body;
+      subject: subject || null,
+      reason: reason || null,
+      outline: outline || null,
+      isAiSuggested: !!isAiSuggested,
+      status: initialStatus,
+      ownerId: req.user.id,
+    },
+  });
 
-    if (!title || !channel || !scheduledAt || !content) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Missing required fields: title, channel, scheduledAt, content",
-        });
-    }
-
-    const scheduledDate = new Date(scheduledAt);
-    if (isNaN(scheduledDate.getTime())) {
-      return res.status(400).json({ message: "Invalid scheduledAt date" });
-    }
-
-    const initialStatus = status || (isAiSuggested ? "Suggested" : "Draft");
-    if (!VALID_STATUSES.includes(initialStatus)) {
-      return res
-        .status(400)
-        .json({
-          message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`,
-        });
-    }
-
-    if (initialStatus === "Scheduled" && channel === "SMS") {
-      const windowError = checkSmsWindow(scheduledDate);
-      if (windowError) return res.status(422).json(windowError);
-    }
-
-    const event = await prisma.contentCalendar.create({
+  if (initialStatus === "Scheduled") {
+    await inngest.send({
+      name: "calendar.item.scheduled",
       data: {
-        companyId: req.user.companyId,
-        title,
-        channel,
-        scheduledAt: scheduledDate,
-        content,
-        subject: subject || null,
-        reason: reason || null,
-        outline: outline || null,
-        isAiSuggested: !!isAiSuggested,
-        status: initialStatus,
-        ownerId: req.user.id,
+        calendarId: event.id,
+        // NFR-SC-002: carried so the scheduler can fair-share per tenant.
+        companyId: event.companyId,
+        scheduledAt: event.scheduledAt.toISOString(),
       },
     });
-
-    if (initialStatus === "Scheduled") {
-      await inngest.send({
-        name: "calendar.item.scheduled",
-        data: {
-          calendarId: event.id,
-          // NFR-SC-002: carried so the scheduler can fair-share per tenant.
-          companyId: event.companyId,
-          scheduledAt: event.scheduledAt.toISOString(),
-        },
-      });
-    }
-
-    return res.status(201).json(event);
-  } catch (error) {
-    console.error("[Calendar Create] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  return res.status(201).json(event);
 };
 
 export const getCalendarSuggestions = async (req, res) => {
-  try {
-    const companyId = req.user.companyId;
+  const companyId = req.user.companyId;
 
-    const company = await prisma.company.findUnique({
-      where: { id: companyId },
-      include: {
-        communities: { select: { name: true } },
-      },
-    });
+  const company = await prisma.company.findUnique({
+    where: { id: companyId },
+    include: {
+      communities: { select: { name: true } },
+    },
+  });
 
-    const voiceProfile = company?.voiceProfile || "professional";
+  const voiceProfile = company?.voiceProfile || "professional";
 
-    const communityNames = (company?.communities || [])
-      .map((c) => c.name)
-      .filter(Boolean);
-    let brandText = "";
-    const brand = company?.salesBrandProfile;
-    if (brand && typeof brand === "object") {
-      brandText = Object.entries(brand)
-        .map(
-          ([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`,
-        )
-        .join("; ");
-    }
-    const tenantProfileText =
-      [
-        company?.address
-          ? `Primary market / location: ${company.address}`
-          : null,
-        communityNames.length
-          ? `Communities / markets served: ${communityNames.join(", ")}`
-          : null,
-        brandText ? `Brand profile: ${brandText}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n") || "No detailed tenant profile on file.";
-
-    const seasonalContextText = getSeasonalContext();
-
-    if (!(await hasLLM(companyId))) {
-      return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
-    }
-
-    const kbQueryText =
-      [company?.name, communityNames.join(" "), brandText]
-        .filter(Boolean)
-        .join(" ")
-        .slice(0, 400) || "brand voice communities products";
-    const kbChunks = await kbQuery(
-      companyId,
-      kbQueryText,
-      4,
-      KB_SCOPES.calendar,
-    ).catch(() => []);
-    const kbContextText = kbChunks.length
-      ? kbChunks
-          .map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`)
-          .join("\n\n")
-      : "No knowledge-base context available.";
-
-    const existingEvents = await prisma.contentCalendar.findMany({
-      where: {
-        companyId,
-        ...ownerScope(req),
-        scheduledAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-        status: { in: ["Draft", "Approved", "Scheduled", "Sent", "Published"] },
-      },
-      select: { scheduledAt: true, title: true, channel: true },
-      orderBy: { scheduledAt: "asc" },
-    });
-
-    const existingEventsText = existingEvents
+  const communityNames = (company?.communities || [])
+    .map((c) => c.name)
+    .filter(Boolean);
+  let brandText = "";
+  const brand = company?.salesBrandProfile;
+  if (brand && typeof brand === "object") {
+    brandText = Object.entries(brand)
       .map(
-        (e) =>
-          `${e.scheduledAt.toISOString().split("T")[0]}: ${e.channel} - ${e.title}`,
+        ([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`,
       )
-      .join("\n");
-
-    const dismissedItems = await prisma.contentCalendar.findMany({
-      where: { companyId, ...ownerScope(req), status: "Dismissed" },
-      select: { title: true, reason: true },
-      orderBy: { updatedAt: "desc" },
-      take: 10,
-    });
-
-    const dismissedText =
-      dismissedItems.length > 0
-        ? dismissedItems
-            .map((d) => `${d.title} (${d.reason || "No reason"})`)
-            .join("\n")
-        : "None";
-    const recentNews = await prisma.newsPost.findMany({
-      where: {
-        status: "PUBLISHED",
-        publishedAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
-      },
-      select: { title: true, summary: true, source: true, publishedAt: true },
-      orderBy: { publishedAt: "desc" },
-      take: 8,
-    });
-
-    const recentNewsText =
-      recentNews.length > 0
-        ? recentNews
-            .map(
-              (n) =>
-                `${n.publishedAt.toISOString().split("T")[0]} [${n.source}] ${n.title}: ${n.summary}`,
-            )
-            .join("\n")
-        : "No recent market news available.";
-
-    const systemPrompt = renderTemplate(CONTENT_CALENDAR_TEMPLATE, {
-      companyName: company?.name || "Homebuilder",
-      voiceProfile,
-      currentDate: new Date().toISOString(),
-      tenantProfile: tenantProfileText,
-      kbContext: kbContextText,
-      seasonalContext: seasonalContextText,
-      existingEvents: existingEventsText || "No existing events.",
-      recentNews: recentNewsText,
-      dismissedTopics: dismissedText,
-    });
-
-    const text = await chat({
-      system: systemPrompt,
-      user: "Generate the suggestions as raw JSON.",
-      maxTokens: 1500,
-      json: true,
-      companyId,
-    });
-
-    if (!text) {
-      return res
-        .status(502)
-        .json({
-          message:
-            "The AI provider did not return any suggestions. Please try again.",
-        });
-    }
-
-    const suggestionsJson = parseLlmJson(text, { array: true });
-    if (!Array.isArray(suggestionsJson)) {
-      return res
-        .status(502)
-        .json({
-          message: "The AI suggestions could not be parsed. Please try again.",
-        });
-    }
-
-    const createdSuggestions = [];
-    for (const s of suggestionsJson) {
-      let scheduledDate = new Date();
-      if (s.scheduledAt && !isNaN(new Date(s.scheduledAt).getTime())) {
-        scheduledDate = new Date(s.scheduledAt);
-      }
-
-      const item = await prisma.contentCalendar.create({
-        data: {
-          companyId,
-          title: s.topic || "Suggested Topic",
-          channel: s.channel || "Email",
-          scheduledAt: scheduledDate,
-          status: "Suggested",
-          content: s.outline || "",
-          reason: s.reason || "",
-          isAiSuggested: true,
-          ownerId: req.user.id,
-        },
-      });
-      createdSuggestions.push(item);
-    }
-
-    return res.json(createdSuggestions);
-  } catch (error) {
-    console.error("[Calendar Suggestions] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+      .join("; ");
   }
+  const tenantProfileText =
+    [
+      company?.address
+        ? `Primary market / location: ${company.address}`
+        : null,
+      communityNames.length
+        ? `Communities / markets served: ${communityNames.join(", ")}`
+        : null,
+      brandText ? `Brand profile: ${brandText}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n") || "No detailed tenant profile on file.";
+
+  const seasonalContextText = getSeasonalContext();
+
+  if (!(await hasLLM(companyId))) {
+    return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
+  }
+
+  const kbQueryText =
+    [company?.name, communityNames.join(" "), brandText]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 400) || "brand voice communities products";
+  const kbChunks = await kbQuery(
+    companyId,
+    kbQueryText,
+    4,
+    KB_SCOPES.calendar,
+  ).catch(() => []);
+  const kbContextText = kbChunks.length
+    ? kbChunks
+        .map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`)
+        .join("\n\n")
+    : "No knowledge-base context available.";
+
+  const existingEvents = await prisma.contentCalendar.findMany({
+    where: {
+      companyId,
+      ...ownerScope(req),
+      scheduledAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      status: { in: ["Draft", "Approved", "Scheduled", "Sent", "Published"] },
+    },
+    select: { scheduledAt: true, title: true, channel: true },
+    orderBy: { scheduledAt: "asc" },
+  });
+
+  const existingEventsText = existingEvents
+    .map(
+      (e) =>
+        `${e.scheduledAt.toISOString().split("T")[0]}: ${e.channel} - ${e.title}`,
+    )
+    .join("\n");
+
+  const dismissedItems = await prisma.contentCalendar.findMany({
+    where: { companyId, ...ownerScope(req), status: "Dismissed" },
+    select: { title: true, reason: true },
+    orderBy: { updatedAt: "desc" },
+    take: 10,
+  });
+
+  const dismissedText =
+    dismissedItems.length > 0
+      ? dismissedItems
+          .map((d) => `${d.title} (${d.reason || "No reason"})`)
+          .join("\n")
+      : "None";
+  const recentNews = await prisma.newsPost.findMany({
+    where: {
+      status: "PUBLISHED",
+      publishedAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
+    },
+    select: { title: true, summary: true, source: true, publishedAt: true },
+    orderBy: { publishedAt: "desc" },
+    take: 8,
+  });
+
+  const recentNewsText =
+    recentNews.length > 0
+      ? recentNews
+          .map(
+            (n) =>
+              `${n.publishedAt.toISOString().split("T")[0]} [${n.source}] ${n.title}: ${n.summary}`,
+          )
+          .join("\n")
+      : "No recent market news available.";
+
+  const systemPrompt = renderTemplate(CONTENT_CALENDAR_TEMPLATE, {
+    companyName: company?.name || "Homebuilder",
+    voiceProfile,
+    currentDate: new Date().toISOString(),
+    tenantProfile: tenantProfileText,
+    kbContext: kbContextText,
+    seasonalContext: seasonalContextText,
+    existingEvents: existingEventsText || "No existing events.",
+    recentNews: recentNewsText,
+    dismissedTopics: dismissedText,
+  });
+
+  const text = await chat({
+    system: systemPrompt,
+    user: "Generate the suggestions as raw JSON.",
+    maxTokens: 1500,
+    json: true,
+    companyId,
+  });
+
+  if (!text) {
+    return res
+      .status(502)
+      .json({
+        message:
+          "The AI provider did not return any suggestions. Please try again.",
+      });
+  }
+
+  const suggestionsJson = parseLlmJson(text, { array: true });
+  if (!Array.isArray(suggestionsJson)) {
+    return res
+      .status(502)
+      .json({
+        message: "The AI suggestions could not be parsed. Please try again.",
+      });
+  }
+
+  const createdSuggestions = [];
+  for (const s of suggestionsJson) {
+    let scheduledDate = new Date();
+    if (s.scheduledAt && !isNaN(new Date(s.scheduledAt).getTime())) {
+      scheduledDate = new Date(s.scheduledAt);
+    }
+
+    const item = await prisma.contentCalendar.create({
+      data: {
+        companyId,
+        title: s.topic || "Suggested Topic",
+        channel: s.channel || "Email",
+        scheduledAt: scheduledDate,
+        status: "Suggested",
+        content: s.outline || "",
+        reason: s.reason || "",
+        isAiSuggested: true,
+        ownerId: req.user.id,
+      },
+    });
+    createdSuggestions.push(item);
+  }
+
+  return res.json(createdSuggestions);
 };
 
 export const updateCalendarEvent = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const item = await prisma.contentCalendar.findFirst({
-      where: { id, companyId: req.user.companyId, ...ownerScope(req) },
-    });
-    if (!item) {
-      return res.status(404).json({ message: "Calendar item not found" });
-    }
-    if (NON_EDITABLE_STATUSES.has(item.status)) {
-      return res
-        .status(409)
-        .json({ message: `Cannot edit an item in "${item.status}" state` });
-    }
-
-    const data = {};
-    for (const field of EDITABLE_FIELDS) {
-      if (req.body[field] !== undefined) data[field] = req.body[field];
-    }
-
-    if (req.body.scheduledAt !== undefined) {
-      const newDate = new Date(req.body.scheduledAt);
-      if (isNaN(newDate.getTime())) {
-        return res.status(400).json({ message: "Invalid scheduledAt date" });
-      }
-      if (newDate.getTime() <= Date.now()) {
-        return res
-          .status(422)
-          .json({ message: "Scheduled time must be in the future" });
-      }
-      const effectiveChannel = data.channel || item.channel;
-      if (effectiveChannel === "SMS") {
-        const windowError = checkSmsWindow(newDate);
-        if (windowError) return res.status(422).json(windowError);
-      }
-      data.scheduledAt = newDate;
-    }
-
-    if (Object.keys(data).length === 0) {
-      return res.status(400).json({ message: "No valid fields to update" });
-    }
-
-    const updated = await prisma.contentCalendar.update({
-      where: { id: item.id },
-      data,
-    });
-    return res.json(updated);
-  } catch (error) {
-    console.error("[Calendar Update] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const { id } = req.params;
+  const item = await prisma.contentCalendar.findFirst({
+    where: { id, companyId: req.user.companyId, ...ownerScope(req) },
+  });
+  if (!item) {
+    return res.status(404).json({ message: "Calendar item not found" });
   }
+  if (NON_EDITABLE_STATUSES.has(item.status)) {
+    return res
+      .status(409)
+      .json({ message: `Cannot edit an item in "${item.status}" state` });
+  }
+
+  const data = {};
+  for (const field of EDITABLE_FIELDS) {
+    if (req.body[field] !== undefined) data[field] = req.body[field];
+  }
+
+  if (req.body.scheduledAt !== undefined) {
+    const newDate = new Date(req.body.scheduledAt);
+    if (isNaN(newDate.getTime())) {
+      return res.status(400).json({ message: "Invalid scheduledAt date" });
+    }
+    if (newDate.getTime() <= Date.now()) {
+      return res
+        .status(422)
+        .json({ message: "Scheduled time must be in the future" });
+    }
+    const effectiveChannel = data.channel || item.channel;
+    if (effectiveChannel === "SMS") {
+      const windowError = checkSmsWindow(newDate);
+      if (windowError) return res.status(422).json(windowError);
+    }
+    data.scheduledAt = newDate;
+  }
+
+  if (Object.keys(data).length === 0) {
+    return res.status(400).json({ message: "No valid fields to update" });
+  }
+
+  const updated = await prisma.contentCalendar.update({
+    where: { id: item.id },
+    data,
+  });
+  return res.json(updated);
 };
 
 export const transitionCalendarEvent = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status: target } = req.body;
+  const { id } = req.params;
+  const { status: target } = req.body;
 
-    if (!target || !VALID_STATUSES.includes(target)) {
-      return res
-        .status(400)
-        .json({
-          message: `Invalid target status. Must be one of: ${VALID_STATUSES.join(", ")}`,
-        });
-    }
-
-    const item = await prisma.contentCalendar.findFirst({
-      where: { id, companyId: req.user.companyId, ...ownerScope(req) },
-    });
-    if (!item) {
-      return res.status(404).json({ message: "Calendar item not found" });
-    }
-
-    if (item.status === target) {
-      return res.json(item);
-    }
-
-    const allowed = STATUS_TRANSITIONS[item.status] || [];
-    if (!allowed.includes(target)) {
-      return res.status(409).json({
-        message: `Invalid transition: "${item.status}" → "${target}". Allowed: ${allowed.join(", ") || "none"}`,
+  if (!target || !VALID_STATUSES.includes(target)) {
+    return res
+      .status(400)
+      .json({
+        message: `Invalid target status. Must be one of: ${VALID_STATUSES.join(", ")}`,
       });
-    }
-
-    if (
-      APPROVAL_REQUIRED_TARGETS.has(target) &&
-      req.user.role?.toUpperCase() !== "ADMIN"
-    ) {
-      return res
-        .status(403)
-        .json({ message: "Only an ADMIN can approve calendar items" });
-    }
-    if (target === "Scheduled" && item.channel === "SMS") {
-      const windowError = checkSmsWindow(item.scheduledAt);
-      if (windowError) return res.status(422).json(windowError);
-    }
-
-    const updated = await prisma.contentCalendar.update({
-      where: { id: item.id },
-      data: { status: target },
-    });
-
-    if (target === "Scheduled") {
-      await inngest.send({
-        name: "calendar.item.scheduled",
-        data: {
-          calendarId: updated.id,
-          companyId: updated.companyId,
-          scheduledAt: updated.scheduledAt.toISOString(),
-        },
-      });
-    }
-
-    return res.json(updated);
-  } catch (error) {
-    console.error("[Calendar Transition] Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+
+  const item = await prisma.contentCalendar.findFirst({
+    where: { id, companyId: req.user.companyId, ...ownerScope(req) },
+  });
+  if (!item) {
+    return res.status(404).json({ message: "Calendar item not found" });
+  }
+
+  if (item.status === target) {
+    return res.json(item);
+  }
+
+  const allowed = STATUS_TRANSITIONS[item.status] || [];
+  if (!allowed.includes(target)) {
+    return res.status(409).json({
+      message: `Invalid transition: "${item.status}" → "${target}". Allowed: ${allowed.join(", ") || "none"}`,
+    });
+  }
+
+  if (
+    APPROVAL_REQUIRED_TARGETS.has(target) &&
+    req.user.role?.toUpperCase() !== "ADMIN"
+  ) {
+    return res
+      .status(403)
+      .json({ message: "Only an ADMIN can approve calendar items" });
+  }
+  if (target === "Scheduled" && item.channel === "SMS") {
+    const windowError = checkSmsWindow(item.scheduledAt);
+    if (windowError) return res.status(422).json(windowError);
+  }
+
+  const updated = await prisma.contentCalendar.update({
+    where: { id: item.id },
+    data: { status: target },
+  });
+
+  if (target === "Scheduled") {
+    await inngest.send({
+      name: "calendar.item.scheduled",
+      data: {
+        calendarId: updated.id,
+        companyId: updated.companyId,
+        scheduledAt: updated.scheduledAt.toISOString(),
+      },
+    });
+  }
+
+  return res.json(updated);
 };

@@ -31,83 +31,78 @@ function requireCompanyAdmin(req, res) {
 
 
 export const searchDataSubjects = async (req, res) => {
-  try {
-    if (!requireCompanyAdmin(req, res)) return;
+  if (!requireCompanyAdmin(req, res)) return;
 
-    const query = String(req.query.query || "").trim();
-    if (query.length < 3) {
-      return res.status(400).json({ message: "Enter at least 3 characters to search." });
-    }
-
-    const companyId = req.user.companyId;
-    const digits = normalizePhone(query);
-
-    const leadWhere = {
-      companyId,
-      OR: [
-        { email: { contains: query, mode: "insensitive" } },
-        { firstName: { contains: query, mode: "insensitive" } },
-        { lastName: { contains: query, mode: "insensitive" } },
-        ...(digits.length >= 4 ? [{ phone: { contains: digits.slice(-10) } }] : []),
-      ],
-    };
-
-    const [leads, homeowners] = await Promise.all([
-      prisma.lead.findMany({
-        where: leadWhere,
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          phone: true,
-          createdAt: true,
-          archived: true,
-        },
-        orderBy: { createdAt: "desc" },
-        take: MAX_RESULTS,
-      }),
-      prisma.user.findMany({
-        where: {
-          companyId,
-          role: "HOMEOWNER",
-          OR: [
-            { email: { contains: query, mode: "insensitive" } },
-            { name: { contains: query, mode: "insensitive" } },
-          ],
-        },
-        select: { id: true, name: true, email: true, createdAt: true },
-        orderBy: { createdAt: "desc" },
-        take: MAX_RESULTS,
-      }),
-    ]);
-
-    return res.json({
-      subjects: [
-        ...leads.map((l) => ({
-          id: l.id,
-          type: "lead",
-          name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)",
-          email: l.email,
-          phone: l.phone,
-          createdAt: l.createdAt,
-          archived: l.archived,
-        })),
-        ...homeowners.map((u) => ({
-          id: u.id,
-          type: "homeowner",
-          name: u.name || "(no name)",
-          email: u.email,
-          phone: null,
-          createdAt: u.createdAt,
-          archived: false,
-        })),
-      ],
-    });
-  } catch (error) {
-    console.error("[Privacy] Subject search failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const query = String(req.query.query || "").trim();
+  if (query.length < 3) {
+    return res.status(400).json({ message: "Enter at least 3 characters to search." });
   }
+
+  const companyId = req.user.companyId;
+  const digits = normalizePhone(query);
+
+  const leadWhere = {
+    companyId,
+    OR: [
+      { email: { contains: query, mode: "insensitive" } },
+      { firstName: { contains: query, mode: "insensitive" } },
+      { lastName: { contains: query, mode: "insensitive" } },
+      ...(digits.length >= 4 ? [{ phone: { contains: digits.slice(-10) } }] : []),
+    ],
+  };
+
+  const [leads, homeowners] = await Promise.all([
+    prisma.lead.findMany({
+      where: leadWhere,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        createdAt: true,
+        archived: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: MAX_RESULTS,
+    }),
+    prisma.user.findMany({
+      where: {
+        companyId,
+        role: "HOMEOWNER",
+        OR: [
+          { email: { contains: query, mode: "insensitive" } },
+          { name: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      select: { id: true, name: true, email: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: MAX_RESULTS,
+    }),
+  ]);
+
+  return res.json({
+    subjects: [
+      ...leads.map((l) => ({
+        id: l.id,
+        type: "lead",
+        name: [l.firstName, l.lastName].filter(Boolean).join(" ") || "(no name)",
+        email: l.email,
+        phone: l.phone,
+        createdAt: l.createdAt,
+        archived: l.archived,
+      })),
+      ...homeowners.map((u) => ({
+        id: u.id,
+        type: "homeowner",
+        name: u.name || "(no name)",
+        email: u.email,
+        phone: null,
+        createdAt: u.createdAt,
+        archived: false,
+      })),
+    ],
+  });
 };
 
 async function buildLeadExport(companyId, leadId) {
@@ -264,54 +259,49 @@ async function buildHomeownerExport(companyId, userId) {
 
 
 export const exportDataSubject = async (req, res) => {
-  try {
-    if (!requireCompanyAdmin(req, res)) return;
+  if (!requireCompanyAdmin(req, res)) return;
 
-    const { type, id } = req.params;
-    const companyId = req.user.companyId;
+  const { type, id } = req.params;
+  const companyId = req.user.companyId;
 
-    const data =
-      type === "homeowner"
-        ? await buildHomeownerExport(companyId, id)
-        : type === "lead"
-          ? await buildLeadExport(companyId, id)
-          : undefined;
+  const data =
+    type === "homeowner"
+      ? await buildHomeownerExport(companyId, id)
+      : type === "lead"
+        ? await buildLeadExport(companyId, id)
+        : undefined;
 
-    if (data === undefined) {
-      return res.status(400).json({ message: "Subject type must be 'lead' or 'homeowner'." });
-    }
-    if (!data) {
-      return res.status(404).json({ message: "No record found for that data subject." });
-    }
-
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      exportedBy: req.user.email,
-      regulation: "GDPR Art. 15 / Art. 20 · CCPA §1798.100",
-      companyId,
-      ...data,
-    };
-
-    await writeAuditLog({
-      req,
-      action: "PRIVACY_DATA_EXPORTED",
-      companyId,
-      targetType: type === "homeowner" ? "User" : "Lead",
-      targetId: id,
-      metadata: { subjectType: type },
-    });
-
-    if (String(req.query.download || "") === "1") {
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="data-export-${type}-${id}.json"`,
-      );
-    }
-    return res.json(payload);
-  } catch (error) {
-    console.error("[Privacy] Export failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (data === undefined) {
+    return res.status(400).json({ message: "Subject type must be 'lead' or 'homeowner'." });
   }
+  if (!data) {
+    return res.status(404).json({ message: "No record found for that data subject." });
+  }
+
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    exportedBy: req.user.email,
+    regulation: "GDPR Art. 15 / Art. 20 · CCPA §1798.100",
+    companyId,
+    ...data,
+  };
+
+  await writeAuditLog({
+    req,
+    action: "PRIVACY_DATA_EXPORTED",
+    companyId,
+    targetType: type === "homeowner" ? "User" : "Lead",
+    targetId: id,
+    metadata: { subjectType: type },
+  });
+
+  if (String(req.query.download || "") === "1") {
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="data-export-${type}-${id}.json"`,
+    );
+  }
+  return res.json(payload);
 };
 
 async function eraseLead(companyId, leadId, mode) {
@@ -424,95 +414,85 @@ async function eraseHomeowner(companyId, userId, mode) {
 
 
 export const eraseDataSubject = async (req, res) => {
-  try {
-    if (!requireCompanyAdmin(req, res)) return;
+  if (!requireCompanyAdmin(req, res)) return;
 
-    const { type, id } = req.params;
-    const mode = req.body?.mode === "delete" ? "delete" : "anonymize";
+  const { type, id } = req.params;
+  const mode = req.body?.mode === "delete" ? "delete" : "anonymize";
 
-    if (req.body?.confirm !== true) {
-      return res.status(400).json({
-        message: "Erasure is irreversible. Send confirm: true to proceed.",
-      });
-    }
-    if (type !== "lead" && type !== "homeowner") {
-      return res.status(400).json({ message: "Subject type must be 'lead' or 'homeowner'." });
-    }
-
-    const companyId = req.user.companyId;
-
-    // Capture what is about to be destroyed so the audit entry is meaningful
-    // after the record no longer exists.
-    const before =
-      type === "lead"
-        ? await prisma.lead.findFirst({
-            where: { id, companyId },
-            select: { email: true, phone: true, firstName: true, lastName: true },
-          })
-        : await prisma.user.findFirst({
-            where: { id, companyId, role: "HOMEOWNER" },
-            select: { email: true, name: true },
-          });
-
-    const result =
-      type === "lead"
-        ? await eraseLead(companyId, id, mode)
-        : await eraseHomeowner(companyId, id, mode);
-
-    if (!result) {
-      return res.status(404).json({ message: "No record found for that data subject." });
-    }
-    if (result.blocked) {
-      return res.status(409).json({ message: result.message, code: "ERASURE_BLOCKED" });
-    }
-
-    await writeAuditLog({
-      req,
-      action: "PRIVACY_DATA_ERASED",
-      companyId,
-      targetType: type === "homeowner" ? "User" : "Lead",
-      targetId: id,
-      metadata: {
-        subjectType: type,
-        mode: result.mode,
-        subjectRef: hashContact(before?.email || before?.phone || id),
-      },
+  if (req.body?.confirm !== true) {
+    return res.status(400).json({
+      message: "Erasure is irreversible. Send confirm: true to proceed.",
     });
-
-    return res.json({
-      success: true,
-      mode: result.mode,
-      message:
-        result.mode === "delete"
-          ? "The record and all associated data have been permanently deleted."
-          : "All personal identifiers have been removed. Non-identifying records were kept for reporting accuracy.",
-      details: result,
-    });
-  } catch (error) {
-    console.error("[Privacy] Erasure failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
+  if (type !== "lead" && type !== "homeowner") {
+    return res.status(400).json({ message: "Subject type must be 'lead' or 'homeowner'." });
+  }
+
+  const companyId = req.user.companyId;
+
+  // Capture what is about to be destroyed so the audit entry is meaningful
+  // after the record no longer exists.
+  const before =
+    type === "lead"
+      ? await prisma.lead.findFirst({
+          where: { id, companyId },
+          select: { email: true, phone: true, firstName: true, lastName: true },
+        })
+      : await prisma.user.findFirst({
+          where: { id, companyId, role: "HOMEOWNER" },
+          select: { email: true, name: true },
+        });
+
+  const result =
+    type === "lead"
+      ? await eraseLead(companyId, id, mode)
+      : await eraseHomeowner(companyId, id, mode);
+
+  if (!result) {
+    return res.status(404).json({ message: "No record found for that data subject." });
+  }
+  if (result.blocked) {
+    return res.status(409).json({ message: result.message, code: "ERASURE_BLOCKED" });
+  }
+
+  await writeAuditLog({
+    req,
+    action: "PRIVACY_DATA_ERASED",
+    companyId,
+    targetType: type === "homeowner" ? "User" : "Lead",
+    targetId: id,
+    metadata: {
+      subjectType: type,
+      mode: result.mode,
+      subjectRef: hashContact(before?.email || before?.phone || id),
+    },
+  });
+
+  return res.json({
+    success: true,
+    mode: result.mode,
+    message:
+      result.mode === "delete"
+        ? "The record and all associated data have been permanently deleted."
+        : "All personal identifiers have been removed. Non-identifying records were kept for reporting accuracy.",
+    details: result,
+  });
 };
 
 export const getPrivacyLog = async (req, res) => {
-  try {
-    if (!requireCompanyAdmin(req, res)) return;
-    if (!prisma.auditLog) {
-      return res.json({ entries: [] });
-    }
-
-    const entries = await prisma.auditLog.findMany({
-      where: {
-        companyId: req.user.companyId,
-        action: { in: ["PRIVACY_DATA_EXPORTED", "PRIVACY_DATA_ERASED"] },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    });
-
-    return res.json({ entries });
-  } catch (error) {
-    console.error("[Privacy] Log fetch failed:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!requireCompanyAdmin(req, res)) return;
+  if (!prisma.auditLog) {
+    return res.json({ entries: [] });
   }
+
+  const entries = await prisma.auditLog.findMany({
+    where: {
+      companyId: req.user.companyId,
+      action: { in: ["PRIVACY_DATA_EXPORTED", "PRIVACY_DATA_ERASED"] },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  return res.json({ entries });
 };

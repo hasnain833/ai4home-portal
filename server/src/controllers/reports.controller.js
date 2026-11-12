@@ -47,9 +47,6 @@ async function warrantyAgentMetrics(companyId, since, until) {
 export const getAnalytics = async (req, res) => {
   try {
     const session = req.user;
-    if (!session || (session.role !== "ADMIN" && session.role !== "STAFF")) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
 
     const period = req.query.period || "7d";
     const startDateParam = req.query.startDate;

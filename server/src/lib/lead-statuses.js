@@ -20,8 +20,3 @@ export const LEAD_STATUS = {
   CLOSED_LOST: "Closed Lost",
   UNSUBSCRIBED: "Unsubscribed",
 };
-
-export function resolveLeadStatuses(company) {
-  void company;
-  return DEFAULT_LEAD_STATUSES;
-}

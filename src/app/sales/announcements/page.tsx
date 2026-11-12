@@ -43,6 +43,7 @@ import {
 import RichTextEditor from "@/components/sales/RichTextEditor";
 import { describeSmsCost } from "@/lib/sms-segments";
 import { useAuth } from "@/contexts/AuthContext";
+import { api, errorMessage } from "@/lib/api";
 
 type Announcement = {
   id: string;
@@ -120,8 +121,7 @@ export default function AnnouncementsPage() {
 
   const loadAnnouncements = useCallback(async () => {
     try {
-      const res = await fetch("/api/sales/announcements");
-      if (res.ok) setAnnouncements(await res.json());
+      setAnnouncements(await api.get<Announcement[]>("/api/sales/announcements"));
     } catch {
       // silent — surfaced via toast on actions
     } finally {
@@ -144,9 +144,8 @@ export default function AnnouncementsPage() {
   /** Load an existing Draft/Scheduled announcement back into the composer. */
   const handleEdit = async (a: Announcement) => {
     try {
-      const res = await fetch(`/api/sales/announcements/${a.id}`);
-      if (!res.ok) throw new Error("Could not load announcement");
-      const full = await res.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const full = await api.get<any>(`/api/sales/announcements/${a.id}`);
       setForm({
         title: full.title || "",
         subject: full.subject || "",
@@ -161,7 +160,7 @@ export default function AnnouncementsPage() {
       setEditingId(a.id);
       setActiveTab("create");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load announcement");
+      toast.error(errorMessage(err));
     }
   };
 
@@ -200,15 +199,7 @@ export default function AnnouncementsPage() {
     try {
       // Editing an existing draft -> PATCH first so the saved copy is current.
       if (editingId) {
-        const patch = await fetch(`/api/sales/announcements/${editingId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(core),
-        });
-        if (!patch.ok) {
-          toast.error((await patch.json()).message || "Failed to save changes");
-          return;
-        }
+        await api.patch(`/api/sales/announcements/${editingId}`, core);
         if (mode === "save") {
           toast.success("Draft saved. Nothing has been sent.");
           resetForm();
@@ -217,18 +208,10 @@ export default function AnnouncementsPage() {
           return;
         }
         // Explicit send of the draft we just saved.
-        const send = await fetch(`/api/sales/announcements/${editingId}/send`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: scheduling ? "schedule" : "send",
-            scheduledAt: scheduling ? new Date(form.scheduleDate).toISOString() : null,
-          }),
+        await api.post(`/api/sales/announcements/${editingId}/send`, {
+          action: scheduling ? "schedule" : "send",
+          scheduledAt: scheduling ? new Date(form.scheduleDate).toISOString() : null,
         });
-        if (!send.ok) {
-          toast.error((await send.json()).message || "Failed to send announcement");
-          return;
-        }
         toast.success(
           scheduling
             ? "Announcement scheduled — it will be sent at the set time."
@@ -241,20 +224,11 @@ export default function AnnouncementsPage() {
       }
 
       // New announcement.
-      const res = await fetch("/api/sales/announcements", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...core,
-          action: mode === "save" ? "draft" : scheduling ? "schedule" : "send",
-          scheduledAt: mode === "send" && scheduling ? new Date(form.scheduleDate).toISOString() : null,
-        }),
+      await api.post("/api/sales/announcements", {
+        ...core,
+        action: mode === "save" ? "draft" : scheduling ? "schedule" : "send",
+        scheduledAt: mode === "send" && scheduling ? new Date(form.scheduleDate).toISOString() : null,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.message || "Failed to save announcement");
-        return;
-      }
       toast.success(
         mode === "save"
           ? "Draft saved. Edit it any time, then send when you're ready."
@@ -265,8 +239,8 @@ export default function AnnouncementsPage() {
       resetForm();
       setActiveTab("past");
       loadAnnouncements();
-    } catch {
-      toast.error("Network error while saving announcement");
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setSubmitting(false);
     }
@@ -282,34 +256,21 @@ export default function AnnouncementsPage() {
     });
     if (!ok) return;
     try {
-      const res = await fetch(`/api/sales/announcements/${a.id}/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "send" }),
-      });
-      if (!res.ok) {
-        toast.error((await res.json()).message || "Failed to send announcement");
-        return;
-      }
+      await api.post(`/api/sales/announcements/${a.id}/send`, { action: "send" });
       toast.success("Announcement queued — fanning out to your leads now.");
       loadAnnouncements();
-    } catch {
-      toast.error("Network error while sending announcement");
+    } catch (error) {
+      toast.error(errorMessage(error));
     }
   };
 
   const handleCancel = async (id: string) => {
     try {
-      const res = await fetch(`/api/sales/announcements/${id}/cancel`, { method: "POST" });
-      if (res.ok) {
-        toast.success("Scheduled announcement cancelled");
-        loadAnnouncements();
-      } else {
-        const d = await res.json();
-        toast.error(d.message || "Could not cancel");
-      }
-    } catch {
-      toast.error("Network error");
+      await api.post(`/api/sales/announcements/${id}/cancel`);
+      toast.success("Scheduled announcement cancelled");
+      loadAnnouncements();
+    } catch (error) {
+      toast.error(errorMessage(error));
     }
   };
 
@@ -319,15 +280,10 @@ export default function AnnouncementsPage() {
     setFailuresOpen(true);
     setLoadingFailures(true);
     try {
-      const res = await fetch(`/api/sales/announcements/${a.id}/failures`);
-      if (res.ok) {
-        const data = await res.json();
-        setFailures(Array.isArray(data.failures) ? data.failures : []);
-      } else {
-        toast.error("Could not load failed sends");
-      }
-    } catch {
-      toast.error("Network error loading failures");
+      const data = await api.get<{ failures?: typeof failures }>(`/api/sales/announcements/${a.id}/failures`);
+      setFailures(Array.isArray(data?.failures) ? data.failures : []);
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setLoadingFailures(false);
     }
@@ -337,17 +293,12 @@ export default function AnnouncementsPage() {
     if (!failuresFor) return;
     setRetrying(true);
     try {
-      const res = await fetch(`/api/sales/announcements/${failuresFor.id}/retry`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        toast.success("Retrying failed sends — check back shortly.");
-        setFailuresOpen(false);
-        loadAnnouncements();
-      } else {
-        toast.error(data.message || "Could not retry");
-      }
-    } catch {
-      toast.error("Network error");
+      await api.post(`/api/sales/announcements/${failuresFor.id}/retry`);
+      toast.success("Retrying failed sends — check back shortly.");
+      setFailuresOpen(false);
+      loadAnnouncements();
+    } catch (error) {
+      toast.error(errorMessage(error));
     } finally {
       setRetrying(false);
     }

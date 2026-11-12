@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertTriangle, Check, FileUp, Link2, Loader2, Pencil, Plus, RefreshCw, Route, Send, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
 import { B2B_API, sendJson } from "@/lib/b2b-store";
 
 const API = `${B2B_API}/nurture`;
@@ -75,7 +75,6 @@ interface Kpis {
   pieces: (Totals & { id: string; category: Category; stage: ContentStage; channel: string; status: string; label: string })[];
 }
 
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "None scheduled");
 const rate = (part: number, whole: number) => (whole ? `${Math.round((part / whole) * 100)}%` : "–");
 const newDraft = () => ({ category: "ABOUT" as Category, stage: "FIRST_TOUCH" as ContentStage, channel: "EMAIL" as "EMAIL" | "SMS", subject: "", body: "" });
@@ -495,10 +494,7 @@ function SourcesTab() {
     try {
       const body = new FormData();
       body.append("file", file);
-      const res = await fetch(`${API}/sources/extract-file`, { method: "POST", body });
-      const out = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(out.message || "That file couldn't be read.");
-      fill(out);
+      fill(await apiFetch(`${API}/sources/extract-file`, { method: "POST", body }));
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {

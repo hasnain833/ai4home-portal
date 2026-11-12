@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SignInEmailField } from "@/components/auth/SignInEmailField";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { api, errorMessage } from "@/lib/api";
 
 interface CalendlyStatus {
   available: boolean;
@@ -35,27 +36,22 @@ function EventTypePicker({ current, onSaved }: { current: CalendlyStatus["eventT
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch("/api/trade/calendly/event-types")
-      .then(async (r) => {
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(data.message || "Could not load your event types.");
-        setTypes(data);
-      })
-      .catch((err) => setError(err.message));
+    api.get<CalendlyEventType[]>("/api/trade/calendly/event-types")
+      .then(setTypes)
+      .catch((err) => setError(errorMessage(err)));
   }, []);
 
   const choose = async (uri: string) => {
     setSaving(true);
     setError("");
-    const r = await fetch("/api/trade/calendly/event-type", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uri: uri === NONE ? null : uri }),
-    });
-    const data = await r.json().catch(() => ({}));
-    setSaving(false);
-    if (!r.ok) return setError(data.message || "Could not save.");
-    onSaved();
+    try {
+      await api.put("/api/trade/calendly/event-type", { uri: uri === NONE ? null : uri });
+      onSaved();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -200,8 +196,7 @@ function TradeSettings() {
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
-    fetch("/api/trade/calendly")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
+    api.get<CalendlyStatus>("/api/trade/calendly")
       .then(setStatus)
       .catch(() => setError("Could not load your Calendly status."));
   }, [version]);
@@ -209,22 +204,27 @@ function TradeSettings() {
   const connect = async () => {
     setBusy(true);
     setError("");
-    const r = await fetch("/api/trade/calendly/connect", { method: "POST" });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data.url) {
+    try {
+      const data = await api.post<{ url?: string }>("/api/trade/calendly/connect");
+      if (!data?.url) throw new Error("Could not start the Calendly connection.");
+      window.location.href = data.url;
+    } catch (e) {
       setBusy(false);
-      return setError(data.message || "Could not start the Calendly connection.");
+      setError(errorMessage(e));
     }
-    window.location.href = data.url;
   };
 
   const disconnect = async () => {
     setBusy(true);
     setError("");
-    const r = await fetch("/api/trade/calendly", { method: "DELETE" });
-    setBusy(false);
-    if (!r.ok) return setError("Could not disconnect Calendly.");
-    setVersion((v) => v + 1);
+    try {
+      await api.delete("/api/trade/calendly");
+      setVersion((v) => v + 1);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

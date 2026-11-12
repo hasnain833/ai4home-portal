@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -21,8 +22,9 @@ import {
   AlertCircle,
   Upload,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
+import { api, errorMessage } from "@/lib/api";
 import { SignInEmailField } from "@/components/auth/SignInEmailField";
 
 // Types
@@ -80,10 +82,6 @@ export default function CompanyPage() {
   const [savingInfo, setSavingInfo] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [toastMessage, setToastMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
   const [errors, setErrors] = useState<{
     name?: string;
     email?: string;
@@ -116,8 +114,7 @@ export default function CompanyPage() {
 
   // Show toast notification
   const showToast = (type: "success" | "error", text: string) => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3000);
+    toast[type](text);
   };
 
   // Validate company info
@@ -137,32 +134,22 @@ export default function CompanyPage() {
     if (!validateCompanyInfo()) return;
     setSavingInfo(true);
     try {
-      const response = await fetch("/api/company", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: company.id,
-          name: company.name,
-          email: company.email,
-          phone: company.phone,
-          address: company.address,
-        }),
+      await api.put("/api/company", {
+        id: company.id,
+        name: company.name,
+        email: company.email,
+        phone: company.phone,
+        address: company.address,
       });
-
-      if (response.ok) {
-        if (user?.role === "admin") {
-          updateProfile({ name: company.name, companyName: company.name });
-        } else {
-          updateProfile({ companyName: company.name });
-        }
-        invalidate(QUERY_KEYS.company);
-        showToast("success", "Company information saved successfully");
+      if (user?.role === "admin") {
+        updateProfile({ name: company.name, companyName: company.name });
       } else {
-        showToast("error", "Failed to save information");
+        updateProfile({ companyName: company.name });
       }
+      invalidate(QUERY_KEYS.company);
+      showToast("success", "Company information saved successfully");
     } catch (error) {
-      console.error("[warranty/company]", error);
-      showToast("error", "Error connecting to server");
+      showToast("error", errorMessage(error));
     } finally {
       setSavingInfo(false);
     }
@@ -172,24 +159,11 @@ export default function CompanyPage() {
   const handleSavePolicy = async () => {
     setSavingPolicy(true);
     try {
-      const response = await fetch("/api/company", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: company.id,
-          warrantyPolicy: company.warrantyPolicy,
-        }),
-      });
-
-      if (response.ok) {
-        invalidate(QUERY_KEYS.company);
-        showToast("success", "Warranty policy saved successfully");
-      } else {
-        showToast("error", "Failed to save policy");
-      }
+      await api.put("/api/company", { id: company.id, warrantyPolicy: company.warrantyPolicy });
+      invalidate(QUERY_KEYS.company);
+      showToast("success", "Warranty policy saved successfully");
     } catch (error) {
-      console.error("[warranty/company]", error);
-      showToast("error", "Error connecting to server");
+      showToast("error", errorMessage(error));
     } finally {
       setSavingPolicy(false);
     }
@@ -211,22 +185,11 @@ export default function CompanyPage() {
     formData.append("file", file);
 
     try {
-      const response = await fetch("/api/company/logo", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setCompany({ ...company, logo: data.url });
-        showToast("success", "Logo uploaded successfully");
-      } else {
-        const err = await response.json();
-        showToast("error", err.message || "Failed to upload logo");
-      }
+      const data = await api.post<{ url: string }>("/api/company/logo", formData);
+      setCompany({ ...company, logo: data.url });
+      showToast("success", "Logo uploaded successfully");
     } catch (error) {
-      console.error("[warranty/company]", error);
-      showToast("error", "Error connecting to server during upload");
+      showToast("error", errorMessage(error));
     } finally {
       setUploadingLogo(false);
     }
@@ -235,27 +198,6 @@ export default function CompanyPage() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
       <PortalLayout>
-        {/* Toast Notification */}
-        <AnimatePresence>
-          {toastMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: -50, x: "-50%" }}
-              animate={{ opacity: 1, y: 0, x: "-50%" }}
-              exit={{ opacity: 0, y: -50, x: "-50%" }}
-              className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${toastMessage.type === "success"
-                ? "bg-green-50 dark:bg-green-900/80 text-green-800 dark:text-green-200 border border-green-200"
-                : "bg-red-50 dark:bg-red-900/80 text-red-800 dark:text-red-200 border border-red-200"
-                }`}
-            >
-              {toastMessage.type === "success" ? (
-                <CheckCircle2 className="h-5 w-5" />
-              ) : (
-                <AlertCircle className="h-5 w-5" />
-              )}
-              <span className="text-sm font-medium">{toastMessage.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <motion.div
           variants={staggerContainer}

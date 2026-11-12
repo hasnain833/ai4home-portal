@@ -1,5 +1,5 @@
 import express from "express";
-import { requireAuth, requireCompany } from "../middlewares/auth.js";
+import { requireAuth, requireCompany, requireRoles } from "../middlewares/auth.js";
 import multer from "multer";
 import {
   getCompany,
@@ -20,7 +20,7 @@ const upload = multer({
 const uploadFile = handleUploadErrors(upload.single("file"));
 
 router.get("/", requireAuth, getCompany);
-router.put("/", requireAuth, requireCompany, updateCompany);
+router.put("/", requireAuth, requireCompany, requireRoles(["ADMIN", "STAFF"]), updateCompany);
 
 router.get("/branding", getCompanyBranding);
 router.options("/branding", (req, res) => {

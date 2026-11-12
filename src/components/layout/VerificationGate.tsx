@@ -13,6 +13,7 @@ import {
   Download,
   AlertCircle,
 } from "lucide-react";
+import { api, errorMessage } from "@/lib/api";
 
 
 type DocKind = "agreement" | "verification";
@@ -70,16 +71,12 @@ function DocumentSlot({
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const response = await fetch(ENDPOINT[kind], { method: "POST", body: formData });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.message || "Upload failed. Please try again.");
-      }
+      await api.post(ENDPOINT[kind], formData);
       setFile(null);
       if (inputRef.current) inputRef.current.value = "";
       await onUploaded();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      setError(errorMessage(err));
     } finally {
       setUploading(false);
     }

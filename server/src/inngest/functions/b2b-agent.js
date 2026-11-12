@@ -21,6 +21,9 @@ import {
   appUrl,
   asksToOptOut,
   isAgentPaused,
+  LEAD_DAILY_LIMIT,
+  pausedForDailyLimit,
+  showsInterest,
   b2bEmailHtml,
   bookingLinkFor,
   getB2BAvailability,
@@ -121,7 +124,7 @@ export function pickSlots(slots, timezone) {
 }
 
 /** A daily limit lifts once the oldest reply in the 24-hour window ages out; the total limit doesn't lift. */
-async function capReached(leadId) {
+async function capReached(leadId, { interested = false } = {}) {
   const agentRows = (where) => prisma.b2BMessage.count({ where: { actor: "AGENT", ...where } });
   const since = new Date(Date.now() - DAY_MS);
   const liftsAt = async (where) => {
@@ -133,8 +136,9 @@ async function capReached(leadId) {
     return new Date(oldest.createdAt.getTime() + DAY_MS + 60_000).toISOString();
   };
   if ((await agentRows({ leadId })) >= CAPS.leadTotal) return { reason: "the total reply limit for this lead", until: null };
-  if ((await agentRows({ leadId, createdAt: { gte: since } })) >= CAPS.leadPerDay) {
-    return { reason: "the daily reply limit for this lead", until: await liftsAt({ leadId }) };
+  // An interested lead still gets an answer today; the lifetime and platform limits above and below still hold.
+  if (!interested && (await agentRows({ leadId, createdAt: { gte: since } })) >= CAPS.leadPerDay) {
+    return { reason: LEAD_DAILY_LIMIT, until: await liftsAt({ leadId }) };
   }
   if ((await agentRows({ createdAt: { gte: since } })) >= CAPS.platformPerDay) {
     return { reason: "the platform's daily reply limit", until: await liftsAt({}) };
@@ -166,13 +170,14 @@ export async function loadTurn(leadId, channel) {
   });
   const history = rows.reverse().map((m) => ({ actor: m.actor, channel: m.channel, subject: m.subject, body: m.body }));
 
-  if (isAgentPaused(lead)) return { lead, channel, pendingIds, history, paused: true };
-  const blocked = await agentBlockReason(lead, channel);
+  const latest = history.filter((m) => m.actor === "LEAD").slice(-1)[0];
+  const interested = showsInterest(latest?.body);
+  if (isAgentPaused(lead) && !(interested && pausedForDailyLimit(lead))) return { lead, channel, pendingIds, history, paused: true };
+  const blocked = await agentBlockReason(lead, channel, { interested });
   if (blocked) return { lead, channel, pendingIds, history, blocked };
-  const cap = await capReached(leadId);
+  const cap = await capReached(leadId, { interested });
   if (cap) return { lead, channel, pendingIds, history, cap };
 
-  const latest = history.filter((m) => m.actor === "LEAD").slice(-1)[0];
   if (channel === "EMAIL" && latest && asksToOptOut({ body: latest.body, subject: latest.subject })) {
     return { lead, channel, pendingIds, history, optOutRequest: true };
   }

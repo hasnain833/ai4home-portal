@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { HelpChatPanel } from "@/components/layout/HelpChat";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
+import { api, errorMessage } from "@/lib/api";
 
 type Placeholder = { token: string; description: string };
 type HelpAgent = { prompt: string; isDefault: boolean; defaultPrompt: string; placeholders: Placeholder[] };
@@ -19,32 +20,24 @@ export default function HelpAgentLab() {
   const [tab, setTab] = useState<"prompt" | "kb">("prompt");
 
   useEffect(() => {
-    fetch("/api/admin/help-agent")
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Could not load the Help Agent");
+    api.get<HelpAgent>("/api/admin/help-agent")
+      .then((data) => {
         setAgent(data);
         setPrompt(data.prompt);
       })
-      .catch((e) => toast.error(e.message));
+      .catch((e) => toast.error(errorMessage(e)));
   }, []);
 
   const save = async (value: string) => {
     setSaving(true);
     try {
-      const res = await fetch("/api/admin/help-agent", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: value }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.message || "Could not save");
+      const data = await api.put<{ isDefault: boolean }>("/api/admin/help-agent", { prompt: value });
       const next = value.trim() ? value : agent!.defaultPrompt;
       setAgent({ ...agent!, prompt: next, isDefault: data.isDefault });
       setPrompt(next);
       toast.success(data.isDefault ? "Using the built-in prompt" : "Saved — builders get it on their next question");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not save");
+      toast.error(errorMessage(e));
     } finally {
       setSaving(false);
     }

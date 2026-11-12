@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import WarrantyChat from "@/components/warranty/WarrantyChat";
+import { api } from "@/lib/api";
 
 export default function WidgetPage() {
   const params = useParams();
@@ -24,19 +25,15 @@ export default function WidgetPage() {
 
     const fetchBranding = async () => {
       try {
-        const response = await fetch(
+        const data = await api.get<{ botColor?: string; name?: string; logo?: string } | null>(
           `/api/company/branding?id=${encodeURIComponent(companyId)}&v=${Date.now()}`,
-          { cache: "no-store" }
         );
-        if (response.ok) {
-          const data = await response.json();
-          if (data) {
-            if (data.botColor) setThemeColor(data.botColor);
-            if (data.name) {
-              setBotName(`${data.name} Assistant`);
-            }
-            if (data.logo) setLogoUrl(data.logo);
+        if (data) {
+          if (data.botColor) setThemeColor(data.botColor);
+          if (data.name) {
+            setBotName(`${data.name} Assistant`);
           }
+          if (data.logo) setLogoUrl(data.logo);
         }
       } catch (error) {
         console.error("Failed to fetch company branding:", error);

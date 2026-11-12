@@ -6,6 +6,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
 import { Bot } from "lucide-react";
 import SalesChat from "@/components/sales/SalesChat";
+import { fetchKey, QUERY_KEYS } from "@/lib/use-query";
 
 export default function SalesChatPage() {
   const { user, isLoading } = useAuth();
@@ -16,8 +17,8 @@ export default function SalesChatPage() {
   // Same brand color the warranty assistant uses, so both read as one company.
   useEffect(() => {
     if (isLoading || !user) return;
-    fetch("/api/company", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
+    // Shared with the company settings pages, so they never disagree.
+    fetchKey<{ botColor?: string }>(QUERY_KEYS.company)
       .then((data) => {
         if (data?.botColor) setThemeColor(data.botColor);
       })

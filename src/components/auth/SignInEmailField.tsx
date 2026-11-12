@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Mail, Loader2, Clock, X } from "lucide-react";
 import { motion } from "framer-motion";
+import { api, errorMessage } from "@/lib/api";
 
 export function SignInEmailField({
   onNotify,
@@ -38,23 +39,11 @@ export function SignInEmailField({
     setError(null);
     setSubmitting(true);
     try {
-      const response = await fetch("/api/auth/email-change", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: next }),
-      });
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        setError(data.message || "Could not request the email change");
-        notify("error", data.message || "Could not request the email change");
-        return;
-      }
-
-      notify("success", data.message || `Confirmation sent to ${next}`);
+      const data = await api.post<{ message?: string }>("/api/auth/email-change", { email: next });
+      notify("success", data?.message || `Confirmation sent to ${next}`);
       await refreshUser();
-    } catch {
-      const message = "Could not reach the server. Please try again.";
+    } catch (e) {
+      const message = errorMessage(e);
       setError(message);
       notify("error", message);
     } finally {
@@ -65,7 +54,7 @@ export function SignInEmailField({
   const handleCancel = async () => {
     setCancelling(true);
     try {
-      await fetch("/api/auth/email-change/cancel", { method: "POST" });
+      await api.post("/api/auth/email-change/cancel");
       await refreshUser();
       setValue(currentEmail);
       setError(null);

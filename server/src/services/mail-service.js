@@ -1,7 +1,8 @@
 import nodemailer from "nodemailer";
 import { fileURLToPath } from "node:url";
 import { ticketRef } from "../lib/ticket-number.js";
-import { Templates, prepareOutgoingEmail } from "./templates.js";
+import { Templates, isPlatformEmail, prepareOutgoingEmail } from "./templates.js";
+import prisma from "../lib/prisma.js";
 import { recordUsage } from "../lib/usage.js";
 import { isCompanySuspended } from "../lib/company-suspension.js";
 
@@ -14,6 +15,16 @@ export const MAIL_OUTCOME = {
 };
 
 export const mailShouldPark = (result) => result?.outcome === MAIL_OUTCOME.FAILED;
+
+/** True when NEXT_PUBLIC_URL is a public HTTPS address a mail app can load the logo from. */
+function hasPublicLogoUrl() {
+  try {
+    const url = new URL(process.env.NEXT_PUBLIC_URL || "");
+    return url.protocol === "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
 
 export class MailService {
   static SMTP_HOST = process.env.SMTP_HOST || "smtp-relay.brevo.com";
@@ -85,14 +96,21 @@ export class MailService {
       });
 
     try {
-      // Embed our own logo, so inboxes do not need access to localhost or a
-      // separately deployed frontend asset. Builder emails have no logo tag.
-      let emailHtml = prepareOutgoingEmail(html, { companyId, source, branding });
+      // A builder's email carries their uploaded logo; a failed lookup falls back to ours.
+      const builder = isPlatformEmail({ companyId, source, branding })
+        ? null
+        : await prisma.company.findUnique({ where: { id: companyId }, select: { name: true, logo: true } }).catch(() => null);
+      // Our logo loads from the public site, so mail apps don't list it as an attachment.
+      // Only without a public HTTPS address (local development) is it embedded in the email.
+      // Builder logos are always public storage URLs.
+      let emailHtml = prepareOutgoingEmail(html, { companyId, source, branding, builder });
       let hasLogo = false;
-      emailHtml = emailHtml.replace(/(<img\b[^>]*\bsrc\s*=\s*)(["'])(?:https?:\/\/[^"']*\/logo-email\.png(?:\?[^"']*)?|cid:ai4hb-logo)\2/gi, (_match, prefix, quote) => {
-        hasLogo = true;
-        return `${prefix}${quote}cid:ai4hb-logo${quote}`;
-      });
+      if (!hasPublicLogoUrl()) {
+        emailHtml = emailHtml.replace(/(<img\b[^>]*\bsrc\s*=\s*)(["'])(?:https?:\/\/[^"']*\/logo-email\.png(?:\?[^"']*)?|cid:ai4hb-logo)\2/gi, (_match, prefix, quote) => {
+          hasLogo = true;
+          return `${prefix}${quote}cid:ai4hb-logo${quote}`;
+        });
+      }
       const info = await this.getPlatformTransporter().sendMail({
         from: fromString,
         ...(replyToAddress ? { replyTo: replyToAddress } : {}),

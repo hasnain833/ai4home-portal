@@ -24,6 +24,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { api, errorMessage } from "@/lib/api";
 type SubjectType = "lead" | "homeowner";
 
 interface Subject {
@@ -67,21 +68,13 @@ export default function PrivacyRequestsTab() {
     }
     setSearching(true);
     try {
-      const res = await fetch(
-        `/api/sales/privacy/subjects?query=${encodeURIComponent(query.trim())}`,
-        { credentials: "include" },
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "Search failed.");
-        return;
-      }
-      setSubjects(data.subjects || []);
-      if ((data.subjects || []).length === 0) {
+      const data = await api.get<{ subjects?: Subject[] }>(`/api/sales/privacy/subjects?query=${encodeURIComponent(query.trim())}`);
+      setSubjects(data?.subjects || []);
+      if ((data?.subjects || []).length === 0) {
         toast.info("No matching records — this person may not be in your data.");
       }
-    } catch {
-      toast.error("Network error.");
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setSearching(false);
     }
@@ -90,15 +83,7 @@ export default function PrivacyRequestsTab() {
   const handleExport = async (subject: Subject) => {
     setBusyId(subject.id);
     try {
-      const res = await fetch(
-        `/api/sales/privacy/subjects/${subject.type}/${subject.id}/export`,
-        { credentials: "include" },
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "Could not build the export.");
-        return;
-      }
+      const data = await api.get(`/api/sales/privacy/subjects/${subject.type}/${subject.id}/export`);
 
       // Hand the subject a portable file (GDPR Art. 20).
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -111,8 +96,8 @@ export default function PrivacyRequestsTab() {
 
       toast.success("Export downloaded. The request has been recorded in the log.");
       loadLog();
-    } catch {
-      toast.error("Network error.");
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setBusyId(null);
     }
@@ -131,25 +116,15 @@ export default function PrivacyRequestsTab() {
 
     setBusyId(subject.id);
     try {
-      const res = await fetch(
-        `/api/sales/privacy/subjects/${subject.type}/${subject.id}/erase`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ mode, confirm: true }),
-        },
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(data.message || "Erasure failed.");
-        return;
-      }
-      toast.success(data.message || "Erasure complete.");
+      const data = await api.post<{ message?: string }>(`/api/sales/privacy/subjects/${subject.type}/${subject.id}/erase`, {
+        mode,
+        confirm: true,
+      });
+      toast.success(data?.message || "Erasure complete.");
       setSubjects((prev) => (prev || []).filter((s) => s.id !== subject.id));
       loadLog();
-    } catch {
-      toast.error("Network error.");
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
       setBusyId(null);
     }

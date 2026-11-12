@@ -34,113 +34,64 @@ async function distinctLeadTags({ companyId, ownerId, includeArchived }) {
 }
 
 export const getLeads = async (req, res) => {
-  try {
-    const search = qs(req.query.search);
-    const status = qs(req.query.status, "all");
-    const tag = qs(req.query.tag, "all");
-    const includeArchived = qs(req.query.includeArchived) === "true";
-    const rawSize = parseInt(qs(req.query.pageSize) || qs(req.query.limit), 10);
-    const pageSize = Math.min(
-      Math.max(
-        Number.isFinite(rawSize) && rawSize > 0
-          ? rawSize
-          : LEADS_DEFAULT_PAGE_SIZE,
-        1,
-      ),
-      LEADS_MAX_PAGE_SIZE,
-    );
-    const rawPage = parseInt(qs(req.query.page), 10);
-    const page = Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1);
+  const search = qs(req.query.search);
+  const status = qs(req.query.status, "all");
+  const tag = qs(req.query.tag, "all");
+  const includeArchived = qs(req.query.includeArchived) === "true";
+  const rawSize = parseInt(qs(req.query.pageSize) || qs(req.query.limit), 10);
+  const pageSize = Math.min(
+    Math.max(
+      Number.isFinite(rawSize) && rawSize > 0
+        ? rawSize
+        : LEADS_DEFAULT_PAGE_SIZE,
+      1,
+    ),
+    LEADS_MAX_PAGE_SIZE,
+  );
+  const rawPage = parseInt(qs(req.query.page), 10);
+  const page = Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1);
 
-    const companyId = req.user.companyId;
-    const where = { companyId };
-    const now = new Date();
-    if (!includeArchived) {
-      where.archived = false;
-    }
-
-    const ownerId =
-      req.user.role.toUpperCase() === "HOMEOWNER" ? req.user.id : null;
-    if (ownerId) {
-      where.ownerId = ownerId;
-    }
-
-    if (status !== "all") {
-      where.status = status;
-    }
-
-    if (tag !== "all") {
-      where.tags = { has: tag };
-    }
-
-    if (search) {
-      where.OR = [
-        { firstName: { contains: search, mode: "insensitive" } },
-        { lastName: { contains: search, mode: "insensitive" } },
-        { email: { contains: search, mode: "insensitive" } },
-        { phone: { contains: search, mode: "insensitive" } },
-      ];
-    }
-
-    const [leads, total, availableTags] = await Promise.all([
-      prisma.lead.findMany({
-        where,
-        include: {
-          owner: {
-            select: { name: true, email: true },
-          },
-          appointments: {
-            where: { status: { not: "CANCELLED" }, time: { gte: now } },
-            orderBy: { time: "asc" },
-            take: 1,
-            select: {
-              id: true,
-              title: true,
-              time: true,
-              endTime: true,
-              durationMinutes: true,
-              status: true,
-              agent: { select: { id: true, name: true, email: true, role: true } },
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.lead.count({ where }),
-      distinctLeadTags({ companyId, ownerId, includeArchived }),
-    ]);
-
-    return res.json({
-      leads: leads.map(({ appointments, ...lead }) => ({
-        ...lead,
-        upcomingAppointment: appointments[0] || null,
-      })),
-      total,
-      page,
-      pageSize,
-      totalPages: Math.max(Math.ceil(total / pageSize), 1),
-      availableTags,
-    });
-  } catch (error) {
-    console.error("Fetch leads error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  const companyId = req.user.companyId;
+  const where = { companyId };
+  const now = new Date();
+  if (!includeArchived) {
+    where.archived = false;
   }
-};
 
-export const getLead = async (req, res) => {
-  try {
-    const companyId = req.user.companyId;
+  const ownerId =
+    req.user.role.toUpperCase() === "HOMEOWNER" ? req.user.id : null;
+  if (ownerId) {
+    where.ownerId = ownerId;
+  }
 
-    const lead = await prisma.lead.findFirst({
-      // companyId in the filter, so an id from another tenant is a 404 rather
-      // than a leak.
-      where: { id: req.params.id, companyId },
+  if (status !== "all") {
+    where.status = status;
+  }
+
+  if (tag !== "all") {
+    where.tags = { has: tag };
+  }
+
+  if (search) {
+    where.OR = [
+      { firstName: { contains: search, mode: "insensitive" } },
+      { lastName: { contains: search, mode: "insensitive" } },
+      { email: { contains: search, mode: "insensitive" } },
+      { phone: { contains: search, mode: "insensitive" } },
+    ];
+  }
+
+  const [leads, total, availableTags] = await Promise.all([
+    prisma.lead.findMany({
+      where,
       include: {
-        owner: { select: { id: true, name: true, email: true } },
+        owner: {
+          select: { name: true, email: true },
+        },
         appointments: {
+          where: { status: { not: "CANCELLED" }, time: { gte: now } },
           orderBy: { time: "asc" },
+          take: 1,
           select: {
             id: true,
             title: true,
@@ -148,123 +99,157 @@ export const getLead = async (req, res) => {
             endTime: true,
             durationMinutes: true,
             status: true,
-            locationType: true,
-            notes: true,
-          },
-        },
-        campaignEnrollments: {
-          orderBy: { createdAt: "desc" },
-          take: 10,
-          select: {
-            id: true,
-            status: true,
-            createdAt: true,
-            campaign: { select: { id: true, name: true } },
-          },
-        },
-        schedulingConversations: {
-          orderBy: { updatedAt: "desc" },
-          take: 20,
-          select: {
-            id: true,
-            channel: true,
-            mode: true,
-            status: true,
-            turnCount: true,
-            transcript: true,
-            createdAt: true,
-            updatedAt: true,
+            agent: { select: { id: true, name: true, email: true, role: true } },
           },
         },
       },
-    });
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.lead.count({ where }),
+    distinctLeadTags({ companyId, ownerId, includeArchived }),
+  ]);
 
-    if (!lead) {
-      return res.status(404).json({ message: "Lead not found" });
-    }
+  return res.json({
+    leads: leads.map(({ appointments, ...lead }) => ({
+      ...lead,
+      upcomingAppointment: appointments[0] || null,
+    })),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(Math.ceil(total / pageSize), 1),
+    availableTags,
+  });
+};
 
-    if (req.user.role.toUpperCase() === "HOMEOWNER" && lead.ownerId !== req.user.id) {
-      return res.status(404).json({ message: "Lead not found" });
-    }
+export const getLead = async (req, res) => {
+  const companyId = req.user.companyId;
 
-    const agents = await prisma.user.findMany({
-      where: { companyId, role: { in: ["ADMIN", "STAFF"] } },
-      select: { id: true, name: true, email: true },
-      orderBy: { name: "asc" },
-    });
+  const lead = await prisma.lead.findFirst({
+    // companyId in the filter, so an id from another tenant is a 404 rather
+    // than a leak.
+    where: { id: req.params.id, companyId },
+    include: {
+      owner: { select: { id: true, name: true, email: true } },
+      appointments: {
+        orderBy: { time: "asc" },
+        select: {
+          id: true,
+          title: true,
+          time: true,
+          endTime: true,
+          durationMinutes: true,
+          status: true,
+          locationType: true,
+          notes: true,
+        },
+      },
+      campaignEnrollments: {
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          campaign: { select: { id: true, name: true } },
+        },
+      },
+      schedulingConversations: {
+        orderBy: { updatedAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          channel: true,
+          mode: true,
+          status: true,
+          turnCount: true,
+          transcript: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+  });
 
-    return res.json({ lead, agents, statuses: DEFAULT_LEAD_STATUSES });
-  } catch (error) {
-    console.error("Fetch lead error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  if (!lead) {
+    return res.status(404).json({ message: "Lead not found" });
   }
+
+  if (req.user.role.toUpperCase() === "HOMEOWNER" && lead.ownerId !== req.user.id) {
+    return res.status(404).json({ message: "Lead not found" });
+  }
+
+  const agents = await prisma.user.findMany({
+    where: { companyId, role: { in: ["ADMIN", "STAFF"] } },
+    select: { id: true, name: true, email: true },
+    orderBy: { name: "asc" },
+  });
+
+  return res.json({ lead, agents, statuses: DEFAULT_LEAD_STATUSES });
 };
 
 export const createLead = async (req, res) => {
-  try {
-    const {
+  const {
+    firstName,
+    lastName,
+    email,
+    phone,
+    street,
+    city,
+    state,
+    zipCode,
+    status,
+    tags,
+    emailOptIn,
+    smsOptIn,
+    consentSource,
+    customFields,
+  } = req.body;
+
+  if (!firstName || !lastName) {
+    return res
+      .status(400)
+      .json({ message: "First name and last name are required." });
+  }
+
+  if (status && !ALLOWED_LEAD_STATUSES.has(status)) {
+    return res.status(400).json({ message: "Invalid lead status." });
+  }
+  if (phone && !toE164(phone)) return res.status(400).json({ message: PHONE_ERROR });
+
+  const lead = await prisma.lead.create({
+    data: {
+      companyId: req.user.companyId,
+      source: "MANUAL",
       firstName,
       lastName,
-      email,
-      phone,
-      street,
-      city,
-      state,
-      zipCode,
-      status,
-      tags,
-      emailOptIn,
-      smsOptIn,
-      consentSource,
-      customFields,
-    } = req.body;
+      email: email || null,
+      phone: phone || null,
+      street: street || null,
+      city: city || null,
+      state: state || null,
+      zipCode: zipCode || null,
+      status: status || LEAD_STATUS.NEW,
+      ownerId: req.user.id,
+      tags: tags || [],
+      emailOptIn: !!emailOptIn,
+      smsOptIn: !!smsOptIn,
+      consentSource:
+        consentSource || (emailOptIn || smsOptIn ? "Manual Form" : null),
+      consentTimestamp: emailOptIn || smsOptIn ? new Date() : null,
+      customFields: customFields || null,
+    },
+  });
+  await triggerAutomation({
+    companyId: lead.companyId,
+    leadId: lead.id,
+    event: "MANUAL_CREATION",
+  });
+  void pushLeadToSalesforce(lead.companyId, lead.id);
 
-    if (!firstName || !lastName) {
-      return res
-        .status(400)
-        .json({ message: "First name and last name are required." });
-    }
-
-    if (status && !ALLOWED_LEAD_STATUSES.has(status)) {
-      return res.status(400).json({ message: "Invalid lead status." });
-    }
-    if (phone && !toE164(phone)) return res.status(400).json({ message: PHONE_ERROR });
-
-    const lead = await prisma.lead.create({
-      data: {
-        companyId: req.user.companyId,
-        source: "MANUAL",
-        firstName,
-        lastName,
-        email: email || null,
-        phone: phone || null,
-        street: street || null,
-        city: city || null,
-        state: state || null,
-        zipCode: zipCode || null,
-        status: status || LEAD_STATUS.NEW,
-        ownerId: req.user.id,
-        tags: tags || [],
-        emailOptIn: !!emailOptIn,
-        smsOptIn: !!smsOptIn,
-        consentSource:
-          consentSource || (emailOptIn || smsOptIn ? "Manual Form" : null),
-        consentTimestamp: emailOptIn || smsOptIn ? new Date() : null,
-        customFields: customFields || null,
-      },
-    });
-    await triggerAutomation({
-      companyId: lead.companyId,
-      leadId: lead.id,
-      event: "MANUAL_CREATION",
-    });
-    void pushLeadToSalesforce(lead.companyId, lead.id);
-
-    return res.json(lead);
-  } catch (error) {
-    console.error("Create lead error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+  return res.json(lead);
 };
 
 async function afterStatusChange(companyId, leadId, status, previousStatus) {
@@ -449,333 +434,318 @@ export const closeLeadWon = async (req, res) => {
 };
 
 export const importLeads = async (req, res) => {
-  try {
-    const { leadsList, mergeStrategy, attested } = req.body;
+  const { leadsList, mergeStrategy, attested } = req.body;
 
-    if (!attested) {
+  if (!attested) {
+    return res.status(400).json({
+      message:
+        "You must attest that contacts have consented to be contacted.",
+    });
+  }
+
+  if (!leadsList || !Array.isArray(leadsList)) {
+    return res.status(400).json({ message: "Invalid lead list payload." });
+  }
+
+  // Check homeowner limits
+  if (req.user.role.toUpperCase() === "HOMEOWNER") {
+    const existingCount = await prisma.lead.count({
+      where: { ownerId: req.user.id },
+    });
+    const limit = 500;
+    if (existingCount + leadsList.length > limit) {
       return res.status(400).json({
-        message:
-          "You must attest that contacts have consented to be contacted.",
+        message: `Homeowner accounts are limited to a maximum of ${limit} leads total. You currently have ${existingCount} leads and are trying to import ${leadsList.length}.`,
       });
     }
-
-    if (!leadsList || !Array.isArray(leadsList)) {
-      return res.status(400).json({ message: "Invalid lead list payload." });
-    }
-
-    // Check homeowner limits
-    if (req.user.role.toUpperCase() === "HOMEOWNER") {
-      const existingCount = await prisma.lead.count({
-        where: { ownerId: req.user.id },
-      });
-      const limit = 500;
-      if (existingCount + leadsList.length > limit) {
-        return res.status(400).json({
-          message: `Homeowner accounts are limited to a maximum of ${limit} leads total. You currently have ${existingCount} leads and are trying to import ${leadsList.length}.`,
-        });
-      }
-    }
-
-    let createdCount = 0;
-    let updatedCount = 0;
-    let skippedCount = 0;
-    const errors = [];
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-    for (let i = 0; i < leadsList.length; i++) {
-      const rowNum = i + 1;
-      const rawLead = leadsList[i];
-      const {
-        firstName,
-        lastName,
-        email,
-        phone: rawPhone,
-        street,
-        city,
-        state,
-        zipCode,
-        tags: rawTags,
-        emailOptIn,
-        smsOptIn,
-      } = rawLead;
-      const phone = usablePhone(rawPhone);
-      const tags = rawPhone && !phone ? [...(rawTags || []), NON_PLUS_ONE_TAG] : rawTags;
-
-      if (!firstName || !lastName) {
-        errors.push({
-          row: rowNum,
-          name: `${firstName || ""} ${lastName || ""}`,
-          reason: "First name and last name are required.",
-        });
-        continue;
-      }
-
-      if (email && !emailRegex.test(email)) {
-        errors.push({
-          row: rowNum,
-          name: `${firstName} ${lastName}`,
-          reason: `Invalid email format: ${email}`,
-        });
-        continue;
-      }
-
-      const duplicateLead = await findDuplicateLead(
-        req.user.companyId,
-        email,
-        phone,
-      );
-
-      const optInSource =
-        emailOptIn || smsOptIn ? "CSV Import Opt-in Column" : null;
-      const optInTimestamp = emailOptIn || smsOptIn ? new Date() : null;
-
-      if (duplicateLead) {
-        if (mergeStrategy === "skip") {
-          skippedCount++;
-          continue;
-        } else if (mergeStrategy === "update") {
-          const isCrmOwned = !!duplicateLead.externalId;
-          await prisma.lead.update({
-            where: { id: duplicateLead.id },
-            data: {
-              firstName: resolveMergedField(
-                firstName,
-                duplicateLead.firstName,
-                isCrmOwned,
-              ),
-              lastName: resolveMergedField(
-                lastName,
-                duplicateLead.lastName,
-                isCrmOwned,
-              ),
-              street: resolveMergedField(
-                street,
-                duplicateLead.street,
-                isCrmOwned,
-              ),
-              city: resolveMergedField(city, duplicateLead.city, isCrmOwned),
-              state: resolveMergedField(state, duplicateLead.state, isCrmOwned),
-              zipCode: resolveMergedField(
-                zipCode,
-                duplicateLead.zipCode,
-                isCrmOwned,
-              ),
-              tags: Array.from(
-                new Set([...(duplicateLead.tags || []), ...(tags || [])]),
-              ),
-              emailOptIn:
-                emailOptIn !== undefined
-                  ? !!emailOptIn
-                  : duplicateLead.emailOptIn,
-              smsOptIn:
-                smsOptIn !== undefined ? !!smsOptIn : duplicateLead.smsOptIn,
-              consentSource: optInSource || duplicateLead.consentSource,
-              consentTimestamp:
-                optInTimestamp || duplicateLead.consentTimestamp,
-            },
-          });
-          updatedCount++;
-          continue;
-        }
-      }
-
-      // Create new
-      await prisma.lead.create({
-        data: {
-          companyId: req.user.companyId,
-          source: "CSV",
-          firstName,
-          lastName,
-          email: email || null,
-          phone: phone || null,
-          street: street || null,
-          city: city || null,
-          state: state || null,
-          zipCode: zipCode || null,
-          status: LEAD_STATUS.NEW,
-          ownerId: req.user.id,
-          tags: tags || [],
-          emailOptIn: !!emailOptIn,
-          smsOptIn: !!smsOptIn,
-          consentSource: optInSource,
-          consentTimestamp: optInTimestamp,
-        },
-      });
-
-      createdCount++;
-    }
-
-    return res.json({
-      totalProcessed: leadsList.length,
-      createdCount,
-      updatedCount,
-      skippedCount,
-      errorsCount: errors.length,
-      errors,
-    });
-  } catch (error) {
-    console.error("CSV import error:", error);
-    return res.status(500).json({ message: "Internal server error" });
   }
-};
 
-export const deleteLead = async (req, res) => {
-  try {
-    const { id } = req.params;
+  let createdCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+  const errors = [];
 
-    const lead = await prisma.lead.findUnique({
-      where: { id },
-    });
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    if (!lead || lead.companyId !== req.user.companyId) {
-      return res.status(404).json({ message: "Lead not found." });
-    }
-
-    if (
-      req.user.role.toUpperCase() === "HOMEOWNER" &&
-      lead.ownerId !== req.user.id
-    ) {
-      return res
-        .status(403)
-        .json({ message: "You do not have permission to delete this lead." });
-    }
-
-    await prisma.lead.delete({
-      where: { id },
-    });
-
-    return res.json({ message: "Lead deleted successfully." });
-  } catch (error) {
-    console.error("Delete lead error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-};
-
-export const updateLead = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const lead = await prisma.lead.findUnique({
-      where: { id },
-    });
-
-    if (!lead || lead.companyId !== req.user.companyId) {
-      return res.status(404).json({ message: "Lead not found." });
-    }
-
-    if (
-      req.user.role.toUpperCase() === "HOMEOWNER" &&
-      lead.ownerId !== req.user.id
-    ) {
-      return res
-        .status(403)
-        .json({ message: "You do not have permission to update this lead." });
-    }
-
+  for (let i = 0; i < leadsList.length; i++) {
+    const rowNum = i + 1;
+    const rawLead = leadsList[i];
     const {
       firstName,
       lastName,
       email,
-      phone,
+      phone: rawPhone,
       street,
       city,
       state,
       zipCode,
-      status,
-      ownerId,
-      tags,
+      tags: rawTags,
       emailOptIn,
       smsOptIn,
-      consentSource,
-      customFields,
-    } = req.body;
+    } = rawLead;
+    const phone = usablePhone(rawPhone);
+    const tags = rawPhone && !phone ? [...(rawTags || []), NON_PLUS_ONE_TAG] : rawTags;
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (email && !emailRegex.test(email)) {
-      return res.status(400).json({ message: "Invalid email format." });
-    }
-    if (status !== undefined && !ALLOWED_LEAD_STATUSES.has(status)) {
-      return res.status(400).json({ message: "Invalid lead status." });
-    }
-    // An older non-+1 number on file doesn't block edits to the rest of the lead.
-    if (phone && phone !== lead.phone && !toE164(phone)) {
-      return res.status(400).json({ message: PHONE_ERROR });
-    }
-
-    if (ownerId !== undefined && ownerId !== null) {
-      if (req.user.role.toUpperCase() === "HOMEOWNER") {
-        return res.status(403).json({ message: "You cannot reassign a lead." });
-      }
-      const agent = await prisma.user.findFirst({
-        where: { id: ownerId, companyId: req.user.companyId, role: { in: ["ADMIN", "STAFF"] } },
-        select: { id: true },
+    if (!firstName || !lastName) {
+      errors.push({
+        row: rowNum,
+        name: `${firstName || ""} ${lastName || ""}`,
+        reason: "First name and last name are required.",
       });
-      if (!agent) {
-        return res.status(400).json({ message: "That agent is not part of this company." });
+      continue;
+    }
+
+    if (email && !emailRegex.test(email)) {
+      errors.push({
+        row: rowNum,
+        name: `${firstName} ${lastName}`,
+        reason: `Invalid email format: ${email}`,
+      });
+      continue;
+    }
+
+    const duplicateLead = await findDuplicateLead(
+      req.user.companyId,
+      email,
+      phone,
+    );
+
+    const optInSource =
+      emailOptIn || smsOptIn ? "CSV Import Opt-in Column" : null;
+    const optInTimestamp = emailOptIn || smsOptIn ? new Date() : null;
+
+    if (duplicateLead) {
+      if (mergeStrategy === "skip") {
+        skippedCount++;
+        continue;
+      } else if (mergeStrategy === "update") {
+        const isCrmOwned = !!duplicateLead.externalId;
+        await prisma.lead.update({
+          where: { id: duplicateLead.id },
+          data: {
+            firstName: resolveMergedField(
+              firstName,
+              duplicateLead.firstName,
+              isCrmOwned,
+            ),
+            lastName: resolveMergedField(
+              lastName,
+              duplicateLead.lastName,
+              isCrmOwned,
+            ),
+            street: resolveMergedField(
+              street,
+              duplicateLead.street,
+              isCrmOwned,
+            ),
+            city: resolveMergedField(city, duplicateLead.city, isCrmOwned),
+            state: resolveMergedField(state, duplicateLead.state, isCrmOwned),
+            zipCode: resolveMergedField(
+              zipCode,
+              duplicateLead.zipCode,
+              isCrmOwned,
+            ),
+            tags: Array.from(
+              new Set([...(duplicateLead.tags || []), ...(tags || [])]),
+            ),
+            emailOptIn:
+              emailOptIn !== undefined
+                ? !!emailOptIn
+                : duplicateLead.emailOptIn,
+            smsOptIn:
+              smsOptIn !== undefined ? !!smsOptIn : duplicateLead.smsOptIn,
+            consentSource: optInSource || duplicateLead.consentSource,
+            consentTimestamp:
+              optInTimestamp || duplicateLead.consentTimestamp,
+          },
+        });
+        updatedCount++;
+        continue;
       }
     }
 
-    const updateData = {};
-    if (firstName !== undefined) updateData.firstName = firstName;
-    if (lastName !== undefined) updateData.lastName = lastName;
-    if (email !== undefined) updateData.email = email || null;
-    if (phone !== undefined) updateData.phone = phone || null;
-    if (street !== undefined) updateData.street = street || null;
-    if (city !== undefined) updateData.city = city || null;
-    if (state !== undefined) updateData.state = state || null;
-    if (zipCode !== undefined) updateData.zipCode = zipCode || null;
-    if (status !== undefined) updateData.status = status;
-    if (ownerId !== undefined) updateData.ownerId = ownerId || null;
-    if (tags !== undefined) updateData.tags = tags;
-    if (emailOptIn !== undefined) updateData.emailOptIn = !!emailOptIn;
-    if (smsOptIn !== undefined) updateData.smsOptIn = !!smsOptIn;
-    if (consentSource !== undefined) updateData.consentSource = consentSource;
-    if (customFields !== undefined) updateData.customFields = customFields;
-
-    if (
-      (emailOptIn !== undefined && !!emailOptIn !== lead.emailOptIn) ||
-      (smsOptIn !== undefined && !!smsOptIn !== lead.smsOptIn)
-    ) {
-      updateData.consentTimestamp = new Date();
-      if (!updateData.consentSource && !lead.consentSource) {
-        updateData.consentSource = "Manual Update";
-      }
-    }
-
-    const updatedLead = await prisma.lead.update({
-      where: { id },
-      data: updateData,
-      include: {
-        owner: {
-          select: { name: true, email: true },
-        },
+    // Create new
+    await prisma.lead.create({
+      data: {
+        companyId: req.user.companyId,
+        source: "CSV",
+        firstName,
+        lastName,
+        email: email || null,
+        phone: phone || null,
+        street: street || null,
+        city: city || null,
+        state: state || null,
+        zipCode: zipCode || null,
+        status: LEAD_STATUS.NEW,
+        ownerId: req.user.id,
+        tags: tags || [],
+        emailOptIn: !!emailOptIn,
+        smsOptIn: !!smsOptIn,
+        consentSource: optInSource,
+        consentTimestamp: optInTimestamp,
       },
     });
 
-    if (status !== undefined && status !== lead.status) {
-      await afterStatusChange(req.user.companyId, id, status, lead.status);
-    }
-    const writeBack = {};
-    if (status !== undefined && status !== lead.status)
-      writeBack.status = status;
-    if (emailOptIn !== undefined && !!emailOptIn !== lead.emailOptIn)
-      writeBack.emailOptIn = !!emailOptIn;
-    if (smsOptIn !== undefined && !!smsOptIn !== lead.smsOptIn)
-      writeBack.smsOptIn = !!smsOptIn;
-    if (Object.keys(writeBack).length > 0) {
-      writeBackLeadToSalesforce(req.user.companyId, id, writeBack).catch((e) =>
-        console.error(
-          "[Lead Update] Salesforce write-back failed:",
-          e?.message || e,
-        ),
-      );
-    }
-
-    return res.json(updatedLead);
-  } catch (error) {
-    console.error("Update lead error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    createdCount++;
   }
+
+  return res.json({
+    totalProcessed: leadsList.length,
+    createdCount,
+    updatedCount,
+    skippedCount,
+    errorsCount: errors.length,
+    errors,
+  });
+};
+
+export const deleteLead = async (req, res) => {
+  const { id } = req.params;
+
+  const lead = await prisma.lead.findUnique({
+    where: { id },
+  });
+
+  if (!lead || lead.companyId !== req.user.companyId) {
+    return res.status(404).json({ message: "Lead not found." });
+  }
+
+  if (
+    req.user.role.toUpperCase() === "HOMEOWNER" &&
+    lead.ownerId !== req.user.id
+  ) {
+    return res
+      .status(403)
+      .json({ message: "You do not have permission to delete this lead." });
+  }
+
+  await prisma.lead.delete({
+    where: { id },
+  });
+
+  return res.json({ message: "Lead deleted successfully." });
+};
+
+export const updateLead = async (req, res) => {
+  const { id } = req.params;
+
+  const lead = await prisma.lead.findUnique({
+    where: { id },
+  });
+
+  if (!lead || lead.companyId !== req.user.companyId) {
+    return res.status(404).json({ message: "Lead not found." });
+  }
+
+  if (
+    req.user.role.toUpperCase() === "HOMEOWNER" &&
+    lead.ownerId !== req.user.id
+  ) {
+    return res
+      .status(403)
+      .json({ message: "You do not have permission to update this lead." });
+  }
+
+  const {
+    firstName,
+    lastName,
+    email,
+    phone,
+    street,
+    city,
+    state,
+    zipCode,
+    status,
+    ownerId,
+    tags,
+    emailOptIn,
+    smsOptIn,
+    consentSource,
+    customFields,
+  } = req.body;
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (email && !emailRegex.test(email)) {
+    return res.status(400).json({ message: "Invalid email format." });
+  }
+  if (status !== undefined && !ALLOWED_LEAD_STATUSES.has(status)) {
+    return res.status(400).json({ message: "Invalid lead status." });
+  }
+  // An older non-+1 number on file doesn't block edits to the rest of the lead.
+  if (phone && phone !== lead.phone && !toE164(phone)) {
+    return res.status(400).json({ message: PHONE_ERROR });
+  }
+
+  if (ownerId !== undefined && ownerId !== null) {
+    if (req.user.role.toUpperCase() === "HOMEOWNER") {
+      return res.status(403).json({ message: "You cannot reassign a lead." });
+    }
+    const agent = await prisma.user.findFirst({
+      where: { id: ownerId, companyId: req.user.companyId, role: { in: ["ADMIN", "STAFF"] } },
+      select: { id: true },
+    });
+    if (!agent) {
+      return res.status(400).json({ message: "That agent is not part of this company." });
+    }
+  }
+
+  const updateData = {};
+  if (firstName !== undefined) updateData.firstName = firstName;
+  if (lastName !== undefined) updateData.lastName = lastName;
+  if (email !== undefined) updateData.email = email || null;
+  if (phone !== undefined) updateData.phone = phone || null;
+  if (street !== undefined) updateData.street = street || null;
+  if (city !== undefined) updateData.city = city || null;
+  if (state !== undefined) updateData.state = state || null;
+  if (zipCode !== undefined) updateData.zipCode = zipCode || null;
+  if (status !== undefined) updateData.status = status;
+  if (ownerId !== undefined) updateData.ownerId = ownerId || null;
+  if (tags !== undefined) updateData.tags = tags;
+  if (emailOptIn !== undefined) updateData.emailOptIn = !!emailOptIn;
+  if (smsOptIn !== undefined) updateData.smsOptIn = !!smsOptIn;
+  if (consentSource !== undefined) updateData.consentSource = consentSource;
+  if (customFields !== undefined) updateData.customFields = customFields;
+
+  if (
+    (emailOptIn !== undefined && !!emailOptIn !== lead.emailOptIn) ||
+    (smsOptIn !== undefined && !!smsOptIn !== lead.smsOptIn)
+  ) {
+    updateData.consentTimestamp = new Date();
+    if (!updateData.consentSource && !lead.consentSource) {
+      updateData.consentSource = "Manual Update";
+    }
+  }
+
+  const updatedLead = await prisma.lead.update({
+    where: { id },
+    data: updateData,
+    include: {
+      owner: {
+        select: { name: true, email: true },
+      },
+    },
+  });
+
+  if (status !== undefined && status !== lead.status) {
+    await afterStatusChange(req.user.companyId, id, status, lead.status);
+  }
+  const writeBack = {};
+  if (status !== undefined && status !== lead.status)
+    writeBack.status = status;
+  if (emailOptIn !== undefined && !!emailOptIn !== lead.emailOptIn)
+    writeBack.emailOptIn = !!emailOptIn;
+  if (smsOptIn !== undefined && !!smsOptIn !== lead.smsOptIn)
+    writeBack.smsOptIn = !!smsOptIn;
+  if (Object.keys(writeBack).length > 0) {
+    writeBackLeadToSalesforce(req.user.companyId, id, writeBack).catch((e) =>
+      console.error(
+        "[Lead Update] Salesforce write-back failed:",
+        e?.message || e,
+      ),
+    );
+  }
+
+  return res.json(updatedLead);
 };
 

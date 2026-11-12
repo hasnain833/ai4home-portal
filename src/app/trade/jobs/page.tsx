@@ -1,23 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { CalendarClock, CheckCircle2, ChevronRight, MapPin, Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatVisit, jobStage, type TradeJob } from "@/components/trade/jobs";
+import { useQuery } from "@/lib/use-query";
 
 export default function TradeJobsPage() {
-  const [jobs, setJobs] = useState<TradeJob[] | null>(null);
-  const [error, setError] = useState("");
+  const { data: jobs, error: loadError } = useQuery<TradeJob[]>("/api/trade/jobs");
+  const error = loadError ? "Could not load your jobs." : "";
   const [tab, setTab] = useState<"open" | "closed">("open");
-
-  useEffect(() => {
-    fetch("/api/trade/jobs")
-      .then(async (r) => (r.ok ? setJobs(await r.json()) : Promise.reject()))
-      .catch(() => setError("Could not load your jobs."));
-  }, []);
 
   const open = (jobs || []).filter((j) => j.status === "DISPATCHED");
   const closed = (jobs || []).filter((j) => j.status === "RESOLVED");

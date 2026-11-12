@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Loader2, Calendar } from "lucide-react";
 import { toast } from "sonner";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
 import { sendJson } from "@/lib/b2b-store";
 
 type SalesAgentAppointment = {
@@ -34,7 +34,6 @@ const STATUS_STYLES: Record<string, string> = {
   NO_SHOW: "bg-amber-500/10 text-amber-600",
   CANCELLED: "bg-zinc-500/10 text-zinc-500",
 };
-const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 
 export default function SalesAgentAppointmentsPage() {
   const [appointments, setAppointments] = useState<SalesAgentAppointment[]>([]);
