@@ -734,7 +734,7 @@ function JourneyTab() {
           <h3 className="text-sm font-semibold">Add builders</h3>
           <Button size="sm" className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={!picked.size} onClick={join}>Add {picked.size || ""} to journey</Button>
         </div>
-        <p className="text-xs text-muted-foreground">Website leads with marketing consent join by themselves. Add CSV and manual leads here. Leads who opted out of email or are Signed or Lost aren&apos;t listed.</p>
+        <p className="text-xs text-muted-foreground">New leads join by themselves: website leads need marketing consent, CSV and manual leads don&apos;t. Add older CSV and manual leads here. Leads who opted out of email or are Signed or Lost aren&apos;t listed.</p>
         {journey.available.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">No leads to add.</p>
         ) : (

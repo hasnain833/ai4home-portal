@@ -1,6 +1,8 @@
 import prisma from "../lib/prisma.js";
 import { recordUsage, countSegments } from "../lib/usage.js";
 import { isCompanySuspended } from "../lib/company-suspension.js";
+import { toE164 } from "../lib/lead-phone.js";
+export { PHONE_ERROR, toE164 } from "../lib/lead-phone.js";
 
 const TELNYX_API_BASE = "https://api.telnyx.com/v2";
 const TELNYX_PROVIDER = "TELNYX_SMS";
@@ -28,7 +30,6 @@ export const SMS_OUTCOME = {
   SKIPPED: "skipped",
 };
 
-export const PHONE_ERROR = "Only +1 phone numbers are supported, e.g. +1 (555) 123-4567.";
 export const NON_PLUS_ONE_TAG = "non-+1-phone";
 
 export const smsSent = (result) => result?.outcome === SMS_OUTCOME.SENT;
@@ -133,16 +134,9 @@ export function normalizePhone(value) {
 
 // Phone as typed -> E.164 for Telnyx. We only text +1 (US and Canada); bare
 // 10-digit numbers are taken as +1. "" -> null (clear); anything else -> undefined (reject).
-export function toE164(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return null;
-  const digits = normalizePhone(raw);
-  const withCountry = digits.length === 10 && !raw.startsWith("+") ? `1${digits}` : digits;
-  return /^1[2-9]\d{9}$/.test(withCountry) ? `+${withCountry}` : undefined;
-}
 
 // For imports and CRM sync: one bad number shouldn't cost us the lead, so keep it without a phone.
-export const usablePhone = (value) => (toE164(value) ? value : null);
+export const usablePhone = (value) => toE164(value) || null;
 
 const NAME_TTL_MS = 60_000;
 const nameCache = new Map();

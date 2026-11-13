@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma.js";
+import { isLeadPhoneError } from "../lib/lead-phone.js";
 import { runClaudeTurn } from "../inngest/functions/appointment.js";
 import { queryDetailed as kbQueryDetailed } from "../services/vector-store.service.js";
 import {
@@ -8,7 +9,7 @@ import {
   leadTimezone,
   bookSlot,
 } from "../services/scheduling-service.js";
-import { normalizePhone, PHONE_ERROR, toE164 } from "../services/sms.service.js";
+import { PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import { KB_SCOPES } from "../lib/sales-ai.js";
 import { withInventory, homeCards } from "../lib/sales-homes.js";
 import { hasPlatformAi } from "../lib/ai-config.js";
@@ -173,7 +174,7 @@ export const bookVisit = async (req, res) => {
     const b = req.body || {};
     const name = String(b.name || "").trim().replace(/\s+/g, " ");
     const email = String(b.email || "").trim().toLowerCase();
-    const phone = normalizePhone(b.phone);
+    const phone = toE164(b.phone);
 
     if (name.length < 2) return res.status(400).json({ message: "Enter the buyer's name" });
     if (!EMAIL_RE.test(email)) return res.status(400).json({ message: "Enter a valid email address" });
@@ -250,6 +251,7 @@ export const bookVisit = async (req, res) => {
     });
   } catch (error) {
     console.error("[Sales Chat] Booking failed:", error);
+    if (isLeadPhoneError(error)) return res.status(error.status).json({ message: error.message });
     return res.status(500).json({ message: "The visit could not be booked. Please try again." });
   }
 };

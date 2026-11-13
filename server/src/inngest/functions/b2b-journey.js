@@ -182,7 +182,7 @@ export const generateContentBatch = inngest.createFunction(
   },
 );
 
-/** Finds who is due, adds new website leads, and hands each lead to its own job. */
+/** Finds who is due, adds new leads, and hands each lead to its own job. */
 export const runB2BJourney = inngest.createFunction(
   { id: "b2b-journey-scheduler", triggers: [{ cron: "*/15 * * * *" }] },
   async ({ step }) => {

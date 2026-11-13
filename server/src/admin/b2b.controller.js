@@ -1,5 +1,6 @@
 import { bookB2BMeeting, getPlatformSlots as openSlots } from "../services/website-sales.js";
 import prisma from "../lib/prisma.js";
+import { isLeadPhoneError } from "../lib/lead-phone.js";
 import { queueSalesforceDeletion } from "../services/b2b-salesforce-sync.js";
 import { adminHandler } from "../middlewares/auth.js";
 import { PHONE_ERROR, sendSms, smsSent, toE164 } from "../services/sms.service.js";
@@ -181,8 +182,29 @@ export const importLeads = wrap("Lead import", async (req, res) => {
     seen.add(data.email);
     valid.push({ ...data, source: "CSV" });
   }
-  const { count } = await prisma.b2BLead.createMany({ data: valid, skipDuplicates: true });
-  res.json({ imported: count, duplicates: valid.length - count, invalid });
+  let count = 0;
+  const errors = [];
+  for (let i = 0; i < valid.length; i += 100) {
+    const batch = valid.slice(i, i + 100);
+    try {
+      const result = await prisma.b2BLead.createMany({ data: batch, skipDuplicates: true });
+      count += result.count;
+    } catch (error) {
+      if (!isLeadPhoneError(error)) throw error;
+      // The failed batch was rolled back. Isolate its conflicting rows while
+      // keeping the normal path efficient for large files.
+      for (const data of batch) {
+        try {
+          const result = await prisma.b2BLead.createMany({ data: [data], skipDuplicates: true });
+          count += result.count;
+        } catch (rowError) {
+          if (!isLeadPhoneError(rowError)) throw rowError;
+          errors.push({ email: data.email, reason: rowError.message });
+        }
+      }
+    }
+  }
+  res.json({ imported: count, duplicates: valid.length - count - errors.length, invalid, errors });
 });
 
 export const updateLead = wrap("Lead update", async (req, res) => {

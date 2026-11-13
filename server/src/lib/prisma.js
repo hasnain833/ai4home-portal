@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { leadPhoneExtension } from "./lead-phone.js";
 
 function runtimeDatabaseUrl(rawUrl, serverless = Boolean(process.env.VERCEL)) {
   if (!rawUrl) throw new Error("DATABASE_URL is required");
@@ -54,6 +55,6 @@ pool.on("error", (err) => {
 
 const adapter = new PrismaPg(pool);
 
-const prisma = new PrismaClient({ adapter });
+const prisma = new PrismaClient({ adapter }).$extends(leadPhoneExtension);
 
 export default prisma;

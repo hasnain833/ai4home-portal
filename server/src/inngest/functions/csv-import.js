@@ -1,5 +1,6 @@
 import { inngest } from "../../lib/inngest.js";
 import prisma from "../../lib/prisma.js";
+import { isLeadPhoneError } from "../../lib/lead-phone.js";
 import { triggerAutomation } from "../../lib/automation-events.js";
 import { validateLeadRow, sanitizeCsvValue } from "../../lib/csv-validation.js";
 import { findDuplicateLead, resolveMergedField } from "../../lib/lead-dedup.js";
@@ -86,65 +87,70 @@ export const handleCsvImport = inngest.createFunction(
           const smsOptIn = Boolean(lead.smsOptIn);
           const tags = (Array.isArray(lead.tags) ? lead.tags : []).map(sanitizeCsvValue);
           if (lead.phone && !phone) tags.push(NON_PLUS_ONE_TAG);
-          const duplicateLead = await findDuplicateLead(companyId, email, phone);
+          try {
+            const duplicateLead = await findDuplicateLead(companyId, email, phone);
 
-          const optInSource = emailOptIn || smsOptIn ? "CSV Import" : null;
-          const optInTimestamp = emailOptIn || smsOptIn ? new Date() : null;
+            const optInSource = emailOptIn || smsOptIn ? "CSV Import" : null;
+            const optInTimestamp = emailOptIn || smsOptIn ? new Date() : null;
 
-          if (duplicateLead) {
-            if (mergeStrategy === "skip") {
-              skippedCount++;
-              continue;
-            } else if (mergeStrategy === "update") {
-              const mergedTags = Array.from(new Set([...duplicateLead.tags, ...tags]));
-              const isCrmOwned = !!duplicateLead.externalId;
+            if (duplicateLead) {
+              if (mergeStrategy === "skip") {
+                skippedCount++;
+                continue;
+              } else if (mergeStrategy === "update") {
+                const mergedTags = Array.from(new Set([...duplicateLead.tags, ...tags]));
+                const isCrmOwned = !!duplicateLead.externalId;
 
-              await prisma.lead.update({
-                where: { id: duplicateLead.id },
-                data: {
-                  firstName: resolveMergedField(firstName, duplicateLead.firstName, isCrmOwned),
-                  lastName: resolveMergedField(lastName, duplicateLead.lastName, isCrmOwned),
-                  email: resolveMergedField(email, duplicateLead.email, isCrmOwned),
-                  phone: resolveMergedField(phone, duplicateLead.phone, isCrmOwned),
-                  street: resolveMergedField(street, duplicateLead.street, isCrmOwned),
-                  city: resolveMergedField(city, duplicateLead.city, isCrmOwned),
-                  state: resolveMergedField(state, duplicateLead.state, isCrmOwned),
-                  zipCode: resolveMergedField(zipCode, duplicateLead.zipCode, isCrmOwned),
-                  tags: mergedTags,
-                  emailOptIn: lead.emailOptIn !== undefined ? emailOptIn : duplicateLead.emailOptIn,
-                  smsOptIn: lead.smsOptIn !== undefined ? smsOptIn : duplicateLead.smsOptIn,
-                  consentSource: optInSource || duplicateLead.consentSource,
-                  consentTimestamp: optInTimestamp || duplicateLead.consentTimestamp,
-                },
-              });
-              updatedCount++;
-              continue;
+                await prisma.lead.update({
+                  where: { id: duplicateLead.id },
+                  data: {
+                    firstName: resolveMergedField(firstName, duplicateLead.firstName, isCrmOwned),
+                    lastName: resolveMergedField(lastName, duplicateLead.lastName, isCrmOwned),
+                    email: resolveMergedField(email, duplicateLead.email, isCrmOwned),
+                    phone: resolveMergedField(phone, duplicateLead.phone, isCrmOwned),
+                    street: resolveMergedField(street, duplicateLead.street, isCrmOwned),
+                    city: resolveMergedField(city, duplicateLead.city, isCrmOwned),
+                    state: resolveMergedField(state, duplicateLead.state, isCrmOwned),
+                    zipCode: resolveMergedField(zipCode, duplicateLead.zipCode, isCrmOwned),
+                    tags: mergedTags,
+                    emailOptIn: lead.emailOptIn !== undefined ? emailOptIn : duplicateLead.emailOptIn,
+                    smsOptIn: lead.smsOptIn !== undefined ? smsOptIn : duplicateLead.smsOptIn,
+                    consentSource: optInSource || duplicateLead.consentSource,
+                    consentTimestamp: optInTimestamp || duplicateLead.consentTimestamp,
+                  },
+                });
+                updatedCount++;
+                continue;
+              }
             }
-          }
 
-          const createdLead = await prisma.lead.create({
-            data: {
-              companyId,
-              source: "CSV",
-              firstName,
-              lastName,
-              email: email || null,
-              phone: phone || null,
-              street: street || null,
-              city: city || null,
-              state: state || null,
-              zipCode: zipCode || null,
-              tags: tags,
-              status: "New",
-              ownerId: userId,
-              emailOptIn,
-              smsOptIn,
-              consentSource: optInSource,
-              consentTimestamp: optInTimestamp,
-            },
-          });
-          createdCount++;
-          createdLeadIds.push(createdLead.id);
+            const createdLead = await prisma.lead.create({
+              data: {
+                companyId,
+                source: "CSV",
+                firstName,
+                lastName,
+                email: email || null,
+                phone: phone || null,
+                street: street || null,
+                city: city || null,
+                state: state || null,
+                zipCode: zipCode || null,
+                tags: tags,
+                status: "New",
+                ownerId: userId,
+                emailOptIn,
+                smsOptIn,
+                consentSource: optInSource,
+                consentTimestamp: optInTimestamp,
+              },
+            });
+            createdCount++;
+            createdLeadIds.push(createdLead.id);
+          } catch (error) {
+            if (!isLeadPhoneError(error)) throw error;
+            errors.push({ row: rowNum, reason: error.message, firstName, lastName, email: email || "", phone: phone || "" });
+          }
         }
 
           return {

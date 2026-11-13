@@ -101,7 +101,6 @@ model Company {
   salesEnabled            Boolean                 @default(false)
   warrantyEnabled         Boolean                 @default(true)
   verificationStatus      String                  @default("PENDING")
-  // Set by Super Admin → Companies. Blocks logins, public entry points and all outbound messages; data is kept.
   suspendedAt             DateTime?
   verificationDocUrl      String?
   verificationSubmittedAt DateTime?
@@ -352,6 +351,14 @@ enum LeadSource {
   SALESFORCE
   CSV
   MANUAL
+}
+
+model LeadPhoneRegistry {
+  phone     String @id(map: "lead_phone_registry_phone_key")
+  ownerType String
+  ownerId   String
+
+  @@unique([ownerType, ownerId])
 }
 
 model Lead {
@@ -924,10 +931,6 @@ model ScrapedNews {
   @@index([companyId, publishedAt])
 }
 
-/// Platform news, curated in Super Admin → News. Builders see only PUBLISHED posts.
-/// status: CANDIDATE (scraped, unreviewed) · DRAFT (AI-combined or written, being edited)
-///         PUBLISHED · REJECTED · USED (a candidate folded into a published combined post)
-/// origin: SCRAPED · AI · MANUAL
 model NewsPost {
   id              String    @id @default(cuid())
   status          String    @default("CANDIDATE")
@@ -937,7 +940,6 @@ model NewsPost {
   originalUrl     String
   source          String
   imageUrl        String?
-  /// Combined posts: the candidates they were written from, [{ id, title, url, source }].
   sources         Json?
   articleDate     DateTime  @default(now())
   publishedAt     DateTime?
@@ -963,7 +965,6 @@ model SalesAgentAppointment {
   b2bLead       B2BLead?  @relation(fields: [b2bLeadId], references: [id], onDelete: SetNull)
   reminderSentAt DateTime?
   calendlyEventUri String?
-  // Where to join (video link, address or phone), read from Calendly or the booking settings.
   meetingUrl    String?
   salesforceEventId  String?
   salesforceHash     String?
@@ -1004,7 +1005,6 @@ model B2BLead {
   journeyHoldReason String?
   journeyEnteredAt DateTime?
   profile      Json?
-  // AI4Home's own Salesforce org (Super Admin > Salesforce). Synced = the updatedAt last sent or received.
   salesforceId       String?   @unique
   salesforceHash     String?
   salesforceSyncedAt DateTime?
@@ -1020,8 +1020,6 @@ model B2BLead {
   @@index([journeyNextAt])
 }
 
-// The short link in a campaign text (/m/<code>). It stands for the lead's full booking link,
-// including which campaign and step it came from, so the redirect keeps click tracking.
 model B2BShortLink {
   code       String   @id
   leadId     String
@@ -1033,7 +1031,6 @@ model B2BShortLink {
   @@index([leadId, campaignId, stepId])
 }
 
-// Records deleted in the portal that still have to be deleted in AI4Home's Salesforce org.
 model SalesforceDeletion {
   id        String   @id @default(cuid())
   sobject   String
@@ -1053,7 +1050,6 @@ model B2BCampaign {
   updatedAt   DateTime        @updatedAt
 }
 
-// The conversation with a B2B lead: their replies and the agent's answers.
 model B2BMessage {
   id        String    @id @default(cuid())
   leadId    String
@@ -1067,7 +1063,6 @@ model B2BMessage {
   note      String?
   handledAt DateTime?
   contentItemId String?
-  // Salesforce Task id once logged; "FAILED" when Salesforce rejected it for good.
   salesforceTaskId String?
   createdAt DateTime  @default(now())
 
@@ -1076,7 +1071,6 @@ model B2BMessage {
   @@index([actor, createdAt])
 }
 
-// Reviewed nurture content. The journey only ever sends APPROVED items, word for word.
 model B2BContentItem {
   id         String    @id @default(cuid())
   category   String
@@ -1100,7 +1094,6 @@ model B2BContentItem {
   @@index([batchId])
 }
 
-// Articles and notes staff trust. The AI only drafts industry content from these.
 model B2BContentSource {
   id        String   @id @default(cuid())
   title     String
@@ -1422,7 +1415,6 @@ model B2BInquiry {
   @@index([nextAttemptAt])
 }
 
-// Platform website conversations; isolated from builder/tenant agent data.
 model WebsiteConversation {
   id String @id
   visitorKey String

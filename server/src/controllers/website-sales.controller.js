@@ -1,5 +1,6 @@
 import { waitUntil } from "@vercel/functions";
 import prisma from "../lib/prisma.js";
+import { isLeadPhoneError } from "../lib/lead-phone.js";
 import { toolCall } from "../lib/llm.js";
 import { websiteVisitorKey } from "../middlewares/website-intake-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
@@ -157,7 +158,7 @@ export async function websiteSales(req, res) {
     console.error("[Website Agent] Request failed", { conversationId, requestId, error: error.message });
     if (locked) await prisma.websiteConversation.updateMany({ where: { id: conversationId, processingUntil: leaseUntil }, data: { lastError: String(error.message).slice(0, 1000) } }).catch(() => {});
     await writeAuditLog({ req, action: "website_agent.request_failed", targetType: "WebsiteConversation", targetId: uuid.test(conversationId || "") ? conversationId : null, metadata: { requestId: uuid.test(requestId) ? requestId : null, error: String(error.message).slice(0, 500) } });
-    return res.status(error.status || 503).json({ message: "We couldn't complete your request. Please retry or contact our team.", requestId });
+    return res.status(error.status || 503).json({ message: isLeadPhoneError(error) ? error.message : "We couldn't complete your request. Please retry or contact our team.", requestId });
   } finally {
     if (locked) await prisma.websiteConversation.updateMany({ where: { id: conversationId, processingUntil: leaseUntil }, data: { processingUntil: null } }).catch(() => {});
   }

@@ -1,7 +1,8 @@
 import prisma from "../lib/prisma.js";
+import { isLeadPhoneError } from "../lib/lead-phone.js";
 import { findDuplicateLead } from "../lib/lead-dedup.js";
 import { triggerAutomation } from "../lib/automation-events.js";
-import { normalizePhone, PHONE_ERROR, toE164 } from "../services/sms.service.js";
+import { PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import { pushLeadToSalesforce } from "../services/salesforce-writeback.js";
 
 // ponytail: no per-company form key, add a rotatable one if a form gets spammed.
@@ -54,7 +55,7 @@ export const submitLeadForm = async (req, res) => {
     let lastName = clip(b.lastName, 80);
     if (!firstName && b.name) [firstName, lastName = ""] = clip(b.name, 160).split(/ (.*)/);
     const email = clip(b.email, 200).toLowerCase();
-    const phone = normalizePhone(b.phone);
+    const phone = toE164(b.phone);
 
     if (!firstName) return res.status(400).json({ message: "Please enter your name." });
     if (email && !EMAIL_RE.test(email)) return res.status(400).json({ message: "Please enter a valid email address." });
@@ -122,6 +123,7 @@ export const submitLeadForm = async (req, res) => {
     return done();
   } catch (error) {
     console.error("[Lead Form] Submission failed:", error);
+    if (isLeadPhoneError(error)) return res.status(error.status).json({ message: error.message });
     return res.status(500).json({ message: "Something went wrong. Please try again." });
   }
 };

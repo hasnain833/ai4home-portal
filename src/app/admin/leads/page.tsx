@@ -194,11 +194,16 @@ export default function AdminLeadsPage() {
     if (!preview?.rows.length) return;
     setSaving(true);
     try {
-      const r = await sendJson<{ imported: number; duplicates: number; invalid: number }>(`${B2B_API}/leads/import`, "POST", {
+      const r = await sendJson<{ imported: number; duplicates: number; invalid: number; errors?: { email: string; reason: string }[] }>(`${B2B_API}/leads/import`, "POST", {
         rows: preview.rows,
       });
-      const extra = r.duplicates + r.invalid;
+      const extra = r.duplicates + r.invalid + (r.errors?.length || 0);
       toast.success(`Imported ${r.imported} lead${r.imported === 1 ? "" : "s"}${extra ? ` · ${extra} skipped` : ""}.`);
+      if (r.errors?.length) {
+        toast.warning(`${r.errors.length} lead${r.errors.length === 1 ? " was" : "s were"} skipped because of phone conflicts.`, {
+          description: r.errors.slice(0, 3).map((error) => `${error.email}: ${error.reason}`).join("\n"),
+        });
+      }
       closeImport();
       await reload();
     } catch (e) {

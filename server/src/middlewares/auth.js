@@ -1,5 +1,6 @@
 import { supabase } from "../lib/supabase.js";
 import prisma from "../lib/prisma.js";
+import { isLeadPhoneError } from "../lib/lead-phone.js";
 import {
   verifySuperadminSessionToken,
   createSuperadminSessionToken,
@@ -376,6 +377,7 @@ export const adminHandler = (tag) => (label, fn, { admin = true } = {}) => async
     await fn(req, res);
   } catch (error) {
     console.error(`[${tag}] ${label} failed:`, error);
+    if (isLeadPhoneError(error)) return res.status(error.status).json({ message: error.message });
     res.status(500).json({ message: `${label} failed. Please try again.` });
   }
 };

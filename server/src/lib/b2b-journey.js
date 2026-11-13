@@ -105,12 +105,17 @@ export async function joinJourney(leadIds) {
   return { joined, skipped: leadIds.length - joined };
 }
 
-/** Website leads who gave marketing consent join once. CSV and manual leads join only when staff add them. */
+// Manual and CSV leads made before auto-join existed stay manual, so turning it on didn't email the whole backlog.
+const MANUAL_AUTO_JOIN_FROM = new Date("2026-11-13T00:00:00Z");
+
+/** Leads join once: website leads only with marketing consent, manual and CSV leads made since auto-join started. */
 export async function autoJoinWebsiteLeads() {
   const leads = await prisma.b2BLead.findMany({
     where: {
-      source: { startsWith: "WEBSITE_" },
-      marketingOptIn: true,
+      OR: [
+        { source: { startsWith: "WEBSITE_" }, marketingOptIn: true },
+        { source: { in: ["MANUAL", "CSV"] }, createdAt: { gte: MANUAL_AUTO_JOIN_FROM } },
+      ],
       emailOptOut: false,
       journeyStage: null,
       journeyEnteredAt: null,
