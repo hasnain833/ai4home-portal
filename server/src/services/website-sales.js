@@ -90,10 +90,6 @@ export async function bookB2BMeeting({ lead, start, setting, campaignId }) {
 
   // Booked: this lead leaves every campaign; the campaigns carry on for everyone else.
   await exitB2BEnrollments(lead.id, "APPOINTMENT");
-  await prisma.b2BLead.updateMany({
-    where: { id: lead.id, journeyStage: { not: null } },
-    data: { journeyStage: "APPOINTMENT_BOOKED", journeyTouches: 0, journeyNextAt: new Date(), journeyHoldReason: null },
-  });
   if (["NEW", "CONTACTED"].includes(lead.status)) {
     await prisma.b2BLead.update({ where: { id: lead.id }, data: { status: "INTERESTED" } });
   }
@@ -159,9 +155,7 @@ export async function saveSalesBooking(id, payload, db = prisma, availability = 
         const label = formatSlotLabel(start, setting.timezone);
         await tx.salesAgentAppointment.create({ data: { id, name: payload.name, email: payload.email, phone: payload.phone, preferredTime: label, source: "WEBSITE_SALES", startTime: start, b2bLeadId: lead.id, calendlyEventUri: eventUri } });
         await tx.b2BInquiry.create({ data: { id, leadId: lead.id, type: "BOOKING", payload: { ...payload, label, slotDuration: setting.slotDuration }, payloadHash: hash, marketingConsent: payload.marketingConsent, consentText: `${WEBSITE_CONSENT_TEXT}\nMeeting consent: Receive email and SMS confirmations for this booking.` } });
-        await tx.b2BEnrollment.updateMany({ where: { leadId: lead.id, status: "ACTIVE" }, data: { status: "EXITED", exitedReason: "APPOINTMENT", nextRunAt: null } });
-        await tx.b2BLead.updateMany({ where: { id: lead.id, journeyStage: { not: null } }, data: { journeyStage: "APPOINTMENT_BOOKED", journeyTouches: 0, journeyNextAt: new Date(), journeyHoldReason: null } });
-        return { label, appointmentId: id };
+        await tx.b2BEnrollment.updateMany({ where: { leadId: lead.id, status: "ACTIVE" }, data: { status: "EXITED", exitedReason: "APPOINTMENT", nextRunAt: null } });        return { label, appointmentId: id };
       }, { isolationLevel: "Serializable" });
     } catch (e) {
       if (attempt < 2 && ["P2034", "P2002"].includes(e.code)) continue;

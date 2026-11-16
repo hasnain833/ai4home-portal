@@ -31,6 +31,7 @@ import { parseCsv } from "@/lib/csv";
 import { apiFetch, errorMessage } from "@/lib/api";
 import {
   B2B_API,
+  B2B_AUTO_ID,
   B2B_LEAD_STATUSES,
   type B2BLead,
   type B2BLeadStatus,
@@ -120,13 +121,15 @@ export default function AdminLeadsPage() {
     else toast.error("That lead wasn't found. It may have been deleted.");
   }, [loading, leads]);
 
-  const setJourney = async (join: boolean) => {
+  const inAutoNurture = !!timelineFor?.activeCampaigns.some((c) => c.id === B2B_AUTO_ID);
+  const setAutoNurture = async (join: boolean) => {
     if (!timelineFor) return;
     try {
-      const out = await sendJson<{ joined?: number }>(`${B2B_API}/nurture/journey/${join ? "join" : "remove"}`, "POST", { leadIds: [timelineFor.id] });
-      if (join && !out.joined) toast.error("This lead can't join: it is closed, opted out of email, or already in the journey.");
-      else toast.success(join ? "Added to the journey." : "Removed from the journey.");
-      await Promise.all([openTimeline(timelineFor), reload()]);
+      const out = await sendJson<{ enrolled?: number }>(`${B2B_API}/campaigns/${B2B_AUTO_ID}/${join ? "enroll" : "unenroll"}`, "POST", { leadIds: [timelineFor.id] });
+      if (join && !out.enrolled) toast.error("This lead can't join: it is closed or opted out.");
+      else toast.success(join ? "Added to the 180-day nurture. It starts from the first touch." : "Removed from the 180-day nurture.");
+      const fresh = await reload();
+      setTimelineFor(fresh.find((l) => l.id === timelineFor.id) || timelineFor);
     } catch (e) {
       toast.error(errorMessage(e));
     }
@@ -464,13 +467,9 @@ export default function AdminLeadsPage() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3 text-sm">
-                <span className="min-w-0">
-                  {timeline.journeyStage ? `Journey: ${titleCase(timeline.journeyStage)}.` : "Not in the journey."}
-                  {timeline.journeyNextAt && ` Next step ${new Date(timeline.journeyNextAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.`}
-                  {timeline.journeyHoldReason && ` On hold: ${timeline.journeyHoldReason}.`}
-                </span>
-                <Button variant="outline" size="sm" onClick={() => setJourney(!timeline.journeyStage)}>
-                  {timeline.journeyStage ? "Remove from journey" : "Add to journey"}
+                <span className="min-w-0">{inAutoNurture ? "In the 180-day nurture." : "Not in the 180-day nurture."}</span>
+                <Button variant="outline" size="sm" onClick={() => setAutoNurture(!inAutoNurture)}>
+                  {inAutoNurture ? "Remove from nurture" : "Add to nurture"}
                 </Button>
               </div>
               {timeline.profile && (

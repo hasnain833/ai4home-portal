@@ -46,6 +46,10 @@ type Touch = {
   body: string;
   enabled: boolean;
   edited: boolean;
+  /** B2B only: Sales has a separate analytics page. */
+  sent?: number;
+  opened?: number;
+  clicked?: number;
 };
 
 type Phase = { id: number; name: string; range: string; goal: string; activeLeads: number };
@@ -58,8 +62,6 @@ type Workflow = {
   stats: { enrolled: number; active: number; booked: number; replied: number; optedOut: number; completed: number };
 };
 
-const API = "/api/sales/campaigns/auto";
-
 function timing(at: number) {
   if (at === 0) return "Instantly";
   if (at < 60) return `+${at} min`;
@@ -67,19 +69,59 @@ function timing(at: number) {
   return `Day ${Math.round(at / 1440)}`;
 }
 
-async function rewriteWithAi(t: Touch) {
-  const data = await api.post<{ subject?: string; body?: string }>("/api/sales/campaigns/generate-copy", {
-    stepType: t.type,
-    goal: `${t.theme}: ${t.goal}. Invite them to book a model-home visit or chat with a sales consultant.`,
-    audience: "New-home buyer leads who recently showed interest",
-    contextInfo:
-      `Rewrite this message for our company using facts from our knowledge base only. ` +
-      `Keep the booking link merge tag if it is present. Current message: ${t.body}`,
-  });
-  return { subject: data.subject || t.subject, body: data.body || t.body };
-}
+const VARIANTS = {
+  sales: {
+    api: "/api/sales/campaigns/auto",
+    title: "180-Day Lead Nurture",
+    description: "Runs automatically for every new lead from your website form, manual entry, or CSV import.",
+    personalize: "using your knowledge base and brand voice",
+    steps: [
+      { icon: UserPlus, title: "New lead arrives", text: "From your website form, a manual entry, or a CSV import. They're enrolled instantly; no setup needed." },
+      { icon: Zap, title: "Instant follow-up", text: "An SMS within a minute and an email within two, then scheduled touches across five phases." },
+      { icon: Bot, title: "AI takes over on reply", text: "When a lead replies, the AI sales agent answers from your knowledge base and books the visit. Replying or booking ends the sequence." },
+      { icon: ShieldCheck, title: "Compliant by default", text: "Texts only go to leads with SMS consent, sends respect quiet hours, and STOP or unsubscribe is honoured immediately." },
+    ],
+    mergeFields: "{{firstName}}, {{companyName}}, {{city}}, {{bookingLink}}.",
+    smsNote: " Your company name and the opt-out line are added automatically.",
+    rewrite: async (t: Touch) => {
+      const data = await api.post<{ subject?: string; body?: string }>("/api/sales/campaigns/generate-copy", {
+        stepType: t.type,
+        goal: `${t.theme}: ${t.goal}. Invite them to book a model-home visit or chat with a sales consultant.`,
+        audience: "New-home buyer leads who recently showed interest",
+        contextInfo:
+          `Rewrite this message for our company using facts from our knowledge base only. ` +
+          `Keep the booking link merge tag if it is present. Current message: ${t.body}`,
+      });
+      return { subject: data.subject || t.subject, body: data.body || t.body };
+    },
+  },
+  b2b: {
+    api: "/api/admin/b2b/nurture/auto",
+    title: "180-Day Builder Nurture",
+    description: "Runs automatically for every new builder lead from the website, manual entry, or CSV import.",
+    personalize: "using the AI4Home product guide",
+    steps: [
+      { icon: UserPlus, title: "New lead arrives", text: "From the website, a manual entry, or a CSV import. They're enrolled instantly; no setup needed." },
+      { icon: Zap, title: "Instant follow-up", text: "An SMS within a minute and an email within two, then scheduled touches across five phases." },
+      { icon: Bot, title: "AI takes over on reply", text: "When a builder replies, the B2B agent answers and helps book a consultation. Replying or booking ends the sequence." },
+      { icon: ShieldCheck, title: "Compliant by default", text: "Texts only go to leads with SMS consent and within 8am–9pm on their clock, and STOP or unsubscribe is honoured immediately." },
+    ],
+    mergeFields: "{{firstName}}, {{contactName}}, {{companyName}} (the builder), {{city}}, {{bookingLink}}.",
+    smsNote: " Our name, the booking link and the opt-out line are added automatically.",
+    rewrite: async (t: Touch) => {
+      const data = await api.post<{ subject?: string; body?: string }>("/api/admin/b2b/campaigns/generate-step", {
+        channel: t.type,
+        topic: `${t.theme}: ${t.goal}. Invite them to book a consultation with the AI4Home team.`,
+        draft: t.body,
+        campaignName: "180-Day Builder Nurture",
+      });
+      return { subject: data.subject || t.subject, body: data.body || t.body };
+    },
+  },
+};
 
-export default function AutoNurtureWorkflow() {
+export default function AutoNurtureWorkflow({ variant = "sales" }: { variant?: keyof typeof VARIANTS }) {
+  const { api: API, rewrite: rewriteWithAi, ...copy } = VARIANTS[variant];
   const confirm = useConfirm();
   const [wf, setWf] = useState<Workflow | null>(null);
   const [error, setError] = useState("");
@@ -96,7 +138,7 @@ export default function AutoNurtureWorkflow() {
     } catch (e) {
       setError(errorMessage(e));
     }
-  }, []);
+  }, [API]);
 
   useEffect(() => {
     load();
@@ -187,7 +229,7 @@ export default function AutoNurtureWorkflow() {
     const targets = wf.touches.filter((t) => t.enabled);
     const ok = await confirm({
       title: "Personalize every message with AI?",
-      description: `The AI rewrites all ${targets.length} active messages using your knowledge base and brand voice, replacing the current wording (including your edits). You can reset any message to its default afterwards.`,
+      description: `The AI rewrites all ${targets.length} active messages ${copy.personalize}, replacing the current wording (including your edits). You can reset any message to its default afterwards.`,
       confirmText: "Personalize",
     });
     if (!ok) return;
@@ -240,21 +282,21 @@ export default function AutoNurtureWorkflow() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-bold">180-Day Lead Nurture</h2>
+            <h2 className="text-xl font-bold">{copy.title}</h2>
             <Badge className={wf.active ? "bg-emerald-500/10 text-emerald-600 border-none" : "bg-muted text-muted-foreground border-none"}>
               {wf.active ? "On" : "Off"}
             </Badge>
           </div>
-          <p className="text-muted-foreground text-sm mt-1">
-            Runs automatically for every new lead from your website form, manual entry, or CSV import.
-          </p>
+          <p className="text-muted-foreground text-sm mt-1">{copy.description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline" className="gap-2 h-9">
-            <Link href={`/sales/campaigns/${wf.id}/analytics`}>
-              <BarChart3 className="h-4 w-4" /> Analytics
-            </Link>
-          </Button>
+          {variant === "sales" && (
+            <Button asChild variant="outline" className="gap-2 h-9">
+              <Link href={`/sales/campaigns/${wf.id}/analytics`}>
+                <BarChart3 className="h-4 w-4" /> Analytics
+              </Link>
+            </Button>
+          )}
           <Button variant="outline" onClick={personalizeAll} disabled={!!bulk} className="gap-2 h-9">
             {bulk ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             {bulk ? `Personalizing ${bulk.done}/${bulk.total}` : "Personalize with AI"}
@@ -277,12 +319,7 @@ export default function AutoNurtureWorkflow() {
           <CardDescription>Every lead gets an instant response, useful content, and a clear next step until they book, opt out, or finish the 180 days.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-sm">
-          {[
-            { icon: UserPlus, title: "New lead arrives", text: "From your website form, a manual entry, or a CSV import. They're enrolled instantly; no setup needed." },
-            { icon: Zap, title: "Instant follow-up", text: "An SMS within a minute and an email within two, then scheduled touches across five phases." },
-            { icon: Bot, title: "AI takes over on reply", text: "When a lead replies, the AI sales agent answers from your knowledge base and books the visit. Replying or booking ends the sequence." },
-            { icon: ShieldCheck, title: "Compliant by default", text: "Texts only go to leads with SMS consent, sends respect quiet hours, and STOP or unsubscribe is honoured immediately." },
-          ].map(({ icon: Icon, title, text }) => (
+          {copy.steps.map(({ icon: Icon, title, text }) => (
             <div key={title} className="space-y-1.5">
               <div className="flex items-center gap-2 font-medium">
                 <Icon className="h-4 w-4 text-[#b48c3c]" /> {title}
@@ -335,6 +372,11 @@ export default function AutoNurtureWorkflow() {
                   </div>
                   {t.subject && <p className="text-xs font-medium truncate">{t.subject}</p>}
                   <p className="text-xs text-muted-foreground line-clamp-2">{t.body}</p>
+                  {t.sent !== undefined && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Sent {t.sent}{t.type === "EMAIL" && ` · Opened ${t.opened} · Clicked ${t.clicked}`}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button variant="ghost" size="sm" onClick={() => openEditor(t)} className="h-8 w-8 p-0" aria-label="Edit message">
@@ -371,8 +413,8 @@ export default function AutoNurtureWorkflow() {
               <Label htmlFor="auto-body">Message</Label>
               <Textarea id="auto-body" rows={editing?.type === "EMAIL" ? 10 : 5} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
               <p className="text-xs text-muted-foreground">
-                Merge fields: {"{{firstName}}"}, {"{{companyName}}"}, {"{{city}}"}, {"{{bookingLink}}"}.
-                {editing?.type === "SMS" && " Your company name and the opt-out line are added automatically."}
+                Merge fields: {copy.mergeFields}
+                {editing?.type === "SMS" && copy.smsNote}
                 {editing?.type === "EMAIL" && " The unsubscribe footer is added automatically."}
               </p>
             </div>

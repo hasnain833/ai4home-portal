@@ -18,10 +18,12 @@ import {
   weeklyLimitReached,
 } from "../../lib/b2b.js";
 
+import { B2B_AUTO_ID } from "../../services/b2b-auto-nurture.js";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SENDER = "AI for Homebuilders";
-// Hard stop for the loop below; a campaign is capped at 20 steps, each can wait several times.
-const MAX_ITERATIONS = 200;
+// Hard stop for the loop below; the 180-day nurture has 34 steps, each can wait several times.
+const MAX_ITERATIONS = 400;
 // A failed send gets two more tries before the lead moves on to the next step.
 const RETRY_DELAYS_MS = [15 * 60 * 1000, 60 * 60 * 1000];
 
@@ -192,8 +194,12 @@ export const runB2BCampaign = inngest.createFunction(
           return { stop: blocked.reason };
         }
 
-        // Over the weekly limit: try again tomorrow. The step isn't lost.
-        if (!blocked && (await weeklyLimitReached(e.leadId, current.channel, await getB2BJourneySettings()))) {
+        // A step switched off in the 180-day nurture passes without sending, like the Sales one.
+        const off = current.enabled === false;
+
+        // Over the weekly limit: try again tomorrow. The step isn't lost. The 180-day nurture
+        // sets its own pace (several touches in week one), as the Sales version does.
+        if (!blocked && !off && e.campaignId !== B2B_AUTO_ID && (await weeklyLimitReached(e.leadId, current.channel, await getB2BJourneySettings()))) {
           await prisma.b2BEnrollment.update({
             where: { id: e.id },
             data: { nextRunAt: new Date(Date.now() + DAY_MS), lastError: `Step ${state.stepIndex + 1} waiting: the weekly ${current.channel === "SMS" ? "SMS" : "email"} limit was reached` },
@@ -202,7 +208,7 @@ export const runB2BCampaign = inngest.createFunction(
         }
 
         // A builder is mid-conversation with this phone on the shared number: wait, so their reply isn't ours.
-        const heldUntil = !blocked && current.channel === "SMS" ? await smsConversationHold(e.lead.phone, null) : null;
+        const heldUntil = !blocked && !off && current.channel === "SMS" ? await smsConversationHold(e.lead.phone, null) : null;
         if (heldUntil) {
           await prisma.b2BEnrollment.update({
             where: { id: e.id },
@@ -220,6 +226,7 @@ export const runB2BCampaign = inngest.createFunction(
           data: { currentStep: state.stepIndex + 1, nextRunAt, stepAttempts: 0 },
         });
         if (claim.count === 0) return { stop: "step already handled by another run" };
+        if (off) return { next: true };
 
         if (blocked) {
           await prisma.b2BEnrollment.update({ where: { id: e.id }, data: { lastError: `Step ${state.stepIndex + 1} skipped: ${blocked.reason}` } });

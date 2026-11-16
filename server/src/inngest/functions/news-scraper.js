@@ -19,7 +19,7 @@ export const scrapeNews = inngest.createFunction(
           `${waiting} news ${waiting === 1 ? "article" : "articles"} to review`,
           `<p>${result.saved} new ${result.saved === 1 ? "article was" : "articles were"} fetched today. ${waiting} ${waiting === 1 ? "is" : "are"} waiting for review.</p>` +
             `<p>Builders only see news once it's published.</p>` +
-            `<p><a href="${appUrl()}/admin/news">Review news</a></p>`,
+            `<p><a href="${appUrl()}/admin/content?kind=NEWS">Review news</a></p>`,
         );
       });
     }

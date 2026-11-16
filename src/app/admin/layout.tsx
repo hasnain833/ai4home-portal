@@ -27,7 +27,7 @@ import {
   UserCog,
   ShieldAlert,
   GraduationCap,
-  Newspaper,
+  PenSquare,
   Cloud,
   type LucideIcon,
 } from "lucide-react";
@@ -44,7 +44,7 @@ const adminNavItems: { name: string; href: string; icon: LucideIcon; perm: Admin
   { name: "Business Leads", href: "/admin/leads", icon: Target, perm: ["b2b"] },
   { name: "Nurture", href: "/admin/nurture", icon: Route, perm: ["b2b"] },
   { name: "Salesforce", href: "/admin/salesforce", icon: Cloud, perm: ["salesforce"] },
-  { name: "News", href: "/admin/news", icon: Newspaper, perm: ["integrations"] },
+  { name: "Content", href: "/admin/content", icon: PenSquare, perm: ["integrations"] },
   { name: "Hand-off Issues", href: "/admin/handoffs", icon: ArrowRightLeft, perm: ["handoffs"] },
   { name: "Support Access", href: "/admin/support", icon: LifeBuoy, perm: ["support"] },
   {

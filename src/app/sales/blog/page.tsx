@@ -66,7 +66,8 @@ interface BlogPost {
   citations?: { title: string; url: string }[] | null;
   kbCitations?: { documentId: string | null; name: string; category: string }[] | null;
   approvedAt?: string | null;
-
+  /** Set when the post came from the AI4Home library; its text is locked. */
+  platformContentId?: string | null;
   publishedAt?: string | null;
   slug?: string | null;
   readTime?: string;
@@ -74,11 +75,15 @@ interface BlogPost {
   updatedAt?: string;
 }
 
-interface NewsItem {
+interface LibraryArticle {
   id: string;
   title: string;
-  summary: string;
-  originalUrl: string;
+  excerpt: string | null;
+  content: string;
+  category: string;
+  tags: string[];
+  readTime: string;
+  used: boolean;
 }
 
 const STATUS_STYLES: Record<BlogStatus, string> = {
@@ -124,19 +129,10 @@ export default function BlogDraftingPage() {
   const [editorMetaDesc, setEditorMetaDesc] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // AI modal state
-  const [aiModalOpen, setAiModalOpen] = useState(false);
-  const [aiTopic, setAiTopic] = useState("");
-  const [aiTone, setAiTone] = useState("professional");
-  const [aiKeywords, setAiKeywords] = useState("");
-  const [aiAudience, setAiAudience] = useState("prospective homebuyers");
-  const [aiLength, setAiLength] = useState("800-1000 words");
-  const [generating, setGenerating] = useState(false);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [selectedNewsIds, setSelectedNewsIds] = useState<string[]>([]);
-
-  // Schedule modal
-
+  // AI4Home library
+  const [library, setLibrary] = useState<LibraryArticle[] | null>(null);
+  const [reading, setReading] = useState<LibraryArticle | null>(null);
+  const locked = !!selectedPost?.platformContentId;
 
   // Note: no synchronous setState here (loading starts true) so this is safe to
   // call directly from an effect without triggering cascading renders.
@@ -155,44 +151,24 @@ export default function BlogDraftingPage() {
     fetchPosts();
   }, [fetchPosts]);
 
-  const openAiModal = async () => {
-    setAiModalOpen(true);
-    setSelectedNewsIds([]);
+  const openLibrary = async () => {
     try {
-      const json = await apiFetch<{ data?: any[] }>("/api/sales/news?limit=8");
-      setNews((json?.data || []).map((n: any) => ({ id: n.id, title: n.title, summary: n.summary, originalUrl: n.originalUrl })));
-    } catch {}
-  };
-
-  const handleGenerate = async () => {
-    if (!aiTopic.trim()) return toast.error("Enter a topic prompt.");
-    try {
-      setGenerating(true);
-      const post: BlogPost = await api("/generate", {
-        method: "POST",
-        body: JSON.stringify({
-          topic: aiTopic,
-          tone: aiTone,
-          keywords: aiKeywords ? aiKeywords.split(",").map((k) => k.trim()).filter(Boolean) : [],
-          targetAudience: aiAudience,
-          targetLength: aiLength,
-          newsIds: selectedNewsIds,
-        }),
-      });
-      toast.success("AI draft generated.");
-      setAiModalOpen(false);
-      setAiTopic("");
-      setAiKeywords("");
-      await fetchPosts();
-      openEditor(post);
-    } catch (e: any) {
-      toast.error(e.message || "Generation failed");
-    } finally {
-      setGenerating(false);
+      setLibrary(await api<LibraryArticle[]>("/library"));
+    } catch (e) {
+      toast.error(errorMessage(e));
     }
   };
 
-  const openEditor = (post?: BlogPost) => {
+  const addArticle = (article: LibraryArticle) =>
+    withBusy(article.id, async () => {
+      await api(`/library/${article.id}/use`, { method: "POST" });
+      toast.success("Added to your drafts. Approve it, then publish.");
+      setReading(null);
+      setLibrary(null);
+      await fetchPosts();
+    });
+
+  const openEditor = (post: BlogPost) => {
     setSelectedPost(post || null);
     setEditorTitle(post?.title || "");
     setEditorExcerpt(post?.excerpt || "");
@@ -205,6 +181,7 @@ export default function BlogDraftingPage() {
   };
 
   const handleSave = async () => {
+    if (!selectedPost) return;
     if (!editorTitle.trim()) return toast.error("Title is required.");
     const body = JSON.stringify({
       title: editorTitle,
@@ -217,13 +194,8 @@ export default function BlogDraftingPage() {
     });
     try {
       setSaving(true);
-      if (selectedPost) {
-        await api(`/${selectedPost.id}`, { method: "PATCH", body });
-        toast.success("Post updated.");
-      } else {
-        await api("", { method: "POST", body });
-        toast.success("Post created.");
-      }
+      await api(`/${selectedPost.id}`, { method: "PATCH", body });
+      toast.success("Post updated.");
       setEditorOpen(false);
       await fetchPosts();
     } catch (e: any) {
@@ -306,10 +278,10 @@ export default function BlogDraftingPage() {
           <motion.div variants={fadeInUp} className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-2xl">
               <h1 className="text-2xl md:text-3xl font-bold bg-linear-to-r from-primary to-primary/60 bg-clip-text text-transparent dark:from-[#b48c3c] dark:to-[#d4af6c]">
-                AI Blog Post Builder
+                Blog
               </h1>
               <p className="text-muted-foreground text-sm mt-1">
-                Draft builder blogs with AI grounded in your brand voice, knowledge base, and market news — then approve, publish, or schedule.
+                Add articles written and approved by the AI for Homebuilders team, with your company name filled in. Approve, then publish to your hosted blog or export.
               </p>
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-start lg:shrink-0 lg:flex-nowrap lg:justify-end">
@@ -320,11 +292,8 @@ export default function BlogDraftingPage() {
                   </a>
                 </Button>
               )}
-              <Button onClick={openAiModal} className="h-9 justify-center gap-2 border-none bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90">
-                <Sparkles className="h-4 w-4" /> AI Draft Assistant
-              </Button>
-              <Button onClick={() => openEditor()} className="h-9 justify-center gap-2 bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90">
-                <Plus className="h-4 w-4" /> New
+              <Button onClick={openLibrary} className="h-9 justify-center gap-2 border-none bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90">
+                <Plus className="h-4 w-4" /> From AI4Home
               </Button>
             </div>
           </motion.div>
@@ -368,7 +337,11 @@ export default function BlogDraftingPage() {
                                   {post.status.replace("_", " ")}
                                 </Badge>
                                 <Badge variant="outline" className="text-[9px] px-1.5 py-0">{post.category}</Badge>
-                                {post.aiAssisted && (
+                                {post.platformContentId ? (
+                                  <Badge className="bg-[#b48c3c]/10 text-[#b48c3c] border-none text-[9px] gap-1 px-1.5 py-0">
+                                    <Sparkles className="h-2.5 w-2.5" /> From AI4Home
+                                  </Badge>
+                                ) : post.aiAssisted && (
                                   <Badge className="bg-[#b48c3c]/10 text-[#b48c3c] border-none text-[9px] gap-1 px-1.5 py-0">
                                     <Sparkles className="h-2.5 w-2.5" /> AI Draft
                                   </Badge>
@@ -433,8 +406,8 @@ export default function BlogDraftingPage() {
                                     </Button>
                                   </>
                                 )}
-                                <Button variant="ghost" size="icon" className="h-7 w-7 text-[#b48c3c] hover:bg-[#b48c3c]/10" onClick={() => openEditor(post)} title="Edit">
-                                  <Pencil className="h-3.5 w-3.5" />
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-[#b48c3c] hover:bg-[#b48c3c]/10" onClick={() => openEditor(post)} title={post.platformContentId ? "Read" : "Edit"}>
+                                  {post.platformContentId ? <BookOpen className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
                                 </Button>
                                 <Button variant="ghost" size="icon" disabled={busyId === post.id} className="h-7 w-7 text-red-500 hover:bg-red-500/10" onClick={() => handleDelete(post)} title="Delete">
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -448,7 +421,7 @@ export default function BlogDraftingPage() {
                       <div className="text-center py-16 text-muted-foreground border-2 border-dashed rounded-xl p-8">
                         <FileText className="h-12 w-12 mx-auto opacity-20 text-[#b48c3c] mb-2" />
                         <p className="font-semibold text-sm">No blog posts yet.</p>
-                        <p className="text-xs mt-1 text-slate-400">Use the AI Draft Assistant to generate one grounded in your brand voice and market news.</p>
+                        <p className="text-xs mt-1 text-slate-400">Press &quot;From AI4Home&quot; to add an article approved by the AI for Homebuilders team.</p>
                       </div>
                     )}
                   </AnimatePresence>
@@ -458,84 +431,52 @@ export default function BlogDraftingPage() {
           </motion.div>
         </motion.div>
 
-        {/* AI Draft modal */}
-        <Dialog open={aiModalOpen} onOpenChange={setAiModalOpen}>
-          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        {/* AI4Home library */}
+        <Dialog open={!!library} onOpenChange={(open) => !open && setLibrary(null)}>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-[#b48c3c]" /> AI Draft Assistant</DialogTitle>
-              <DialogDescription>Claude drafts a post grounded in your brand voice, knowledge base, and any market news you pick as sources.</DialogDescription>
+              <DialogTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-[#b48c3c]" /> Articles from AI4Home</DialogTitle>
+              <DialogDescription>Written and approved by the AI for Homebuilders team. Your company name is filled in; the text can&apos;t be changed.</DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <Label className="font-semibold text-xs">Topic Prompt *</Label>
-                <Input placeholder="e.g. How rising rates affect first-time buyers in our communities" value={aiTopic} onChange={(e) => setAiTopic(e.target.value)} disabled={generating} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="font-semibold text-xs">Tone</Label>
-                  <Select value={aiTone} onValueChange={setAiTone} disabled={generating}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="professional">Professional & Direct</SelectItem>
-                      <SelectItem value="friendly">Informative & Friendly</SelectItem>
-                      <SelectItem value="bold">Bold & Marketing</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="font-semibold text-xs">Target Length</Label>
-                  <Select value={aiLength} onValueChange={setAiLength} disabled={generating}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="500-700 words">Short (500-700)</SelectItem>
-                      <SelectItem value="800-1000 words">Medium (800-1000)</SelectItem>
-                      <SelectItem value="1200-1500 words">Long (1200-1500)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="font-semibold text-xs">Target Audience</Label>
-                  <Input value={aiAudience} onChange={(e) => setAiAudience(e.target.value)} disabled={generating} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="font-semibold text-xs">Keywords</Label>
-                  <Input placeholder="curb appeal, ROI" value={aiKeywords} onChange={(e) => setAiKeywords(e.target.value)} disabled={generating} />
-                </div>
-              </div>
-              {news.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label className="font-semibold text-xs">Cite market news (optional)</Label>
-                  <div className="max-h-36 overflow-y-auto border rounded-lg divide-y">
-                    {news.map((n) => {
-                      const checked = selectedNewsIds.includes(n.id);
-                      return (
-                        <label key={n.id} className="flex items-start gap-2 p-2 text-[11px] cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5"
-                            checked={checked}
-                            disabled={generating}
-                            onChange={(e) => setSelectedNewsIds((prev) => (e.target.checked ? [...prev, n.id] : prev.filter((id) => id !== n.id)))}
-                          />
-                          <span className="line-clamp-2">{n.title}</span>
-                        </label>
-                      );
-                    })}
+            {library?.length === 0 ? (
+              <p className="py-10 text-center text-sm text-muted-foreground">No articles yet. New ones appear here when the AI for Homebuilders team publishes them.</p>
+            ) : (
+              <div className="divide-y rounded-lg border">
+                {library?.map((a) => (
+                  <div key={a.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0">{a.category}</Badge>
+                        <span className="text-[10px] text-muted-foreground">{a.readTime}</span>
+                      </div>
+                      <p className="text-sm font-semibold">{a.title}</p>
+                      {a.excerpt && <p className="text-xs text-muted-foreground">{a.excerpt}</p>}
+                    </div>
+                    <div className="flex shrink-0 gap-1.5">
+                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setReading(a)}>Read</Button>
+                      <Button size="sm" className="h-7 text-xs bg-[#0F3B3D] text-white hover:bg-[#0F3B3D]/90" disabled={a.used || busyId === a.id} onClick={() => addArticle(a)}>
+                        {a.used ? "Added" : "Use this"}
+                      </Button>
+                    </div>
                   </div>
-                </div>
+                ))}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!reading} onOpenChange={(open) => !open && setReading(null)}>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{reading?.title}</DialogTitle>
+              {reading?.excerpt && <DialogDescription>{reading.excerpt}</DialogDescription>}
+            </DialogHeader>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">{reading?.content}</p>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setReading(null)}>Close</Button>
+              {reading && !reading.used && (
+                <Button className="bg-[#0F3B3D] text-white" disabled={busyId === reading.id} onClick={() => addArticle(reading)}>Use this</Button>
               )}
-              {generating && (
-                <div className="p-4 bg-slate-50 dark:bg-slate-900 border rounded-xl flex items-center justify-center gap-3">
-                  <Sparkles className="h-5 w-5 text-[#b48c3c] animate-pulse" />
-                  <span className="text-xs font-semibold">Claude is writing your draft…</span>
-                </div>
-              )}
-            </div>
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="ghost" onClick={() => setAiModalOpen(false)} disabled={generating}>Cancel</Button>
-              <Button onClick={handleGenerate} disabled={generating} className="bg-[#b48c3c] text-white">Generate Draft</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -544,12 +485,16 @@ export default function BlogDraftingPage() {
         <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
           <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto pr-2">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5 text-[#0F3B3D]" /> {selectedPost ? "Edit Post" : "Create New Blog Post"}</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                {locked ? <BookOpen className="h-5 w-5 text-[#0F3B3D]" /> : <Pencil className="h-5 w-5 text-[#0F3B3D]" />} {locked ? "Article from AI4Home" : "Edit Post"}
+              </DialogTitle>
               <DialogDescription>
-                Markdown is supported in the body. {selectedPost && ["APPROVED", "SCHEDULED", "PUBLISHED"].includes(selectedPost.status) ? "Editing content will send this post back to review." : "Drafts must be approved before publishing or export."}
+                {locked
+                  ? "Approved by the AI for Homebuilders team and published exactly as written, so it can't be edited."
+                  : `Markdown is supported in the body. ${selectedPost && ["APPROVED", "SCHEDULED", "PUBLISHED"].includes(selectedPost.status) ? "Editing content will send this post back to review." : "Drafts must be approved before publishing or export."}`}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 pt-2">
+            <fieldset disabled={locked} className="space-y-4 pt-2">
               <div className="space-y-1.5">
                 <Label className="font-semibold text-xs">Title *</Label>
                 <Input value={editorTitle} onChange={(e) => setEditorTitle(e.target.value)} placeholder="Enter a catching title..." />
@@ -590,12 +535,14 @@ export default function BlogDraftingPage() {
                 <Label className="font-semibold text-xs">Body (Markdown)</Label>
                 <Textarea rows={12} className="border focus-visible:ring-1 focus-visible:ring-[#b48c3c] text-xs font-mono" placeholder="## Start drafting in markdown..." value={editorContent} onChange={(e) => setEditorContent(e.target.value)} />
               </div>
-            </div>
+            </fieldset>
             <DialogFooter className="pt-2">
-              <Button type="button" variant="ghost" onClick={() => setEditorOpen(false)} disabled={saving}>Cancel</Button>
-              <Button onClick={handleSave} disabled={saving} className="bg-[#0F3B3D] text-white gap-2">
-                <Check className="h-4 w-4" /> {selectedPost ? "Save Changes" : "Save Post"}
-              </Button>
+              <Button type="button" variant="ghost" onClick={() => setEditorOpen(false)} disabled={saving}>{locked ? "Close" : "Cancel"}</Button>
+              {!locked && (
+                <Button onClick={handleSave} disabled={saving} className="bg-[#0F3B3D] text-white gap-2">
+                  <Check className="h-4 w-4" /> Save Changes
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>

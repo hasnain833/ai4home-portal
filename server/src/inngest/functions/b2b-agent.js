@@ -231,7 +231,10 @@ export function buildAgentPrompt(ctx, { systemTemplate = B2B_AGENT_SYSTEM, kbEmp
     lastSubject ? `Subject of their latest email: ${lastSubject}` : "",
     ctx.existingMeeting
       ? `They already have a meeting booked for ${ctx.existingMeeting}. Do not book another. Any change or cancellation goes to a person: use handoff.`
-      : `Available meeting times (offer two or three, written exactly as shown):\n${times || "(none available: use handoff so a person can arrange it)"}`,
+      : times
+        // Added on every turn, so it holds even when a live Prompt Lab version still says "offer times".
+        ? `When you suggest a meeting, do NOT name or list specific times. Write {{bookingLink}} so they can pick any open time on their own booking page. The times below are only for when they name a time themselves: book it if it is listed (copy its iso), otherwise share {{bookingLink}}.\nOpen meeting times:\n${times}`
+        : "No meeting times are open right now: use handoff so a person can arrange it.",
     ctx.channel === "SMS"
       ? "This conversation is by text. Keep the message under 300 characters, plain text, with no sign-off."
       : 'This conversation is by email. Write 40 to 120 words of plain text with short paragraphs. Sign off as "The AI4Home assistant".',
@@ -407,9 +410,8 @@ async function actOnDecision(ctx, decision) {
     const booked = await bookB2BMeeting({ lead, start: new Date(slot.iso), setting });
     if (booked.alreadyBooked) return handOff(ctx, "the lead already has a meeting booked", summary);
     if (booked.taken) {
-      const others = ctx.slots.filter((s) => s.iso !== slot.iso).slice(0, 3).map((s) => s.label).join(", ");
-      if (!others) return handOff(ctx, "the chosen time was taken and no others were available", summary);
-      const r = await deliver(ctx, `Sorry, that time was just taken. Would any of these work instead? ${others}`, { bookingButton: true });
+      if (!ctx.slots.some((s) => s.iso !== slot.iso)) return handOff(ctx, "the chosen time was taken and no others were available", summary);
+      const r = await deliver(ctx, "Sorry, that time was just taken. You can pick another time that suits you here: {{bookingLink}}", { bookingButton: true });
       if (!r.sent) return handOff(ctx, `the reply could not be sent (${r.error})`, summary);
       return { action: "slot taken" };
     }

@@ -648,6 +648,7 @@ model ContentCalendar {
   reason        String?  @db.Text
   outline       String?
   isAiSuggested Boolean  @default(false)
+  platformContentId String?
   ownerId       String?
   owner         User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   createdAt     DateTime @default(now())
@@ -906,6 +907,7 @@ model BlogPost {
   approvedById    String?
   publishedAt     DateTime?
   calendarEventId String?
+  platformContentId String?
   authorId        String?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
@@ -929,6 +931,30 @@ model ScrapedNews {
   updatedAt   DateTime @updatedAt
 
   @@index([companyId, publishedAt])
+}
+
+model PlatformContent {
+  id              String    @id @default(cuid())
+  kind            String 
+  status          String    @default("DRAFT") 
+  origin          String    @default("AI") 
+  title           String
+  excerpt         String?   @db.Text
+  content         String    @db.Text 
+  category        String    @default("Market Trends")
+  tags            String[]  @default([])
+  metaTitle       String?
+  metaDescription String?   @db.Text
+  channel         String? 
+  suggestedFor    DateTime?
+  reason          String?   @db.Text 
+  citations       Json?
+  publishedAt     DateTime?
+  publishedByName String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([kind, status, publishedAt])
 }
 
 model NewsPost {

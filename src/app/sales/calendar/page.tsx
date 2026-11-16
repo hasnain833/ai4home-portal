@@ -55,7 +55,7 @@ const isDraggable = (evt: CalendarEvent) =>
 const describeSource = (evt: CalendarEvent) => {
   if (evt.type === "announcement") return "Announcement sent to a lead audience";
   if (evt.type === "campaign_aggregation") return "Campaign sends scheduled for this day";
-  if (evt.status === "Suggested") return "AI suggestion — not scheduled until you approve it";
+  if (evt.status === "Suggested") return "Suggestion — not on your plan until you add it";
   return "Content calendar item";
 };
 
@@ -87,7 +87,8 @@ export default function ContentCalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  // Ideas published by the AI4Home team (Super Admin → Content) that this builder hasn't added or dismissed.
+  const [libraryIdeas, setLibraryIdeas] = useState<CalendarEvent[]>([]);
   const [view, setView] = useState<ViewMode>("month");
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
@@ -97,10 +98,11 @@ export default function ContentCalendarPage() {
       const data = await api.get<CalendarEvent[]>("/api/sales/calendar");
       setEvents(data);
       setSuggestions(data.filter((e) => e.status === "Suggested"));
+      if (!isHomeowner) setLibraryIdeas(await api.get<CalendarEvent[]>("/api/sales/calendar/library"));
     } catch (err) {
       console.error("Failed to fetch calendar events", err);
     }
-  }, []);
+  }, [isHomeowner]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -109,29 +111,21 @@ export default function ContentCalendarPage() {
     return () => window.clearTimeout(timeout);
   }, [fetchEvents]);
 
-  const handleGenerateSuggestions = async () => {
-    setIsGenerating(true);
-    try {
-      await api.post("/api/sales/calendar/suggestions");
-      await fetchEvents();
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setIsGenerating(false);
-    }
-  };
+  const isLibrary = (id: string) => libraryIdeas.some((i) => i.id === id);
 
   const handleApproveSuggestion = async (id: string) => {
     try {
-      const suggestion = suggestions.find((s) => s.id === id);
-      const updated = await api.patch<{ scheduledAt?: string } | null>(`/api/sales/calendar/${id}/status`, { status: "Draft" });
+      const suggestion = [...libraryIdeas, ...suggestions].find((s) => s.id === id);
+      const updated = isLibrary(id)
+        ? await api.post<{ scheduledAt?: string } | null>(`/api/sales/calendar/library/${id}/use`)
+        : await api.patch<{ scheduledAt?: string } | null>(`/api/sales/calendar/${id}/status`, { status: "Draft" });
       const approvedDate = updated?.scheduledAt || suggestion?.scheduledAt;
       if (approvedDate && !isNaN(new Date(approvedDate).getTime())) {
         setCurrentDate(new Date(approvedDate));
       }
       setView("list");
       setShowSuggestions(false);
-      toast.success("Suggestion approved as a draft on the calendar.");
+      toast.success("Added to your calendar as a draft.");
       await fetchEvents();
     } catch (err) {
       toast.error(errorMessage(err));
@@ -140,7 +134,8 @@ export default function ContentCalendarPage() {
 
   const handleDismissSuggestion = async (id: string) => {
     try {
-      await api.patch(`/api/sales/calendar/${id}/status`, { status: "Dismissed" });
+      if (isLibrary(id)) await api.post(`/api/sales/calendar/library/${id}/dismiss`);
+      else await api.patch(`/api/sales/calendar/${id}/status`, { status: "Dismissed" });
       fetchEvents();
     } catch (err) {
       toast.error(errorMessage(err));
@@ -400,7 +395,7 @@ export default function ContentCalendarPage() {
                   className="relative h-9 w-9 border-indigo-200 text-indigo-600 bg-indigo-50/50 hover:bg-indigo-50 dark:border-indigo-900/50 dark:bg-indigo-900/20"
                 >
                   <Sparkles className="h-4 w-4" />
-                  {suggestions.length > 0 && (
+                  {suggestions.length + libraryIdeas.length > 0 && (
                     <span className="absolute -top-1 -right-1 flex h-3 w-3">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-white dark:border-slate-900"></span>
@@ -413,13 +408,13 @@ export default function ContentCalendarPage() {
                     <div className="p-4 border-b dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
                       <h3 className="font-bold flex items-center gap-2 text-sm">
                         <Sparkles className="h-4 w-4 text-indigo-500" />
-                        AI Suggested Slots
+                        Ideas from AI4Home
                       </h3>
-                      <p className="text-xs text-muted-foreground mt-1">Identified outreach gaps & local events</p>
+                      <p className="text-xs text-muted-foreground mt-1">Approved by the AI for Homebuilders team. Add one to plan it on your calendar.</p>
                     </div>
                     <div className="p-4 max-h-100 overflow-y-auto space-y-3">
-                      {suggestions.length > 0 ? (
-                        suggestions.map((s) => (
+                      {suggestions.length + libraryIdeas.length > 0 ? (
+                        [...libraryIdeas, ...suggestions].map((s) => (
                           <div key={s.id} className="p-3 border dark:border-slate-800 bg-white dark:bg-slate-950 rounded-xl space-y-2 shadow-sm">
                             <div className="flex justify-between items-center text-[10px]">
                               <Badge className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 font-semibold">{s.channel}</Badge>
@@ -435,7 +430,7 @@ export default function ContentCalendarPage() {
                                 onClick={() => handleApproveSuggestion(s.id)}
                                 className="flex-1 h-8 text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg"
                               >
-                                Approve
+                                Add to calendar
                               </Button>
                               <Button
                                 onClick={() => handleDismissSuggestion(s.id)}
@@ -448,17 +443,8 @@ export default function ContentCalendarPage() {
                           </div>
                         ))
                       ) : (
-                        <p className="text-sm text-center text-slate-400 py-6">All suggestions processed.</p>
+                        <p className="text-sm text-center text-slate-400 py-6">No new ideas. They appear here when the AI for Homebuilders team publishes them.</p>
                       )}
-
-                      <Button
-                        onClick={handleGenerateSuggestions}
-                        disabled={isGenerating}
-                        className="w-full mt-2"
-                        variant="secondary"
-                      >
-                        {isGenerating ? "Generating..." : "Generate New Suggestions"}
-                      </Button>
                     </div>
                   </div>
                 )}

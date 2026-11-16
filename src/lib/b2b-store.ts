@@ -43,8 +43,6 @@ export interface B2BLead {
   smsConsentAt: string | null;
   agentPausedAt: string | null;
   agentPauseReason: string | null;
-  journeyStage: string | null;
-  journeyNextAt: string | null;
   inquiries: { id: string; type: string; payload: Record<string, string | boolean | number>; marketingConsent: boolean; consentText: string; createdAt: string; adminSentAt: string | null; visitorSentAt: string | null; adminSmsSentAt: string | null; visitorSmsSentAt: string | null; lastError: string | null }[];
   emailOptOut: boolean;
   smsOptOut: boolean;
@@ -59,9 +57,6 @@ export interface B2BTimeline {
   agentPauseReason: string | null;
   waiting: number;
   profile: Record<string, string> | null;
-  journeyStage: string | null;
-  journeyNextAt: string | null;
-  journeyHoldReason: string | null;
   items: { id: string; at: string; kind: "agent" | "lead" | "campaign" | "meeting" | "website"; title: string; body: string | null; status: string | null }[];
 }
 
@@ -118,6 +113,8 @@ export interface B2BEnrollment {
 }
 
 export const B2B_API = "/api/admin/b2b";
+/** The built-in 180-day builder nurture (server: services/b2b-auto-nurture.js). */
+export const B2B_AUTO_ID = "b2b-auto-180";
 
 export const sendJson = <T = unknown>(url: string, method: string, body?: unknown) =>
   apiFetch<T>(url, {
@@ -132,7 +129,9 @@ export function useApiList<T>(url: string) {
   const [loading, setLoading] = useState(true);
   const reload = useCallback(async () => {
     try {
-      setItems(await apiFetch<T[]>(url));
+      const data = await apiFetch<T[]>(url);
+      setItems(data);
+      return data;
     } finally {
       setLoading(false);
     }

@@ -128,20 +128,6 @@ export const endB2BJourney = (leadId) =>
     data: { journeyStage: null, journeyNextAt: null, journeyHoldReason: null },
   });
 
-const QUIET_AFTER_MS = 5 * 24 * 60 * 60 * 1000;
-
-/**
- * A reply moves the lead out of scheduled sending. If it goes quiet, the journey picks it up again.
- * A lead with a meeting stays booked: "thanks, see you then" is no reason to re-engage them.
- */
-export const moveJourneyToResponded = (leadId) =>
-  prisma.b2BLead.updateMany({
-    where: { id: leadId, journeyStage: { not: null, notIn: ["APPOINTMENT_BOOKED"] } },
-    data: { journeyStage: "RESPONDED", journeyTouches: 0, journeyNextAt: new Date(Date.now() + QUIET_AFTER_MS), journeyHoldReason: null },
-  });
-
-export const QUIET_AFTER = QUIET_AFTER_MS;
-
 const icsText = (value) => String(value).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
 const icsDate = (date) => date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
 
@@ -307,7 +293,8 @@ export async function exitB2BEnrollments(leadId, reason, { campaignId } = {}) {
 export async function completeFinishedCampaigns(campaignId) {
   await prisma.b2BCampaign.updateMany({
     where: {
-      ...(campaignId ? { id: campaignId } : {}),
+      // The built-in 180-day nurture keeps taking new leads, so it never finishes.
+      id: campaignId ? { equals: campaignId, not: "b2b-auto-180" } : { not: "b2b-auto-180" },
       status: "ACTIVE",
       enrollments: { some: {}, none: { status: "ACTIVE" } },
     },
@@ -466,7 +453,6 @@ export async function handleB2BReply({ channel, sender, body, subject, headers }
   }
 
   const campaignsStopped = await exitB2BEnrollments(lead.id, "REPLY");
-  await moveJourneyToResponded(lead.id);
   if (lead.status === "NEW") {
     await prisma.b2BLead.update({ where: { id: lead.id }, data: { status: "CONTACTED" } });
   }

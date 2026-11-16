@@ -18,6 +18,7 @@ import { PLATFORM_GUIDE } from "../prompts/help-agent.js";
 import { randomUUID } from "node:crypto";
 import { inngest } from "../lib/inngest.js";
 import { journeyOnMeetingStatus } from "../lib/b2b-journey.js";
+import { B2B_AUTO_ID, autoEnrollSoon } from "../services/b2b-auto-nurture.js";
 import {
   B2B_LEAD_STATUSES,
   B2B_CLOSED_STATUSES,
@@ -162,7 +163,9 @@ export const createLead = wrap("Lead create", async (req, res) => {
   if (error) return res.status(400).json({ message: error });
   const exists = await prisma.b2BLead.findUnique({ where: { email: data.email } });
   if (exists) return res.status(409).json({ message: "A lead with that email already exists." });
-  res.status(201).json(await prisma.b2BLead.create({ data: { ...data, source: "MANUAL" } }));
+  const lead = await prisma.b2BLead.create({ data: { ...data, source: "MANUAL" } });
+  await autoEnrollSoon();
+  res.status(201).json(lead);
 });
 
 export const importLeads = wrap("Lead import", async (req, res) => {
@@ -204,6 +207,7 @@ export const importLeads = wrap("Lead import", async (req, res) => {
       }
     }
   }
+  if (count) await autoEnrollSoon();
   res.json({ imported: count, duplicates: valid.length - count - errors.length, invalid, errors });
 });
 
@@ -306,7 +310,7 @@ export const leadTimeline = wrap("Lead timeline", async (req, res) => {
   ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
   const waiting = lead.messages.filter((m) => m.direction === "IN" && !m.handledAt).length;
-  res.json({ agentPausedAt: lead.agentPausedAt, agentPausedUntil: lead.agentPausedUntil, agentPauseReason: lead.agentPauseReason, waiting, profile: lead.profile, journeyStage: lead.journeyStage, journeyNextAt: lead.journeyNextAt, journeyHoldReason: lead.journeyHoldReason, items });
+  res.json({ agentPausedAt: lead.agentPausedAt, agentPausedUntil: lead.agentPausedUntil, agentPauseReason: lead.agentPauseReason, waiting, profile: lead.profile, items });
 });
 
 export const deleteLead = wrap("Lead delete", async (req, res) => {
@@ -339,7 +343,8 @@ async function launchBlocker(steps) {
 
 export const listCampaigns = wrap("Campaigns", async (req, res) => {
   const campaigns = await prisma.b2BCampaign.findMany({
-    where: { archivedAt: null },
+    // The 180-day nurture has its own page on Nurture.
+    where: { archivedAt: null, id: { not: B2B_AUTO_ID } },
     orderBy: { createdAt: "desc" },
     include: { enrollments: { select: { status: true, exitedReason: true, failedCount: true, lastError: true } } },
   });
@@ -565,7 +570,10 @@ export const deleteTemplate = wrap("Template delete", async (req, res) => {
   res.json({ success: true });
 });
 
+const AUTO_ONLY_ON_NURTURE = "The 180-day nurture is managed on the Nurture page.";
+
 export const updateCampaign = wrap("Campaign update", async (req, res) => {
+  if (req.params.id === B2B_AUTO_ID) return res.status(400).json({ message: AUTO_ONLY_ON_NURTURE });
   const campaign = await prisma.b2BCampaign.findUnique({ where: { id: req.params.id } });
   if (!campaign) return res.status(404).json({ message: "Campaign not found." });
   const name = String(req.body?.name || "").trim();
@@ -590,6 +598,7 @@ export const updateCampaign = wrap("Campaign update", async (req, res) => {
 
 export const setCampaignStatus = wrap("Campaign status", async (req, res) => {
   const { status } = req.body || {};
+  if (req.params.id === B2B_AUTO_ID) return res.status(400).json({ message: AUTO_ONLY_ON_NURTURE });
   if (!["ACTIVE", "PAUSED"].includes(status)) return res.status(400).json({ message: "Status must be ACTIVE or PAUSED." });
   const campaign = await prisma.b2BCampaign.findUnique({ where: { id: req.params.id } });
   if (!campaign) return res.status(404).json({ message: "Campaign not found." });
@@ -610,6 +619,7 @@ export const setCampaignStatus = wrap("Campaign status", async (req, res) => {
 });
 
 export const deleteCampaign = wrap("Campaign delete", async (req, res) => {
+  if (req.params.id === B2B_AUTO_ID) return res.status(400).json({ message: AUTO_ONLY_ON_NURTURE });
   const history = await prisma.b2BEnrollment.count({ where: { campaignId: req.params.id } });
   if (!history) {
     await prisma.b2BCampaign.delete({ where: { id: req.params.id } }).catch(() => null);

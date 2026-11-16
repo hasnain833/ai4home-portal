@@ -1,8 +1,8 @@
 import prisma from "../lib/prisma.js";
-import { chat, toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
-import { query as kbQuery } from "../services/vector-store.service.js";
-import { KB_SCOPES, buildBrandContext, dedupeKbCitations } from "../lib/sales-ai.js";
-import { renderTemplate, BLOG_WRITER_TEMPLATE } from "../prompts/index.js";
+
+// Builders publish only articles the AI4Home team approved (Super Admin → Content).
+// They take one with "Use this", their name is filled in, and the text can't be changed.
+// Posts written before the library existed stay editable.
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,11 +28,6 @@ async function uniqueSlug(companyId, title) {
 function readTimeMinutes(content) {
   const words = String(content || "").trim().split(/\s+/).filter(Boolean).length;
   return Math.max(1, Math.ceil(words / 200));
-}
-
-// Thin wrapper over the shared brand-context builder (SW-KB-006).
-function brandVoiceContext(company) {
-  return buildBrandContext(company);
 }
 
 function escapeHtml(s) {
@@ -79,6 +74,73 @@ function serializePost(p) {
   };
 }
 
+const withCompanyName = (text, name) => (text == null ? text : String(text).replace(/\{\{\s*companyName\s*\}\}/g, name));
+
+// ─── AI4Home library ──────────────────────────────────────────────────────────
+
+export const listLibraryArticles = async (req, res) => {
+  try {
+    const { companyId } = req.user;
+    const [items, taken, company] = await Promise.all([
+      prisma.platformContent.findMany({ where: { kind: "BLOG", status: "PUBLISHED" }, orderBy: { publishedAt: "desc" }, take: 100 }),
+      prisma.blogPost.findMany({ where: { companyId, platformContentId: { not: null } }, select: { platformContentId: true } }),
+      prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }),
+    ]);
+    const used = new Set(taken.map((t) => t.platformContentId));
+    const name = company?.name || "our team";
+    return res.json(items.map((i) => ({
+      id: i.id,
+      title: withCompanyName(i.title, name),
+      excerpt: withCompanyName(i.excerpt, name),
+      content: withCompanyName(i.content, name),
+      category: i.category,
+      tags: i.tags,
+      publishedAt: i.publishedAt,
+      readTime: `${readTimeMinutes(i.content)} min read`,
+      used: used.has(i.id),
+    })));
+  } catch (e) {
+    console.error("[Blog] library failed:", e);
+    return res.status(500).json({ message: "Failed to load AI4Home articles" });
+  }
+};
+
+/** Copies an approved article into this builder's blog as a draft, word for word. */
+export const useLibraryArticle = async (req, res) => {
+  try {
+    const { companyId, id: userId } = req.user;
+    const item = await prisma.platformContent.findFirst({ where: { id: req.params.id, kind: "BLOG", status: "PUBLISHED" } });
+    if (!item) return res.status(404).json({ message: "That article is no longer available." });
+    if (await prisma.blogPost.findFirst({ where: { companyId, platformContentId: item.id } })) {
+      return res.status(409).json({ message: "You already added this article." });
+    }
+    const name = (await prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }))?.name || "our team";
+    const content = withCompanyName(item.content, name);
+    const post = await prisma.blogPost.create({
+      data: {
+        companyId,
+        title: withCompanyName(item.title, name).slice(0, 300),
+        excerpt: withCompanyName(item.excerpt, name),
+        content,
+        category: item.category,
+        tags: item.tags,
+        metaTitle: withCompanyName(item.metaTitle, name),
+        metaDescription: withCompanyName(item.metaDescription, name),
+        headings: [...content.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim()),
+        citations: item.citations ?? undefined,
+        aiAssisted: true,
+        status: "DRAFT",
+        platformContentId: item.id,
+        authorId: userId,
+      },
+    });
+    return res.status(201).json(serializePost(post));
+  } catch (e) {
+    console.error("[Blog] use library article failed:", e);
+    return res.status(500).json({ message: "Failed to add the article" });
+  }
+};
+
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
 export const listBlogPosts = async (req, res) => {
@@ -109,41 +171,14 @@ export const getBlogPost = async (req, res) => {
   }
 };
 
-export const createBlogPost = async (req, res) => {
-  try {
-    const { companyId, id: userId } = req.user;
-    if (!companyId) return res.status(403).json({ message: "No company associated" });
-    const { title, excerpt, content, category, tags, metaTitle, metaDescription, headings, aiAssisted } = req.body;
-    if (!title || !title.trim()) return res.status(400).json({ message: "Title is required" });
-
-    const post = await prisma.blogPost.create({
-      data: {
-        companyId,
-        title: title.trim(),
-        excerpt: excerpt || null,
-        content: content || "",
-        category: category || "Market Trends",
-        tags: Array.isArray(tags) ? tags : [],
-        metaTitle: metaTitle || null,
-        metaDescription: metaDescription || null,
-        headings: Array.isArray(headings) ? headings : [],
-        aiAssisted: !!aiAssisted,
-        status: "DRAFT",
-        authorId: userId,
-      },
-    });
-    return res.status(201).json(serializePost(post));
-  } catch (e) {
-    console.error("[Blog] create failed:", e);
-    return res.status(500).json({ message: "Failed to create post" });
-  }
-};
-
 export const updateBlogPost = async (req, res) => {
   try {
     const { companyId } = req.user;
     const existing = await prisma.blogPost.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.companyId !== companyId) return res.status(404).json({ message: "Post not found" });
+    if (existing.platformContentId) {
+      return res.status(400).json({ message: "Articles from AI4Home are published as approved and can't be edited." });
+    }
 
     const { title, excerpt, content, category, tags, metaTitle, metaDescription, headings } = req.body;
     const data = {};
@@ -187,144 +222,6 @@ export const deleteBlogPost = async (req, res) => {
   }
 };
 
-
-const BLOG_DRAFT_TOOL = {
-  name: "write_blog_post",
-  description: "Return the finished blog post.",
-  input_schema: {
-    type: "object",
-    properties: {
-      title: { type: "string" },
-      excerpt: { type: "string", description: "1-2 sentence summary" },
-      metaTitle: { type: "string", description: "<= 60 chars, SEO" },
-      metaDescription: { type: "string", description: "<= 160 chars, SEO" },
-      headings: { type: "array", items: { type: "string" }, description: "H2 section headings, in order" },
-      tags: { type: "array", items: { type: "string" }, description: "3-6 lowercase tags" },
-      content: { type: "string", description: "Full post body in Markdown using ## headings" },
-    },
-    required: ["title", "excerpt", "metaTitle", "metaDescription", "headings", "tags", "content"],
-  },
-};
-
-export const generateBlogDraft = async (req, res) => {
-  try {
-    const { companyId, id: userId } = req.user;
-    if (!companyId) return res.status(403).json({ message: "No company associated" });
-    if (!(await hasLLM(companyId))) return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
-
-    const { topic, tone, keywords, targetAudience, targetLength, category, newsIds } = req.body;
-    if (!topic || !topic.trim()) return res.status(400).json({ message: "A topic prompt is required." });
-
-    const company = await prisma.company.findUnique({ where: { id: companyId } });
-    const keywordStr = Array.isArray(keywords) ? keywords.join(", ") : keywords || "";
-    const kbChunks = await kbQuery(companyId, `${topic} ${keywordStr}`, 5, KB_SCOPES.blog, "blog-draft").catch(() => []);
-    const kbContext = kbChunks.length
-      ? kbChunks.map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`).join("\n\n")
-      : "No knowledge-base context available.";
-    const kbCitations = dedupeKbCitations(kbChunks);
-
-    let citations = [];
-    let newsContext = "No source news selected.";
-    if (Array.isArray(newsIds) && newsIds.length) {
-      const news = await prisma.newsPost.findMany({ where: { status: "PUBLISHED", id: { in: newsIds.map(String) } } });
-      citations = news.map((n) => ({ title: n.title, url: n.originalUrl }));
-      newsContext = news.map((n) => `- ${n.title}: ${n.summary} (${n.originalUrl})`).join("\n") || newsContext;
-    }
-
-    const system = renderTemplate(BLOG_WRITER_TEMPLATE, {
-      companyName: company?.name || "a homebuilder",
-      brandVoice: brandVoiceContext(company),
-      kbContext,
-      newsContext,
-    });
-
-    const user = `Topic: ${topic}
-Tone: ${tone || company?.voiceProfile || "professional"}
-Target audience: ${targetAudience || "prospective homebuyers"}
-Target length: ${targetLength || "800-1000 words"}
-Keywords to work in naturally: ${keywordStr || "(none specified)"}`;
-
-    // A tool call, not free-text JSON: a full post in Markdown inside a JSON
-    // string broke parsing whenever an escape slipped or 2000 tokens cut it off.
-    const parsed = await toolCall({
-      companyId,
-      system,
-      messages: [{ role: "user", content: user }],
-      tool: BLOG_DRAFT_TOOL,
-      maxTokens: 8000,
-    });
-    if (!parsed?.content) {
-      console.error("[Blog] draft generation returned no post");
-      return res.status(502).json({ message: "The AI draft could not be generated. Please try again." });
-    }
-
-    const post = await prisma.blogPost.create({
-      data: {
-        companyId,
-        title: (parsed.title || topic).slice(0, 300),
-        excerpt: parsed.excerpt || null,
-        content: parsed.content || "",
-        category: category || "Market Trends",
-        tags: Array.isArray(parsed.tags) ? parsed.tags.slice(0, 8) : [],
-        metaTitle: parsed.metaTitle || null,
-        metaDescription: parsed.metaDescription || null,
-        headings: Array.isArray(parsed.headings) ? parsed.headings : [],
-        tone: tone || company?.voiceProfile || null,
-        targetAudience: targetAudience || null,
-        citations: citations.length ? citations : undefined,
-        kbCitations: kbCitations.length ? kbCitations : undefined,
-        sourceNewsIds: Array.isArray(newsIds) ? newsIds : [],
-        aiAssisted: true,
-        status: "DRAFT",
-        authorId: userId,
-      },
-    });
-    return res.status(201).json(serializePost(post));
-  } catch (e) {
-    console.error("[Blog] generate failed:", e);
-    return res.status(500).json({ message: "Failed to generate draft" });
-  }
-};
-
-// SW-BLOG-003: regenerate one section via AI while preserving manual edits elsewhere.
-export const regenerateSection = async (req, res) => {
-  try {
-    const { companyId } = req.user;
-    if (!(await hasLLM(companyId))) return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
-    const post = await prisma.blogPost.findUnique({ where: { id: req.params.id } });
-    if (!post || post.companyId !== companyId) return res.status(404).json({ message: "Post not found" });
-
-    const { heading, instruction } = req.body;
-    if (!heading) return res.status(400).json({ message: "A section heading is required." });
-
-    const company = await prisma.company.findUnique({ where: { id: companyId } });
-
-    // Locate the "## heading" section (up to the next ## or end of doc).
-    const lines = post.content.split(/\r?\n/);
-    const startIdx = lines.findIndex((l) => /^##\s+/.test(l) && l.replace(/^##\s+/, "").trim().toLowerCase() === String(heading).trim().toLowerCase());
-    if (startIdx === -1) return res.status(404).json({ message: `Section "${heading}" not found.` });
-    let endIdx = lines.length;
-    for (let i = startIdx + 1; i < lines.length; i++) {
-      if (/^##\s+/.test(lines[i])) { endIdx = i; break; }
-    }
-    const currentSection = lines.slice(startIdx, endIdx).join("\n");
-
-    const system = `You rewrite a single section of a blog post for ${company?.name || "a homebuilder"}, preserving the section heading and matching this brand voice:\n${brandVoiceContext(company)}\nReturn ONLY the rewritten Markdown for that one section (keep the "## ${heading}" heading line). Do not add other sections.`;
-    const user = `Current section:\n${currentSection}\n\nInstruction: ${instruction || "Improve clarity and engagement while keeping the meaning."}`;
-
-    const rewritten = await chat({ companyId, system, user, maxTokens: 900 });
-    if (!rewritten) return res.status(502).json({ message: "Regeneration returned nothing." });
-
-    const newSection = rewritten.replace(/```markdown/gi, "").replace(/```/g, "").trim();
-    const newContent = [...lines.slice(0, startIdx), newSection, ...lines.slice(endIdx)].join("\n");
-
-    const updated = await prisma.blogPost.update({ where: { id: post.id }, data: { content: newContent } });
-    return res.json(serializePost(updated));
-  } catch (e) {
-    console.error("[Blog] regenerate failed:", e);
-    return res.status(500).json({ message: "Failed to regenerate section" });
-  }
-};
 
 // ─── Approval / publish / schedule (SW-BLOG-004 / 005 / 006) ────────────────────
 

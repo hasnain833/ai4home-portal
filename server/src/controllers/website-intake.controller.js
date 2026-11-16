@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { inngest } from "../lib/inngest.js";
 import { parseWebsiteInquiry, storeWebsiteInquiry } from "../lib/website-inquiry.js";
+import { autoEnrollSoon } from "../services/b2b-auto-nurture.js";
 
 export async function websiteIntake(req, res) {
   const id = req.get("Idempotency-Key") || "";
@@ -12,6 +13,8 @@ export async function websiteIntake(req, res) {
     const inquiry = await storeWebsiteInquiry(prisma, id, payload);
     // The cron also sweeps persisted pending deliveries if event publication fails.
     await inngest.send({ name: "b2b.website-inquiry.saved", data: { inquiryId: inquiry.id } }).catch(() => console.error("[Website intake] Delivery queued for cron recovery"));
+    // Speed-to-lead: the 180-day nurture starts now, not at the next 15-minute sweep.
+    void autoEnrollSoon();
     return res.status(202).json({ success: true, delivery: "pending" });
   } catch (error) {
     console.error("[Website intake] Could not store inquiry:", error.code || error.status || "unknown");

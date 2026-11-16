@@ -85,8 +85,6 @@ const SEND_TIMES = Array.from({ length: 26 }, (_, i) => {
 const SEND_RIGHT_AWAY = "right-away";
 const PLACEHOLDERS = ["{{firstName}}", "{{contactName}}", "{{companyName}}", "{{city}}", "{{bookingLink}}"];
 
-type LibraryPiece = { id: string; category: string; stage: string; channel: "EMAIL" | "SMS"; subject: string | null; body: string };
-
 export default function CampaignsView() {
   const confirm = useConfirm();
   const { items: campaigns, loading, reload } = useB2BCampaigns();
@@ -104,7 +102,6 @@ export default function CampaignsView() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [writingStep, setWritingStep] = useState<number | null>(null);
-  const [library, setLibrary] = useState<LibraryPiece[] | null>(null);
   const [enrollFor, setEnrollFor] = useState<B2BCampaign | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [pickFilter, setPickFilter] = useState<B2BLeadStatus | "ALL">("NEW");
@@ -156,20 +153,6 @@ export default function CampaignsView() {
     } finally {
       setWritingStep(null);
     }
-  };
-
-  const openLibrary = async () => {
-    try {
-      setLibrary(await apiFetch<LibraryPiece[]>(`${B2B_API}/nurture/content?status=APPROVED`));
-    } catch (e) {
-      toast.error(errorMessage(e));
-    }
-  };
-
-  const addFromLibrary = (piece: LibraryPiece) => {
-    setDraft((d) => d && { ...d, steps: [...d.steps, { ...newStep(d.steps.length ? 3 : 0), channel: piece.channel, subject: piece.subject || "", body: piece.body }] });
-    setLibrary(null);
-    toast.success("Added as a new step. You can edit it for this campaign.");
   };
 
   const save = async () => {
@@ -695,14 +678,9 @@ export default function CampaignsView() {
                   </div>
                 ))}
                 {draft.steps.length < 20 && (
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDraft({ ...draft, steps: [...draft.steps, newStep(3)] })}>
-                      <Plus className="h-3.5 w-3.5" /> Add step
-                    </Button>
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={openLibrary}>
-                      <Plus className="h-3.5 w-3.5" /> Add from library
-                    </Button>
-                  </div>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDraft({ ...draft, steps: [...draft.steps, newStep(3)] })}>
+                    <Plus className="h-3.5 w-3.5" /> Add step
+                  </Button>
                 )}
                 <p className="text-[11px] text-muted-foreground">
                   Placeholders: {PLACEHOLDERS.map((p) => <span key={p} className="mr-1.5 font-mono">{p}</span>)}— if a message has no{" "}
@@ -715,30 +693,6 @@ export default function CampaignsView() {
             <Button variant="outline" onClick={() => setDraft(null)}>Cancel</Button>
             <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={busy || writingStep !== null} onClick={save}>{draft?.template ? "Save template" : "Save campaign"}</Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add an approved message to the campaign being edited */}
-      <Dialog open={!!library} onOpenChange={(open) => !open && setLibrary(null)}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Add from library</DialogTitle>
-            <DialogDescription>Approved messages from Nurture. The campaign gets its own copy, so editing it won&apos;t change the library.</DialogDescription>
-          </DialogHeader>
-          {library?.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">No approved messages yet. Approve some on the Nurture tab.</p>
-          ) : (
-            <ul className="divide-y divide-border rounded-lg border border-border">
-              {library?.map((piece) => (
-                <li key={piece.id}>
-                  <button type="button" className="w-full space-y-0.5 p-3 text-left hover:bg-muted/50" onClick={() => addFromLibrary(piece)}>
-                    <span className="block text-sm font-medium">{piece.subject || piece.body.slice(0, 90)}</span>
-                    <span className="block text-xs text-muted-foreground">{piece.channel === "SMS" ? "SMS" : "Email"} · {titleCase(piece.stage)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
         </DialogContent>
       </Dialog>
 

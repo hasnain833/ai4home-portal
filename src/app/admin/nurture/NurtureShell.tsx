@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Megaphone, Route } from "lucide-react";
-import NurtureView from "@/components/admin/NurtureView";
+import AutoNurtureWorkflow from "@/components/sales/AutoNurtureWorkflow";
 import CampaignsView from "@/components/admin/CampaignsView";
 
 const VIEWS = [
@@ -34,7 +34,7 @@ export default function NurtureShell() {
           ))}
         </div>
       </div>
-      {view === "nurture" ? <NurtureView /> : <CampaignsView />}
+      {view === "nurture" ? <AutoNurtureWorkflow variant="b2b" /> : <CampaignsView />}
     </div>
   );
 }

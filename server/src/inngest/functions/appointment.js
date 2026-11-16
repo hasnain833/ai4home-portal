@@ -40,6 +40,12 @@ export function clampMaxTurns(value) {
   return Math.min(MAX_MAX_TURNS, Math.max(MIN_MAX_TURNS, n));
 }
 
+/** The lead's own booking page, where they pick any open time themselves. */
+async function bookingLinkFor(leadId) {
+  const portal = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
+  return `${portal}/book/${await getOrCreateLeadBookingToken(leadId)}`;
+}
+
 function brandedEmail(companyName, bodyText) {
   return Templates.getBrandedAgentEmail(bodyText, companyName);
 }
@@ -170,14 +176,18 @@ function renderAgentPrompt({
   timezone,
   kbChunks,
   retrievalMethod = null,
+  bookingLink = "https://example.com/book/your-link",
 }, prompts) {
   const slotList = slots.map((s, i) => `${i + 1}. ${s.label}  [iso:${s.iso}]`).join("\n") || "(no slots currently available)";
+  // How to invite overrides any "name two times" wording in the prompt (a live Prompt Lab
+  // version included): SMS and email share the lead's booking link, web chat shows its calendar.
+  const linkRule = `When you invite them to book a visit, do NOT name or list specific times. Share their booking link so they can pick any open time themselves: ${bookingLink} — copy the link exactly, once. The slot list below is only for when they name a time themselves: then book it if it is on the list, otherwise send the link.`;
   const channelGuidance =
     channel === "SMS"
-      ? "This is an SMS conversation. Keep replies under 320 characters, plain text, no markdown."
+      ? `This is an SMS conversation. Keep replies under 320 characters, plain text, no markdown. ${linkRule}`
       : channel === "WEBCHAT"
         ? "This is a live web chat. Keep replies short and snappy — a couple of sentences, plain text, no markdown. When you offer visit times here, do NOT name two specific times: invite them to pick a time that suits them and set show_calendar to true — the chat shows a calendar of every open time and a booking form once they choose."
-        : "This is an email conversation. Keep replies concise and friendly.";
+        : `This is an email conversation. Keep replies concise and friendly. ${linkRule}`;
 
   const pacingGuidance =
     channel === "WEBCHAT"
@@ -287,9 +297,7 @@ export const appointmentSchedulingAgent = inngest.createFunction(
 
     if (mode === "SIMPLE") {
       await step.run("send-booking-link", async () => {
-        const portal = process.env.NEXT_PUBLIC_URL || "http://localhost:3000";
-        const bookingToken = await getOrCreateLeadBookingToken(lead.id);
-        const link = `${portal}/book/${bookingToken}`;
+        const link = await bookingLinkFor(lead.id);
         const text = `Hi ${lead.firstName}, thanks for your interest! Pick a time that works for you here: ${link}`;
         await sendLeadMessage(lead, channel, text, "Book your visit");
         await prisma.schedulingConversation.update({ where: { id: convoId }, data: { status: "CLOSED", mode } });
@@ -352,6 +360,7 @@ export const appointmentSchedulingAgent = inngest.createFunction(
         timezone: slots.tz,
         kbChunks: kb.chunks,
         retrievalMethod: kb.method,
+        bookingLink: await bookingLinkFor(lead.id),
       });
     });
 
@@ -430,10 +439,7 @@ export const appointmentSchedulingAgent = inngest.createFunction(
             data: { transcript: finalTranscript, status: "BOOKED" },
           });
         } else {
-          const reoffer = `Sorry — that time was just taken. Here are the next available options:\n${slots.list
-            .slice(0, 3)
-            .map((s) => `• ${s.label}`)
-            .join("\n")}\nWhich one works?`;
+          const reoffer = `Sorry — that time was just taken. You can pick another time that suits you here: ${await bookingLinkFor(lead.id)}`;
           await sendLeadMessage(lead, channel, reoffer, "Let's find another time");
           const finalTranscript = [
             ...transcript,

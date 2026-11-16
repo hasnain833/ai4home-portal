@@ -630,7 +630,7 @@ export const Templates = {
       .map((m, i) => `<tr style="${i < meetings.length - 1 ? `border-bottom: 1px solid ${COLORS.border};` : ""}"><td style="padding: 12px 12px 12px 0; font-weight: 600;">${escapeHtml(m.company)}${m.contact ? `<br><span style="font-weight: 400; color: ${COLORS.textMuted}; font-size: 14px;">${escapeHtml(m.contact)}</span>` : ""}</td><td style="padding: 12px 0; text-align: right;">${escapeHtml(m.when)}</td></tr>`)
       .join("");
     const content = `
-      <p style="margin-top: 0;">These meetings have passed but are still marked <strong>Confirmed</strong>, so each builder's nurture journey is paused until you record what happened.</p>
+      <p style="margin-top: 0;">These meetings have passed but are still marked <strong>Confirmed</strong>, so there's no record of what happened. Please mark each one Completed, No-show or Cancelled.</p>
       <table style="margin: 24px 0; font-size: 15px; color: ${COLORS.textMain}; width: 100%; border-collapse: collapse;">${rows}</table>
       <p>Mark each one Completed, No-show or Cancelled. A no-show gets a rebooking email, and a cancelled one goes back into nurture.</p>
       ${emailButton(adminUrl, "Open Appointments")}

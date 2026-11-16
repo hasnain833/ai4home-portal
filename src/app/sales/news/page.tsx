@@ -81,7 +81,7 @@ export default function SalesNewsPage() {
                 Housing Market News
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Market news reviewed and published by the AI for Homebuilders team, from the last 30 days. It also powers your calendar suggestions, blog drafts and news campaigns. Nothing is sent to leads without your approval.
+                Market news reviewed and published by the AI for Homebuilders team, from the last 30 days. You can turn any post into a campaign. Nothing is sent to leads without your approval.
               </p>
             </div>
             <div className="flex items-center gap-2">

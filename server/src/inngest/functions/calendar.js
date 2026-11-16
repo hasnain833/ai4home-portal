@@ -26,28 +26,24 @@ export const scheduleCalendarItem = inngest.createFunction(
       return { skipped: true, reason: "Item is no longer Scheduled" };
     }
 
+    // Only a blog post linked to this item can go out from the calendar. Emails, texts and
+    // announcements are sent from Campaigns and Announcements, so they are never marked Sent here.
     const dispatchResult = await step.run("dispatch-calendar-item", async () => {
-      let success = true;
-      let reason = "Dispatched";
+      const post = item.channel === "Blog"
+        ? await prisma.blogPost.findFirst({ where: { calendarEventId: item.id, companyId: item.companyId } })
+        : null;
+      let reason;
+      if (!post) reason = "No blog post is linked to this calendar item";
+      else if (post.status === "PUBLISHED") reason = "Already published";
+      else if (post.status !== "APPROVED" || !post.approvedAt) reason = "The linked blog post isn't approved";
 
-      try {
-        if (item.channel === "Email" || item.channel === "SMS") {
-          console.warn(`[Calendar Executor] Dispatching ${item.channel} item ${item.id}. Audience logic pending SW-ANN.`);
-        } else if (item.channel === "Blog" || item.channel === "Announcement") {
-          console.log(`[Calendar Executor] Publishing ${item.channel} item ${item.id}.`);
-        }
-      } catch (err) {
-        success = false;
-        reason = err.message;
+      if (!reason) {
+        const slug = post.slug || `${post.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "post"}-${post.id.slice(-6)}`;
+        await prisma.blogPost.update({ where: { id: post.id }, data: { status: "PUBLISHED", publishedAt: new Date(), slug } });
       }
-
-      // Update status
-      await prisma.contentCalendar.update({
-        where: { id: item.id },
-        data: { status: success ? (item.channel === "Blog" || item.channel === "Announcement" ? "Published" : "Sent") : "Failed" },
-      });
-
-      return { success, reason };
+      const success = !reason || reason === "Already published";
+      await prisma.contentCalendar.update({ where: { id: item.id }, data: { status: success ? "Published" : "Failed" } });
+      return { success, reason: reason || "Published" };
     });
 
     return { calendarId, dispatchResult };

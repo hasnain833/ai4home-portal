@@ -1,10 +1,6 @@
 import prisma from "../lib/prisma.js";
-import { chat, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { getNextValidSendWindow } from "../lib/timezone.js";
 import { inngest } from "../lib/inngest.js";
-import { query as kbQuery } from "../services/vector-store.service.js";
-import { KB_SCOPES, parseLlmJson } from "../lib/sales-ai.js";
-import { renderTemplate, CONTENT_CALENDAR_TEMPLATE } from "../prompts/index.js";
 
 const VALID_STATUSES = [
   "Suggested",
@@ -40,6 +36,9 @@ const EDITABLE_FIELDS = [
   "channel",
 ];
 
+// The calendar plans; it doesn't send. Only a blog post linked to the item can go out from here.
+const CANNOT_SEND = "The calendar can't send emails, texts or announcements. Send them from Campaigns or Announcements; this item stays on the calendar as your plan.";
+
 const DEFAULT_TIMEZONE = "America/New_York";
 const SMS_WINDOW_START_HOUR = 8;
 const SMS_WINDOW_END_HOUR = 21;
@@ -59,7 +58,7 @@ const SEASONAL_MOMENTS = {
   11: "Year-end tax-benefit purchases; holiday season; new-year planning",
 };
 
-function getSeasonalContext(now = new Date()) {
+export function getSeasonalContext(now = new Date()) {
   const month = now.getMonth();
   const seasons = [
     "Winter",
@@ -119,7 +118,8 @@ export const getCalendarEvents = async (req, res) => {
   const homeowner = isHomeowner(req);
 
   const manualEvents = await prisma.contentCalendar.findMany({
-    where: { companyId: req.user.companyId, ...ownerScope(req) },
+    // A dismissed idea is only kept so it isn't offered again; it isn't part of the plan.
+    where: { companyId: req.user.companyId, status: { not: "Dismissed" }, ...ownerScope(req) },
     orderBy: { scheduledAt: "asc" },
   });
 
@@ -276,9 +276,8 @@ export const createCalendarEvent = async (req, res) => {
       });
   }
 
-  if (initialStatus === "Scheduled" && channel === "SMS") {
-    const windowError = checkSmsWindow(scheduledDate);
-    if (windowError) return res.status(422).json(windowError);
+  if (initialStatus === "Scheduled" && channel !== "Blog") {
+    return res.status(422).json({ message: CANNOT_SEND });
   }
 
   const event = await prisma.contentCalendar.create({
@@ -312,179 +311,60 @@ export const createCalendarEvent = async (req, res) => {
   return res.status(201).json(event);
 };
 
-export const getCalendarSuggestions = async (req, res) => {
+// ─── AI4Home library ideas (Super Admin → Content) ───────────────────────────
+// Builders no longer generate their own suggestions; they add or dismiss ideas the
+// AI4Home team published. Each idea is offered once per builder.
+
+const withCompanyName = (text, name) => String(text || "").replace(/\{\{\s*companyName\s*\}\}/g, name);
+
+export const getLibraryIdeas = async (req, res) => {
   const companyId = req.user.companyId;
+  const [ideas, taken, company] = await Promise.all([
+    prisma.platformContent.findMany({ where: { kind: "IDEA", status: "PUBLISHED" }, orderBy: { publishedAt: "desc" }, take: 50 }),
+    prisma.contentCalendar.findMany({ where: { companyId, platformContentId: { not: null } }, select: { platformContentId: true } }),
+    prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }),
+  ]);
+  const seen = new Set(taken.map((t) => t.platformContentId));
+  const name = company?.name || "our team";
+  res.json(
+    ideas
+      .filter((i) => !seen.has(i.id))
+      .map((i) => ({
+        id: i.id,
+        title: withCompanyName(i.title, name),
+        channel: i.channel,
+        scheduledAt: i.suggestedFor,
+        reason: withCompanyName(i.reason, name),
+        content: withCompanyName(i.content, name),
+      })),
+  );
+};
 
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    include: {
-      communities: { select: { name: true } },
-    },
-  });
-
-  const voiceProfile = company?.voiceProfile || "professional";
-
-  const communityNames = (company?.communities || [])
-    .map((c) => c.name)
-    .filter(Boolean);
-  let brandText = "";
-  const brand = company?.salesBrandProfile;
-  if (brand && typeof brand === "object") {
-    brandText = Object.entries(brand)
-      .map(
-        ([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`,
-      )
-      .join("; ");
-  }
-  const tenantProfileText =
-    [
-      company?.address
-        ? `Primary market / location: ${company.address}`
-        : null,
-      communityNames.length
-        ? `Communities / markets served: ${communityNames.join(", ")}`
-        : null,
-      brandText ? `Brand profile: ${brandText}` : null,
-    ]
-      .filter(Boolean)
-      .join("\n") || "No detailed tenant profile on file.";
-
-  const seasonalContextText = getSeasonalContext();
-
-  if (!(await hasLLM(companyId))) {
-    return res.status(503).json({ message: await aiUnavailableMessage(companyId) });
-  }
-
-  const kbQueryText =
-    [company?.name, communityNames.join(" "), brandText]
-      .filter(Boolean)
-      .join(" ")
-      .slice(0, 400) || "brand voice communities products";
-  const kbChunks = await kbQuery(
-    companyId,
-    kbQueryText,
-    4,
-    KB_SCOPES.calendar,
-  ).catch(() => []);
-  const kbContextText = kbChunks.length
-    ? kbChunks
-        .map((c, i) => `[KB ${i + 1}] ${c.name}: ${c.text}`)
-        .join("\n\n")
-    : "No knowledge-base context available.";
-
-  const existingEvents = await prisma.contentCalendar.findMany({
-    where: {
+/** Adds an idea to the calendar as a draft, word for word with the builder's name filled in. */
+export const useLibraryIdea = async (req, res) => {
+  const companyId = req.user.companyId;
+  const idea = await prisma.platformContent.findFirst({ where: { id: req.params.id, kind: "IDEA", status: "PUBLISHED" } });
+  if (!idea) return res.status(404).json({ message: "That idea is no longer available." });
+  const existing = await prisma.contentCalendar.findFirst({ where: { companyId, platformContentId: idea.id } });
+  if (existing) return res.status(409).json({ message: "You already added or dismissed this idea." });
+  const name = (await prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }))?.name || "our team";
+  // A suggested date already behind us lands tomorrow, so the item is still ahead on the calendar.
+  const when = idea.suggestedFor && idea.suggestedFor.getTime() > Date.now() ? idea.suggestedFor : new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const item = await prisma.contentCalendar.create({
+    data: {
       companyId,
-      ...ownerScope(req),
-      scheduledAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-      status: { in: ["Draft", "Approved", "Scheduled", "Sent", "Published"] },
+      title: withCompanyName(idea.title, name),
+      channel: idea.channel || "Email",
+      scheduledAt: when,
+      status: req.path.endsWith("/dismiss") ? "Dismissed" : "Draft",
+      content: withCompanyName(idea.content, name),
+      reason: withCompanyName(idea.reason, name),
+      isAiSuggested: true,
+      platformContentId: idea.id,
+      ownerId: req.user.id,
     },
-    select: { scheduledAt: true, title: true, channel: true },
-    orderBy: { scheduledAt: "asc" },
   });
-
-  const existingEventsText = existingEvents
-    .map(
-      (e) =>
-        `${e.scheduledAt.toISOString().split("T")[0]}: ${e.channel} - ${e.title}`,
-    )
-    .join("\n");
-
-  const dismissedItems = await prisma.contentCalendar.findMany({
-    where: { companyId, ...ownerScope(req), status: "Dismissed" },
-    select: { title: true, reason: true },
-    orderBy: { updatedAt: "desc" },
-    take: 10,
-  });
-
-  const dismissedText =
-    dismissedItems.length > 0
-      ? dismissedItems
-          .map((d) => `${d.title} (${d.reason || "No reason"})`)
-          .join("\n")
-      : "None";
-  const recentNews = await prisma.newsPost.findMany({
-    where: {
-      status: "PUBLISHED",
-      publishedAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) },
-    },
-    select: { title: true, summary: true, source: true, publishedAt: true },
-    orderBy: { publishedAt: "desc" },
-    take: 8,
-  });
-
-  const recentNewsText =
-    recentNews.length > 0
-      ? recentNews
-          .map(
-            (n) =>
-              `${n.publishedAt.toISOString().split("T")[0]} [${n.source}] ${n.title}: ${n.summary}`,
-          )
-          .join("\n")
-      : "No recent market news available.";
-
-  const systemPrompt = renderTemplate(CONTENT_CALENDAR_TEMPLATE, {
-    companyName: company?.name || "Homebuilder",
-    voiceProfile,
-    currentDate: new Date().toISOString(),
-    tenantProfile: tenantProfileText,
-    kbContext: kbContextText,
-    seasonalContext: seasonalContextText,
-    existingEvents: existingEventsText || "No existing events.",
-    recentNews: recentNewsText,
-    dismissedTopics: dismissedText,
-  });
-
-  const text = await chat({
-    system: systemPrompt,
-    user: "Generate the suggestions as raw JSON.",
-    maxTokens: 1500,
-    json: true,
-    companyId,
-  });
-
-  if (!text) {
-    return res
-      .status(502)
-      .json({
-        message:
-          "The AI provider did not return any suggestions. Please try again.",
-      });
-  }
-
-  const suggestionsJson = parseLlmJson(text, { array: true });
-  if (!Array.isArray(suggestionsJson)) {
-    return res
-      .status(502)
-      .json({
-        message: "The AI suggestions could not be parsed. Please try again.",
-      });
-  }
-
-  const createdSuggestions = [];
-  for (const s of suggestionsJson) {
-    let scheduledDate = new Date();
-    if (s.scheduledAt && !isNaN(new Date(s.scheduledAt).getTime())) {
-      scheduledDate = new Date(s.scheduledAt);
-    }
-
-    const item = await prisma.contentCalendar.create({
-      data: {
-        companyId,
-        title: s.topic || "Suggested Topic",
-        channel: s.channel || "Email",
-        scheduledAt: scheduledDate,
-        status: "Suggested",
-        content: s.outline || "",
-        reason: s.reason || "",
-        isAiSuggested: true,
-        ownerId: req.user.id,
-      },
-    });
-    createdSuggestions.push(item);
-  }
-
-  return res.json(createdSuggestions);
+  return res.status(201).json(item);
 };
 
 export const updateCalendarEvent = async (req, res) => {
@@ -573,9 +453,8 @@ export const transitionCalendarEvent = async (req, res) => {
       .status(403)
       .json({ message: "Only an ADMIN can approve calendar items" });
   }
-  if (target === "Scheduled" && item.channel === "SMS") {
-    const windowError = checkSmsWindow(item.scheduledAt);
-    if (windowError) return res.status(422).json(windowError);
+  if (target === "Scheduled" && item.channel !== "Blog") {
+    return res.status(422).json({ message: CANNOT_SEND });
   }
 
   const updated = await prisma.contentCalendar.update({
