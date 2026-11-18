@@ -131,8 +131,6 @@ export class ComplianceService {
       ? senderContact.replace(/\D/g, "")
       : senderContact.trim().toLowerCase();
 
-    // Without a companyId the STOP arrived on the shared number with no tenant
-    // attached, so it applies to every lead with this contact, everywhere.
     const leads = await prisma.lead.findMany({
       where: {
         ...(companyId ? { companyId } : {}),
@@ -185,7 +183,8 @@ export class ComplianceService {
           });
         }
       }
-      if (isSms) await setB2BSmsOptOut(normalizedContact, true);
+      // A STOP to one builder never touches AI4Home's B2B texts (SRS SMS-08); only the shared number's does.
+      if (isSms && !companyId) await setB2BSmsOptOut(normalizedContact, true);
 
       return {
         isComplianceAction: true,
@@ -196,8 +195,6 @@ export class ComplianceService {
     }
 
     if (startKeywords.includes(text) && isSms) {
-      // START only restores what a STOP removed. It may arrive with no tenant
-      // attached, so it must not grant consent at builders never opted in to.
       for (const lead of leads) {
         if (lead.consentSource !== "SMS STOP Keyword") continue;
         await prisma.lead.update({
@@ -218,7 +215,7 @@ export class ComplianceService {
           },
         })
         .catch(() => {});
-      await setB2BSmsOptOut(normalizedContact, false);
+      if (!companyId) await setB2BSmsOptOut(normalizedContact, false);
 
       return {
         isComplianceAction: true,

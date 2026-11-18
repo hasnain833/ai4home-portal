@@ -91,6 +91,13 @@ model Company {
   voiceProfile            String?                 @default("professional")
   salesBrandProfile       Json?
   maxSmsPerHour           Int                     @default(60)
+ smsNumber               String?                 @unique
+  smsStatus               String                  @default("NONE") 
+  smsRejectReason         String?
+  smsRegistration         Json? 
+  smsMessagingProfileId   String?
+  smsBrandId              String?
+  smsCampaignId           String?
   complianceOptInRequired Boolean                 @default(true)
   smsQuietHoursEnabled    Boolean                 @default(false)
   quietHoursStart         Int                     @default(8)
@@ -831,6 +838,7 @@ model MessageUsage {
   campaignId        String?
   stepId            String?
   providerMessageId String?
+  fromNumber        String?
   deliveredAt       DateTime?
   openedAt          DateTime?
   clickedAt         DateTime?

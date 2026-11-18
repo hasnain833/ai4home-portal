@@ -4,7 +4,7 @@ import { resolveDownloadUrl } from "../lib/storage.js";
 import { Templates } from "../services/templates.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { forgetCompanySuspension } from "../lib/company-suspension.js";
-
+import { SMS_STATUS, forgetCompanySender, toE164 } from "../services/sms.service.js";
 export const getCompanies = async (req, res) => {
   try {
     const session = req.user;
@@ -13,14 +13,29 @@ export const getCompanies = async (req, res) => {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const companies = await prisma.company.findMany({
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const [companies, smsCounts, sharedNumberSends] = await Promise.all([
+      prisma.company.findMany({ orderBy: { createdAt: "desc" } }),
+      prisma.messageUsage.groupBy({
+        by: ["companyId"],
+        where: { channel: "SMS", outcome: "sent", companyId: { not: null }, createdAt: { gte: monthStart } },
+        _count: { _all: true },
+      }),
+      prisma.messageUsage.groupBy({
+        by: ["companyId"],
+        where: { channel: "SMS", outcome: "sent", companyId: { not: null }, fromNumber: null },
+        _max: { createdAt: true },
+      }),
+    ]);
+    const smsThisMonth = new Map(smsCounts.map((row) => [row.companyId, row._count._all]));
+    const lastSharedSms = new Map(sharedNumberSends.map((row) => [row.companyId, row._max.createdAt]));
     const withSignedDocs = await Promise.all(
       companies.map(async (company) => ({
         ...company,
+        smsThisMonth: smsThisMonth.get(company.id) || 0,
+        smsLastSharedAt: lastSharedSms.get(company.id) || null,
         verificationDocUrl: await resolveDownloadUrl(company.verificationDocUrl, {
           expiresIn: 900,
         }),
@@ -250,9 +265,6 @@ export const updateUserAccess = async (req, res) => {
   return res.json(user);
 };
 
-/** Onboarding dates; time to go-live is reported against the SOP's 30-day target. */
-// Suspend keeps every record; it blocks logins, public entry points and sends
-// until reactivated (see lib/company-suspension.js).
 export const setCompanySuspension = async (req, res) => {
   try {
     if (!req.user?.isSuperAdmin && req.adminAccess !== true) return res.status(403).json({ message: "Unauthorized" });
@@ -278,6 +290,57 @@ export const setCompanySuspension = async (req, res) => {
     if (error?.code === "P2025") return res.status(404).json({ message: "Company not found" });
     console.error("Error updating company suspension:", error);
     return res.status(500).json({ message: "Could not update the company." });
+  }
+};
+
+/** A builder's own texting number, registered in Telnyx; it sends only once APPROVED. */
+export const updateCompanySms = async (req, res) => {
+  try {
+    if (!req.user?.isSuperAdmin && req.adminAccess !== true) return res.status(403).json({ message: "Unauthorized" });
+
+    const data = {};
+    if (req.body?.smsNumber !== undefined) {
+      const number = toE164(req.body.smsNumber);
+      if (number === undefined) return res.status(400).json({ message: "Enter a US or Canadian number, e.g. +1 555 123 4567." });
+      if (number && number === toE164(process.env.TELNYX_FROM_NUMBER)) {
+        return res.status(400).json({ message: "That's the shared AI4Home number. Each builder needs its own." });
+      }
+      data.smsNumber = number;
+    }
+    if (req.body?.smsStatus !== undefined) {
+      if (!Object.values(SMS_STATUS).includes(req.body.smsStatus)) return res.status(400).json({ message: "Unknown status." });
+      data.smsStatus = req.body.smsStatus;
+      if (data.smsStatus !== SMS_STATUS.REJECTED) data.smsRejectReason = null;
+    }
+
+    const existing = await prisma.company.findUnique({ where: { id: req.params.companyId }, select: { smsNumber: true, smsStatus: true } });
+    if (!existing) return res.status(404).json({ message: "Company not found" });
+    const finalNumber = data.smsNumber !== undefined ? data.smsNumber : existing.smsNumber;
+    const finalStatus = data.smsStatus ?? existing.smsStatus;
+    if (finalStatus === SMS_STATUS.APPROVED && !finalNumber) {
+      return res.status(400).json({ message: "Add the number before marking it approved." });
+    }
+
+    const company = await prisma.company.update({
+      where: { id: req.params.companyId },
+      data,
+      select: { id: true, name: true, smsNumber: true, smsStatus: true, smsRejectReason: true },
+    });
+    forgetCompanySender(company.id);
+    await writeAuditLog({
+      req,
+      action: "COMPANY_SMS_UPDATED",
+      companyId: company.id,
+      targetType: "Company",
+      targetId: company.id,
+      metadata: { smsNumber: company.smsNumber, smsStatus: company.smsStatus },
+    });
+    return res.json(company);
+  } catch (error) {
+    if (error?.code === "P2025") return res.status(404).json({ message: "Company not found" });
+    if (error?.code === "P2002") return res.status(409).json({ message: "Another builder already has that number." });
+    console.error("Error updating company SMS number:", error);
+    return res.status(500).json({ message: "Could not update the texting number." });
   }
 };
 

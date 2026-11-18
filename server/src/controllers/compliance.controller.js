@@ -1,6 +1,6 @@
 import prisma from "../lib/prisma.js";
 import { handleB2BReply, B2B_REPLY_TAG, notifySuperAdmin } from "../lib/b2b.js";
-import { B2B_OWNER, CONVERSATION_LOCK_MS, recentSmsOwners, sendSms } from "../services/sms.service.js";
+import { B2B_OWNER, CONVERSATION_LOCK_MS, recentSmsOwners, sendSms, companyForSmsNumber, toE164 } from "../services/sms.service.js";
 import { inngest } from "../lib/inngest.js";
 import { ComplianceService } from "../services/compliance-service.js";
 import { triggerAutomation } from "../lib/automation-events.js";
@@ -590,6 +590,8 @@ async function resolveInboundCompany(sender, channel = "SMS") {
         companyId: { not: null },
         outcome: "sent",
         createdAt: { gte: since },
+        // A reply on the shared number answers a shared-number text, not one from a builder's own number.
+        ...(channel === "SMS" && { fromNumber: null }),
       },
       select: { companyId: true, createdAt: true },
       orderBy: { createdAt: "desc" },
@@ -680,7 +682,7 @@ export const smsRouteExpired = inngest.createFunction(
   },
 );
 
-async function routeInboundSms({ companyId, sender, body, toNumber, provider }) {
+async function routeInboundSms({ companyId, sender, body, toNumber, provider, ownNumber = null }) {
   console.log(`[SMS IN] ← inbound SMS (${provider}) | company=${companyId} from=${sender || "?"} to=${toNumber || "?"} | body="${(body || "").replace(/\s+/g, " ").slice(0, 160)}"`);
 
   if (!sender || !body) {
@@ -699,7 +701,7 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
 
   const lastOutbound = await prisma.messageUsage
     .findFirst({
-      where: { channel: "SMS", recipient: normalizePhone(sender), outcome: "sent" },
+      where: { channel: "SMS", recipient: normalizePhone(sender), outcome: "sent", fromNumber: ownNumber },
       orderBy: { createdAt: "desc" },
       select: { source: true },
     })
@@ -724,7 +726,6 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
       console.log(`[SMS IN] ${sender} picked ${choice.name}.`);
       return routeToOwner(choice.owner, { sender, body: pending.body, toNumber, provider });
     }
-    // Two senders texted them today: ask, don't guess.
     const owners = await recentSmsOwners(sender, new Date(Date.now() - CONVERSATION_LOCK_MS));
     if (owners.length > 1) {
       await askWhichSender(sender, body, owners);
@@ -732,9 +733,6 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
     }
   }
 
-  // We texted them last as a platform lead, so this is their answer, even if the same
-  // number also exists as a lead under a builder.
-  // Any platform B2B text counts: campaign, agent, meeting reminder or a staff test send.
   if (!companyId && lastOutbound?.source?.startsWith("b2b-") && (await handleB2BReply({ channel: "SMS", sender, body }))) {
     return { b2b: true };
   }
@@ -796,8 +794,6 @@ async function routeInboundSms({ companyId, sender, body, toNumber, provider }) 
 
 export const processTelnyxInboundSms = async (req, res) => {
   try {
-    const companyId = req.query.companyId || req.body?.companyId || null;
-
     const event = req.body?.data;
     const eventType = event?.event_type;
     // Delivery report for an SMS we sent; feeds campaign analytics.
@@ -811,11 +807,15 @@ export const processTelnyxInboundSms = async (req, res) => {
     }
 
     const payload = event.payload || {};
+    const toNumber = payload.to?.[0]?.phone_number || "";
+    // Sent to a builder's own number: it's that builder's, no guessing (SRS SMS-07).
+    const ownerId = await companyForSmsNumber(toNumber);
     const { complianceReply } = await routeInboundSms({
-      companyId,
+      companyId: ownerId || req.query.companyId || req.body?.companyId || null,
+      ownNumber: ownerId ? toE164(toNumber) : null,
       sender: payload.from?.phone_number,
       body: payload.text || "",
-      toNumber: payload.to?.[0]?.phone_number || "",
+      toNumber,
       provider: "TELNYX_SMS",
     });
 

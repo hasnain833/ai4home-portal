@@ -16,6 +16,7 @@ import {
   verifyCompany,
   updateCompanyOnboarding,
   setCompanySuspension,
+  updateCompanySms,
 } from "../admin/superadmin.controller.js";
 import {
   getDefaultNewsSources,
@@ -97,7 +98,7 @@ router.patch("/users/:userId/access", requireAuth, requireAdmin("companies.manag
 router.patch("/companies/:companyId/verify", requireAuth, requireAdmin("companies.manage"), verifyCompany);
 router.patch("/companies/:companyId/onboarding", requireAuth, requireAdmin("companies.manage"), updateCompanyOnboarding);
 router.patch("/companies/:companyId/suspension", requireAuth, requireAdmin("companies.manage"), setCompanySuspension);
-router.get("/news-defaults", requireAuth, requireAdmin("integrations"), getDefaultNewsSources);
+router.patch("/companies/:companyId/sms", requireAuth, requireAdmin("companies.manage"), updateCompanySms);router.get("/news-defaults", requireAuth, requireAdmin("integrations"), getDefaultNewsSources);
 router.put("/news-defaults", requireAuth, requireAdmin("integrations"), updateDefaultNewsSources);
 router.get("/news", requireAuth, requireAdmin("integrations"), adminNews.listNews);
 router.post("/news", requireAuth, requireAdmin("integrations"), adminNews.createNews);

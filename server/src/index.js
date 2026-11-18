@@ -89,6 +89,7 @@ import { runB2BCampaign, resumeStalledB2BEnrollments } from "./inngest/functions
 import { runB2BAgent, resumeB2BAgentPauses } from "./inngest/functions/b2b-agent.js";
 import { b2bAutoNurtureSweep, b2bMeetingReminders } from "./inngest/functions/b2b-journey.js";
 import { smsRouteExpired } from "./controllers/compliance.controller.js";
+import { registerBuilderSms } from "./services/sms-registration.js";
 
 import { websiteInquiryDelivery } from "./inngest/functions/website-inquiry.js";
 
@@ -244,6 +245,7 @@ app.use(
       b2bAutoNurtureSweep,
       b2bMeetingReminders,
       smsRouteExpired,
+      registerBuilderSms,
       websiteInquiryDelivery,
     ],
   }),

@@ -82,29 +82,22 @@ async function sendViaTelnyx({ to, body, cfg }) {
   };
 }
 
-// Digits only, so a number written any way matches the same conversation.
-
-// ---------- One shared number: who owns the conversation ----------
 
 export const CONVERSATION_LOCK_MS = 24 * 60 * 60 * 1000;
 export const B2B_OWNER = "B2B";
 
-/**
- * Who a text speaks for: a builder (its companyId) or the platform's B2B sales.
- * No-reply texts (warranty, logins, the routing question) belong to no one.
- */
 export function smsOwner({ companyId, source }) {
   if (String(source || "").startsWith("warranty-")) return null;
   if (companyId) return companyId;
   return /^(b2b-|website-b2b)/.test(source || "") ? B2B_OWNER : null;
 }
 
-/** Everyone who texted this phone since `since`, newest first: [{ owner, at }]. */
 export async function recentSmsOwners(phone, since) {
   const digits = normalizePhone(phone).slice(-10);
   if (!digits) return [];
   const rows = await prisma.messageUsage.findMany({
-    where: { channel: "SMS", outcome: "sent", recipient: { endsWith: digits }, createdAt: { gte: since } },
+    // Only the shared number's conversations: a builder texting from its own number shares nothing.
+    where: { channel: "SMS", outcome: "sent", fromNumber: null, recipient: { endsWith: digits }, createdAt: { gte: since } },
     select: { companyId: true, source: true, createdAt: true },
     orderBy: { createdAt: "desc" },
     take: 50,
@@ -117,12 +110,8 @@ export async function recentSmsOwners(phone, since) {
   return [...owners].map(([owner, at]) => ({ owner, at }));
 }
 
-/**
- * Marketing waits while someone else is talking to this phone, so a reply has one clear owner.
- * Returns when it may go, or null for now. `companyId` null means B2B.
- * ponytail: a sender who texts daily keeps the lock; add a max wait if builders starve.
- */
 export async function smsConversationHold(phone, companyId) {
+  if ((await companySender(companyId)).ownNumber) return null; // its own number: no one to collide with
   const me = companyId || B2B_OWNER;
   const others = (await recentSmsOwners(phone, new Date(Date.now() - CONVERSATION_LOCK_MS))).filter((o) => o.owner !== me);
   if (!others.length) return null;
@@ -132,34 +121,50 @@ export function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-// Phone as typed -> E.164 for Telnyx. We only text +1 (US and Canada); bare
-// 10-digit numbers are taken as +1. "" -> null (clear); anything else -> undefined (reject).
-
-// For imports and CRM sync: one bad number shouldn't cost us the lead, so keep it without a phone.
 export const usablePhone = (value) => toE164(value) || null;
 
-const NAME_TTL_MS = 60_000;
-const nameCache = new Map();
+const SENDER_TTL_MS = 60_000;
+const senderCache = new Map();
 
-async function companyName(companyId) {
-  if (!companyId) return null;
+async function companySender(companyId) {
+  if (!companyId) return { name: null, ownNumber: null };
 
-  const hit = nameCache.get(companyId);
-  if (hit && Date.now() - hit.at < NAME_TTL_MS) return hit.name;
+  const hit = senderCache.get(companyId);
+  if (hit && Date.now() - hit.at < SENDER_TTL_MS) return hit.sender;
 
-  let name = null;
+  let sender = { name: null, ownNumber: null };
   try {
     const row = await prisma.company.findUnique({
       where: { id: companyId },
-      select: { name: true },
+      select: { name: true, smsNumber: true, smsStatus: true },
     });
-    name = row?.name || null;
+    sender = {
+      name: row?.name || null,
+      ownNumber: row?.smsStatus === SMS_STATUS.APPROVED ? row.smsNumber || null : null,
+    };
   } catch (error) {
-    console.error("[SMS] Company name lookup failed:", error.message);
+    console.error("[SMS] Company lookup failed:", error.message);
   }
 
-  nameCache.set(companyId, { at: Date.now(), name });
-  return name;
+  senderCache.set(companyId, { at: Date.now(), sender });
+  return sender;
+}
+
+export function forgetCompanySender(companyId) {
+  senderCache.delete(companyId);
+}
+
+export const SMS_STATUS = { NONE: "NONE", PENDING: "PENDING", APPROVED: "APPROVED", REJECTED: "REJECTED" };
+
+/** The builder that owns this number (one of ours, approved), or null for the shared platform number. */
+export async function companyForSmsNumber(number) {
+  const e164 = toE164(number);
+  if (!e164) return null;
+  const row = await prisma.company.findFirst({
+    where: { smsNumber: e164, smsStatus: SMS_STATUS.APPROVED },
+    select: { id: true },
+  });
+  return row?.id || null;
 }
 
 export function brandSmsBody(body, name) {
@@ -178,7 +183,9 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
     console.info(`[SMS] Skipped for ${source || "unknown source"}: not a +1 number.`);
     return { outcome: SMS_OUTCOME.SKIPPED, to, body, provider: null, error: "SMS skipped: not a +1 number." };
   }
-  const cfg = resolveSystemConfig();
+  const system = resolveSystemConfig();
+  const sender = await companySender(companyId);
+  const cfg = system && (sender.ownNumber ? { ...system, from: sender.ownNumber } : system);
 
   if (!cfg) {
     const error = "Platform SMS credentials are missing or incomplete.";
@@ -186,7 +193,7 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
     return { outcome: SMS_OUTCOME.NOT_CONFIGURED, to, body, provider: null, error };
   }
 
-  const finalBody = brand ? brandSmsBody(body, await companyName(companyId)) : String(body || "");
+  const finalBody = brand ? brandSmsBody(body, sender.name) : String(body || "");
   const recipient = normalizePhone(to);
 
   const segments = countSegments(finalBody);
@@ -199,9 +206,7 @@ export const sendSms = async ({ to, body, tag, companyId = null, source = null, 
       outcome,
       source,
       recipient,
-      // Every SMS needs its provider ID, including website acknowledgments,
-      // so a later delivery receipt can find the send.
-      track: { ...track, providerMessageId },
+      track: { ...track, providerMessageId, fromNumber: sender.ownNumber },
     });
 
   try {

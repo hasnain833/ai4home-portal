@@ -4,13 +4,10 @@ export const PRICING_SETTING_KEY = "messaging.pricing";
 
 export const DEFAULT_PRICING = {
   EMAIL: 1250,
-  // Telnyx US outbound long-code, list price $0.004 per segment.
   TELNYX_SMS: 4000,
   FAILED_SEND: 0,
 };
 
-// Per million tokens, input/output. Anything unlisted falls back to the Sonnet
-// rate rather than silently recording zero cost.
 const AI_RATES = {
   "claude-opus-5": { in: 15, out: 75 },
   "claude-sonnet-5": { in: 3, out: 15 },
@@ -44,8 +41,6 @@ export async function getPricing() {
   return value;
 }
 
-// The GSM-7 alphabet, as code points. Anything outside it forces the whole
-// message to UCS-2, which more than halves how much fits in a segment.
 const GSM7_EXTRA = new Set([
   0x40, 0xa3, 0x24, 0xa5, 0xe8, 0xe9, 0xf9, 0xec, 0xf2, 0xc7, 0x0a, 0xd8, 0xf8,
   0x0d, 0xc5, 0xe5, 0x394, 0x5f, 0x3a6, 0x393, 0x39b, 0x3a9, 0x3a0, 0x3a8,
@@ -53,11 +48,8 @@ const GSM7_EXTRA = new Set([
   0xdc, 0xa7, 0xbf, 0xe4, 0xf6, 0xf1, 0xfc, 0xe0,
 ]);
 
-// Extension-table characters are sent as ESC + char, so each costs two.
 const GSM7_EXTENSION = new Set([..."^{}\\[~]|€"].map((c) => c.codePointAt(0)));
 
-// Length in GSM-7 septets, or null when the text needs UCS-2. The backtick is
-// printable ASCII but not GSM-7, so it forces UCS-2 like any other outsider.
 function gsm7Length(text) {
   let septets = 0;
   for (const ch of text) {
@@ -69,8 +61,6 @@ function gsm7Length(text) {
   return septets;
 }
 
-// A message longer than one segment is split and billed per part. Concatenated
-// parts carry a header, which is why the per-part limit drops.
 export function countSegments(body) {
   const text = String(body || "");
   if (!text) return 0;
@@ -122,6 +112,7 @@ export async function recordUsage({
           campaignId: track.campaignId || null,
           stepId: track.stepId || null,
           providerMessageId: track.providerMessageId || null,
+          fromNumber: track.fromNumber || null,
         }),
       },
     });
