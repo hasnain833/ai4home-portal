@@ -14,11 +14,12 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
-      // Admin pages merged into Companies / CRM & News / Usage & Costs.
+      // Admin pages merged into Companies / Salesforce / Content / Usage & Costs.
       { source: "/admin/users", destination: "/admin/companies", permanent: true },
       { source: "/admin/verifications", destination: "/admin/companies", permanent: true },
-      { source: "/admin/crm-health", destination: "/admin/integrations", permanent: true },
-      { source: "/admin/news-defaults", destination: "/admin/integrations", permanent: true },
+      { source: "/admin/crm-health", destination: "/admin", permanent: true },
+      { source: "/admin/news-defaults", destination: "/admin/content?kind=NEWS", permanent: true },
+      { source: "/admin/integrations", destination: "/admin/content?kind=NEWS", permanent: true },
       { source: "/admin/messaging", destination: "/admin/costs", permanent: true },
       {
         source: "/tickets",
