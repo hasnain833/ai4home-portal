@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +39,6 @@ const getPasswordStrength = (password: string) => {
 
 function AuthContainer() {
   const { login, verifySuperadminCode } = useAuth();
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   // Mode: login, signup, verify, forgot, code (Super Admin's emailed sign-in code)
@@ -58,6 +57,7 @@ function AuthContainer() {
     try {
       const savedEmail = localStorage.getItem("remembered_email");
       if (savedEmail) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only value, read after mount
         setLoginEmail(savedEmail);
         setRememberMe(true);
       }
@@ -87,6 +87,7 @@ function AuthContainer() {
   useEffect(() => {
     const initialMode = searchParams.get("mode");
     if (initialMode === "signup") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only value, read after mount
       setMode("signup");
     } else {
       setMode("login");

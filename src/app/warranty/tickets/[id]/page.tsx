@@ -92,6 +92,7 @@ type TicketDetailData = {
   workDoneNotes?: string | null;
   workDoneBy?: { id: string; name?: string | null } | null;
   nextVisitAt?: string | null;
+  outOfCoverage?: boolean;
   property?: {
     address?: string | null;
     city?: string | null;
@@ -480,6 +481,15 @@ export default function TicketDetail() {
               <Badge variant="outline" className={cn("rounded-full px-3 py-1 font-semibold border shadow-2xs", pr.bg, pr.text, pr.border)}>
                 {ticket.priority} Priority
               </Badge>
+              {canManage && ticket.outOfCoverage && (
+                <Badge
+                  variant="outline"
+                  className="rounded-full px-3 py-1 font-semibold border shadow-2xs bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900"
+                  title="Filed after this home's 1-year coverage ended. Decide whether to honour it."
+                >
+                  Out of coverage
+                </Badge>
+              )}
               {canManage && ticket.status === "OPEN" && (
                 <Button
                   size="sm"

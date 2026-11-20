@@ -78,7 +78,7 @@ export const publicGetBooking = async (req, res) => {
 export const publicBook = async (req, res) => {
   try {
     const { token, startTime } = req.body;
-    if (!token || !startTime) {
+    if (typeof token !== "string" || !token || !startTime) {
       return res.status(400).json({ message: "Please choose a time." });
     }
 
@@ -273,7 +273,7 @@ export const publicGetManage = async (req, res) => {
 export const publicReschedule = async (req, res) => {
   try {
     const { token, startTime } = req.body;
-    if (!token || !startTime) {
+    if (typeof token !== "string" || !token || !startTime) {
       return res.status(400).json({ message: "Please choose a new time." });
     }
 
@@ -365,7 +365,8 @@ export const publicReschedule = async (req, res) => {
 export const publicCancel = async (req, res) => {
   try {
     const { token, reason } = req.body;
-    if (!token) return res.status(400).json({ message: "This link is not valid." });
+    // Links carry string tokens; an object here would be read by Prisma as a filter matching any visit.
+    if (typeof token !== "string" || !token) return res.status(400).json({ message: "This link is not valid." });
 
     const appointment = await prisma.ticketAppointment.findFirst({
       where: { OR: [{ cancelToken: token }, { rescheduleToken: token }] },

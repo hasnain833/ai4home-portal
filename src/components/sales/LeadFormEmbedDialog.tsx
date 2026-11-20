@@ -46,6 +46,7 @@ export default function LeadFormEmbedDialog({
 }) {
   // Read on the client: the snippets must carry this deployment's own address.
   const [origin, setOrigin] = useState("");
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only value, read after mount
   useEffect(() => setOrigin(window.location.origin), []);
 
   const formUrl = `${origin}/lead-form/${companyId}`;

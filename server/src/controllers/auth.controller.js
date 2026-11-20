@@ -9,6 +9,9 @@ import {
   verifySuperadminChallenge,
   CHALLENGE_TTL_SECONDS,
   SESSION_COOKIE_OPTIONS,
+  verifySuperadminSessionToken,
+  currentSessionVersion,
+  revokeSessions,
 } from "../lib/superadmin-session.js";
 import { resolveDownloadUrl } from "../lib/storage.js";
 import { PHONE_ERROR, sendSms, smsSent, toE164 } from "../services/sms.service.js";
@@ -391,8 +394,10 @@ export const cancelEmailChange = async (req, res) => {
   return res.json({ message: "Pending email change cancelled" });
 };
 
-function startSuperadminSession(res, claims) {
-  res.cookie("superadmin_session", createSuperadminSessionToken(claims), SESSION_COOKIE_OPTIONS);
+async function startSuperadminSession(res, claims) {
+  // Stamped with the current version, so signing out (which bumps it) ends this session too.
+  const sv = await currentSessionVersion(claims.id);
+  res.cookie("superadmin_session", createSuperadminSessionToken({ ...claims, sv }), SESSION_COOKIE_OPTIONS);
   return res.json({ message: "Authenticated", isSuperAdmin: true });
 }
 
@@ -448,8 +453,8 @@ export const superadminVerifyCode = async (req, res) => {
 };
 
 export const superadminLogin = async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
+  const { email, password } = req.body || {};
+  if (!email || !password || typeof email !== "string" || typeof password !== "string") {
     return res
       .status(400)
       .json({ message: "Email and password are required" });
@@ -477,7 +482,7 @@ export const superadminLogin = async (req, res) => {
   }
 
   const dbUser = await prisma.user.findUnique({
-    where: { email: email.toLowerCase() },
+    where: { email: email.trim().toLowerCase() },
   });
 
   if (!dbUser || dbUser.role !== "SUPER_ADMIN") {
@@ -499,6 +504,12 @@ export const superadminLogin = async (req, res) => {
 };
 
 export const logout = async (req, res) => {
+  // Signing out ends this admin's sessions on every device, not just this browser's cookie.
+  const cookie = req.headers.cookie?.match(/(?:^|;\s*)superadmin[_-]session=([^;]+)/)?.[1];
+  const session = cookie ? verifySuperadminSessionToken(decodeURIComponent(cookie)) : null;
+  if (session?.id) {
+    await revokeSessions(session.id).catch((e) => console.error("[Auth] Session revoke failed:", e.message));
+  }
   res.clearCookie("superadmin_session", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -510,16 +521,16 @@ export const logout = async (req, res) => {
 
 export const signup = async (req, res) => {
   try {
-    const {
-      companyName,
-      companyEmail,
-      password,
-      companyPhone,
-      companyAddress,
-    } = req.body;
+    const { companyName, password, companyPhone, companyAddress } = req.body || {};
+    // Supabase stores emails lowercased and requireAuth looks users up by that exact
+    // value, so a mixed-case email here would create an account that can never sign in.
+    const companyEmail = String(req.body?.companyEmail || "").trim().toLowerCase();
 
-    if (!companyName || !companyEmail || !password) {
+    if (!companyName || !companyEmail || !password || typeof password !== "string") {
       return res.status(400).json({ message: "Missing required fields" });
+    }
+    if (!EMAIL_RE.test(companyEmail)) {
+      return res.status(400).json({ message: "Invalid email format" });
     }
 
     const existingUser = await prisma.user.findUnique({
@@ -608,10 +619,9 @@ export const signup = async (req, res) => {
       await prisma.user.delete({ where: { email: companyEmail } });
       await prisma.company.delete({ where: { id: newCompany.id } });
 
-      const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-      const supabaseUser = usersData.users.find(
-        (u) => u.email === companyEmail,
-      );
+      // Pages through every auth user; the first page alone missed anyone past user 50,
+      // leaving an orphan that blocked signing up again with the same email.
+      const supabaseUser = await findSupabaseUserByEmail(supabaseAdmin, companyEmail).catch(() => null);
       if (supabaseUser) {
         await supabaseAdmin.auth.admin.deleteUser(supabaseUser.id);
       }
@@ -709,6 +719,6 @@ export const forgotPassword = async (req, res) => {
 
   // Answers before the lookup, so neither the reply nor its timing says whether
   // the account exists. Delivery failures therefore show only in the logs.
-  waitUntil(sendPasswordReset(email));
+  waitUntil(sendPasswordReset(email.trim().toLowerCase()));
   return res.json({ message: "If that email has an account, a reset link is on its way." });
 };

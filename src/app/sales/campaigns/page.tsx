@@ -80,7 +80,33 @@ const isEnrollableLead = (lead: unknown): lead is EnrollableLead => {
   return typeof lead === "object" && lead !== null && typeof (lead as { id?: unknown }).id === "string";
 };
 
-const buildDefaultEmailStep = () => ({
+type Campaign = {
+  id: string;
+  name: string;
+  description?: string | null;
+  status: string;
+  channel?: string | null;
+  conversionRate?: number | string | null;
+  stepsCount?: number;
+  totalLeads?: number;
+};
+type CampaignStep = {
+  id?: string;
+  type: string;
+  subject?: string;
+  body?: string;
+  delayValue?: string | number;
+  delayUnit?: string;
+  position?: number;
+};
+type CampaignDetail = Campaign & {
+  steps: CampaignStep[];
+  enrollments?: { leadId: string; currentStepPosition: number }[];
+};
+type StepDraft = { type: string; subject: string; body: string; delayValue: string | number; delayUnit: string };
+type Segment = { id: string; name: string };
+
+const buildDefaultEmailStep = (): StepDraft => ({
   type: "EMAIL",
   subject: DEFAULT_EMAIL_SUBJECT,
   body: DEFAULT_EMAIL_BODY,
@@ -94,19 +120,19 @@ export default function CampaignsPage() {
   const { emailConfigured, smsConfigured } = useMessagingCapabilities();
 
   const [mode, setMode] = useState<"auto" | "manual">("auto");
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [activeSeq, setActiveSeq] = useState<any>(null);
-  const [activeSeqDetail, setActiveSeqDetail] = useState<any>(null);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [activeSeq, setActiveSeq] = useState<Campaign | null>(null);
+  const [activeSeqDetail, setActiveSeqDetail] = useState<CampaignDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Modals state
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newSeqName, setNewSeqName] = useState("New Campaign");
-  const [seqToDelete, setSeqToDelete] = useState<any>(null);
+  const [seqToDelete, setSeqToDelete] = useState<Campaign | null>(null);
   const [addStepModalOpen, setAddStepModalOpen] = useState(false);
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
-  const [newStep, setNewStep] = useState<any>(buildDefaultEmailStep());
+  const [newStep, setNewStep] = useState<StepDraft>(buildDefaultEmailStep());
   const [generatingStepCopy, setGeneratingStepCopy] = useState(false);
 
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
@@ -118,7 +144,7 @@ export default function CampaignsPage() {
   const [tagFilter, setTagFilter] = useState("ALL");
 
   // Segment-based enrollment (SW-NUR-002)
-  const [segments, setSegments] = useState<any[]>([]);
+  const [segments, setSegments] = useState<Segment[]>([]);
   const [enrollMode, setEnrollMode] = useState<"leads" | "segment">("leads");
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>("");
   const [enrolling, setEnrolling] = useState(false);
@@ -132,8 +158,7 @@ export default function CampaignsPage() {
   const fetchCampaigns = async () => {
     setLoading(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await api.get<any[]>("/api/sales/campaigns");
+      const data = await api.get<Campaign[]>("/api/sales/campaigns");
       setCampaigns(data);
       if (data.length > 0 && !activeSeq) {
         setActiveSeq(data[0]);
@@ -146,7 +171,9 @@ export default function CampaignsPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchCampaigns();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
   }, []);
 
   useEffect(() => {
@@ -154,7 +181,7 @@ export default function CampaignsPage() {
     const fetchDetail = async () => {
       setLoadingDetail(true);
       try {
-        setActiveSeqDetail(await api.get(`/api/sales/campaigns/${activeSeq.id}`));
+        setActiveSeqDetail(await api.get<CampaignDetail>(`/api/sales/campaigns/${activeSeq.id}`));
       } catch (e) {
         console.error(e);
       } finally {
@@ -169,13 +196,12 @@ export default function CampaignsPage() {
     let interval: NodeJS.Timeout;
     if (activeSeq && (activeSeq.status === "Active" || activeSeq.status === "Paused")) {
       interval = setInterval(() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        api.get<any>(`/api/sales/campaigns/${activeSeq.id}`)
+        api.get<CampaignDetail>(`/api/sales/campaigns/${activeSeq.id}`)
           .then(detail => {
             setActiveSeqDetail(detail);
             // If the campaign finished, update main state too
             if (detail.status !== activeSeq.status) {
-              setActiveSeq((prev: any) => ({ ...prev, status: detail.status }));
+              setActiveSeq((prev) => (prev ? { ...prev, status: detail.status } : prev));
               fetchCampaigns();
             }
           })
@@ -183,6 +209,7 @@ export default function CampaignsPage() {
       }, 3000); // Poll every 3 seconds for fast real-time feedback
     }
     return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- restart polling only when the selected campaign changes
   }, [activeSeq]);
 
   const confirmCreateCampaign = async () => {
@@ -227,7 +254,7 @@ export default function CampaignsPage() {
       setEditingStepIndex(null);
       setNewStep(buildDefaultEmailStep());
       // Refetch campaign detail and list to update steps count
-      setActiveSeqDetail(await api.get(`/api/sales/campaigns/${activeSeq.id}`));
+      setActiveSeqDetail(await api.get<CampaignDetail>(`/api/sales/campaigns/${activeSeq.id}`));
       fetchCampaigns();
       toast.success(editingStepIndex !== null ? "Step updated successfully." : "Step added successfully.");
       // Saving is never blocked — a tenant can draft SMS steps before SMS
@@ -255,7 +282,7 @@ export default function CampaignsPage() {
           newStep.body ? `Current draft to improve: ${newStep.body}` : null,
         ].filter(Boolean).join("\n"),
       });
-      setNewStep((prev: any) => ({
+      setNewStep((prev) => ({
         ...prev,
         subject: prev.type === "EMAIL" ? (data.subject || prev.subject) : prev.subject,
         body: data.body || data.draft || prev.body,
@@ -270,10 +297,10 @@ export default function CampaignsPage() {
 
   const deleteStep = async (indexToRemove: number) => {
     if (!activeSeq || !activeSeqDetail) return;
-    const newSteps = activeSeqDetail.steps.filter((_: any, i: number) => i !== indexToRemove);
+    const newSteps = activeSeqDetail.steps.filter((_, i) => i !== indexToRemove);
     try {
       await api.post(`/api/sales/campaigns/${activeSeq.id}/steps`, { steps: newSteps });
-      setActiveSeqDetail(await api.get(`/api/sales/campaigns/${activeSeq.id}`));
+      setActiveSeqDetail(await api.get<CampaignDetail>(`/api/sales/campaigns/${activeSeq.id}`));
       fetchCampaigns();
       toast.success("Step deleted.");
     } catch (e) {
@@ -281,7 +308,7 @@ export default function CampaignsPage() {
     }
   };
 
-  const openEditStep = (step: any, index: number) => {
+  const openEditStep = (step: CampaignStep, index: number) => {
     setEditingStepIndex(index);
     setNewStep({
       type: step.type,
@@ -333,7 +360,7 @@ export default function CampaignsPage() {
       // with the leads and announcements pages.
       const [leadsResult, segResult] = await Promise.allSettled([
         fetchKey<unknown[] | { leads?: unknown[] }>("/api/sales/leads?pageSize=200"),
-        fetchKey<unknown[] | { segments?: unknown[] }>(QUERY_KEYS.segments),
+        fetchKey<Segment[] | { segments?: Segment[] }>(QUERY_KEYS.segments),
       ]);
       if (leadsResult.status === "fulfilled") {
         const data = leadsResult.value;
@@ -382,7 +409,7 @@ export default function CampaignsPage() {
       // The campaign may contain steps on a channel this workspace cannot send.
       for (const w of r?.warnings || []) toast.warning(w, { duration: 8000 });
       fetchCampaigns();
-      setActiveSeqDetail(await api.get(`/api/sales/campaigns/${activeSeq.id}`));
+      setActiveSeqDetail(await api.get<CampaignDetail>(`/api/sales/campaigns/${activeSeq.id}`));
     } catch (e) {
       toast.error(errorMessage(e), { duration: 10000 });
     } finally {
@@ -553,13 +580,13 @@ export default function CampaignsPage() {
                         <div className="p-8 text-center text-muted-foreground animate-pulse text-sm">
                           Loading steps...
                         </div>
-                      ) : activeSeqDetail?.steps?.length > 0 ? (
-                        activeSeqDetail.steps.map((step: any, index: number) => {
+                      ) : activeSeqDetail && activeSeqDetail.steps?.length > 0 ? (
+                        activeSeqDetail.steps.map((step, index) => {
                           const isRunning = activeSeq.status === "Active" || activeSeq.status === "Paused" || activeSeq.status === "Completed";
                           const totalEnrollments = activeSeqDetail?.enrollments?.length || 0;
                           // currentStepPosition is the next step to run, so a step counts
                           // as done only once the pointer has moved past it.
-                          const completedCount = activeSeqDetail?.enrollments?.filter((e: any) => e.currentStepPosition > step.position).length || 0;
+                          const completedCount = activeSeqDetail?.enrollments?.filter((e) => e.currentStepPosition > (step.position ?? 0)).length || 0;
                           const isFullyCompleted = isRunning && totalEnrollments > 0 && completedCount === totalEnrollments;
 
                           return (
@@ -673,7 +700,7 @@ export default function CampaignsPage() {
             <DialogHeader>
               <DialogTitle>Delete Campaign</DialogTitle>
               <DialogDescription>
-                Are you sure you want to delete the "{seqToDelete?.name}" campaign? This will also stop all active lead enrollments on this campaign. This action cannot be undone.
+                Are you sure you want to delete the &ldquo;{seqToDelete?.name}&rdquo; campaign? This will also stop all active lead enrollments on this campaign. This action cannot be undone.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="sm:justify-end gap-2 mt-4">
@@ -820,7 +847,7 @@ export default function CampaignsPage() {
             <DialogHeader>
               <DialogTitle>Enroll Leads</DialogTitle>
               <DialogDescription>
-                Select leads to enroll into the "{activeSeq?.name}" campaign. They will start from step 1 immediately.
+                Select leads to enroll into the &ldquo;{activeSeq?.name}&rdquo; campaign. They will start from step 1 immediately.
               </DialogDescription>
             </DialogHeader>
             <div className="py-4 overflow-hidden flex flex-col flex-1">
@@ -855,7 +882,7 @@ export default function CampaignsPage() {
                     <Select value={selectedSegmentId} onValueChange={setSelectedSegmentId} disabled={enrolling}>
                       <SelectTrigger><SelectValue placeholder="Choose a segment" /></SelectTrigger>
                       <SelectContent>
-                        {segments.map((s: any) => (
+                        {segments.map((s) => (
                           <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                         ))}
                       </SelectContent>

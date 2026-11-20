@@ -184,7 +184,7 @@ export const deleteSuppression = async (req, res) => {
             },
           },
         });
-      } catch (e) {
+      } catch {
         return res.status(404).json({ message: "Record not found" });
       }
     }

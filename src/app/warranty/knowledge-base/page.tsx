@@ -4,7 +4,6 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +26,6 @@ import {
   Search,
   Loader2,
   File,
-  Plus,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -55,20 +53,10 @@ interface Document {
   community?: { id: string; name: string; color: string } | null;
 }
 
-const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-};
-
 export default function KnowledgeBasePage() {
-  const { user } = useAuth();
   const isAdmin = false; // Changed to false to allow Admin full CRUD access like staff
   const [documents, setDocuments] = useState<Document[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -82,17 +70,16 @@ export default function KnowledgeBasePage() {
   const [deleteConfirmName, setDeleteConfirmName] = useState<string>("");
 
   const fetchData = async () => {
-    setLoading(true);
     try {
       // Each list loads on its own, so one failing still shows the other.
       const [data, payload] = await Promise.all([
-        api.get<any[]>("/api/knowledge-base").catch(() => null),
+        api.get<{ id: string; name: string; size: string; createdAt: string; community?: Document["community"] }[]>("/api/knowledge-base").catch(() => null),
         api.get<Community[] | { communities?: Community[] }>("/api/communities").catch(() => null),
       ]);
 
       if (data) {
         setDocuments(
-          data.map((d: any) => ({
+          data.map((d) => ({
             id: d.id,
             name: d.name,
             size: d.size,
@@ -110,12 +97,11 @@ export default function KnowledgeBasePage() {
       }
     } catch (error) {
       console.error("Failed to load data:", error);
-    } finally {
-      setLoading(false);
     }
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchData();
   }, []);
 
@@ -225,19 +211,17 @@ export default function KnowledgeBasePage() {
     }
   }, []);
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragActive(false);
+  // A plain handler: it must see the current community on every drop.
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
 
-      if (isAdmin) return;
-      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        handleMultipleFilesUpload(e.dataTransfer.files);
-      }
-    },
-    [isAdmin, selectedCommunityId],
-  ); // depend on community
+    if (isAdmin) return;
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleMultipleFilesUpload(e.dataTransfer.files);
+    }
+  };
 
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>

@@ -32,6 +32,7 @@ export default function ErpIntegrationsCard() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
   useEffect(() => { load(); }, []);
 
   // Keys saved before these went "coming soon" would otherwise have no UI to remove them.

@@ -146,6 +146,7 @@ export default function KnowledgeBasePanel({
   }, [agent, communityId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reload on agent/community change
     setLoading(true);
     load();
   }, [load]);

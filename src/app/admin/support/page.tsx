@@ -24,15 +24,15 @@ import { api, errorMessage } from "@/lib/api";
 /** The support phone builders see in the Help menu and on Communities. */
 function SupportContactCard() {
   const contact = useSupportContact();
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(contact?.phone ?? "");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (contact) {
-      setPhone(contact.phone);
-    }
-  }, [contact]);
-
+  // Fill the field when the saved contact arrives or changes (adjusting state during render).
+  const [syncedContact, setSyncedContact] = useState(contact);
+  if (contact !== syncedContact) {
+    setSyncedContact(contact);
+    if (contact) setPhone(contact.phone);
+  }
   const save = async () => {
     setSaving(true);
     try {

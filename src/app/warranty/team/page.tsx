@@ -121,6 +121,7 @@ export default function TeamManagementPage() {
 
   useEffect(() => {
     if (user?.role === "admin" || user?.role === "staff") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
       fetchStaff();
     }
   }, [user]);

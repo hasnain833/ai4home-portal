@@ -186,12 +186,14 @@ export default function AppointmentsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     loadSettings();
     loadAppointments();
     fetchSlotPreview();
     // Allow direct links to open the settings tab.
     const params = new URLSearchParams(window.location.search);
     if (params.get("tab") === "settings") setActiveTab("settings");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load; the URL tab is read once
   }, [loadSettings, loadAppointments]);
 
   // ─── Actions ──────────────────────────────────────────────────────────────────

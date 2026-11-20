@@ -92,7 +92,9 @@ export const getSupportLeads = async (req, res) => {
 
   const { companyId } = req.params;
   const search = String(req.query.search ?? "");
-  const reason = String(req.query.reason ?? "");
+  const reason = String(req.query.reason ?? "").trim();
+  // The audit trail needs a reason; the UI asks, but the API is the boundary.
+  if (reason.length < 5) return res.status(400).json({ message: "Give a short reason; it is written to the audit trail." });
 
   const company = await prisma.company.findUnique({
     where: { id: companyId },

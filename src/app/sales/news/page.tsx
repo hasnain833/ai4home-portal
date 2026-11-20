@@ -48,7 +48,9 @@ export default function SalesNewsPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchNews();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
   }, []);
 
   const createCampaignFromNews = async (item: ScrapedNews) => {

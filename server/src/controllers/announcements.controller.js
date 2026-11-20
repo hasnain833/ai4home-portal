@@ -41,6 +41,7 @@ export const getAnnouncements = async (req, res) => {
     scheduledAt: a.scheduledAt,
     sentAt: a.sentAt,
     audienceCount: a.audienceCount,
+    failedCount: a.failedCount,
     createdAt: a.createdAt,
   }));
 

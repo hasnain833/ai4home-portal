@@ -171,6 +171,7 @@ export const updateCompanyWorkspaces = async (req, res) => {
     where: { id: companyId },
     data: updateData,
   });
+  await writeAuditLog({ req, action: "COMPANY_WORKSPACES_UPDATED", companyId, targetType: "Company", targetId: companyId, metadata: updateData });
 
   return res.json(company);
 };
@@ -182,7 +183,11 @@ export const verifyCompany = async (req, res) => {
   }
 
   const { companyId } = req.params;
-  const { action } = req.body; 
+  const { action } = req.body || {};
+  // Only an explicit "approve" verifies; a typo must not activate a workspace.
+  if (action !== "approve" && action !== "reject") {
+    return res.status(400).json({ message: 'action must be "approve" or "reject"' });
+  }
 
   const existing = await prisma.company.findUnique({ where: { id: companyId } });
   if (!existing) {
@@ -202,6 +207,7 @@ export const verifyCompany = async (req, res) => {
         agreementVersion: null,
       },
     });
+    await writeAuditLog({ req, action: "COMPANY_VERIFICATION_REJECTED", companyId, targetType: "Company", targetId: companyId, metadata: { name: company.name } });
     return res.json(company);
   }
 
@@ -214,6 +220,7 @@ export const verifyCompany = async (req, res) => {
       contractSignedAt: existing.contractSignedAt ?? new Date(),
     },
   });
+  await writeAuditLog({ req, action: "COMPANY_VERIFIED", companyId, targetType: "Company", targetId: companyId, metadata: { name: company.name } });
 
   try {
     if (company.email) {
@@ -260,7 +267,10 @@ export const updateUserAccess = async (req, res) => {
   const user = await prisma.user.update({
     where: { id: userId },
     data: updateData,
+    // Never echo the password hash or email-change token back.
+    select: { id: true, name: true, email: true, role: true, companyId: true, hasWarrantyAccess: true, hasSalesAccess: true },
   });
+  await writeAuditLog({ req, action: "USER_ACCESS_UPDATED", companyId: user.companyId, targetType: "User", targetId: user.id, metadata: updateData });
 
   return res.json(user);
 };

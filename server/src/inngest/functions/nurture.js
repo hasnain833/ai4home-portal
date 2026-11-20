@@ -8,7 +8,7 @@ import { ComplianceService } from "../../services/compliance-service.js";
 import { getSenderIdentity } from "../../lib/messaging-config.js";
 import { deadLetter } from "../../lib/dead-letter.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
-import { renderMergeFields, leadMergeVars, escapeHtml } from "../../lib/utils.js";
+import { renderMergeFields, escapeHtml } from "../../lib/utils.js";
 import { getOrCreateLeadBookingToken } from "../../lib/public-tokens.js";
 import { LEAD_STATUS } from "../../lib/lead-statuses.js";
 import { Templates } from "../../services/templates.js";

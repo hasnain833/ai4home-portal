@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import prisma from "./prisma.js";
 const SECRET = process.env.SESSION_SECRET || "";
 const SECRET_CONFIGURED = SECRET.length >= 16;
 const ALGORITHM = "sha256";
@@ -121,4 +122,55 @@ export function verifySuperadminSessionToken(token) {
   } catch {
     return null;
   }
+}
+
+// ---------- Revocation ----------
+// Each Super Admin has a session version; every cookie carries the version it was
+// issued with. Signing out bumps it, which ends that admin's sessions everywhere.
+// Cookies issued before this existed have no version and count as version 0.
+const versionKey = (id) => `superadmin.session.${id}`;
+const VERSION_CACHE_MS = 30_000;
+// ponytail: per-instance cache, so a revoked cookie can live up to 30s on another instance.
+const versionCache = new Map();
+
+async function readSessionState(id) {
+  const hit = versionCache.get(id);
+  if (hit && hit.expires > Date.now()) return hit.state;
+  const [row, dbUser] = await Promise.all([
+    prisma.platformSetting.findUnique({ where: { key: versionKey(id) } }),
+    id === "env-superadmin"
+      ? null
+      : prisma.user.findUnique({ where: { id }, select: { role: true } }),
+  ]);
+  const state = {
+    version: Number(row?.value?.version) || 0,
+    // The env admin lives in configuration; a database admin must still exist and still be one.
+    active: id === "env-superadmin" || dbUser?.role === "SUPER_ADMIN",
+  };
+  versionCache.set(id, { state, expires: Date.now() + VERSION_CACHE_MS });
+  return state;
+}
+
+/** The version to stamp on a new session cookie. */
+export async function currentSessionVersion(id) {
+  return (await readSessionState(id)).version;
+}
+
+/** True when a verified cookie payload has not been signed out or orphaned. */
+export async function isSessionCurrent(payload) {
+  if (!payload?.id) return false;
+  const { version, active } = await readSessionState(payload.id);
+  return active && (Number(payload.sv) || 0) === version;
+}
+
+/** Ends every session this Super Admin has, on every device. */
+export async function revokeSessions(id) {
+  versionCache.delete(id);
+  const next = (await currentSessionVersion(id)) + 1;
+  await prisma.platformSetting.upsert({
+    where: { key: versionKey(id) },
+    create: { key: versionKey(id), value: { version: next } },
+    update: { value: { version: next } },
+  });
+  versionCache.delete(id);
 }

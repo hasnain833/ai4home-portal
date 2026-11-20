@@ -16,7 +16,7 @@ export const handleCsvImport = inngest.createFunction(
       deadLetterJob({ functionId: "handle-csv-import", event, error }),
   },
   async ({ event, step }) => {
-    const { jobId, companyId, userRole, userName } = event.data;
+    const { jobId, companyId } = event.data;
     const job = await step.run("load-import-job", async () => {
       if (!jobId) {
         throw new Error("CSV import event is missing jobId.");

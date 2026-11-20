@@ -13,9 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Users,
   Send,
-  TrendingUp,
   Mail,
   X,
   Loader2,
@@ -56,6 +54,7 @@ type Announcement = {
   scheduledAt: string | null;
   sentAt: string | null;
   audienceCount: number;
+  failedCount?: number;
   createdAt: string;
 };
 
@@ -133,6 +132,7 @@ export default function AnnouncementsPage() {
   const segments: Segment[] = Array.isArray(cachedSegments) ? cachedSegments : [];
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     loadAnnouncements();
   }, [loadAnnouncements]);
 
@@ -398,6 +398,17 @@ export default function AnnouncementsPage() {
                               </td>
                               <td className="py-3.5 px-4">
                                 <Badge className={statusStyles[a.status] || statusStyles.Draft}>{a.status}</Badge>
+                                {!!a.failedCount && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); openFailures(a); }}
+                                    className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-red-500 hover:text-red-600 hover:underline"
+                                    title="See who didn't get it, and retry"
+                                  >
+                                    <AlertTriangle className="h-3 w-3" />
+                                    {a.failedCount} failed
+                                  </button>
+                                )}
                               </td>
                               <td className="py-3.5 px-4 text-xs font-medium">{a.audienceCount || "—"}</td>
 

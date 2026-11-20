@@ -37,6 +37,7 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);

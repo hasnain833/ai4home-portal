@@ -147,6 +147,7 @@ export default function AdminCompaniesPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     if (isPlatformUser(user)) fetchCompanies();
   }, [user]);
 
@@ -571,7 +572,6 @@ export default function AdminCompaniesPage() {
                       /\.pdf($|\?)/i.test(url) ? (
                         <iframe src={url} title={label} className="h-80 w-full rounded-lg border border-border bg-muted" />
                       ) : (
-                        // eslint-disable-next-line @next/next/no-img-element -- arbitrary uploaded document URL
                         <img src={url} alt={label} className="h-80 w-full rounded-lg border border-border bg-muted object-contain" />
                       )
                     ) : (

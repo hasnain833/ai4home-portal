@@ -5,6 +5,7 @@ import {
   verifySuperadminSessionToken,
   createSuperadminSessionToken,
   shouldRenewSuperadminSession,
+  isSessionCurrent,
   SESSION_COOKIE_OPTIONS,
 } from "../lib/superadmin-session.js";
 import { hasSalesPermission, SALES_PERMISSIONS } from "../lib/permissions.js";
@@ -68,7 +69,9 @@ export async function requireAuth(req, res, next) {
     const superadminCookie =
       cookies.superadmin_session || cookies["superadmin-session"];
     if (superadminCookie) {
-      const payload = verifySuperadminSessionToken(superadminCookie);
+      const verified = verifySuperadminSessionToken(superadminCookie);
+      // Signed out elsewhere, or the admin was removed: the signature alone isn't enough.
+      const payload = verified && (await isSessionCurrent(verified)) ? verified : null;
       if (!payload) {
         return res
           .status(401)

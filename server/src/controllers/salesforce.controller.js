@@ -74,23 +74,27 @@ export const salesforceCallback = async (req, res) => {
 
     const baseUrl = getPortalUrl();
 
+    let stateData = null;
+    try {
+      if (stateParam && isEncrypted(stateParam)) stateData = JSON.parse(decrypt(stateParam));
+    } catch {
+      stateData = null;
+    }
+    // Salesforce returns the state on errors too, so a Super Admin lands back on their own page.
+    const returnPage = stateData?.platform ? "/admin/salesforce" : "/sales/settings";
+
     if (error) {
       console.error(`[Salesforce Callback] OAuth error: ${error} — ${errorDescription}`);
       return res.redirect(
-        `${baseUrl}/sales/settings?sf_error=${encodeURIComponent(errorDescription || error)}`
+        `${baseUrl}${returnPage}?sf_error=${encodeURIComponent(errorDescription || error)}`
       );
     }
 
     if (!code || !stateParam) {
-      return res.redirect(`${baseUrl}/sales/settings?sf_error=missing_code`);
+      return res.redirect(`${baseUrl}${returnPage}?sf_error=missing_code`);
     }
 
-    let stateData;
-
-    try {
-      if (!isEncrypted(stateParam)) throw new Error("unsigned state");
-      stateData = JSON.parse(decrypt(stateParam));
-    } catch {
+    if (!stateData) {
       return res.redirect(`${baseUrl}/sales/settings?sf_error=invalid_state`);
     }
 
@@ -536,7 +540,7 @@ export const bulkImport = async (req, res) => {
         .json({ message: "No active Salesforce connection. Please connect first." });
     }
 
-    const { client, connection } = auth;
+    const { client } = auth;
 
     const mappings = await prisma.salesforceFieldMapping.findMany({
       where: { companyId, isActive: true },
@@ -556,7 +560,6 @@ export const bulkImport = async (req, res) => {
     const soql = `SELECT ${queryableFields.join(", ")} FROM Lead`;
 
     let allRecords = [];
-    let usedBulkApi = false;
 
     try {
       const job = await client.createBulkQueryJob(soql);
@@ -575,7 +578,6 @@ export const bulkImport = async (req, res) => {
         const csvResults = await client.getBulkQueryResults(job.id);
         const { parseBulkCSV } = await import("../services/salesforce-service.js");
         allRecords = parseBulkCSV(csvResults);
-        usedBulkApi = true;
       } else {
         throw new Error("Bulk job timed out");
       }

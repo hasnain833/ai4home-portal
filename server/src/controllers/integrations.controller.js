@@ -187,6 +187,11 @@ export const syncIntegration = async (req, res) => {
     if (!ticketId) {
       return res.status(400).json({ message: "ticketId is required" });
     }
+    const owned = await prisma.ticket.findFirst({
+      where: { id: String(ticketId), homeowner: { companyId: session.companyId } },
+      select: { id: true },
+    });
+    if (!owned) return res.status(404).json({ message: "Ticket not found" });
 
     const success = await syncTicketToERP(ticketId);
 

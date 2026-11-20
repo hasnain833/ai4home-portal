@@ -32,6 +32,7 @@ const isAdmin = (req) => req.user?.role === "ADMIN";
 /** Staff need the list too, to dispatch. */
 export const listTrades = async (req, res) => {
   try {
+    if (!["ADMIN", "STAFF"].includes(req.user?.role)) return res.status(403).json({ message: "Forbidden" });
     const trades = await prisma.companyTrade.findMany({
       where: { companyId: req.user.companyId },
       select: TRADE_SELECT,
@@ -310,6 +311,7 @@ export const markWorkDone = async (req, res) => {
 
 export const getCalendly = async (req, res) => {
   try {
+    if (!requireTrade(req, res)) return;
     return res.json(await calendlyStatus(req.user.id));
   } catch (error) {
     console.error("[Calendly] status failed:", error);
@@ -318,6 +320,7 @@ export const getCalendly = async (req, res) => {
 };
 
 export const startCalendlyConnect = (req, res) => {
+  if (!requireTrade(req, res)) return;
   if (!calendlyConfigured()) {
     return res.status(503).json({ message: "Calendly isn't set up on this portal yet" });
   }
@@ -353,6 +356,7 @@ export const calendlyCallback = async (req, res) => {
 
 export const removeCalendly = async (req, res) => {
   try {
+    if (!requireTrade(req, res)) return;
     await disconnectCalendly(req.user.id);
     return res.json({ message: "Calendly disconnected" });
   } catch (error) {
@@ -364,6 +368,7 @@ export const removeCalendly = async (req, res) => {
 /** The trade's Calendly event types, to choose which one homeowners book. */
 export const getCalendlyEventTypes = async (req, res) => {
   try {
+    if (!requireTrade(req, res)) return;
     return res.json(await listEventTypes(req.user.id));
   } catch (error) {
     console.error("[Calendly] event types failed:", error.message);
@@ -379,6 +384,7 @@ export const getCalendlyEventTypes = async (req, res) => {
 
 export const putCalendlyEventType = async (req, res) => {
   try {
+    if (!requireTrade(req, res)) return;
     const chosen = await setEventType(req.user.id, req.body?.uri || null);
     return res.json({ eventType: chosen });
   } catch (error) {

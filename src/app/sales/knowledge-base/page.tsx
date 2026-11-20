@@ -109,6 +109,7 @@ export default function SalesKnowledgeBasePage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     loadDocs();
   }, [loadDocs]);
 

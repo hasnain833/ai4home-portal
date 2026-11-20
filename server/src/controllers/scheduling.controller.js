@@ -231,7 +231,7 @@ export const publicGetBooking = async (req, res) => {
 
 export const publicBook = async (req, res) => {
   const { bookingToken, startTime, locationType, title } = req.body;
-  if (!bookingToken || !startTime)
+  if (typeof bookingToken !== "string" || !bookingToken || !startTime)
     return res.status(400).json({ message: "bookingToken and startTime required" });
 
   const lead = await prisma.lead.findUnique({
@@ -296,7 +296,7 @@ export const publicGetManage = async (req, res) => {
 export const publicReschedule = async (req, res) => {
   try {
     const { token, startTime } = req.body;
-    if (!token || !startTime)
+    if (typeof token !== "string" || !token || !startTime)
       return res.status(400).json({ message: "token and startTime required" });
     const result = await rescheduleAppointment({
       rescheduleToken: token,
@@ -316,7 +316,7 @@ export const publicReschedule = async (req, res) => {
 
 export const publicCancel = async (req, res) => {
   const { token } = req.body;
-  if (!token) return res.status(400).json({ message: "token required" });
+  if (typeof token !== "string" || !token) return res.status(400).json({ message: "token required" });
   const result = await cancelAppointment({
     cancelToken: token,
     reason: "Cancelled by lead",

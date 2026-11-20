@@ -411,7 +411,7 @@ export class ComplianceService {
               where: { id: metadata.tag.slice(4) },
               data: { [field]: { increment: 1 } },
             });
-          } catch (e) {
+          } catch {
             // ignore if tag is not a valid Announcement ID
           }
         }
@@ -430,7 +430,7 @@ export class ComplianceService {
               where: { id: metadata.tag },
               data: { [field]: { increment: 1 } }
             });
-          } catch (e) {
+          } catch {
             // ignore if tag is not a valid CampaignStep ID
           }
         }

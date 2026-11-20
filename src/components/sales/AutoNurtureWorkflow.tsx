@@ -141,6 +141,7 @@ export default function AutoNurtureWorkflow({ variant = "sales" }: { variant?: k
   }, [API]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     load();
   }, [load]);
 

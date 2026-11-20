@@ -19,6 +19,7 @@ export default function HubPage() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration flag, set once on the client
     setMounted(true);
   }, []);
 
@@ -50,9 +51,6 @@ export default function HubPage() {
     // Redirect to the workspace dashboard
     router.push(`/${workspace}/dashboard`);
   };
-
-  const getInitials = (name: string) =>
-    name.split(" ").map((n) => n[0]).join("").toUpperCase();
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-300">

@@ -156,6 +156,9 @@ export const createProperty = async (req, res) => {
   const community = await checkCommunity(communityId, companyId);
   if (community.error) return res.status(400).json({ message: community.error });
 
+  // Coverage runs from the closing date, so only the builder's staff set it.
+  const closingDate = session.role === "HOMEOWNER" ? null : coeDate;
+
   const property = await prisma.property.create({
     data: {
       address,
@@ -165,8 +168,8 @@ export const createProperty = async (req, res) => {
       zipCode: zipCode || null,
       areaOfHome: areaOfHome || null,
       units: parseUnits(units),
-      coeDate: coeDate ? new Date(coeDate) : null,
-      coverageTerm: coverageTermFor(coeDate),
+      coeDate: closingDate ? new Date(closingDate) : null,
+      coverageTerm: coverageTermFor(closingDate),
       homeownerId: assignedHomeownerId,
       companyId,
     },

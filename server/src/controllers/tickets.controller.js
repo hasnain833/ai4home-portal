@@ -9,6 +9,7 @@ import { syncTicketToERP } from "../services/erp-service.js";
 import { cancelCalendlyVisit } from "../services/calendly.service.js";
 import { notifyTicketCreated } from "../services/notification-service.js";
 import { nextTicketNumber, ticketRef } from "../lib/ticket-number.js";
+import { getCoverageStatus, COVERAGE } from "../lib/coverage.js";
 import {
   normalizePriority,
   TICKET_PRIORITIES,
@@ -27,7 +28,12 @@ const NEXT_VISIT_SELECT = {
 
 const withNextVisit = (ticket) => {
   const { appointments, ...rest } = ticket;
-  return { ...rest, nextVisitAt: appointments?.[0]?.scheduledAt ?? null };
+  return {
+    ...rest,
+    nextVisitAt: appointments?.[0]?.scheduledAt ?? null,
+    // Filed after the home's coverage ended. Still filed, flagged for staff to decide.
+    outOfCoverage: !!ticket.property && getCoverageStatus(ticket.property, ticket.createdAt).status === COVERAGE.EXPIRED,
+  };
 };
 
 const DISPATCH_ROLES = ["ADMIN", "STAFF"];

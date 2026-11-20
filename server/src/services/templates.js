@@ -390,7 +390,7 @@ export const Templates = {
   },
 
   getTicketDispatchHomeownerEmail: (
-    { ticketId, ticketRef, issueType, whenLabel, address, staffName, homeownerName, manageUrl },
+    { ticketId, issueType, whenLabel, address, staffName, homeownerName, manageUrl },
     portalUrl,
     companyName,
     { rescheduled = false } = {},
@@ -418,7 +418,7 @@ export const Templates = {
   },
 
   getTicketBookingInviteEmail: (
-    { ticketId, ticketRef, issueType, address, staffName, homeownerName },
+    { ticketRef, issueType, address, staffName, homeownerName },
     bookingUrl,
     companyName,
     { nudge = false } = {},

@@ -736,9 +736,15 @@ export default function PropertiesPage() {
                             type="date"
                             className="pl-9"
                             value={form.coeDate}
+                            disabled={isHomeowner}
                             onChange={(e) => setForm((f) => ({ ...f, coeDate: e.target.value }))}
                           />
                         </div>
+                        {isHomeowner && (
+                          <p className="text-xs text-gray-400 dark:text-slate-500">
+                            Your builder sets this from your closing records.
+                          </p>
+                        )}
                       </div>
                     </div>
 

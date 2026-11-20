@@ -51,6 +51,7 @@ import {
   Send,
   CalendarClock,
   UserCheck,
+  ShieldAlert,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -84,6 +85,7 @@ interface Ticket {
   // Present only once the homeowner has picked a time. Its absence on a
   // dispatched ticket is what "awaiting booking" means.
   nextVisitAt?: string | null;
+  outOfCoverage?: boolean;
 }
 
 interface HomeownerOption {
@@ -260,11 +262,13 @@ function TicketsPageInner() {
 
   // Load tickets
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load on filter/page change
     fetchTickets();
   }, [fetchTickets]);
 
   // Resolving the last ticket on the last page leaves that page empty.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clamp after the total shrinks
     if (totalPages > 0 && page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
@@ -288,6 +292,7 @@ function TicketsPageInner() {
 
   // Reset page when filters change
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- back to page 1 on new filters
     setPage(1);
   }, [debouncedSearch, status, priority, dateRange]);
 
@@ -738,6 +743,15 @@ function TicketsPageInner() {
                                   >
                                     <CalendarClock className="h-3 w-3 shrink-0" />
                                     Awaiting booking
+                                  </span>
+                                )}
+                                {canManage && ticket.outOfCoverage && (
+                                  <span
+                                    className="mt-1 flex items-center gap-1 text-[10px] font-medium text-rose-600 dark:text-rose-400"
+                                    title="Filed after this home's 1-year coverage ended."
+                                  >
+                                    <ShieldAlert className="h-3 w-3 shrink-0" />
+                                    Out of coverage
                                   </span>
                                 )}
                               </TableCell>

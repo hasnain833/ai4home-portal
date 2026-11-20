@@ -148,6 +148,7 @@ export default function BlogDraftingPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchPosts();
   }, [fetchPosts]);
 
@@ -198,8 +199,8 @@ export default function BlogDraftingPage() {
       toast.success("Post updated.");
       setEditorOpen(false);
       await fetchPosts();
-    } catch (e: any) {
-      toast.error(e.message || "Save failed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save failed");
     } finally {
       setSaving(false);
     }

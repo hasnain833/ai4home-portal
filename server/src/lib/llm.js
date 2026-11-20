@@ -45,7 +45,7 @@ async function callAnthropic({ cfg, companyId, system, user, messages, maxTokens
   return text;
 }
 
-export async function chat({ companyId, system, user, messages, maxTokens = 700, json = false, source = null }) {
+export async function chat({ companyId, system, user, messages, maxTokens = 700, source = null }) {
   const cfg = resolveAiConfig();
   if (!cfg.provider) {
     console.warn(`[LLM] No AI provider available for company=${companyId} (${cfg.reason}).`);
@@ -59,7 +59,7 @@ export async function chat({ companyId, system, user, messages, maxTokens = 700,
   }
 }
 
-async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature, effort, source }) {
+async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, effort, source }) {
   const outputConfig =
     effort && supportsEffort(cfg.model) ? { output_config: { effort } } : {};
 
@@ -97,7 +97,6 @@ export async function toolCall({
   messages,
   tool,
   maxTokens = 700,
-  forcePlatformKey = false,
   fast = false,
   temperature,
   effort,

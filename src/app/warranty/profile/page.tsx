@@ -35,6 +35,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- fill the form once the user loads
       setEditedName(user.name || "");
     }
   }, [user]);
@@ -117,8 +118,8 @@ export default function ProfilePage() {
                       await updateProfile({ name: editedName });
                       setToastMessage({ type: "success", text: "Profile updated successfully!" });
                       setIsEditingProfile(false);
-                    } catch (err: any) {
-                      setToastMessage({ type: "error", text: err.message || "Failed to update profile." });
+                    } catch (err) {
+                      setToastMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to update profile." });
                     } finally {
                       setIsSaving(false);
                     }

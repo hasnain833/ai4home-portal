@@ -51,28 +51,16 @@ export default function UpdatePasswordPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const [passwordStrength, setPasswordStrength] = useState<{
-    score: number;
-    label: string;
-    color: string;
-  }>({ score: 0, label: "Very Weak", color: "bg-red-500" });
-
-  useEffect(() => {
-    const met = requirements.filter((req) => req.test(password)).length;
-    let label = "Very Weak";
-    let color = "bg-red-500";
-    if (met === 4) {
-      label = "Strong";
-      color = "bg-green-500";
-    } else if (met >= 2) {
-      label = "Good";
-      color = "bg-blue-500";
-    } else if (met > 0) {
-      label = "Weak";
-      color = "bg-yellow-500";
-    }
-    setPasswordStrength({ score: met, label, color });
-  }, [password]);
+  // Derived from the password on every render; no state needed.
+  const met = requirements.filter((req) => req.test(password)).length;
+  const passwordStrength =
+    met === 4
+      ? { score: met, label: "Strong", color: "bg-green-500" }
+      : met >= 2
+        ? { score: met, label: "Good", color: "bg-blue-500" }
+        : met > 0
+          ? { score: met, label: "Weak", color: "bg-yellow-500" }
+          : { score: met, label: "Very Weak", color: "bg-red-500" };
 
   useEffect(() => {
     async function checkSession() {

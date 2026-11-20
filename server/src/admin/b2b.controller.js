@@ -712,7 +712,7 @@ export const enrollLeads = wrap("Enroll", async (req, res) => {
 });
 
 export const unenrollLeads = wrap("Unenroll", async (req, res) => {
-  const leadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds : [];
+  const leadIds = Array.isArray(req.body?.leadIds) ? req.body.leadIds.filter((id) => typeof id === "string") : [];
   let removed = 0;
   for (const leadId of leadIds) removed += await exitB2BEnrollments(leadId, "MANUAL", { campaignId: req.params.id });
   res.json({ removed });

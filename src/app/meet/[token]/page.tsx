@@ -38,7 +38,7 @@ export default function PlatformBookingPage({ params }: { params: Promise<{ toke
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, stepId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial load

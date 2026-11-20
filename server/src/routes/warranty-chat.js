@@ -80,6 +80,8 @@ async function postMessage(req, res) {
     if (conversationId) {
       convo = await prisma.warrantyConversation.findUnique({ where: { id: conversationId } });
       if (convo && convo.companyId !== companyId) convo = null;
+      // A homeowner's conversation is theirs alone: anyone else holding its id starts fresh.
+      if (convo && convo.homeownerId && convo.homeownerId !== homeownerId) convo = null;
 
       if (convo && isStale(convo)) {
         await prisma.warrantyConversation
@@ -129,10 +131,12 @@ async function postMessage(req, res) {
 
 async function photoConversation(req) {
   const conversationId = req.body?.conversationId || req.query?.conversationId || null;
-  const companyId = resolveActor(req).companyId || req.query?.companyId || null;
+  const actor = resolveActor(req);
+  const companyId = actor.companyId || req.query?.companyId || null;
   if (!conversationId || !companyId) return null;
   const convo = await prisma.warrantyConversation.findUnique({ where: { id: String(conversationId) } });
   if (!convo || convo.companyId !== companyId || convo.ticketId || isStale(convo)) return null;
+  if (convo.homeownerId && convo.homeownerId !== actor.homeownerId) return null;
   return convo;
 }
 

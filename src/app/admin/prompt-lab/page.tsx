@@ -199,7 +199,6 @@ export default function PromptLabPage() {
   const [wPhaseTab, setWPhaseTab] = useState<WarrantyPhaseKey>("INTAKE");
   const [wTab, setWTab] = useState<"prompt" | "kb">("prompt");
   const [wVersions, setWVersions] = useState<PromptVersion[]>([]);
-  const [wTableReady, setWTableReady] = useState(true);
   const [wLive, setWLive] = useState<LiveState | null>(null);
   const [wVersionLabel, setWVersionLabel] = useState("");
   const [wSaving, setWSaving] = useState(false);
@@ -251,7 +250,6 @@ export default function PromptLabPage() {
       setWDefaults(data.defaults || EMPTY_WARRANTY_DRAFT);
       setWVersions(data.versions || []);
       setWLive(data.live || null);
-      setWTableReady(data.tableReady !== false);
       setWDraft(data.currentDraft ? {
         INTAKE: data.currentDraft.INTAKE,
         IDENTIFY: data.currentDraft.IDENTIFY,

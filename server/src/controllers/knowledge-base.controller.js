@@ -60,7 +60,7 @@ export const uploadKnowledgeBaseDoc = async (req, res) => {
     const originalName = file.originalname || "document";
     const fileName = `${companyId}/${Date.now()}_${originalName.replace(/[^a-zA-Z0-9.\-_]/g, '')}`;
 
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from(bucketName)
       .upload(fileName, fileBuffer, {
         contentType: file.mimetype,

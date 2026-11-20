@@ -168,6 +168,7 @@ export default function AutomationsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchRules();
     fetchAnalytics();
   }, [fetchRules, fetchAnalytics]);
@@ -510,7 +511,7 @@ export default function AutomationsPage() {
                           <div className="space-y-1 mt-1 font-semibold text-slate-800 dark:text-slate-200">
                             {rule.conditions.map((cond, i) => (
                               <p key={i} className="text-[11px]">
-                                {cond.field} <span className="text-amber-600 font-mono text-[9px]">{cond.operator}</span> "{cond.value}"
+                                {cond.field} <span className="text-amber-600 font-mono text-[9px]">{cond.operator}</span> &ldquo;{cond.value}&rdquo;
                               </p>
                             ))}
                           </div>
@@ -814,7 +815,7 @@ export default function AutomationsPage() {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[10px] text-muted-foreground">Times per</Label>
-                    <Select value={ruleRateLimitWindow} onValueChange={(val: any) => setRuleRateLimitWindow(val)}>
+                    <Select value={ruleRateLimitWindow} onValueChange={(val) => setRuleRateLimitWindow(val as typeof ruleRateLimitWindow)}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="HOUR">Hour</SelectItem>

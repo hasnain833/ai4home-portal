@@ -116,12 +116,48 @@ const CALENDAR_STATUS_COLORS: Record<string, string> = {
     "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
 };
 
+type ApiLead = {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  status: string;
+  source?: string | null;
+  owner?: { name?: string | null } | null;
+  createdAt: string;
+};
+type RecentLead = {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  status: string;
+  source: string;
+  owner: string;
+  date: string;
+};
+type ApiAppointment = {
+  id: string;
+  lead?: { firstName?: string | null; lastName?: string | null } | null;
+  title?: string | null;
+  time: string;
+  status: string;
+};
+type DashboardPayload = {
+  leads?: { total?: number; new?: number; nurturing?: number; closedWon?: number };
+  campaigns?: { activeCount?: number; totalEnrolled?: number; active?: CampaignMetrics[] };
+  upcomingCount?: number;
+  upcomingAppointments?: ApiAppointment[];
+  upcomingCalendarItems?: CalendarItem[];
+};
+
 export default function SalesDashboardPage() {
   const { user } = useAuth();
   // SRS 4.12: a homeowner has no CRM rights and no company-wide reporting.
   const isHomeowner = user?.role === "homeowner";
   const [loading, setLoading] = useState(true);
-  const [leads, setLeads] = useState<any[]>([]);
+  const [leads, setLeads] = useState<RecentLead[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignMetrics[]>([]);
   const [calendarItems, setCalendarItems] = useState<CalendarItem[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -144,10 +180,8 @@ export default function SalesDashboardPage() {
     try {
       // Each panel loads on its own, so one failing still shows the other.
       const [data, leadsPayload] = await Promise.all([
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        api.get<any>("/api/sales/dashboard").catch(() => null),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        api.get<any>("/api/sales/leads?pageSize=5").catch(() => null),
+        api.get<DashboardPayload>("/api/sales/dashboard").catch(() => null),
+        api.get<ApiLead[] | { leads?: ApiLead[] }>("/api/sales/leads?pageSize=5").catch(() => null),
       ]);
 
       if (data) {
@@ -165,7 +199,7 @@ export default function SalesDashboardPage() {
         setCampaigns(data.campaigns?.active || []);
         setCalendarItems(data.upcomingCalendarItems || []);
         setAppointments(
-          (data.upcomingAppointments || []).map((a: any) => ({
+          (data.upcomingAppointments || []).map((a) => ({
             id: a.id,
             leadName: a.lead
               ? `${a.lead.firstName} ${a.lead.lastName}`
@@ -182,7 +216,7 @@ export default function SalesDashboardPage() {
           ? leadsPayload
           : leadsPayload.leads || [];
         setLeads(
-          recentLeads.slice(0, 5).map((l: any) => ({
+          recentLeads.slice(0, 5).map((l) => ({
             id: `L-${l.id.slice(-4).toUpperCase()}`,
             name: `${l.firstName} ${l.lastName}`,
             email: l.email,
@@ -202,6 +236,7 @@ export default function SalesDashboardPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchData();
   }, []);
 

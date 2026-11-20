@@ -314,6 +314,7 @@ function SettingsPageContent() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchStatus();
     fetchMappings();
     fetchLogs();
@@ -327,6 +328,7 @@ function SettingsPageContent() {
 
     if (connected === "true") {
       showToast("Successfully connected to Salesforce!", "success");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
       fetchStatus();
       fetchMappings();
       fetchLogs();

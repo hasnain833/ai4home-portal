@@ -40,11 +40,19 @@ const forgotPasswordLimits = [
   createRateLimiter({ max: 3, windowMs: WINDOW_15_MIN, label: "Forgot password", keyFn: byEmail }),
 ];
 
+// Each request emails an address the caller chooses; cap it so it can't be used to spam.
+const emailChangeLimit = createRateLimiter({
+  max: 5,
+  windowMs: 60 * 60_000,
+  label: "Email change",
+  keyFn: (req) => `email-change:${req.user?.id}`,
+});
+
 const router = Router();
 
 router.get("/me", requireAuth, getMe);
 router.patch("/profile", requireAuth, updateProfile);
-router.post("/email-change", requireAuth, requestEmailChange);
+router.post("/email-change", requireAuth, emailChangeLimit, requestEmailChange);
 router.post("/email-change/cancel", requireAuth, cancelEmailChange);
 // Opened from a link in an email, so this one cannot require a session.
 router.get("/email-change/confirm", confirmEmailChange);

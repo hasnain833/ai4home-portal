@@ -115,6 +115,29 @@ interface AvailableStaff {
 // NFR-P-002: page size for the server-side lead pager.
 const ITEMS_PER_PAGE = 25;
 
+type ImportJob = {
+  id?: string;
+  status?: string;
+  totalRows?: number;
+  processedRows?: number;
+  createdCount?: number;
+  updatedCount?: number;
+  skippedCount?: number;
+  errorCount?: number;
+  errorMessage?: string | null;
+};
+type ImportResults = ImportJob & { jobId: string; rowCount?: number; errorsCount?: number };
+type CsvRejectedRow = Record<string, unknown>;
+type CsvValidation = {
+  valid: number;
+  duplicates: number;
+  duplicatesInDb: number;
+  duplicatesInFile: number;
+  invalid: number;
+  rejected?: CsvRejectedRow[];
+};
+type CsvTemplate = { id: string; name: string; mapping?: Record<string, string> };
+
 export default function LeadsPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -235,11 +258,11 @@ export default function LeadsPage() {
   const [mergeStrategy, setMergeStrategy] = useState<"skip" | "update" | "create">("update");
   const [consentAttested, setConsentAttested] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [importResults, setImportResults] = useState<any>(null);
-  const [importJobStatus, setImportJobStatus] = useState<any>(null);
-  const [validation, setValidation] = useState<any>(null);
+  const [importResults, setImportResults] = useState<ImportResults | null>(null);
+  const [importJobStatus, setImportJobStatus] = useState<ImportJob | null>(null);
+  const [validation, setValidation] = useState<CsvValidation | null>(null);
   const [validating, setValidating] = useState(false);
-  const [csvTemplates, setCsvTemplates] = useState<any[]>([]);
+  const [csvTemplates, setCsvTemplates] = useState<CsvTemplate[]>([]);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -299,10 +322,12 @@ export default function LeadsPage() {
   const changeTagFilter = (value: string) => { setTagFilter(value); setCurrentPage(1); };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchLeads();
   }, [fetchLeads]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchSegments();
   }, [fetchSegments]);
 
@@ -448,10 +473,10 @@ export default function LeadsPage() {
     const rejected = validation?.rejected || [];
     if (!rejected.length) return;
     const header = ["row", "firstName", "lastName", "email", "phone", "reason"];
-    const escape = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const escape = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [
       header.join(","),
-      ...rejected.map((r: any) => header.map(h => escape(r[h])).join(",")),
+      ...rejected.map((r) => header.map(h => escape(r[h])).join(",")),
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -512,8 +537,7 @@ export default function LeadsPage() {
   const handleCSVImportExecute = async () => {
     setImporting(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await api.post<any>("/api/sales/csv/upload", {
+      const data = await api.post<ImportResults>("/api/sales/csv/upload", {
         ...csvImportBody(),
         mergeStrategy,
         attested: consentAttested,
@@ -559,12 +583,11 @@ export default function LeadsPage() {
     let cancelled = false;
     const poll = async () => {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = await api.get<any>(`/api/sales/csv/imports/${importResults.jobId}`);
+        const data = await api.get<ImportJob>(`/api/sales/csv/imports/${importResults.jobId}`);
         if (cancelled) return;
         setImportJobStatus(data);
         if (data.status === "COMPLETED") {
-          setImportResults((prev: any) => ({ ...prev, ...data, errorsCount: data.errorCount }));
+          setImportResults((prev) => (prev ? { ...prev, ...data, errorsCount: data.errorCount } : prev));
           fetchLeads();
         }
       } catch {
@@ -578,14 +601,19 @@ export default function LeadsPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- polling is keyed to the job, not the fetch helpers
   }, [csvStep, importResults?.jobId, importJobStatus?.status]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     if (csvModalOpen) fetchCsvTemplates();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load templates when the modal opens
   }, [csvModalOpen]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- validate when the CSV step opens
     if (csvStep === 3 && csvRows.length > 0) runValidation();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- validate once on entering step 3
   }, [csvStep]);
 
   return (
@@ -1272,7 +1300,7 @@ export default function LeadsPage() {
                 <div className="space-y-4 my-4 p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border">
                   <div className="space-y-1.5">
                     <Label className="font-semibold text-xs">Duplicate Ingestion Strategy (SW-LEAD-003)</Label>
-                    <Select value={mergeStrategy} onValueChange={(val: any) => setMergeStrategy(val)}>
+                    <Select value={mergeStrategy} onValueChange={(val) => setMergeStrategy(val as typeof mergeStrategy)}>
                       <SelectTrigger className="h-9">
                         <SelectValue />
                       </SelectTrigger>

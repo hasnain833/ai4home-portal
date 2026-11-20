@@ -145,6 +145,7 @@ export default function HomeownersManagementPage() {
 
   useEffect(() => {
     if (user?.role === "admin" || user?.role === "staff") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
       fetchHomeowners();
     }
   }, [user]);
@@ -488,7 +489,6 @@ export default function HomeownersManagementPage() {
           <>
             <div className="relative h-52 bg-muted flex items-center justify-center">
               {viewed.property?.photoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- short-lived signed URL
                 <img src={viewed.property.photoUrl} alt={`House at ${viewed.property.address}`} className="absolute inset-0 h-full w-full object-cover" />
               ) : viewed.property ? (
                 <button

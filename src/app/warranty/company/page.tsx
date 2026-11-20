@@ -78,7 +78,6 @@ export default function CompanyPage() {
     warrantyPolicy: "",
   });
 
-  const [loading, setLoading] = useState(true);
   const [savingInfo, setSavingInfo] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -103,10 +102,7 @@ export default function CompanyPage() {
           warrantyPolicy: data.warrantyPolicy || "",
         });
       })
-      .catch((error) => console.error("Failed to fetch company:", error))
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .catch((error) => console.error("Failed to fetch company:", error));
     return () => {
       cancelled = true;
     };
