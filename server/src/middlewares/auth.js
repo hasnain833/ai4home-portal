@@ -56,6 +56,7 @@ export async function requireAuth(req, res, next) {
 
     let token = "";
     let cookies = {};
+    let invalidSuperadminSession = false;
 
     if (req.headers.cookie) {
       cookies = Object.fromEntries(
@@ -73,35 +74,39 @@ export async function requireAuth(req, res, next) {
       // Signed out elsewhere, or the admin was removed: the signature alone isn't enough.
       const payload = verified && (await isSessionCurrent(verified)) ? verified : null;
       if (!payload) {
-        return res
-          .status(401)
-          .json({ message: "Unauthorized: Invalid superadmin session" });
-      }
-
-      if (shouldRenewSuperadminSession(payload)) {
-        try {
-          const { exp, ...claims } = payload;
-          res.cookie(
-            "superadmin_session",
-            createSuperadminSessionToken(claims),
-            SESSION_COOKIE_OPTIONS,
-          );
-        } catch (e) {
-          console.error("[Auth Middleware] Session renewal failed:", e.message);
+        // An expired/revoked admin cookie must not shadow a valid company login.
+        // Clear both historical names and still require a verified Supabase token.
+        invalidSuperadminSession = true;
+        const { maxAge: _maxAge, ...clearOptions } = SESSION_COOKIE_OPTIONS;
+        res.clearCookie("superadmin_session", clearOptions);
+        res.clearCookie("superadmin-session", clearOptions);
+        console.warn("[Auth Middleware] Discarded invalid Super Admin cookie; checking company session.");
+      } else {
+        if (shouldRenewSuperadminSession(payload)) {
+          try {
+            const { exp, ...claims } = payload;
+            res.cookie(
+              "superadmin_session",
+              createSuperadminSessionToken(claims),
+              SESSION_COOKIE_OPTIONS,
+            );
+          } catch (e) {
+            console.error("[Auth Middleware] Session renewal failed:", e.message);
+          }
         }
-      }
 
-      req.user = {
-        id: payload.id,
-        email: payload.email,
-        name: payload.name,
-        role: "ADMIN",
-        companyId: payload.companyId || null,
-        hasWarrantyAccess: true,
-        hasSalesAccess: true,
-        isSuperAdmin: true,
-      };
-      return next();
+        req.user = {
+          id: payload.id,
+          email: payload.email,
+          name: payload.name,
+          role: "ADMIN",
+          companyId: payload.companyId || null,
+          hasWarrantyAccess: true,
+          hasSalesAccess: true,
+          isSuperAdmin: true,
+        };
+        return next();
+      }
     }
 
     const authHeader = req.headers.authorization;
@@ -111,7 +116,9 @@ export async function requireAuth(req, res, next) {
 
     if (!token && req.headers.cookie) {
       let tokenKeys = Object.keys(cookies).filter(
-        (k) => k.includes("auth-token") || k.includes("access-token"),
+        // PKCE's auth-token-code-verifier is not a session chunk. Combining it
+        // with the session cookie corrupts an otherwise valid access token.
+        (k) => /(?:^|-)(?:auth-token|access-token)(?:\.\d+)?$/.test(k),
       );
 
       let projectRef = "";
@@ -175,7 +182,9 @@ export async function requireAuth(req, res, next) {
     if (!token) {
       return res
         .status(401)
-        .json({ message: "Unauthorized: Missing authentication token" });
+        .json({ message: invalidSuperadminSession
+          ? "Unauthorized: Invalid superadmin session"
+          : "Unauthorized: Missing authentication token" });
     }
 
     const { data, error } = await supabase.auth.getClaims(token);

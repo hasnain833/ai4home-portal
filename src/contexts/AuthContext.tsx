@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { ApiError } from "@/lib/api";
 import type { AuthChangeEvent } from "@supabase/supabase-js";
 
 export type UserRole = "admin" | "staff" | "homeowner" | "trade" | "super_staff";
@@ -73,9 +74,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  * Who is signed in, or null when nobody is. A 401 here is the normal logged-out answer, so this
  * stays a raw fetch rather than apiFetch, which would log it as an error. A dropped connection still throws.
  */
-async function fetchMe(): Promise<User | null> {
-  const response = await fetch("/api/auth/me");
-  return response.ok ? response.json() : null;
+async function fetchMe(required = false): Promise<User | null> {
+  const response = await fetch("/api/auth/me", { cache: "no-store", credentials: "same-origin" });
+  if (response.ok) return response.json();
+  if (!required) return null;
+  const body = await response.json().catch(() => ({}));
+  console.warn("[auth] Sign-in session verification failed", { status: response.status, code: body?.code });
+  throw new ApiError(
+    body?.message || "We couldn't establish your portal session. Please try signing in again.",
+    response.status,
+    body,
+  );
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -86,6 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const supabaseRef = useRef(createClient());
   const userRef = useRef<User | null>(null);
+  const signingInRef = useRef(false);
+  const authRequestVersionRef = useRef(0);
   useEffect(() => {
     userRef.current = user;
   }, [user]);
@@ -155,15 +166,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let initialFetchDone = false;
 
     async function fetchUser() {
-      if (!mounted) return;
+      if (!mounted || signingInRef.current) return;
+      const version = ++authRequestVersionRef.current;
       setIsLoading(true);
       try {
         const userData = await fetchMe();
-        if (mounted) setUser(userData);
+        if (mounted && version === authRequestVersionRef.current) setUser(userData);
       } catch {
-        if (mounted) setUser(null);
+        if (mounted && version === authRequestVersionRef.current) setUser(null);
       } finally {
-        if (mounted) setIsLoading(false);
+        if (mounted && version === authRequestVersionRef.current) setIsLoading(false);
       }
     }
 
@@ -179,8 +191,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     async function checkSuperadminOrLogout() {
+      if (!mounted || signingInRef.current) return;
+      const version = ++authRequestVersionRef.current;
       try {
         const userData = await fetchMe();
+        if (!mounted || version !== authRequestVersionRef.current) return;
         if (userData?.isSuperAdmin) {
           if (mounted) {
             setUser(userData);
@@ -191,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         console.error(e);
       }
+      if (!mounted || version !== authRequestVersionRef.current) return;
       if (mounted) {
         setUser(null);
         setIsLoading(false);
@@ -198,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       router.push("/login");
     }
 
-    setTimeout(() => {
+    const initialFetchTimer = setTimeout(() => {
       if (!initialFetchDone && mounted) {
         fetchUser();
       }
@@ -206,13 +222,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mounted = false;
+      clearTimeout(initialFetchTimer);
       subscription.unsubscribe();
     };
   }, [router]); 
 
   const enterSuperadminPortal = async () => {
-    const userData = await fetchMe();
-    if (userData) setUser(userData);
+    const userData = await fetchMe(true);
+    ++authRequestVersionRef.current;
+    userRef.current = userData;
+    setUser(userData);
     setIsLoading(false);
     router.push("/admin");
   };
@@ -235,6 +254,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string,
     redirectPath?: string,
   ) => {
+    signingInRef.current = true;
+    ++authRequestVersionRef.current;
     setIsLoading(true);
     try {
       let response: Response;
@@ -285,20 +306,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw error;
       }
 
-      // Valid password but a suspended company: sign straight back out and say why.
-      const me = await fetch("/api/auth/me");
-      if (me.status === 403) {
-        const body = await me.json().catch(() => ({}));
-        if (body?.code === "COMPANY_SUSPENDED") {
-          await supabaseRef.current.auth.signOut();
-          throw new Error(body.message);
-        }
-      }
-
+      // A valid Supabase password is not enough: the API must accept the browser
+      // session and resolve the company profile before any portal navigation.
+      const userData = await fetchMe(true);
+      ++authRequestVersionRef.current;
+      userRef.current = userData;
+      setUser(userData);
+      setSessionExpired(false);
       router.push(redirectPath || "/");
     } catch (err) {
-      setIsLoading(false);
+      if (err instanceof ApiError && (err.body as { code?: string } | null)?.code === "COMPANY_SUSPENDED") {
+        await supabaseRef.current.auth.signOut({ scope: "local" });
+      }
       throw err;
+    } finally {
+      signingInRef.current = false;
+      setIsLoading(false);
     }
   };
 
