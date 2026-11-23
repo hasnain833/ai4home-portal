@@ -31,7 +31,8 @@ function bookingAction(value) {
   return null;
 }
 
-const bookingButtonStyle = "display:inline-block;background-color:#b48c3c;color:#ffffff;padding:14px 24px;text-decoration:none;border-radius:6px;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:600;line-height:1.4;margin:8px 0;";
+// display:table + auto margins puts the button on its own centred line, even mid-sentence.
+const bookingButtonStyle = "display:table;margin:22px auto 8px;background-color:#b48c3c;color:#ffffff;padding:14px 30px;text-decoration:none;border-radius:999px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;line-height:1.4;text-align:center;";
 
 // Keep text nodes separate from tags, styles and anchors to avoid nested links.
 export function bookingButtonsInEmail(html) {
@@ -69,11 +70,11 @@ export function prepareOutgoingEmail(html, { companyId = null, source = null, br
     // Already there (a retried send): don't add it twice.
     if (content.includes(builderLogo) || content.includes(escapeHtml(builderLogo))) return strip();
     // A fixed height keeps any logo shape tidy, Outlook included.
-    logo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-ai4hb-brand="builder"><tr><td align="center" style="padding:20px;background:#ffffff"><img src="${escapeHtml(builderLogo)}" height="72" alt="${escapeHtml(builder.name || "")}" style="display:block;border:0;height:72px;width:auto;max-width:240px"></td></tr></table>`;
+    logo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-ai4hb-brand="builder"><tr><td align="center" style="padding:20px"><img src="${escapeHtml(builderLogo)}" height="72" alt="${escapeHtml(builder.name || "")}" style="display:block;border:0;height:72px;width:auto;max-width:240px"></td></tr></table>`;
   } else {
     if (/<img\b[^>]*\bsrc\s*=\s*["'](?:[^"']*\/logo-email\.png(?:[?"'])|cid:ai4hb-logo["'])/i.test(content)) return strip();
     const origin = new URL(process.env.NEXT_PUBLIC_URL || "http://localhost:3000").origin;
-    logo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-ai4hb-brand="platform"><tr><td align="center" style="padding:20px;background:#ffffff"><a href="https://www.aiforhomebuilders.com"><img src="${escapeHtml(origin)}/logo-email.png" width="210" height="162" alt="AI for Homebuilders" style="display:block;border:0;width:210px;max-width:100%;height:auto"></a></td></tr></table>`;
+    logo = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" data-ai4hb-brand="platform"><tr><td align="center" style="padding:20px"><a href="https://www.aiforhomebuilders.com"><img src="${escapeHtml(origin)}/logo-email.png" width="210" height="162" alt="AI for Homebuilders" style="display:block;border:0;width:210px;max-width:100%;height:auto"></a></td></tr></table>`;
   }
   // Templates reserve a slot inside their card. Untemplated messages get the logo prepended.
   if (content.includes("<!--ai4hb-logo-->")) return content.replace("<!--ai4hb-logo-->", logo).replaceAll("<!--ai4hb-logo-->", "");
@@ -120,6 +121,73 @@ function emailHighlightBox(content) {
       ${content}
     </div>
   `;
+}
+
+// ---------- Letter design (portal palette: navy, gold, cream) ----------
+// Super Admin campaign emails and builder marketing emails share it. Tables and inline styles
+// keep it intact in Gmail, Outlook and on phones.
+const LETTER = {
+  page: "#f2ede4", paper: "#faf8f4", hair: "#e7e1d6", navy: "#0e1623", gold: "#b48c3c",
+  ink: "#1f2733", body: "#3f4856", mute: "#6b7280", quiet: "#8a8f98",
+};
+
+// The CEO signs every Super Admin email. A social link shows once its URL is filled in.
+const CEO = {
+  name: "Steven Fabry",
+  title: "Founder & CEO, AI for Homebuilders",
+  photo: "/ceo-email.jpg",
+  social: [["LinkedIn", ""], ["X", ""], ["Facebook", ""], ["YouTube", ""]],
+};
+
+const letterLink = (href, text, size = 12) =>
+  `<a href="${escapeHtml(href)}" style="color:${LETTER.body};text-decoration:underline;font-size:${size}px">${escapeHtml(text)}</a>`;
+const dot = `<span style="color:${LETTER.hair};padding:0 8px">&middot;</span>`;
+
+function letterButton(href, text) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:26px auto 6px"><tr><td align="center" bgcolor="${LETTER.gold}" style="border-radius:999px;mso-padding-alt:14px 30px">` +
+    `<a href="${href}" style="display:inline-block;padding:14px 30px;border-radius:999px;background:${LETTER.gold};color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;text-decoration:none">${text}</a></td></tr></table>`;
+}
+
+function ceoSignature(origin) {
+  const links = CEO.social.filter(([, href]) => /^https:\/\//i.test(href)).map(([label, href]) => letterLink(href, label));
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:30px;border-top:1px solid ${LETTER.hair}"><tr>
+<td width="80" valign="middle" style="padding-top:22px"><img src="${escapeHtml(origin + CEO.photo)}" width="64" height="64" alt="${escapeHtml(CEO.name)}" style="display:block;width:64px;height:64px;border-radius:50%;border:2px solid ${LETTER.gold}"></td>
+<td valign="middle" style="padding-top:22px;font-family:Arial,Helvetica,sans-serif">
+<div style="font-family:Georgia,'Times New Roman',serif;font-style:italic;font-size:21px;color:${LETTER.navy};line-height:1.2">${escapeHtml(CEO.name)}</div>
+<div style="font-size:12px;color:${LETTER.mute};margin-top:3px">${escapeHtml(CEO.title)}</div>
+${links.length ? `<div style="margin-top:6px">${links.join(dot)}</div>` : ""}
+</td></tr></table>`;
+}
+
+/** Cream page, paper card, centred logo and a short gold rule, then the message. */
+function letterEmail({ logoHtml = "<!--ai4hb-logo-->", bodyHtml, signatureHtml = "", footerHtml }) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+<body style="margin:0;padding:0;background:${LETTER.page}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${LETTER.page}"><tr><td align="center" style="padding:28px 12px">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:${LETTER.paper};border:1px solid ${LETTER.hair}">
+<tr><td align="center" style="padding:26px 40px 0">${logoHtml}
+<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:18px auto 0"><tr><td width="56" height="2" bgcolor="${LETTER.gold}" style="font-size:0;line-height:0;background:${LETTER.gold}">&nbsp;</td></tr></table></td></tr>
+<tr><td style="padding:30px 48px 34px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.7;color:${LETTER.body}">${bodyHtml}${signatureHtml}</td></tr>
+<tr><td align="center" style="padding:20px 40px 24px;background:${LETTER.page};border-top:1px solid ${LETTER.hair};font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.8;color:${LETTER.mute}">${footerHtml}</td></tr>
+</table></td></tr></table></body></html>`;
+}
+
+/** Builder nurture and announcement emails: the builder's logo, no CEO, their contact details and unsubscribe. */
+function builderLetter(bodyHtml, { companyName, phone, email, address, unsubscribeUrl }) {
+  const name = escapeHtml(companyName || "");
+  const contact = [phone && escapeHtml(phone), email && letterLink(`mailto:${email}`, email, 11)].filter(Boolean).join(dot);
+  const platform = new URL(process.env.WEBSITE_PUBLIC_URL || "https://www.aiforhomebuilders.com").origin;
+  return letterEmail({
+    bodyHtml,
+    footerHtml:
+      (name ? `<div style="font-size:13px;color:${LETTER.ink};font-weight:bold">${name}</div>` : "") +
+      (contact ? `<div>${contact}</div>` : "") +
+      (address ? `<div>${escapeHtml(address)}</div>` : "") +
+      // Builder emails keep a small unsubscribe link; Super Admin emails don't have one.
+      (unsubscribeUrl ? `<div style="margin-top:8px"><a href="${escapeHtml(unsubscribeUrl)}" style="color:${LETTER.quiet};text-decoration:underline;font-size:11px">Unsubscribe</a></div>` : "") +
+      `<div style="margin-top:6px;color:${LETTER.quiet}">You're receiving this because you're in touch with ${name || "this builder"}.</div>` +
+      `<div style="margin-top:4px"><a href="${platform}" style="color:${LETTER.quiet};text-decoration:none">Powered by AI for Homebuilders</a></div>`,
+  });
 }
 
 // Table layout and inline styles support Gmail, Outlook, and small screens.
@@ -203,20 +271,19 @@ export const Templates = {
     });
   },
 
-  getB2BCampaignEmail: (bodyHtml, { bookingLink, unsubscribeLink, portalUrl, websiteUrl, bookingButton = true }) => {
+  getB2BCampaignEmail: (bodyHtml, { bookingLink, portalUrl, websiteUrl, bookingButton = true }) => {
     const site = escapeHtml(websiteUrl);
-    const unsubscribe = escapeHtml(unsubscribeLink);
     const logo = escapeHtml(`${portalUrl}/logo-email.png`);
     const body = bookingButtonsInEmail(bodyHtml);
-    const fallbackButton = !bookingButton || body.includes(`href="${escapeHtml(bookingLink)}"`) ? "" : emailButton(escapeHtml(bookingLink), "Book a Product Consultation");
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;background:#f1f3f5;font-family:Arial,Helvetica,sans-serif;color:#334155">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:28px 12px">
-<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;background:#fff;border:1px solid #e5e7eb;border-radius:10px">
-<tr><td align="center" style="padding:20px;border-top:4px solid #b48c3c;border-bottom:1px solid #e5e7eb"><a href="${site}"><img src="${logo}" width="210" height="162" alt="AI for Homebuilders" style="display:block;border:0;width:210px;max-width:100%;height:auto"></a></td></tr>
-<tr><td style="padding:28px 32px;font-size:15px;line-height:1.7">${body}${fallbackButton}<p style="margin:20px 0 0;color:#64748b;font-size:13px">Questions? Reply to this email and our team will help.</p></td></tr>
-<tr><td align="center" style="padding:22px;background:#f8f9fa;border-top:1px solid #e5e7eb;font-size:12px;line-height:1.8;color:#64748b"><p style="margin:0"><strong>AI for Homebuilders</strong><br><a href="${site}" style="color:#0f3b3d">Visit our website</a> &middot; <a href="${unsubscribe}" style="color:#0f3b3d">Unsubscribe</a></p><p style="margin:8px 0 0">&copy; ${new Date().getFullYear()} AI for Homebuilders. All rights reserved.</p></td></tr>
-</table></td></tr></table></body></html>`;
+    const fallbackButton = !bookingButton || body.includes(`href="${escapeHtml(bookingLink)}"`) ? "" : letterButton(escapeHtml(bookingLink), "Book a Product Consultation");
+    return letterEmail({
+      logoHtml: `<a href="${site}"><img src="${logo}" width="96" alt="AI for Homebuilders" style="display:block;border:0;width:96px;height:auto;margin:0 auto"></a>`,
+      bodyHtml: `${body}${fallbackButton}`,
+      signatureHtml: ceoSignature(new URL(portalUrl).origin),
+      footerHtml:
+        `<div>${letterLink(websiteUrl, "Visit website")}${dot}${letterLink(`${websiteUrl}/privacy`, "Privacy")}</div>` +
+        `<div style="margin-top:4px">&copy; ${new Date().getFullYear()} AI for Homebuilders</div>`,
+    });
   },
 
   getEmailChangeVerifyEmail: (name, oldEmail, newEmail, confirmUrl, hoursValid) => {
@@ -650,17 +717,15 @@ export const Templates = {
     return wrapEmail(content, "Verification Document Submitted");
   },
 
-  getNurtureEmail: (userHtml, companyName) => {
-    return wrapEmail(bookingButtonsInEmail(userHtml), "A message from " + companyName, companyName, COLORS.primary, { replyable: true });
-  },
+  /** Builder emails. `footer` = { companyName (raw; escaped here), phone, email, address, unsubscribeUrl }. */
+  getNurtureEmail: (userHtml, footer = {}) =>
+    builderLetter(
+      `${bookingButtonsInEmail(userHtml)}<p style="margin:24px 0 0;color:${LETTER.mute};font-size:12px">You're messaging an automated assistant. Reply to this email and it will pick up the conversation.</p>`,
+      footer,
+    ),
 
-  getAnnouncementEmail: (bodyHtml, companyName, ctaHref) => {
-    let content = bodyHtml;
-    if (ctaHref) {
-      content += emailButton(ctaHref, "Learn more");
-    }
-    return wrapEmail(content, companyName || "Warranty Care & Sales Portal", companyName || "Aiforhomebuilder");
-  },
+  getAnnouncementEmail: (bodyHtml, ctaHref, footer = {}) =>
+    builderLetter(bodyHtml + (ctaHref ? letterButton(ctaHref, "Learn more") : ""), footer),
 
   getAppointmentConfirmationEmail: (role, appointment, formattedDate, actionLink) => {
     const isHomeowner = role === "homeowner";

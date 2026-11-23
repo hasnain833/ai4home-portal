@@ -235,20 +235,6 @@ export class ComplianceService {
     return { isComplianceAction: false };
   }
 
-  static addEmailUnsubscribeFooter(htmlContent, unsubscribeUrl, companyName) {
-    const footerHtml = `
-      <div style="margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; font-size: 11px; color: #718096; text-align: center; line-height: 1.5;">
-        <p>This email was sent by <strong>${companyName}</strong>.</p>
-        <p>If you no longer wish to receive these emails, you can <a href="${unsubscribeUrl}" style="color: #b48c3c; text-decoration: underline;">unsubscribe here</a> at any time.</p>
-        <p>&copy; 2026 ${companyName}. All rights reserved.</p>
-      </div>
-    `;
-    if (htmlContent.includes("</body>")) {
-      return htmlContent.replace("</body>", `${footerHtml}</body>`);
-    }
-    return `${htmlContent}${footerHtml}`;
-  }
-
   static addSmsOptOutSuffix(body) {
     const suffix = " Reply STOP to opt out.";
     if (body.toLowerCase().includes("reply stop")) {

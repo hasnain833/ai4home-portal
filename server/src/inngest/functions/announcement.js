@@ -8,7 +8,7 @@ import { buildPrismaWhereClause } from "../../controllers/segments.controller.js
 import { htmlToText, looksLikeHtml } from "../../lib/sanitize-html.js";
 import { withActiveLeadFilter } from "../../lib/lead-audience.js";
 import { deadLetter, deadLetterJob } from "../../lib/dead-letter.js";
-import { renderMergeFields, leadMergeVars, escapeHtml, safeUrl } from "../../lib/utils.js";
+import { renderMergeFields, leadMergeVars, safeUrl } from "../../lib/utils.js";
 import { Templates } from "../../services/templates.js";
 
 const CHUNK_SIZE = 50;
@@ -64,11 +64,13 @@ function renderText(templateText, lead, html = false) {
 function buildEmailHtml(announcement, lead, body) {
   const ctaHref = safeUrl(announcement.ctaLink);
   const bodyHtml = looksLikeHtml(body) ? body : body.replace(/\n/g, "<br />");
-  return Templates.getAnnouncementEmail(
-    bodyHtml,
-    escapeHtml(lead.companyName || "Warranty Care & Sales Portal"),
-    ctaHref
-  );
+  return Templates.getAnnouncementEmail(bodyHtml, ctaHref, {
+    companyName: lead.companyName || "Warranty Care Portal",
+    phone: lead.companyPhone,
+    email: lead.companyEmail,
+    address: lead.companyAddress,
+    unsubscribeUrl: `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/unsubscribe/${lead.id}`,
+  });
 }
 
 // Has this announcement already been sent to this lead on this channel? (idempotency)
@@ -124,6 +126,9 @@ export const sendAnnouncement = inngest.createFunction(
         phone: l.phone,
         companyId: l.companyId,
         companyName: l.company?.name || null,
+        companyPhone: l.company?.phone || null,
+        companyEmail: l.company?.email || null,
+        companyAddress: l.company?.address || null,
       }));
     });
 
@@ -149,13 +154,7 @@ export const sendAnnouncement = inngest.createFunction(
                 skipped += 1;
               } else {
                 const subject = renderText(announcement.subject, lead) || announcement.title;
-                const html = buildEmailHtml(announcement, lead, renderText(announcement.body, lead, true));
-                const unsubscribeUrl = `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/unsubscribe/${lead.id}`;
-                const finalHtml = ComplianceService.addEmailUnsubscribeFooter(
-                  html,
-                  unsubscribeUrl,
-                  lead.companyName || "Warranty Care Portal"
-                );
+                const finalHtml = buildEmailHtml(announcement, lead, renderText(announcement.body, lead, true));
                 const result = await MailService.sendEmail({
                   to: lead.email,
                   subject,

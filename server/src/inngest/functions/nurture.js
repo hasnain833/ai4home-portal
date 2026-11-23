@@ -8,7 +8,7 @@ import { ComplianceService } from "../../services/compliance-service.js";
 import { getSenderIdentity } from "../../lib/messaging-config.js";
 import { deadLetter } from "../../lib/dead-letter.js";
 import { deadLetterJob } from "../../lib/dead-letter.js";
-import { renderMergeFields, escapeHtml } from "../../lib/utils.js";
+import { renderMergeFields } from "../../lib/utils.js";
 import { getOrCreateLeadBookingToken } from "../../lib/public-tokens.js";
 import { LEAD_STATUS } from "../../lib/lead-statuses.js";
 import { Templates } from "../../services/templates.js";
@@ -71,7 +71,7 @@ const ENROLLMENT_SELECT = {
       city: true,
       state: true,
       status: true,
-      company: { select: { name: true } },
+      company: { select: { name: true, phone: true, email: true, address: true } },
     },
   },
   campaign: {
@@ -305,17 +305,13 @@ export const runNurtureCampaign = inngest.createFunction(
           console.log(`[Nurture] Sending EMAIL to ${lead.email}, subject="${subject}"`);
           const trackId = randomUUID();
 
-          const formattedHtml = Templates.getNurtureEmail(
-            body.replace(/\n/g, "<br />"),
-            escapeHtml(lead.company?.name || "Warranty Care & Sales Portal")
-          );
-
-          const unsubscribeUrl = `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/unsubscribe/${lead.id}`;
-          const finalHtml = ComplianceService.addEmailUnsubscribeFooter(
-            formattedHtml,
-            unsubscribeUrl,
-            lead.company?.name || "Warranty Care Portal"
-          );
+          const finalHtml = Templates.getNurtureEmail(body.replace(/\n/g, "<br />"), {
+            companyName: lead.company?.name || "Warranty Care Portal",
+            phone: lead.company?.phone,
+            email: lead.company?.email,
+            address: lead.company?.address,
+            unsubscribeUrl: `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/unsubscribe/${lead.id}`,
+          });
 
           const emailResult = await MailService.sendEmail({
             to: lead.email,

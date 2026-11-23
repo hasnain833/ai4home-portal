@@ -112,11 +112,18 @@ export async function saveB2BJourneySettings(value) {
   return getB2BJourneySettings();
 }
 
-/** Every scheduled message counts, whether it came from a campaign or the journey. Live replies don't. */
+/**
+ * Counts the lead's manual-campaign messages this week. The 180-day nurture's own messages don't
+ * count, so a lead in the nurture can still get a campaign the Super Admin sends. Live replies don't count.
+ */
 export async function weeklyLimitReached(leadId, channel, settings) {
   const limit = channel === "SMS" ? settings.smsPerWeek : settings.emailsPerWeek;
   const sent = await prisma.b2BMessage.count({
-    where: { leadId, actor: "CAMPAIGN", channel, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+    where: {
+      leadId, actor: "CAMPAIGN", channel, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      // Campaign messages are noted "<campaignId>|b2b:<step>"; skip the nurture's (b2b-auto-180).
+      OR: [{ note: null }, { NOT: { note: { startsWith: "b2b-auto-180|" } } }],
+    },
   });
   return sent >= limit;
 }

@@ -26,6 +26,12 @@ function hasPublicLogoUrl() {
   }
 }
 
+// Files in public/ that emails reference, and their inline ids for local development.
+const INLINE_IMAGES = [
+  { file: "logo-email.png", cid: "ai4hb-logo", type: "image/png" },
+  { file: "ceo-email.jpg", cid: "ai4hb-ceo", type: "image/jpeg" },
+];
+
 export class MailService {
   static SMTP_HOST = process.env.SMTP_HOST || "smtp-relay.brevo.com";
   static SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
@@ -104,12 +110,16 @@ export class MailService {
       // Only without a public HTTPS address (local development) is it embedded in the email.
       // Builder logos are always public storage URLs.
       let emailHtml = prepareOutgoingEmail(html, { companyId, source, branding, builder });
-      let hasLogo = false;
+      // Our own images (logo, CEO photo) load from the public site; without one they ride along inline.
+      const embedded = [];
       if (!hasPublicLogoUrl()) {
-        emailHtml = emailHtml.replace(/(<img\b[^>]*\bsrc\s*=\s*)(["'])(?:https?:\/\/[^"']*\/logo-email\.png(?:\?[^"']*)?|cid:ai4hb-logo)\2/gi, (_match, prefix, quote) => {
-          hasLogo = true;
-          return `${prefix}${quote}cid:ai4hb-logo${quote}`;
-        });
+        for (const img of INLINE_IMAGES) {
+          const re = new RegExp(`(<img\\b[^>]*\\bsrc\\s*=\\s*)(["'])(?:https?:\\/\\/[^"']*\\/${img.file.replace(".", "\\.")}(?:\\?[^"']*)?|cid:${img.cid})\\2`, "gi");
+          emailHtml = emailHtml.replace(re, (_match, prefix, quote) => {
+            if (!embedded.includes(img)) embedded.push(img);
+            return `${prefix}${quote}cid:${img.cid}${quote}`;
+          });
+        }
       }
       const info = await this.getPlatformTransporter().sendMail({
         from: fromString,
@@ -119,13 +129,13 @@ export class MailService {
         html: emailHtml,
         attachments: [
           ...attachments,
-          ...(hasLogo ? [{
-            filename: "ai4hb-logo.png",
-            path: fileURLToPath(new URL("../../../public/logo-email.png", import.meta.url)),
-            cid: "ai4hb-logo",
-            contentType: "image/png",
+          ...embedded.map((img) => ({
+            filename: img.file,
+            path: fileURLToPath(new URL(`../../../public/${img.file}`, import.meta.url)),
+            cid: img.cid,
+            contentType: img.type,
             contentDisposition: "inline",
-          }] : []),
+          })),
         ],
         headers,
       });
