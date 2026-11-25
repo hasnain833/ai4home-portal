@@ -21,13 +21,16 @@ type ManageData = {
   slots: Slot[];
 };
 
-const formatWhen = (iso: string) =>
+const formatWhen = (iso: string, timeZone: string | null) =>
   new Date(iso).toLocaleString(undefined, {
     weekday: "long",
     day: "numeric",
     month: "long",
     hour: "numeric",
     minute: "2-digit",
+    // The visit's timezone when known (a closed visit has none), not the browser's.
+    timeZone: timeZone || undefined,
+    timeZoneName: "short",
   });
 
 export default function ManageVisitPage({ params }: { params: Promise<{ token: string }> }) {
@@ -74,7 +77,7 @@ export default function ManageVisitPage({ params }: { params: Promise<{ token: s
     try {
       await api.post("/api/ticket-scheduling/public/reschedule", { token, startTime: selected });
       const slot = data?.slots.find((s) => s.iso === selected);
-      setDone({ kind: "moved", label: slot?.label || formatWhen(selected) });
+      setDone({ kind: "moved", label: slot?.label || formatWhen(selected, data?.timezone ?? null) });
     } catch (e) {
       if (isSlotTaken(e)) {
         setError(serverMessageOr(e, "That time was just taken. Please pick another."));
@@ -175,7 +178,7 @@ export default function ManageVisitPage({ params }: { params: Promise<{ token: s
 
       <div className="rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-4 mb-5 space-y-1.5">
         <p className="text-base font-bold text-[#0F3B3D] dark:text-white">
-          {formatWhen(data.scheduledAt)}
+          {formatWhen(data.scheduledAt, data.timezone)}
         </p>
         <p className="text-sm text-slate-600 dark:text-slate-300">{data.issueType}</p>
         {data.staffName && (

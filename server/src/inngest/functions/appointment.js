@@ -137,20 +137,20 @@ const RESPOND_TOOL = {
     type: "object",
     properties: {
       action: { type: "string", enum: ["reply", "book", "escalate"] },
-      message: { type: "string", description: "The exact message text to send to the lead. On 'escalate' this is what the lead reads, so acknowledge their concern warmly and tell them a team member will reach out." },
+      home_ids: {
+        type: "array",
+        items: { type: "string" },
+        description: "Decide this before writing the message; use [] when showing none. Ids of homes from the live inventory (the value after 'home:') to show the buyer as cards with photos — when they ask to see a home or for pictures, or when you first recommend specific homes. Omit homes already shown as cards earlier in the conversation, and omit when a reply merely mentions a home (e.g. booking a visit to it).",
+      },
+      message: { type: "string", description: "The exact message text to send to the lead. Only say you are showing homes or pictures when home_ids is not empty, and only describe as shown the homes in it. On 'escalate' this is what the lead reads, so acknowledge their concern warmly and tell them a team member will reach out." },
       slot_iso: { type: "string", description: "Required when action is 'book': the chosen slot's ISO start time, copied verbatim from the available slots." },
       location_type: { type: "string", enum: ["ONSITE", "VIRTUAL"], description: "Visit type when booking. Default ONSITE." },
       show_calendar: { type: "boolean", description: "Web chat only: true on the turn you invite the lead to pick a visit time. The chat then shows a calendar of every open time. Ignored on SMS and email." },
       used_kb: { type: "boolean", description: "True if your answer drew on the Company Knowledge Base context." },
       handoff_reason: { type: "string", description: "Required when action is 'escalate': a short internal note for the human team explaining what the lead needs and what you already know about them. The lead never sees this." },
-      home_ids: {
-        type: "array",
-        items: { type: "string" },
-        description: "Ids of homes from the live inventory (the value after 'home:') to show the buyer as cards with photos — when they ask to see a home or for pictures, or when you first recommend specific homes. Omit homes already shown as cards earlier in the conversation, and omit when a reply merely mentions a home (e.g. booking a visit to it).",
-      },
       optout_request: { type: "boolean", description: "True if the lead asked, in any wording, not to be contacted again — 'remove me', 'don't message me again', 'take me off your list', 'stop emailing me'. Setting this removes them from ALL future messaging for this company, so set it only on a clear request to stop, never on mere disinterest in buying right now." },
     },
-    required: ["action", "message"],
+    required: ["action", "home_ids", "message"],
   },
 };
 

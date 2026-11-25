@@ -2,6 +2,7 @@ import { toAnthropicMessages, toolCall } from "./llm.js";
 import { countConversationPhotos, MAX_PHOTOS_PER_CLAIM } from "../services/warranty-photos.service.js";
 import { effortForPhase } from "./ai-config.js";
 import prisma from "./prisma.js";
+import { embedText } from "../services/embedding.service.js";
 import { queryDetailed as kbQueryDetailed } from "../services/warranty-vector.service.js";
 import { getCoverageStatus, COVERAGE } from "./coverage.js";
 import { classifyClaim } from "./warranty-classify.js";
@@ -522,6 +523,8 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
   const adoptProperty = async (chosen) => {
     property = chosen;
     propertyId = chosen.id;
+    // Found from what they typed, not a login: see mayContinue in routes/warranty-chat.js.
+    if (!homeownerId) issueState.identifiedByLookup = true;
     homeownerId = chosen.homeownerId;
     communityId = chosen.communityId || null;
 
@@ -704,6 +707,10 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     return finish(`${safety}${notFiledLine(result)}`, result.reason === "error" ? "RESOLVE" : "IDENTIFY");
   }
 
+  // Load the embedding model while the first replies are written, so a cold
+  // start doesn't time out the first document search. embedText never rejects.
+  if (currentPhase === "INTAKE" || currentPhase === "IDENTIFY") void embedText("warm up");
+
   let systemPromptTemplate = "";
   let tool = ORCHESTRATOR_TOOLS.RESPOND;
   let kbContext = "";
@@ -820,6 +827,15 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     system += "\n\nConversation progress: the homeowner has already reported completing or being unable to perform a requested step. " +
       "Never request that action or its confirmation again. Completing a step does not prove the issue is fixed. " +
       "If it is still happening or they cannot do the step, move to logging it. Only mark_resolved when they confirm the problem itself is fixed.";
+  }
+  // Last in the prompt: when the document search fails, the model can mistake
+  // that for a failed property lookup and ask for an address it already has.
+  if (propertyId) {
+    system += "\n\nIdentification is complete: the system found their property" +
+      (property?.address ? ` (${property.address})` : "") +
+      ". Never ask for their email or property address, and never say the property or their file was not found or still needs pulling up. " +
+      "If the warranty documents could not be searched, that is a separate matter and does not affect this. " +
+      (issueState.justIdentified ? "Open by naming the address, then carry on with the issue." : "Carry on with the issue.");
   }
   const unresolved = usedTokens(system);
   if (unresolved.length) {

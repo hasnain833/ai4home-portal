@@ -18,6 +18,14 @@ function isStale(convo) {
   return Date.now() - new Date(convo.updatedAt).getTime() > IDLE_MINUTES * 60 * 1000;
 }
 
+// A signed-in homeowner's conversation is theirs alone. One that began without a
+// login and was matched by email or address has no login to compare, so whoever
+// opened it (and so holds its id) carries on.
+function mayContinue(convo, homeownerId) {
+  if (!convo.homeownerId || convo.homeownerId === homeownerId) return true;
+  return !homeownerId && convo.issueState?.identifiedByLookup === true;
+}
+
 function resolveActor(req) {
   const session = req.user;
   const sessionCompanyId = session?.companyId || null;
@@ -80,8 +88,7 @@ async function postMessage(req, res) {
     if (conversationId) {
       convo = await prisma.warrantyConversation.findUnique({ where: { id: conversationId } });
       if (convo && convo.companyId !== companyId) convo = null;
-      // A homeowner's conversation is theirs alone: anyone else holding its id starts fresh.
-      if (convo && convo.homeownerId && convo.homeownerId !== homeownerId) convo = null;
+      if (convo && !mayContinue(convo, homeownerId)) convo = null;
 
       if (convo && isStale(convo)) {
         await prisma.warrantyConversation
@@ -136,7 +143,7 @@ async function photoConversation(req) {
   if (!conversationId || !companyId) return null;
   const convo = await prisma.warrantyConversation.findUnique({ where: { id: String(conversationId) } });
   if (!convo || convo.companyId !== companyId || convo.ticketId || isStale(convo)) return null;
-  if (convo.homeownerId && convo.homeownerId !== actor.homeownerId) return null;
+  if (!mayContinue(convo, actor.homeownerId)) return null;
   return convo;
 }
 

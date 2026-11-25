@@ -11,7 +11,7 @@ import {
 } from "../services/scheduling-service.js";
 import { PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import { KB_SCOPES } from "../lib/sales-ai.js";
-import { withInventory, homeCards } from "../lib/sales-homes.js";
+import { withInventory, homeCards, homeRef } from "../lib/sales-homes.js";
 import { hasPlatformAi } from "../lib/ai-config.js";
 import { getSalesSuggestions } from "../services/sales-suggestions.service.js";
 
@@ -31,7 +31,7 @@ function readTranscript(body) {
     if (!content) continue;
     if (content.length > MAX_MESSAGE_CHARS) return { error: `Messages must be under ${MAX_MESSAGE_CHARS} characters` };
     const role = m.role === "agent" ? "agent" : "lead";
-    const homeIds = role === "agent" && Array.isArray(m.homeIds) ? m.homeIds.map(String).filter(Boolean).slice(0, 6) : [];
+    const homeIds = role === "agent" && Array.isArray(m.homeIds) ? m.homeIds.map(homeRef).filter(Boolean).slice(0, 6) : [];
     if (homeIds.length) {
       homeIds.forEach((id) => shownHomeIds.add(id));
       content += `\n[Shown as cards: ${homeIds.map((id) => `home:${id}`).join(", ")}]`;
@@ -44,11 +44,21 @@ function readTranscript(body) {
   return { transcript, shownHomeIds };
 }
 
-const ASKS_FOR_PICTURES = /\b(photos?|pictures?|pics?|images?|show me)\b/i;
+const ASKS_FOR_PICTURES = /\b(photos?|pi[ctrue]{3,6}s?|pics?|images?|show me)\b/i;
+const CLAIMS_TO_SHOW = /\b(here(?:'s|’s| is| are| they| it)|take a look|have a look|i(?:'ve|’ve| have) (?:attached|pulled up)|showing you)\b/i;
+const SHOWABLE = /\b(looks?|photos?|pictures?|pics?|images?|layouts?|plans?|homes?|they are|it is)\b/i;
 
-function newHomeIds(ids, shownHomeIds, question) {
-  const list = Array.isArray(ids) ? ids.map(String) : [];
-  return ASKS_FOR_PICTURES.test(question) ? list : list.filter((id) => !shownHomeIds.has(id));
+/** The reply says homes or pictures are being shown. */
+export function claimsToShow(reply) {
+  return String(reply || "").split(/(?<=[.!?])\s+/).some((s) => CLAIMS_TO_SHOW.test(s) && SHOWABLE.test(s));
+}
+
+function newHomeIds(ids, shownHomeIds, question, reply) {
+  const list = Array.isArray(ids) ? ids.map(homeRef) : [];
+  if (ASKS_FOR_PICTURES.test(question)) return list;
+  const fresh = list.filter((id) => !shownHomeIds.has(id));
+  // "Here they are" with only already-shown homes: show them again rather than nothing.
+  return fresh.length || !claimsToShow(reply) ? fresh : list;
 }
 
 const isHomeowner = (user) => String(user?.role || "").toUpperCase() === "HOMEOWNER";
@@ -113,16 +123,35 @@ export const postMessage = async (req, res) => {
     }
     kbChunks = await withInventory(companyId, kbChunks);
 
-    const decision = await runClaudeTurn({
+    const turn = (messages) => runClaudeTurn({
       lead: leadForPrompt,
       company,
       channel: "WEBCHAT",
-      transcript,
+      transcript: messages,
       slots,
       timezone,
       kbChunks,
       retrievalMethod,
     });
+    const cardsFor = (d) => homeCards(companyId, newHomeIds(d.home_ids, shownHomeIds, question, d.message));
+    const emptyPromise = (d, cards) => d.action === "reply" && !cards.length && claimsToShow(d.message);
+
+    let decision = await turn(transcript);
+    let homes = await cardsFor(decision);
+    if (emptyPromise(decision, homes)) {
+      // Said it was showing homes but attached none: one more try, told why.
+      decision = await turn([
+        ...transcript.slice(0, -1),
+        {
+          role: "lead",
+          content: `${question}\n\n[System check, not from the buyer: your draft said you were showing homes but home_ids was empty. Attach the homes in home_ids, or do not say you are showing any. Do not mention this check.]`,
+        },
+      ]);
+      homes = await cardsFor(decision);
+      if (emptyPromise(decision, homes) && ASKS_FOR_PICTURES.test(question)) {
+        decision = { ...decision, message: "I want to pull up the right pictures for you. Which community or floor plan would you like to see?" };
+      }
+    }
 
     let reply = decision.message || "";
     let pendingBooking = null;
@@ -156,7 +185,7 @@ export const postMessage = async (req, res) => {
       reply,
       action: decision.action || "reply",
       slots: pickerSlots,
-      homes: await homeCards(companyId, newHomeIds(decision.home_ids, shownHomeIds, question)),
+      homes,
       pendingBooking,
       contactPrefill: isHomeowner(req.user)
         ? { name: req.user.name || "", email: req.user.email || "", phone: "" }

@@ -116,6 +116,9 @@ export default function ManageBookingPage({ params }: { params: Promise<{ token:
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    // The same timezone as the email and the slots below, not the browser's.
+    timeZone: data.timezone,
+    timeZoneName: "short",
   });
 
   const groups: { day: string; slots: { iso: string; time: string }[] }[] = [];
