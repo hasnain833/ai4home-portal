@@ -15,8 +15,6 @@ import {
   setEventType,
   CalendlyBookingError,
 } from "../services/calendly.service.js";
-import { adoptPlatformCalendly } from "../admin/platform-calendly.controller.js";
-import { PLATFORM_CALENDLY_OWNER } from "../lib/calendly-connection.js";
 
 const TRADE_SELECT = {
   id: true,
@@ -329,24 +327,17 @@ export const startCalendlyConnect = (req, res) => {
 
 export const calendlyCallback = async (req, res) => {
   const userId = verifyState(req.query.state);
-  // One OAuth callback for both: a trade's own calendar, or the platform's (Super Admin → Appointments).
-  const platformOwner = userId === PLATFORM_CALENDLY_OWNER || userId === "env-superadmin";
-  const page = platformOwner ? "/admin/sales-agent-appointments" : "/trade/settings";
-  let returnPage = page;
-  const back = (result) => res.redirect(`${process.env.NEXT_PUBLIC_URL || ""}${returnPage}?calendly=${result}`);
+  // Trades only: Super Admin books on its own hours.
+  const back = (result) => res.redirect(`${process.env.NEXT_PUBLIC_URL || ""}/trade/settings?calendly=${result}`);
   if (!userId || !req.query.code) return back(req.query.error ? "cancelled" : "failed");
   try {
-    const user = platformOwner ? null : await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
-    const platform = platformOwner || ["SUPER_ADMIN", "SUPER_STAFF"].includes(user?.role);
-    if (platform) returnPage = "/admin/sales-agent-appointments";
-    if (!platform && user?.role !== "TRADE") return back("failed");
-    const ownerId = platform ? PLATFORM_CALENDLY_OWNER : userId;
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (user?.role !== "TRADE") return back("failed");
     // Honor approvals already in flight through the legacy registered URL.
     const legacyCallback = req.originalUrl?.split("?")[0] === "/api/trade/calendly/callback"
       ? `${(process.env.NEXT_PUBLIC_URL || "").replace(/\/$/, "")}/api/trade/calendly/callback`
       : undefined;
-    await connectCalendly(ownerId, String(req.query.code), legacyCallback);
-    if (platform) await adoptPlatformCalendly(ownerId);
+    await connectCalendly(userId, String(req.query.code), legacyCallback);
     return back("connected");
   } catch (error) {
     console.error("[Calendly] connect failed:", error.message);

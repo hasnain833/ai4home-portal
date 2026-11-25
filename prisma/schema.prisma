@@ -1000,6 +1000,12 @@ model SalesAgentAppointment {
   reminderSentAt DateTime?
   calendlyEventUri String?
   meetingUrl    String?
+  /// The Super Admin / Super Staff member taking the meeting (User id, or the env Super Admin id).
+  assignedUserId   String?
+  /// The event mirrored into that person's Google/Outlook calendar.
+  calendarEventId  String?
+  calendarOwnerId  String?
+  calendarSyncedAt DateTime?
   salesforceEventId  String?
   salesforceHash     String?
   salesforceSyncedAt DateTime?
@@ -1008,6 +1014,23 @@ model SalesAgentAppointment {
 
   @@index([startTime])
   @@index([calendlyEventUri])
+  @@index([assignedUserId])
+}
+
+/// A Super Admin or Super Staff member's own Google or Outlook calendar. Bookings are written to it
+/// and its busy times block open slots. userId has no relation: the env Super Admin has no User row.
+model AdminCalendarConnection {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  userName     String?
+  provider     String   /// GOOGLE | OUTLOOK
+  email        String?
+  accessToken  String   @db.Text
+  refreshToken String   @db.Text
+  expiresAt    DateTime
+  lastError    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 

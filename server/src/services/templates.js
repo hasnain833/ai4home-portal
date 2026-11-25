@@ -248,9 +248,9 @@ function websiteInquiryEmails(inquiry, { portalUrl, bookingLink }) {
 export const Templates = {
   getWebsiteInquiryEmails: websiteInquiryEmails,
 
-  getB2BMeetingConfirmationEmail: ({ name, companyName, label, duration, timezone, calendly = false, meetingLink, contactEmail }) => {
+  getB2BMeetingConfirmationEmail: ({ name, companyName, label, duration, timezone, meetingLink, contactEmail }) => {
     const website = new URL(process.env.WEBSITE_PUBLIC_URL || "https://www.aiforhomebuilders.com").origin;
-    const joinLink = !calendly && /^https:\/\//i.test(meetingLink || "") ? meetingLink : null;
+    const joinLink = /^https:\/\//i.test(meetingLink || "") ? meetingLink : null;
     const contact = contactEmail ? { href: `mailto:${contactEmail}`, label: "Contact our team" } : { href: `${website}/contact`, label: "Contact our team" };
     const changeInstructions = contactEmail ? "Need to change your plans? Reply to this email and our team will help." : "Need to change your plans? Contact our team using the button below.";
     return websiteEmail({
@@ -262,11 +262,9 @@ export const Templates = {
       introduction: "Your Product Consultation with AI for Homebuilders is booked. We look forward to learning about your business and exploring how AI can support your team's sales and warranty workflows.",
       status: "Booking confirmed — your meeting time is reserved.",
       rows: [["Meeting", "Product Consultation"], ["When", label], ["Time zone", timezone], ["Duration", `${duration} minutes`], ["Company", companyName]],
-      nextSteps: (calendly
-        ? "Look out for a separate email from Calendly with your calendar invitation and joining details."
-        : joinLink
-          ? "A calendar invitation is attached. When it's time, use the Join meeting button below."
-          : "A calendar invitation is attached. Our team will contact you using the email or phone number you provided.") + "\n\n" + changeInstructions,
+      nextSteps: (joinLink
+        ? "A calendar invitation is attached. When it's time, use the Join meeting button below."
+        : "A calendar invitation is attached. Our team will contact you using the email or phone number you provided.") + "\n\n" + changeInstructions,
       action: joinLink ? { href: joinLink, label: "Join meeting" } : contact,
     });
   },

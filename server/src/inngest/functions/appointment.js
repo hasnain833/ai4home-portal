@@ -168,6 +168,16 @@ export function formatKbContext(chunks, retrievalMethod = null, emptyText = DEFA
   return `Company Knowledge Base — reference material. Use this to actively answer the lead's questions about homes, communities, pricing, buying process, and financing. ALWAYS ground your answers in this text. If a question cannot be answered by this text, offer to connect them with a human sales consultant.${confidence}\n\n${body}`;
 }
 
+/** "Monday, November 23, 2026 (America/Chicago)": today on the builder's clock. */
+function todayIn(timezone) {
+  const zone = timezone || "America/New_York";
+  try {
+    return `${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: zone })} (${zone})`;
+  } catch {
+    return new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  }
+}
+
 function renderAgentPrompt({
   lead,
   company,
@@ -203,7 +213,8 @@ function renderAgentPrompt({
 
   const kbContext = formatKbContext(kbChunks, retrievalMethod, kbEmptyText);
 
-  const system = renderTemplate(systemTemplate, {
+  // The model has no clock: without today's date it can't tell what "tomorrow" or "this Saturday" means.
+  const system = `${renderTemplate(systemTemplate, {
     companyName: company?.name || "",
     brandVoiceBlock,
     pacingGuidance,
@@ -212,7 +223,7 @@ function renderAgentPrompt({
     slotList,
     leadFirstName: minimalLeadContext(lead).firstName,
     timezone,
-  });
+  })}\n\nToday is ${todayIn(timezone)}.`;
 
   const tool =
     toolDescription === RESPOND_TOOL.description
@@ -245,6 +256,11 @@ async function executeTurn({ company, transcript, system, tool, forcePlatformKey
   if (messages.length === 0) messages.push({ role: "user", content: "(the lead replied to our outreach expressing interest)" });
 
   const input = await toolCall({ companyId: company?.id, system, messages, tool, maxTokens: 700, forcePlatformKey });
+  // The model sometimes leaves out `action` on an ordinary answer. A message with no action is a
+  // reply; booking and escalating still need it said explicitly.
+  if (input && !input.action && typeof input.message === "string" && input.message.trim()) {
+    return { ...input, action: "reply" };
+  }
   if (!input || !input.action) {
     return { action: "reply", message: "Happy to help — tell me a bit about what you're looking for and I'll point you in the right direction." };
   }

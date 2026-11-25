@@ -160,9 +160,13 @@ export default function CampaignsPage() {
     try {
       const data = await api.get<Campaign[]>("/api/sales/campaigns");
       setCampaigns(data);
-      if (data.length > 0 && !activeSeq) {
-        setActiveSeq(data[0]);
-      }
+      // Keep the open campaign's status in step with the list: adding a step turns Draft into
+      // Ready on the server, and Launch stays disabled until the open copy hears about it.
+      setActiveSeq((prev) => {
+        if (!prev) return data[0] ?? null;
+        const fresh = data.find((c) => c.id === prev.id);
+        return fresh && fresh.status !== prev.status ? { ...prev, status: fresh.status } : prev;
+      });
     } catch (e) {
       console.error(e);
     } finally {
@@ -173,7 +177,6 @@ export default function CampaignsPage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- load data on mount/change
     fetchCampaigns();
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
   }, []);
 
   useEffect(() => {
@@ -209,7 +212,6 @@ export default function CampaignsPage() {
       }, 3000); // Poll every 3 seconds for fast real-time feedback
     }
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- restart polling only when the selected campaign changes
   }, [activeSeq]);
 
   const confirmCreateCampaign = async () => {

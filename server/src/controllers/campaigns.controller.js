@@ -873,7 +873,8 @@ export const generateCampaignCopy = async (req, res) => {
 
     const parsed = parseJsonBlock(content || "");
     const subject = parsed?.subject ? String(parsed.subject).slice(0, 200) : "";
-    const body = parsed?.body ? String(parsed.body) : content;
+    // Steps are plain text (line breaks become <br> when sent), so an AI <br> would show as literal text.
+    const body = (parsed?.body ? String(parsed.body) : content).replace(/<br\s*\/?>/gi, "\n");
 
     return res.json({
       success: true,

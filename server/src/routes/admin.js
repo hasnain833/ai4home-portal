@@ -40,9 +40,9 @@ import {
   resendSuperStaffInvite,
   removeSuperStaff,
 } from "../admin/super-staff.controller.js";
+import * as adminCalendar from "../admin/admin-calendar.controller.js";
 import { listHandoffIssues, retryHandoffIssue, resolveHandoffIssue } from "../admin/handoffs.controller.js";
 import * as coach from "../admin/sales-coach.controller.js";
-import * as platformCalendly from "../admin/platform-calendly.controller.js";
 import * as platformSalesforce from "../admin/platform-salesforce.controller.js";
 import * as adminNews from "../admin/news.controller.js";
 import * as adminContent from "../admin/content.controller.js";
@@ -134,6 +134,10 @@ router.post("/super-staff/:id/invite", requireAuth, resendSuperStaffInvite);
 router.delete("/super-staff/:id", requireAuth, removeSuperStaff);
 router.get("/sales-agent-appointments", requireAuth, requireAdmin("appointments"), getSalesAgentAppointments);
 router.patch("/sales-agent-appointments/:id/status", requireAuth, requireAdmin("appointments"), b2b.updateAppointmentStatus);
+router.patch("/sales-agent-appointments/:id/assignee", requireAuth, requireAdmin("appointments"), b2b.updateAppointmentAssignee);
+router.get("/calendar", requireAuth, requireAdmin("appointments"), adminCalendar.getCalendars);
+router.post("/calendar/connect", requireAuth, requireAdmin("appointments"), adminCalendar.startCalendarConnect);
+router.delete("/calendar", requireAuth, requireAdmin("appointments"), adminCalendar.removeCalendar);
 
 // B2B prospecting: business leads, campaigns, platform availability.
 router.get("/b2b/segments", requireAuth, requireAdmin("b2b"), b2b.listSegments);
@@ -164,10 +168,8 @@ router.delete("/b2b/campaigns/:id", requireAuth, requireAdmin("b2b"), b2b.delete
 router.get("/b2b/campaigns/:id/enrollments", requireAuth, requireAdmin("b2b"), b2b.listEnrollments);
 router.post("/b2b/campaigns/:id/enroll", requireAuth, requireAdmin("b2b"), b2b.enrollLeads);
 router.post("/b2b/campaigns/:id/unenroll", requireAuth, requireAdmin("b2b"), b2b.unenrollLeads);
-router.get("/platform-calendly", requireAuth, requireAdmin("appointments"), platformCalendly.getPlatformCalendly);
-router.post("/platform-calendly/connect", requireAuth, requireAdmin("appointments"), platformCalendly.connectPlatformCalendly);
-router.put("/platform-calendly/event-type", requireAuth, requireAdmin("appointments"), platformCalendly.setPlatformEventType);
-router.delete("/platform-calendly", requireAuth, requireAdmin("appointments"), platformCalendly.disconnectPlatformCalendly);
+router.get("/b2b/availability", requireAuth, requireAdmin("appointments", "b2b"), b2b.getAvailability);
+router.put("/b2b/availability", requireAuth, requireAdmin("appointments", "b2b"), b2b.updateAvailability);
 
 // AI4Home's own Salesforce org: Business Leads, meetings and conversations.
 router.get("/salesforce", requireAuth, requireAdmin("salesforce"), platformSalesforce.getPlatformSalesforce);

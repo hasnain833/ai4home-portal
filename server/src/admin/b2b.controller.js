@@ -9,7 +9,7 @@ import { MailService } from "../services/mail-service.js";
 import { Templates } from "../services/templates.js";
 import { missingChannelsForSteps, notConfiguredMessage } from "../lib/messaging-config.js";
 import { formatSlotLabel } from "../lib/scheduling.js";
-import { updatePlatformAppointment } from "../services/website-sales.js";
+import { updatePlatformAppointment, setAppointmentAssignee } from "../services/website-sales.js";
 import { escapeHtml } from "../lib/utils.js";
 import { toolCall, hasLLM, aiUnavailableMessage } from "../lib/llm.js";
 import { renderTemplate } from "../prompts/template.js";
@@ -24,6 +24,7 @@ import {
   B2B_CLOSED_STATUSES,
   appUrl,
   getB2BAvailability,
+  saveB2BAvailability,
   NOT_INTERESTED_REASON,
   endB2BJourney,
   meetingInvite,
@@ -41,6 +42,7 @@ import {
 } from "../lib/b2b.js";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TIME_RE = /^\d{1,2}:\d{2}$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 
@@ -720,6 +722,40 @@ export const unenrollLeads = wrap("Unenroll", async (req, res) => {
 
 // ---------- Availability & appointments ----------
 
+export const getAvailability = wrap("Availability", async (req, res) => res.json(await getB2BAvailability()));
+
+export const updateAvailability = wrap("Availability update", async (req, res) => {
+  const b = req.body || {};
+  if (!TIME_RE.test(b.dayStart || "") || !TIME_RE.test(b.dayEnd || "")) {
+    return res.status(400).json({ message: "Start and end must be HH:mm." });
+  }
+  const minutes = (t) => {
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  };
+  if (minutes(b.dayStart) >= minutes(b.dayEnd)) {
+    return res.status(400).json({ message: "End time must be after start time." });
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: b.timezone });
+  } catch {
+    return res.status(400).json({ message: "Unknown timezone." });
+  }
+  const days = String(b.workingDays || "").split(",").map((d) => d.trim()).filter(Boolean);
+  if (!days.length) return res.status(400).json({ message: "Pick at least one working day." });
+  res.json(
+    await saveB2BAvailability({
+      dayStart: b.dayStart,
+      dayEnd: b.dayEnd,
+      slotDuration: Math.min(240, Math.max(10, parseInt(b.slotDuration, 10) || 30)),
+      bufferMinutes: Math.min(120, Math.max(0, parseInt(b.bufferMinutes, 10) || 0)),
+      workingDays: days.join(","),
+      timezone: b.timezone,
+      meetingLink: String(b.meetingLink || "").trim().startsWith("https://") ? String(b.meetingLink).trim() : "",
+    }),
+  );
+});
+
 export const updateAppointmentStatus = wrap("Appointment status", async (req, res) => {
   const { status } = req.body || {};
   if (!["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"].includes(status)) {
@@ -728,6 +764,18 @@ export const updateAppointmentStatus = wrap("Appointment status", async (req, re
   try {
     const appointment = await updatePlatformAppointment(req.params.id, status, req.body.startTime, await getB2BAvailability());
     await journeyOnMeetingStatus(appointment.b2bLeadId, status);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ message: error.message });
+    throw error;
+  }
+  res.json({ success: true });
+});
+
+export const updateAppointmentAssignee = wrap("Appointment assignee", async (req, res) => {
+  const userId = req.body?.userId;
+  if (userId !== null && typeof userId !== "string") return res.status(400).json({ message: "Choose a person." });
+  try {
+    await setAppointmentAssignee(req.params.id, userId, await getB2BAvailability());
   } catch (error) {
     if (error.status) return res.status(error.status).json({ message: error.message });
     throw error;
@@ -799,14 +847,12 @@ export const publicBook = wrap("Public book", async (req, res) => {
       label,
       duration: setting.slotDuration,
       timezone: setting.timezone,
-      calendly: setting.calendly,
       meetingLink: setting.meetingLink,
       contactEmail: process.env.SUPERADMIN_EMAIL,
     }),
     replyTo: process.env.SUPERADMIN_EMAIL || undefined,
     source: "b2b-booking",
-    // With Calendly connected, its own invite is the calendar entry; a second one would duplicate it.
-    attachments: setting.calendly ? [] : [meetingInvite(lead, start, setting)],
+    attachments: [meetingInvite(lead, start, setting)],
   }).catch((e) => console.error("[B2B booking] Confirmation email failed:", e.message));
   await notifySuperAdmin(
     `New meeting booked: ${lead.companyName} — ${label}`,

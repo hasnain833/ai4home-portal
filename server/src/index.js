@@ -49,6 +49,8 @@ import ticketAppointmentsRouter from "./routes/ticket-appointments.js";
 import { tradesRouter, tradePortalRouter } from "./routes/trades.js";
 import { calendlyCallback } from "./controllers/trades.controller.js";
 import { calendlyWebhook } from "./controllers/calendly-webhooks.controller.js";
+import { adminCalendarCallback } from "./admin/admin-calendar.controller.js";
+import { adminCalendarSync } from "./inngest/functions/admin-calendar.js";
 import ticketSchedulingRouter from "./routes/ticket-scheduling.js";
 import deadLetterRouter from "./routes/dead-letter.js";
 import privacyRouter from "./routes/privacy.js";
@@ -195,6 +197,7 @@ app.use("/api/knowledge-base", ...warrantyGuard, knowledgeBaseRouter);
 // OAuth returns without a tenant session; signed state identifies the owner.
 // Register this exact path before the company-only integrations router.
 app.get("/api/integrations/calendly/callback", calendlyCallback);
+app.get("/api/integrations/admin-calendar/callback/:provider", adminCalendarCallback);
 app.use("/api/integrations", requireAuth, requireCompany, integrationsRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/communities", ...warrantyGuard, communitiesRouter);
@@ -233,6 +236,7 @@ app.use(
       runAutomationRules,
       automationDateTriggers,
       salesforceSyncCron,
+      adminCalendarSync,
       platformSalesforceSync,
       ticketReminders,
       ticketAppointmentReminders,

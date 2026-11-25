@@ -8,9 +8,8 @@ import {
 import { journeyOnMeetingStatus } from "../lib/b2b-journey.js";
 import { getB2BAvailability } from "../lib/b2b.js";
 import { formatSlotLabel } from "../lib/scheduling.js";
-import { clearPlatformSlotCache } from "../lib/platform-calendly.js";
 
-/** AI4Home's own meetings (Super Admin → Appointments) booked through the platform Calendly. */
+/** Legacy: Super Admin meetings booked through the platform Calendly (2026-11-10 to 2026-11-24). */
 async function handlePlatformMeeting(event, payload, eventUri) {
   if (event === "invitee.canceled") {
     if (payload.rescheduled) return null;
@@ -18,7 +17,6 @@ async function handlePlatformMeeting(event, payload, eventUri) {
     if (!meeting) return null;
     await prisma.salesAgentAppointment.update({ where: { id: meeting.id }, data: { status: "CANCELLED" } });
     await journeyOnMeetingStatus(meeting.b2bLeadId, "CANCELLED");
-    clearPlatformSlotCache();
     return "meeting cancelled";
   }
   const oldEventUri = eventOfInvitee(payload.old_invitee);
@@ -31,7 +29,6 @@ async function handlePlatformMeeting(event, payload, eventUri) {
     where: { id: meeting.id },
     data: { startTime: start, preferredTime: formatSlotLabel(start, timezone), calendlyEventUri: eventUri, status: "CONFIRMED", reminderSentAt: null },
   });
-  clearPlatformSlotCache();
   return "meeting rescheduled";
 }
 
