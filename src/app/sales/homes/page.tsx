@@ -41,7 +41,11 @@ import {
   FileDown,
   ChevronLeft,
   ChevronRight,
+  SearchX,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 
@@ -153,6 +157,7 @@ export default function SalesHomesPage() {
   const [homes, setHomes] = useState<SalesHome[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
 
   const [search, setSearch] = useState("");
   const [communityFilter, setCommunityFilter] = useState("all");
@@ -197,8 +202,9 @@ export default function SalesHomesPage() {
       ]);
       setHomes(h?.homes || []);
       if (c) setCommunities(c.communities || []);
+      setLoadError(null);
     } catch (error) {
-      toast.error(errorMessage(error));
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -242,6 +248,14 @@ export default function SalesHomesPage() {
     setHomes((prev) => prev.map((h) => (h.id === updated.id ? updated : h)));
 
   // --- Add / edit ---
+
+  const { dialog: homeGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(form, formOpen),
+    itemName: editing ? "this home" : "the new home",
+  });
+  const changeFormOpen = async (open: boolean) => {
+    if (open || (await confirmDiscard())) setFormOpen(open);
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -496,12 +510,57 @@ export default function SalesHomesPage() {
             <CardContent className="p-0 overflow-x-auto">
               {loading && homes.length === 0 ? (
                 <div className="py-16 flex justify-center text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+              ) : loadError && homes.length === 0 ? (
+                <ErrorState error={loadError} title="Homes couldn't be loaded" onRetry={fetchAll} />
               ) : visible.length === 0 ? (
-                <div className="py-16 text-center text-sm text-muted-foreground">
-                  {homes.length === 0
-                    ? "No homes yet. Import a CSV or add one — the AI Assistant can only offer homes listed here."
-                    : "No homes match these filters."}
-                </div>
+                homes.length === 0 ? (
+                  <EmptyState
+                    icon={Home}
+                    title="No homes for sale yet"
+                    description="The AI sales assistant can only offer homes listed here. Add your inventory one at a time, or import it from a CSV."
+                    action={
+                      canManage && (
+                        <div className="flex flex-wrap justify-center gap-2">
+                          <Button size="sm" onClick={openCreate}>
+                            <Plus className="size-4" />
+                            Add home
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setImportFile(null);
+                              setImportResult(null);
+                              setImportOpen(true);
+                            }}
+                          >
+                            <UploadCloud className="size-4" />
+                            Import CSV
+                          </Button>
+                        </div>
+                      )
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    icon={SearchX}
+                    title="No homes match these filters"
+                    description="Try a different search, or clear the filters to see every home."
+                    action={
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSearch("");
+                          setCommunityFilter("all");
+                          setStatusFilter("all");
+                        }}
+                      >
+                        Clear filters
+                      </Button>
+                    }
+                  />
+                )
               ) : (
                 <table className="w-full text-left text-sm">
                   <thead>
@@ -610,7 +669,8 @@ export default function SalesHomesPage() {
         </div>
 
         {/* Add / edit */}
-        <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        {homeGuard}
+        <Dialog open={formOpen} onOpenChange={changeFormOpen}>
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editing ? "Edit home" : "Add a home"}</DialogTitle>
@@ -713,7 +773,7 @@ export default function SalesHomesPage() {
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => changeFormOpen(false)}>Cancel</Button>
               <Button onClick={saveHome} disabled={saving} className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 text-white">
                 {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 {editing ? "Save changes" : "Add home"}

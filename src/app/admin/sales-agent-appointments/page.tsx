@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Loader2, Calendar, Clock } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
 import { toast } from "sonner";
 import { apiFetch, errorMessage } from "@/lib/api";
 import { B2B_API, sendJson } from "@/lib/b2b-store";
@@ -46,6 +48,7 @@ const STATUS_STYLES: Record<string, string> = {
 export default function SalesAgentAppointmentsPage() {
   const [appointments, setAppointments] = useState<SalesAgentAppointment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [confirming, setConfirming] = useState<SalesAgentAppointment | null>(null);
   const [meetingTime, setMeetingTime] = useState("");
   const [savingMeeting, setSavingMeeting] = useState(false);
@@ -62,8 +65,9 @@ export default function SalesAgentAppointmentsPage() {
   const load = useCallback(async () => {
     try {
       setAppointments(await apiFetch<SalesAgentAppointment[]>("/api/admin/sales-agent-appointments"));
+      setLoadError(null);
     } catch (error) {
-      console.error("Failed to load appointments:", error);
+      setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -141,11 +145,15 @@ export default function SalesAgentAppointmentsPage() {
             <div className="py-12 flex justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
+          ) : loadError && appointments.length === 0 ? (
+            <ErrorState error={loadError} title="Appointments couldn't be loaded" onRetry={load} />
           ) : appointments.length === 0 ? (
-            <div className="py-12 text-center flex flex-col items-center justify-center text-muted-foreground border-2 border-dashed rounded-lg bg-zinc-50 dark:bg-zinc-900/50">
-              <Calendar className="h-8 w-8 mb-3 opacity-20" />
-              <p>No appointments booked yet.</p>
-            </div>
+            <EmptyState
+              className="rounded-lg border-2 border-dashed"
+              icon={Calendar}
+              title="No appointments booked yet"
+              description="Meetings that leads book through the sales agent or a campaign booking link show up here."
+            />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">

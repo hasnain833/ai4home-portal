@@ -40,7 +40,11 @@ import {
   Trash2,
   AlertTriangle,
   Ticket as TicketIcon,
+  SearchX,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   HomesCsvImport,
@@ -135,6 +139,7 @@ export default function PropertiesPage() {
   const maxHomes = communityData?.maxHomes || 50;
   const [communityFilter, setCommunityFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
   // Modal state
@@ -155,8 +160,9 @@ export default function PropertiesPage() {
     setLoading(true);
     try {
       setProperties(await api.get<Property[]>("/api/properties"));
+      setLoadError(null);
     } catch (e) {
-      console.error(e);
+      setLoadError(e);
     } finally {
       setLoading(false);
     }
@@ -203,6 +209,14 @@ export default function PropertiesPage() {
     });
     setFormError("");
     setIsModalOpen(true);
+  };
+
+  const { dialog: propertyGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(form, isModalOpen),
+    itemName: editingProperty ? "this property" : "the new property",
+  });
+  const cancelModal = async () => {
+    if (await confirmDiscard()) closeModal();
   };
 
   const closeModal = () => {
@@ -361,6 +375,13 @@ export default function PropertiesPage() {
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-40 w-full" />
             </div>
+          ) : loadError && properties.length === 0 ? (
+            <ErrorState
+              className="rounded-2xl border bg-card"
+              error={loadError}
+              title="Properties couldn't be loaded"
+              onRetry={fetchProperties}
+            />
           ) : isHomeowner ? (
             // HOMEOWNER CARD GRID
             <motion.div variants={fadeInUp} className="grid gap-6 grid-cols-1 md:grid-cols-2">
@@ -416,13 +437,18 @@ export default function PropertiesPage() {
                   );
                 })
               ) : (
-                <div className="col-span-2 text-center py-16 bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl">
-                  <Building2 className="h-14 w-14 mx-auto opacity-30 text-[#0F3B3D] dark:text-[#a0c5c7] mb-3" />
-                  <h3 className="font-bold text-gray-700 dark:text-slate-200 text-lg">No properties found</h3>
-                  <p className="text-sm text-gray-400 dark:text-slate-500 max-w-sm mx-auto mt-1">
-                    Click &quot;Add Property&quot; to register a new property under your account.
-                  </p>
-                </div>
+                <EmptyState
+                  className="col-span-2 rounded-2xl border bg-card"
+                  icon={Building2}
+                  title="No properties on your account yet"
+                  description="Add your home to see its warranty coverage dates and report issues against it."
+                  action={
+                    <Button size="sm" onClick={openAddModal}>
+                      <Plus className="size-4" />
+                      Add property
+                    </Button>
+                  }
+                />
               )}
             </motion.div>
           ) : (
@@ -570,11 +596,40 @@ export default function PropertiesPage() {
                         })}
                       </TableBody>
                     </Table>
+                  ) : properties.length > 0 ? (
+                    <EmptyState
+                      icon={SearchX}
+                      title="No properties match your search"
+                      description="Check the spelling, or clear the search to see every property."
+                      action={
+                        <Button variant="outline" size="sm" onClick={() => setSearchQuery("")}>
+                          Clear search
+                        </Button>
+                      }
+                    />
+                  ) : communities.length === 0 ? (
+                    <EmptyState
+                      icon={Building2}
+                      title="Add a community first"
+                      description="Every property belongs to a community. Create your first community, then add or import its homes here."
+                      action={
+                        <Button size="sm" asChild>
+                          <Link href="/warranty/communities">Go to Communities</Link>
+                        </Button>
+                      }
+                    />
                   ) : (
-                    <div className="text-center py-16 text-muted-foreground">
-                      <Building2 className="h-12 w-12 mx-auto mb-2 opacity-30 text-[#0F3B3D]" />
-                      <p className="text-sm">No properties registered matching your filter.</p>
-                    </div>
+                    <EmptyState
+                      icon={Building2}
+                      title="No properties yet"
+                      description="Add homes one at a time, or import a CSV of closed homes to put them under warranty coverage."
+                      action={
+                        <Button size="sm" onClick={openAddModal}>
+                          <Plus className="size-4" />
+                          Add property
+                        </Button>
+                      }
+                    />
                   )}
                 </CardContent>
               </Card>
@@ -582,6 +637,7 @@ export default function PropertiesPage() {
           )}
 
           {/* Add / Edit Property Modal */}
+          {propertyGuard}
           <AnimatePresence>
             {isModalOpen && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -592,7 +648,7 @@ export default function PropertiesPage() {
                   className="bg-white dark:bg-gray-900 rounded-3xl p-6 w-full max-w-lg shadow-2xl relative border dark:border-gray-800"
                 >
                   <button
-                    onClick={closeModal}
+                    onClick={cancelModal}
                     className="absolute right-4 top-4 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-400 hover:text-gray-600 transition"
                   >
                     <X className="h-5 w-5" />
@@ -772,7 +828,7 @@ export default function PropertiesPage() {
                     )}
 
                     <div className="flex gap-3 justify-end pt-3 border-t dark:border-gray-800">
-                      <Button type="button" variant="ghost" onClick={closeModal} className="text-gray-600">
+                      <Button type="button" variant="ghost" onClick={cancelModal} className="text-gray-600">
                         Cancel
                       </Button>
                       <Button

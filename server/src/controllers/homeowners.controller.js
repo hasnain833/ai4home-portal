@@ -1,6 +1,6 @@
 import { PHONE_ERROR, toE164 } from "../services/sms.service.js";
 import prisma from "../lib/prisma.js";
-import { createHomeownerAccount, getSupabaseAdmin } from "../lib/homeowner-account.js";
+import { createHomeownerAccount, getSupabaseAdmin, findSupabaseUserByEmail } from "../lib/homeowner-account.js";
 import bcrypt from "bcryptjs";
 import { sendHomeownerWelcome } from "./leads.controller.js";
 import { assertUploadSafe, buildStorageKey, UploadRejected } from "../lib/file-security.js";
@@ -123,8 +123,7 @@ export const deleteHomeowner = async (req, res) => {
 
   // 1. Delete from Supabase Auth
   const supabaseAdmin = getSupabaseAdmin();
-  const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-  const supabaseUser = usersData.users.find(u => u.email === homeowner.email);
+  const supabaseUser = await findSupabaseUserByEmail(supabaseAdmin, homeowner.email);
 
   if (supabaseUser) {
     await supabaseAdmin.auth.admin.deleteUser(supabaseUser.id);
@@ -196,8 +195,7 @@ export const updateHomeowner = async (req, res) => {
 
   if (touchesAuth) {
     const supabaseAdmin = getSupabaseAdmin();
-    const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-    const supabaseUser = usersData.users.find(u => u.email === existingHomeowner.email);
+    const supabaseUser = await findSupabaseUserByEmail(supabaseAdmin, existingHomeowner.email);
 
     if (supabaseUser) {
       const updateData = {};

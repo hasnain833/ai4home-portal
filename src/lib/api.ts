@@ -34,15 +34,45 @@ function friendlyStatusMessage(status: number): string {
   }
 }
 
-export async function apiFetch<T = unknown>(
-  input: string,
-  init?: RequestInit,
-): Promise<T> {
+/** Status used for a request that ran out of time (no HTTP response arrived). */
+export const TIMEOUT_STATUS = 408;
+// ponytail: fixed budgets; pass `timeoutMs` for a call that is known to run long (AI drafting, big imports).
+const READ_TIMEOUT_MS = 45_000;
+const WRITE_TIMEOUT_MS = 120_000;
+
+/** Window events the connection banner listens for. */
+export const CONNECTION_LOST_EVENT = "app:connection-lost";
+export const RECONNECTED_EVENT = "app:reconnected";
+
+export type ApiInit = RequestInit & { timeoutMs?: number };
+
+export async function apiFetch<T = unknown>(input: string, init?: ApiInit): Promise<T> {
+  const { timeoutMs, ...rest } = init ?? {};
+  const method = (rest.method || "GET").toUpperCase();
+  const budget = timeoutMs ?? (method === "GET" ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(budget);
+  // Keep a caller's own cancel working alongside the time budget.
+  const signal = rest.signal
+    ? typeof AbortSignal.any === "function"
+      ? AbortSignal.any([rest.signal, timeout])
+      : rest.signal
+    : timeout;
+
   let res: Response;
   try {
-    res = await fetch(input, init);
+    res = await fetch(input, { ...rest, signal });
   } catch (err) {
+    if (rest.signal?.aborted) throw err; // the caller cancelled on purpose; nothing to show
+    if (timeout.aborted) {
+      throw new ApiError(
+        method === "GET"
+          ? "The server is taking longer than usual to answer. Please try again."
+          : "The server took too long to confirm this. It may still have gone through, so refresh and check before trying again.",
+        TIMEOUT_STATUS,
+      );
+    }
     console.error("[api] Network request failed:", input, err);
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(CONNECTION_LOST_EVENT));
     throw new ApiError(
       "We couldn't reach the server. Please check your connection and try again.",
       0,
@@ -105,6 +135,53 @@ export const serverMessageOr = (e: unknown, fallback: string) => {
 
 /** True when the server refused because the time slot was just taken. */
 export const isSlotTaken = (e: unknown) => e instanceof ApiError && e.status === 409;
+
+/**
+ * Multipart upload with progress. fetch can't report upload progress, so this uses XHR,
+ * with the same error shape as apiFetch. Abort `signal` to cancel.
+ */
+export function uploadWithProgress<T = unknown>(
+  url: string,
+  body: FormData,
+  {
+    method = "POST",
+    onProgress,
+    signal,
+  }: { method?: string; onProgress?: (loaded: number, total: number) => void; signal?: AbortSignal } = {},
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(e.loaded, e.total);
+    };
+    xhr.onload = () => {
+      let parsed: unknown = null;
+      try {
+        parsed = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        /* not JSON */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(parsed as T);
+      const msg = (parsed as { message?: unknown } | null)?.message;
+      reject(
+        new ApiError(typeof msg === "string" && msg.trim() ? msg : friendlyStatusMessage(xhr.status), xhr.status, parsed),
+      );
+    };
+    xhr.onerror = () => {
+      window.dispatchEvent(new Event(CONNECTION_LOST_EVENT));
+      reject(new ApiError("We couldn't reach the server. Please check your connection and try again.", 0));
+    };
+    xhr.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"));
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(body);
+  });
+}
+
+/** True for the error a cancelled request or upload throws. */
+export const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
 
 /** The message to show for anything a request threw. */
 export const errorMessage = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");

@@ -179,7 +179,6 @@ export async function classifyClaim({ companyId, description, context = "" }) {
       tool: CLASSIFY_TOOL,
       maxTokens: 300,
       fast: true,
-      temperature: 0,
     });
   } catch (err) {
     console.error("[Warranty Classify] Call threw, using heuristic:", err.message);

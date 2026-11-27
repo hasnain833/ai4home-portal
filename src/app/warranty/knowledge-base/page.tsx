@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { toast } from "sonner";
-import { api, errorMessage } from "@/lib/api";
+import { api, errorMessage, uploadWithProgress } from "@/lib/api";
+import { useUploadQueue } from "@/lib/use-upload-queue";
+import { UploadList } from "@/components/ui/upload-list";
 import { useState, useRef, useEffect, useCallback } from "react";
 import PortalLayout from "@/components/layout/PortalLayout";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -24,7 +26,6 @@ import {
   FileText,
   Trash2,
   Search,
-  Loader2,
   File,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -58,8 +59,8 @@ export default function KnowledgeBasePage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [search, setSearch] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const uploads = useUploadQueue();
+  const uploading = uploads.busy;
   const [selectedCommunityId, setSelectedCommunityId] = useState<string>("");
   const [isDragActive, setIsDragActive] = useState(false);
 
@@ -120,73 +121,41 @@ export default function KnowledgeBasePage() {
     const fileArray = Array.from(files);
     if (fileArray.length === 0) return;
 
-    setUploading(true);
-    let successCount = 0;
-    let failCount = 0;
-
-    for (let i = 0; i < fileArray.length; i++) {
-      const file = fileArray[i];
-      // Matched on extension rather than MIME: Windows reports .xlsx as a
-      // generic ZIP often enough that a MIME check drops valid workbooks.
-      if (!/\.(pdf|docx|xlsx|csv)$/i.test(file.name)) {
-        showToast(
-          "error",
-          /\.xls$/i.test(file.name)
-            ? `Skipped ${file.name}: save legacy .xls workbooks as .xlsx first`
-            : `Skipped ${file.name}: Only PDF, DOCX, XLSX and CSV files are allowed`,
-        );
-        failCount++;
-        continue;
-      }
-
-      if (file.size > 10 * 1024 * 1024) {
-        showToast(
-          "error",
-          `Skipped ${file.name}: File size must be less than 10MB`,
-        );
-        failCount++;
-        continue;
-      }
-
-      setUploadProgress(Math.round((i / fileArray.length) * 100));
-
-      try {
+    type Uploaded = Omit<Document, "sizeBytes" | "uploaded"> & { createdAt: string };
+    await uploads.run<Uploaded>(
+      fileArray,
+      (file, { signal, onProgress }) => {
         const formData = new FormData();
         formData.append("file", file);
         formData.append("communityId", selectedCommunityId);
-
-        const d = await api.post<Omit<Document, "sizeBytes" | "uploaded"> & { createdAt: string }>("/api/knowledge-base", formData);
-        const newDoc: Document = {
-          id: d.id,
-          name: d.name,
-          size: d.size,
-          sizeBytes: file.size,
-          uploaded: new Date(d.createdAt).toLocaleDateString(),
-          community: d.community,
-        };
-
-        setDocuments((prev) => [newDoc, ...prev]);
-        successCount++;
-      } catch (error) {
-        console.error("[warranty/knowledge-base]", error);
-        failCount++;
-      }
-    }
-
-    setUploading(false);
-    setUploadProgress(0);
+        return uploadWithProgress<Uploaded>("/api/knowledge-base", formData, { signal, onProgress });
+      },
+      {
+        // Matched on extension rather than MIME: Windows reports .xlsx as a
+        // generic ZIP often enough that a MIME check drops valid workbooks.
+        validate: (file) =>
+          !/\.(pdf|docx|xlsx|csv)$/i.test(file.name)
+            ? /\.xls$/i.test(file.name)
+              ? "Save legacy .xls workbooks as .xlsx first."
+              : "Only PDF, DOCX, XLSX and CSV files are allowed."
+            : file.size > 10 * 1024 * 1024
+              ? "Files must be smaller than 10 MB."
+              : null,
+        onUploaded: (file, d) =>
+          setDocuments((prev) => [
+            {
+              id: d.id,
+              name: d.name,
+              size: d.size,
+              sizeBytes: file.size,
+              uploaded: new Date(d.createdAt).toLocaleDateString(),
+              community: d.community,
+            },
+            ...prev,
+          ]),
+      },
+    );
     if (fileInputRef.current) fileInputRef.current.value = "";
-
-    if (successCount > 0 && failCount === 0) {
-      showToast("success", `Uploaded ${successCount} file(s) successfully!`);
-    } else if (successCount > 0 && failCount > 0) {
-      showToast(
-        "info",
-        `Uploaded ${successCount} file(s) successfully. Failed/skipped ${failCount}.`,
-      );
-    } else if (failCount > 0) {
-      showToast("error", `Failed to upload files.`);
-    }
   };
 
   const handleDeleteDocument = async (id: string, name: string) => {
@@ -286,13 +255,13 @@ export default function KnowledgeBasePage() {
                       or click to browse (PDF, DOCX, XLSX or CSV — max 10MB)
                     </p>
 
-                    {uploading && (
-                      <div className="flex items-center justify-center text-primary text-sm font-medium">
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />{" "}
-                        Uploading... {uploadProgress}%
-                      </div>
-                    )}
                   </div>
+                  <UploadList
+                    className="mt-3"
+                    items={uploads.items}
+                    onCancel={uploads.cancel}
+                    onDismiss={uploads.clear}
+                  />
                   <input
                     type="file"
                     ref={fileInputRef}

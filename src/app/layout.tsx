@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { Toaster } from "sonner";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -45,6 +46,7 @@ export default function RootLayout({
           </ThemeProvider>
         </AuthProvider>
         <Toaster richColors position="top-right" />
+        <OfflineBanner />
       </body>
     </html>
   );

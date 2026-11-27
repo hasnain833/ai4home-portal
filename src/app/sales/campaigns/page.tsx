@@ -46,6 +46,10 @@ import {
   Zap,
   BarChart3,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
+import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
 import AutoNurtureWorkflow from "@/components/sales/AutoNurtureWorkflow";
 import { toast } from "sonner";
@@ -124,6 +128,7 @@ export default function CampaignsPage() {
   const [activeSeq, setActiveSeq] = useState<Campaign | null>(null);
   const [activeSeqDetail, setActiveSeqDetail] = useState<CampaignDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Modals state
@@ -133,6 +138,16 @@ export default function CampaignsPage() {
   const [addStepModalOpen, setAddStepModalOpen] = useState(false);
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
   const [newStep, setNewStep] = useState<StepDraft>(buildDefaultEmailStep());
+  const { dialog: stepGuard, confirmDiscard: confirmDiscardStep } = useUnsavedChanges({
+    dirty: useDirty(newStep, addStepModalOpen),
+    itemName: editingStepIndex !== null ? `step ${editingStepIndex + 1}` : "the new step",
+  });
+  const changeStepOpen = async (open: boolean) => {
+    if (open) return setAddStepModalOpen(true);
+    if (!(await confirmDiscardStep())) return;
+    setAddStepModalOpen(false);
+    setEditingStepIndex(null);
+  };
   const [generatingStepCopy, setGeneratingStepCopy] = useState(false);
 
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
@@ -167,8 +182,9 @@ export default function CampaignsPage() {
         const fresh = data.find((c) => c.id === prev.id);
         return fresh && fresh.status !== prev.status ? { ...prev, status: fresh.status } : prev;
       });
+      setLoadError(null);
     } catch (e) {
-      console.error(e);
+      setLoadError(e);
     } finally {
       setLoading(false);
     }
@@ -486,8 +502,36 @@ export default function CampaignsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Panel: List of Campaigns */}
             <div className="space-y-4">
-              {campaigns.length === 0 && !loading && (
-                <p className="text-muted-foreground text-sm py-4">No campaigns found. Create one to get started.</p>
+              {loading && campaigns.length === 0 && (
+                <div className="space-y-3" aria-busy="true" aria-label="Loading campaigns">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-20 w-full rounded-xl" />
+                  ))}
+                </div>
+              )}
+              {!!loadError && campaigns.length === 0 && !loading && (
+                <ErrorState
+                  size="sm"
+                  className="rounded-xl border"
+                  error={loadError}
+                  title="Campaigns couldn't be loaded"
+                  onRetry={fetchCampaigns}
+                />
+              )}
+              {campaigns.length === 0 && !loading && !loadError && (
+                <EmptyState
+                  className="rounded-xl border-2 border-dashed"
+                  size="sm"
+                  icon={Zap}
+                  title="No campaigns yet"
+                  description="A campaign sends a timed series of emails and texts to the leads you enrol."
+                  action={
+                    <Button size="sm" onClick={() => setCreateModalOpen(true)}>
+                      <Plus className="size-4" />
+                      Create campaign
+                    </Button>
+                  }
+                />
               )}
               {campaigns.map((seq) => (
                 <Card
@@ -562,7 +606,7 @@ export default function CampaignsPage() {
                           </Button>
 
                           {activeSeq.status !== "Active" ? (
-                            <Button size="sm" className="bg-green-600 text-white hover:bg-green-700 h-8 text-xs font-semibold" onClick={launchCampaign} disabled={activeSeq.status === "Draft"}>
+                            <Button size="sm" className="bg-green-600 text-white hover:bg-green-700 h-8 text-xs font-semibold" onClick={launchCampaign} disabled={activeSeq.status === "Draft"} disabledReason="Add at least one step before launching this campaign.">
                               <Play className="h-3.5 w-3.5 mr-1" /> {activeSeq.status === "Paused" ? "Resume" : "Launch"}
                             </Button>
                           ) : (
@@ -717,7 +761,8 @@ export default function CampaignsPage() {
         </Dialog>
 
         {/* Add Step Dialog */}
-        <Dialog open={addStepModalOpen} onOpenChange={setAddStepModalOpen}>
+        {stepGuard}
+        <Dialog open={addStepModalOpen} onOpenChange={changeStepOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>{editingStepIndex !== null ? "Edit Step" : "Add Step to Flow"}</DialogTitle>
@@ -745,10 +790,10 @@ export default function CampaignsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="EMAIL" disabled={!emailConfigured}>
-                      {emailConfigured ? "Email" : "Email — unavailable"}
+                      {emailConfigured ? "Email" : "Email — set up email in Settings › Messaging first"}
                     </SelectItem>
                     <SelectItem value="SMS" disabled={!smsConfigured}>
-                      {smsConfigured ? "SMS" : "SMS — unavailable"}
+                      {smsConfigured ? "SMS" : "SMS — set up SMS in Settings › Messaging first"}
                     </SelectItem>
                     <SelectItem value="DELAY">Wait Condition</SelectItem>
                   </SelectContent>
@@ -833,7 +878,7 @@ export default function CampaignsPage() {
               )}
             </div>
             <DialogFooter className="sm:justify-end gap-2 mt-4">
-              <Button variant="outline" onClick={() => { setAddStepModalOpen(false); setEditingStepIndex(null); }}>
+              <Button variant="outline" onClick={() => changeStepOpen(false)}>
                 Cancel
               </Button>
               <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" onClick={confirmAddStep}>
@@ -1039,6 +1084,13 @@ export default function CampaignsPage() {
                 className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90 gap-1.5"
                 onClick={confirmEnroll}
                 disabled={enrolling || (enrollMode === "segment" ? !selectedSegmentId : selectedLeadIds.length === 0)}
+                disabledReason={
+                  enrolling
+                    ? undefined
+                    : enrollMode === "segment"
+                      ? "Choose a segment to enrol."
+                      : "Select at least one lead to enrol."
+                }
               >
                 {enrolling && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
                 {enrolling

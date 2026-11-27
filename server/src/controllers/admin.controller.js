@@ -5,7 +5,7 @@ import {
   SALES_PERMISSIONS,
   normalizeSalesPermissions,
 } from "../lib/permissions.js";
-import { createHomeownerAccount, sendAccountInvite, getSupabaseAdmin } from "../lib/homeowner-account.js";
+import { createHomeownerAccount, sendAccountInvite, getSupabaseAdmin, findSupabaseUserByEmail } from "../lib/homeowner-account.js";
 
 
 
@@ -122,8 +122,7 @@ export const updateStaff = async (req, res) => {
   }
 
   const supabaseAdmin = getSupabaseAdmin();
-  const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-  const supabaseUser = usersData.users.find((u) => u.email === staff.email);
+  const supabaseUser = await findSupabaseUserByEmail(supabaseAdmin, staff.email);
 
   if (!supabaseUser) {
     return res
@@ -210,8 +209,7 @@ export const deleteStaff = async (req, res) => {
 
   // 1. Delete from Supabase Auth
   const supabaseAdmin = getSupabaseAdmin();
-  const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-  const supabaseUser = usersData.users.find((u) => u.email === staff.email);
+  const supabaseUser = await findSupabaseUserByEmail(supabaseAdmin, staff.email);
 
   if (supabaseUser) {
     await supabaseAdmin.auth.admin.deleteUser(supabaseUser.id);

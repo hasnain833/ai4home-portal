@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { HelpChatPanel } from "@/components/layout/HelpChat";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
 import { api, errorMessage } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type Placeholder = { token: string; description: string };
 type HelpAgent = { prompt: string; isDefault: boolean; defaultPrompt: string; placeholders: Placeholder[] };
@@ -36,14 +37,21 @@ export default function HelpAgentLab() {
       setAgent({ ...agent!, prompt: next, isDefault: data.isDefault });
       setPrompt(next);
       toast.success(data.isDefault ? "Using the built-in prompt" : "Saved — builders get it on their next question");
+      return true;
     } catch (e) {
       toast.error(errorMessage(e));
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
   const dirty = agent !== null && prompt !== agent.prompt;
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty,
+    itemName: "the Help agent prompt",
+    onSave: () => save(prompt),
+  });
   const tabClass = (on: boolean) =>
     `flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors ${
       on ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -51,6 +59,7 @@ export default function HelpAgentLab() {
 
   return (
     <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)]">
+      {unsavedDialog}
       <Card className="flex min-h-0 flex-col overflow-hidden">
         <CardHeader className="shrink-0 flex-row items-center justify-between space-y-0 py-3">
           <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">

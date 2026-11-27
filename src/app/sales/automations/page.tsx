@@ -40,6 +40,7 @@ import {
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { api, errorMessage } from "@/lib/api";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 interface AutomationRule {
   id: string;
@@ -147,6 +148,13 @@ export default function AutomationsPage() {
   const [saving, setSaving] = useState(false);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [selectedRule, setSelectedRule] = useState<AutomationRule | null>(null);
+  const { dialog: ruleGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(selectedRule, ruleModalOpen),
+    itemName: selectedRule?.name ? `"${selectedRule.name}"` : "this automation",
+  });
+  const changeRuleOpen = async (open: boolean) => {
+    if (open || (await confirmDiscard())) setRuleModalOpen(open);
+  };
   const [analytics, setAnalytics] = useState<AutomationAnalytics | null>(null);
 
   const fetchRules = useCallback(async () => {
@@ -614,7 +622,8 @@ export default function AutomationsPage() {
         </motion.div>
 
         {/* Rule Editor Modal */}
-        <Dialog open={ruleModalOpen} onOpenChange={setRuleModalOpen}>
+        {ruleGuard}
+        <Dialog open={ruleModalOpen} onOpenChange={changeRuleOpen}>
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto pr-2">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -845,7 +854,7 @@ export default function AutomationsPage() {
                   Delete rule
                 </Button>
               )}
-              <Button type="button" variant="ghost" onClick={() => setRuleModalOpen(false)}>Cancel</Button>
+              <Button type="button" variant="ghost" onClick={() => changeRuleOpen(false)}>Cancel</Button>
               <Button onClick={handleSaveRule} className="bg-[#0F3B3D] text-white">
                 {selectedRule ? "Save changes" : "Turn on this rule"}
               </Button>

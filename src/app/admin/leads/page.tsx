@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { parseCsv } from "@/lib/csv";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import {
   B2B_API,
   B2B_AUTO_ID,
@@ -90,6 +91,13 @@ export default function AdminLeadsPage() {
   // null = closed, "" = adding, otherwise the id of the lead being edited.
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<LeadForm>(EMPTY_FORM);
+  const { dialog: leadGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(form, editing !== null),
+    itemName: editing ? "this lead" : "the new lead",
+  });
+  const closeEditing = async () => {
+    if (await confirmDiscard()) setEditing(null);
+  };
   const [smsConsent, setSmsConsent] = useState(false);
   const [needsPerson, setNeedsPerson] = useState(false);
   const [timelineFor, setTimelineFor] = useState<B2BLead | null>(null);
@@ -506,7 +514,8 @@ export default function AdminLeadsPage() {
       </Dialog>
 
       {/* Add / edit lead */}
-      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+      {leadGuard}
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && closeEditing()}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit business lead" : "Add business lead"}</DialogTitle>
@@ -547,7 +556,7 @@ export default function AdminLeadsPage() {
             </label>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button variant="outline" onClick={closeEditing}>Cancel</Button>
             <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={saving} onClick={saveLead}>
               {editing ? "Save" : "Add lead"}
             </Button>

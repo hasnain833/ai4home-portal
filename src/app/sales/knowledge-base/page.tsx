@@ -29,7 +29,9 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, errorMessage } from "@/lib/api";
+import { api, errorMessage, uploadWithProgress } from "@/lib/api";
+import { useUploadQueue } from "@/lib/use-upload-queue";
+import { UploadList } from "@/components/ui/upload-list";
 
 type KbDoc = {
   id: string;
@@ -93,7 +95,8 @@ function labelFor(value: string) {
 export default function SalesKnowledgeBasePage() {
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  const uploads = useUploadQueue();
+  const uploading = uploads.busy;
   const [category, setCategory] = useState("General");
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -124,46 +127,30 @@ export default function SalesKnowledgeBasePage() {
   const uploadFiles = async (files: FileList | File[]) => {
     const arr = Array.from(files);
     if (arr.length === 0) return;
-    setUploading(true);
-    let ok = 0;
-    let fail = 0;
-
-    for (const file of arr) {
-      const isAllowed =
-        // Extension wins: Windows sends .xlsx as a generic ZIP often enough
-        // that a MIME-only check rejects perfectly good workbooks.
-        /\.(pdf|docx|xlsx|csv|txt|md)$/i.test(file.name) || ACCEPTED_MIME.includes(file.type);
-      if (!isAllowed) {
-        toast.error(
-          /\.xls$/i.test(file.name)
-            ? `Skipped ${file.name}: save legacy .xls workbooks as .xlsx first`
-            : `Skipped ${file.name}: only PDF, DOCX, XLSX, CSV, TXT, or MD are allowed`,
-        );
-        fail++;
-        continue;
-      }
-      if (file.size > 25 * 1024 * 1024) {
-        toast.error(`Skipped ${file.name}: file must be under 25MB`);
-        fail++;
-        continue;
-      }
-      try {
+    const { done } = await uploads.run(
+      arr,
+      (file, { signal, onProgress }) => {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("category", category);
-        await api.post("/api/sales/kb/upload", fd);
-        ok++;
-      } catch (e) {
-        toast.error(`${file.name}: ${errorMessage(e)}`);
-        fail++;
-      }
-    }
-
-    setUploading(false);
+        return uploadWithProgress("/api/sales/kb/upload", fd, { signal, onProgress });
+      },
+      {
+        validate: (file) =>
+          // Extension wins: Windows sends .xlsx as a generic ZIP often enough
+          // that a MIME-only check rejects perfectly good workbooks.
+          !(/\.(pdf|docx|xlsx|csv|txt|md)$/i.test(file.name) || ACCEPTED_MIME.includes(file.type))
+            ? /\.xls$/i.test(file.name)
+              ? "Save legacy .xls workbooks as .xlsx first."
+              : "Only PDF, DOCX, XLSX, CSV, TXT or MD files are allowed."
+            : file.size > 25 * 1024 * 1024
+              ? "Files must be smaller than 25 MB."
+              : null,
+      },
+    );
     if (fileInputRef.current) fileInputRef.current.value = "";
-    if (ok > 0) toast.success(`Uploaded ${ok} document${ok === 1 ? "" : "s"} — indexing started.`);
-    if (ok > 0) loadDocs();
-    else if (fail > 0) toast.error("No documents were uploaded.");
+    // Indexing runs in the background after upload; the list below shows it and refreshes itself.
+    if (done > 0) loadDocs();
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -277,6 +264,7 @@ export default function SalesKnowledgeBasePage() {
                   onChange={(e) => e.target.files && uploadFiles(e.target.files)}
                 />
               </div>
+              <UploadList className="mt-3" items={uploads.items} onCancel={uploads.cancel} onDismiss={uploads.clear} />
             </CardContent>
           </Card>
 

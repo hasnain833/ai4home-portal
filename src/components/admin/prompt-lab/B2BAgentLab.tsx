@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
 
 const API = "/api/admin/b2b-prompt-lab";
@@ -118,8 +119,10 @@ export default function B2BAgentLab({ liveSlot, onMetaChange, historyOpen, onHis
     try {
       await fn();
       if (ok) toast.success(ok);
+      return true;
     } catch (e) {
       toast.error(errorMessage(e));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -131,6 +134,14 @@ export default function B2BAgentLab({ liveSlot, onMetaChange, historyOpen, onHis
     await load();
     out.warnings.forEach((w) => toast.warning(w));
   }, "Saved. Real leads keep the live prompt until you set this one live.");
+
+  // Unsaved = the editor differs from the last saved draft (or the live prompt when there is none).
+  const savedDraft = data ? pickDraft(data.currentDraft || data.livePrompts) : null;
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty: !!savedDraft && (Object.keys(EMPTY_DRAFT) as (keyof Draft)[]).some((k) => draft[k] !== savedDraft[k]),
+    itemName: "the B2B agent prompt",
+    onSave: saveVersion,
+  });
 
   const setLive = async (version: Version) => {
     const ok = await confirm({
@@ -220,6 +231,7 @@ export default function B2BAgentLab({ liveSlot, onMetaChange, historyOpen, onHis
 
   return (
     <>
+      {unsavedDialog}
       {liveSlot && createPortal(
         <LiveStatus live={live} busy={busy} onRevert={revert} onChooseVersion={() => onHistoryOpenChange(true)} />,
         liveSlot,

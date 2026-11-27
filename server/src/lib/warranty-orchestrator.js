@@ -848,7 +848,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     messages: withReferences(messages, kbHits),
     tool,
     maxTokens: 900,
-    temperature: 0.2,
     effort: effortForPhase(currentPhase),
   });
 
@@ -1075,7 +1074,6 @@ export async function processWarrantyTurn({ company, convo, newMsg, sandboxMode 
     },
     maxTokens: 600,
     fast: true,
-    temperature: 0,
   });
 
   // Escalation (filing an emergency ticket) happens once per conversation;

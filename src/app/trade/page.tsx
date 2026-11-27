@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CalendarCheck, CalendarClock, CheckCircle2, ChevronRight, Clock, MapPin, Wrench } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,8 +14,7 @@ import { useQuery } from "@/lib/use-query";
 
 export default function TradeOverviewPage() {
   const { user } = useAuth();
-  const { data: jobs, error: loadError } = useQuery<TradeJob[]>("/api/trade/jobs");
-  const error = loadError ? "Could not load your jobs." : "";
+  const { data: jobs, error: loadError, refresh } = useQuery<TradeJob[]>("/api/trade/jobs");
   // What the trade still has to do in Calendly: connect it, or pick the event type.
   const [calendlyTodo, setCalendlyTodo] = useState<"connect" | "event-type" | null>(null);
 
@@ -59,7 +60,14 @@ export default function TradeOverviewPage() {
         </Card>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {loadError && !jobs && (
+        <ErrorState
+          className="rounded-xl border bg-card"
+          error={loadError}
+          title="Your jobs couldn't be loaded"
+          onRetry={refresh}
+        />
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s) => (
@@ -79,7 +87,14 @@ export default function TradeOverviewPage() {
           <Link href="/trade/jobs" className="text-sm text-muted-foreground hover:text-foreground">All jobs</Link>
         </CardHeader>
         <CardContent className="space-y-2">
-          {jobs && upcoming.length === 0 && <p className="text-sm text-muted-foreground">No visits booked yet.</p>}
+          {jobs && upcoming.length === 0 && (
+            <EmptyState
+              size="sm"
+              icon={CalendarClock}
+              title="No visits booked yet"
+              description="When a builder sends you a warranty job, the homeowner picks a time and the visit appears here."
+            />
+          )}
           {upcoming.slice(0, 5).map((job) => (
             <Link
               key={job.id}

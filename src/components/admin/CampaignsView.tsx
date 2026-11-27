@@ -35,9 +35,11 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { apiFetch, errorMessage } from "@/lib/api";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import {
   B2B_API,
   B2B_LEAD_STATUSES,
@@ -100,6 +102,13 @@ export default function CampaignsView() {
   const [pickSegment, setPickSegment] = useState("all");
   const [wholeSegment, setWholeSegment] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const { dialog: draftGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(draft, !!draft),
+    itemName: draft?.name ? `"${draft.name}"` : draft?.template ? "this template" : "this campaign",
+  });
+  const closeDraft = async () => {
+    if (await confirmDiscard()) setDraft(null);
+  };
   const [busy, setBusy] = useState(false);
   const [writingStep, setWritingStep] = useState<number | null>(null);
   const [enrollFor, setEnrollFor] = useState<B2BCampaign | null>(null);
@@ -346,7 +355,17 @@ export default function CampaignsView() {
           {loading ? (
             <Loader2 className="mx-auto my-12 h-5 w-5 animate-spin text-muted-foreground" />
           ) : campaigns.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">No campaigns yet.</div>
+            <EmptyState
+              icon={Send}
+              title="No campaigns yet"
+              description="Build an email and SMS sequence for your business leads, or start from a template."
+              action={
+                <Button size="sm" onClick={openStart}>
+                  <Plus className="size-4" />
+                  New campaign
+                </Button>
+              }
+            />
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {campaigns.map((c) => {
@@ -475,7 +494,12 @@ export default function CampaignsView() {
                 </Button>
               </div>
               {templates.length === 0 ? (
-                <p className="rounded-lg border border-border py-6 text-center text-xs text-muted-foreground">No templates yet.</p>
+                <EmptyState
+                  size="sm"
+                  className="rounded-lg border border-border"
+                  title="No templates yet"
+                  description="Save a campaign you reuse as a template to start new ones faster."
+                />
               ) : (
                 <ul className="space-y-2">
                   {templates.map((t) => {
@@ -528,7 +552,8 @@ export default function CampaignsView() {
       </Dialog>
 
       {/* Create / edit */}
-      <Dialog open={!!draft} onOpenChange={(open) => !open && setDraft(null)}>
+      {draftGuard}
+      <Dialog open={!!draft} onOpenChange={(open) => !open && closeDraft()}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>
@@ -690,7 +715,7 @@ export default function CampaignsView() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDraft(null)}>Cancel</Button>
+            <Button variant="outline" onClick={closeDraft}>Cancel</Button>
             <Button className="bg-[#b48c3c] text-white hover:bg-[#b48c3c]/90" disabled={busy || writingStep !== null} onClick={save}>{draft?.template ? "Save template" : "Save campaign"}</Button>
           </DialogFooter>
         </DialogContent>
@@ -798,7 +823,12 @@ export default function CampaignsView() {
           {!enrollments ? (
             <Loader2 className="mx-auto my-8 h-5 w-5 animate-spin text-muted-foreground" />
           ) : enrollments.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No leads enrolled yet.</p>
+            <EmptyState
+              size="sm"
+              icon={UserPlus}
+              title="No leads enrolled yet"
+              description="Enrol business leads in this campaign to start sending."
+            />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">

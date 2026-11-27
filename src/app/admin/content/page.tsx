@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { sendJson } from "@/lib/b2b-store";
 import NewsView from "@/components/admin/NewsView";
 
@@ -61,6 +62,13 @@ export default function AdminContentPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [topic, setTopic] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
+  const { dialog: editGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(editing, !!editing),
+    itemName: editing?.title ? `"${editing.title}"` : "this item",
+  });
+  const closeEditing = async () => {
+    if (await confirmDiscard()) setEditing(null);
+  };
   const [preview, setPreview] = useState<Item | null>(null);
 
   // ?kind=BLOG / IDEA / NEWS opens that tab (old /admin/news links send NEWS).
@@ -275,7 +283,8 @@ export default function AdminContentPage() {
       </Dialog>
 
       {/* Write or edit */}
-      <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
+      {editGuard}
+      <Dialog open={!!editing} onOpenChange={(open) => !open && closeEditing()}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editing?.id ? "Edit" : "Write"} {editing?.kind === "BLOG" ? "article" : "calendar idea"}</DialogTitle>

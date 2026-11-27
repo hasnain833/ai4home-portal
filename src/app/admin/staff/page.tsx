@@ -10,6 +10,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Loader2, Mail, Pencil, Trash2, UserPlus } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery } from "@/lib/use-query";
@@ -25,13 +28,20 @@ const API = "/api/admin/super-staff";
 export default function StaffPage() {
   const { user } = useAuth();
   const confirm = useConfirm();
-  const { data, loading, refresh: load } = useQuery<{ staff: Member[]; permissionCatalogue: Catalogue }>(
+  const { data, loading, error: loadError, refresh: load } = useQuery<{ staff: Member[]; permissionCatalogue: Catalogue }>(
     user?.isSuperAdmin ? API : null,
   );
   const staff = data?.staff ?? [];
   const catalogue = data?.permissionCatalogue ?? {};
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  const { dialog: draftGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(draft, !!draft),
+    itemName: draft?.id ? `${draft.name || draft.email}'s access` : "the invite",
+  });
+  const closeDraft = async () => {
+    if (await confirmDiscard()) setDraft(null);
+  };
 
   const save = async () => {
     if (!draft) return;
@@ -117,8 +127,19 @@ export default function StaffPage() {
             <div className="flex justify-center py-10">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
+          ) : loadError && staff.length === 0 ? (
+            <ErrorState error={loadError} title="Staff couldn't be loaded" onRetry={load} />
           ) : staff.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">No staff yet.</p>
+            <EmptyState
+              icon={UserPlus}
+              title="No staff yet"
+              description="Invite teammates and tick the areas of Super Admin each one can see."
+              action={
+                <Button size="sm" onClick={() => setDraft({ id: null, name: "", email: "", permissions: [] })}>
+                  Invite staff
+                </Button>
+              }
+            />
           ) : (
             staff.map((m) => (
               <div key={m.id} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -164,7 +185,8 @@ export default function StaffPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={!!draft} onOpenChange={(open) => !open && setDraft(null)}>
+      {draftGuard}
+      <Dialog open={!!draft} onOpenChange={(open) => !open && closeDraft()}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{draft?.id ? "Edit access" : "Invite staff"}</DialogTitle>
@@ -207,7 +229,7 @@ export default function StaffPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDraft(null)} disabled={saving}>
+            <Button variant="outline" onClick={closeDraft} disabled={saving}>
               Cancel
             </Button>
             <Button

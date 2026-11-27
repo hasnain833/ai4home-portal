@@ -159,7 +159,7 @@ export const setWarrantyVersionLive = async (req, res) => {
       INTAKE: target.INTAKE, IDENTIFY: target.IDENTIFY,
       DIAGNOSE: target.DIAGNOSE, RESOLVE: target.RESOLVE,
     });
-    if (errors.length) return res.status(400).json({ message: "This version can'\''t go live until its errors are fixed.", errors, warnings });
+    if (errors.length) return res.status(400).json({ message: "This version can't go live until its errors are fixed.", errors, warnings });
     if (warnings.length && !req.body?.acknowledgeWarnings) {
       return res.status(409).json({ message: "This version goes live with warnings. Confirm to continue.",
         needsAcknowledgement: true, warnings });

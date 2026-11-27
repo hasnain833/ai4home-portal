@@ -49,6 +49,7 @@ import B2BAgentLab from "@/components/admin/prompt-lab/B2BAgentLab";
 import SalesCoachLab from "@/components/admin/prompt-lab/SalesCoachLab";
 import LiveStatus from "@/components/admin/prompt-lab/LiveStatus";
 import { api, ApiError, errorMessage } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type Draft = {
   systemTemplate: string;
@@ -160,6 +161,8 @@ export default function PromptLabPage() {
   const [loading, setLoading] = useState(true);
   const [defaults, setDefaults] = useState<Draft>(EMPTY_DRAFT);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  // What the editors held when last loaded or saved; any difference is an unsaved edit.
+  const [savedDraft, setSavedDraft] = useState<Draft>(EMPTY_DRAFT);
   const [placeholders, setPlaceholders] = useState<Placeholder[]>([]);
   const [versions, setVersions] = useState<PromptVersion[]>([]);
   const [tableReady, setTableReady] = useState(true);
@@ -196,6 +199,7 @@ export default function PromptLabPage() {
   const [wLoading, setWLoading] = useState(false);
   const [wDefaults, setWDefaults] = useState<WarrantyDraft>(EMPTY_WARRANTY_DRAFT);
   const [wDraft, setWDraft] = useState<WarrantyDraft>(EMPTY_WARRANTY_DRAFT);
+  const [wSavedDraft, setWSavedDraft] = useState<WarrantyDraft>(EMPTY_WARRANTY_DRAFT);
   const [wPhaseTab, setWPhaseTab] = useState<WarrantyPhaseKey>("INTAKE");
   const [wTab, setWTab] = useState<"prompt" | "kb">("prompt");
   const [wVersions, setWVersions] = useState<PromptVersion[]>([]);
@@ -226,15 +230,15 @@ export default function PromptLabPage() {
       setVersions(lab.versions || []);
       setLive(lab.live || null);
       setTableReady(lab.tableReady !== false);
-      setDraft(
-        lab.currentDraft
-          ? {
-              systemTemplate: lab.currentDraft.systemTemplate,
-              toolDescription: lab.currentDraft.toolDescription,
-              kbEmptyText: lab.currentDraft.kbEmptyText,
-            }
-          : lab.defaults,
-      );
+      const next: Draft = lab.currentDraft
+        ? {
+            systemTemplate: lab.currentDraft.systemTemplate,
+            toolDescription: lab.currentDraft.toolDescription,
+            kbEmptyText: lab.currentDraft.kbEmptyText,
+          }
+        : lab.defaults;
+      setDraft(next);
+      setSavedDraft(next);
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
@@ -250,12 +254,14 @@ export default function PromptLabPage() {
       setWDefaults(data.defaults || EMPTY_WARRANTY_DRAFT);
       setWVersions(data.versions || []);
       setWLive(data.live || null);
-      setWDraft(data.currentDraft ? {
+      const next: WarrantyDraft = data.currentDraft ? {
         INTAKE: data.currentDraft.INTAKE,
         IDENTIFY: data.currentDraft.IDENTIFY,
         DIAGNOSE: data.currentDraft.DIAGNOSE,
         RESOLVE: data.currentDraft.RESOLVE,
-      } : data.defaults || EMPTY_WARRANTY_DRAFT);
+      } : data.defaults || EMPTY_WARRANTY_DRAFT;
+      setWDraft(next);
+      setWSavedDraft(next);
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
@@ -391,11 +397,13 @@ export default function PromptLabPage() {
         toast.warning(`Saved with ${data.warnings.length} warning(s) — check the editor.`);
       }
       await load();
+      return true;
     } catch (e) {
       const body = failedBody(e);
       setErrors(body.errors || [errorMessage(e)]);
       setWarnings(body.warnings || []);
       toast.error(errorMessage(e));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -570,15 +578,31 @@ export default function PromptLabPage() {
       setWVersionLabel("");
       toast.success("Version saved.");
       await loadWarranty();
+      return true;
     } catch (e) {
       const body = failedBody(e);
       setWErrors(body.errors || [errorMessage(e)]);
       setWWarnings(body.warnings || []);
       toast.error(errorMessage(e));
+      return false;
     } finally {
       setWSaving(false);
     }
   };
+
+  const salesDirty = (Object.keys(savedDraft) as (keyof Draft)[]).some((k) => draft[k] !== savedDraft[k]);
+  const warrantyDirty = (Object.keys(wSavedDraft) as (keyof WarrantyDraft)[]).some((k) => wDraft[k] !== wSavedDraft[k]);
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty: salesDirty || warrantyDirty,
+    itemName:
+      salesDirty && warrantyDirty
+        ? "the Sales and Warranty agent prompts"
+        : salesDirty
+          ? "the Sales agent prompt"
+          : "the Warranty agent prompt",
+    // Saving creates a new version, just like the editor's own Save button.
+    onSave: async () => (salesDirty ? await saveVersion() : true) && (warrantyDirty ? await saveWarrantyVersion() : true),
+  });
 
   const loadWarrantyVersion = (v: PromptVersion) => {
     const pv = v as unknown as Record<string, string>;
@@ -664,6 +688,7 @@ export default function PromptLabPage() {
 
   return (
     <div className="flex min-h-150 flex-col gap-4 xl:h-[max(46rem,calc(100dvh-4rem))]">
+      {unsavedDialog}
       {/* Heading + Agent Switcher */}
       <div className="grid grid-cols-1 items-center gap-x-4 gap-y-2 lg:grid-cols-[1fr_auto_1fr]">
         <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">

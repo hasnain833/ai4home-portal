@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useEffect,
+  useCallback,
   ReactNode,
   useRef,
 } from "react";
@@ -91,6 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [resumeError, setResumeError] = useState("");
+  // Read by the SIGNED_OUT listener: while the expired-session prompt is up, the page stays put.
+  const sessionExpiredRef = useRef(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const router = useRouter();
   const supabaseRef = useRef(createClient());
@@ -150,14 +154,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // The page stays mounted under the prompt, so nothing typed is lost unless the user picks "Sign in here".
   useEffect(() => {
-    if (!sessionExpired) return;
-    void supabaseRef.current.auth.signOut().finally(() => setUser(null));
+    sessionExpiredRef.current = sessionExpired;
   }, [sessionExpired]);
 
-  const handleSessionExpiredRedirect = () => {
+  /** After signing in from another tab: pick the new session up and carry on where they were. */
+  const resumeSession = useCallback(async () => {
+    setResumeError("");
+    try {
+      const userData = await fetchMe(true);
+      if (userData) {
+        userRef.current = userData;
+        setUser(userData);
+        setSessionExpired(false);
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    setResumeError("You're still signed out. Finish signing in in the other tab, then try again.");
+  }, []);
+
+  // Coming back to this tab after signing in elsewhere resumes on its own.
+  useEffect(() => {
+    if (!sessionExpired) return;
+    const onFocus = () => {
+      fetch("/api/auth/me", { cache: "no-store" })
+        .then((r) => (r.ok ? resumeSession() : undefined))
+        .catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [sessionExpired, resumeSession]);
+
+  const handleSessionExpiredRedirect = async () => {
+    const here = window.location.pathname + window.location.search;
+    // Local only: signing out "globally" would also end this person's sessions on other devices.
+    await supabaseRef.current.auth.signOut({ scope: "local" }).catch(() => {});
     setSessionExpired(false);
-    router.push("/login");
+    setUser(null);
+    router.push(`/login?redirect=${encodeURIComponent(here)}`);
   };
 
   useEffect(() => {
@@ -191,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     async function checkSuperadminOrLogout() {
-      if (!mounted || signingInRef.current) return;
+      if (!mounted || signingInRef.current || sessionExpiredRef.current) return;
       const version = ++authRequestVersionRef.current;
       try {
         const userData = await fetchMe();
@@ -313,7 +350,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       userRef.current = userData;
       setUser(userData);
       setSessionExpired(false);
-      router.push(redirectPath || "/");
+      // Same-site paths only: "//evil.com" or "https://…" in ?redirect= must not send someone off-site.
+      router.push(redirectPath && /^\/(?![/\\])/.test(redirectPath) ? redirectPath : "/");
     } catch (err) {
       if (err instanceof ApiError && (err.body as { code?: string } | null)?.code === "COMPANY_SUSPENDED") {
         await supabaseRef.current.auth.signOut({ scope: "local" });
@@ -452,22 +490,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         </div>
       )}
       {sessionExpired && (
-        <div className="fixed inset-0 z-100 flex items-center justify-center bg-slate-950/40 backdrop-blur-md">
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="session-expired-title"
+          className="fixed inset-0 z-100 flex items-center justify-center bg-slate-950/40 backdrop-blur-md"
+        >
           <div className="mx-4 w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-2xl dark:border-slate-800 dark:bg-slate-900">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
               <svg className="h-6 w-6 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
               </svg>
             </div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Session expired</h2>
+            <h2 id="session-expired-title" className="text-lg font-bold text-slate-900 dark:text-slate-100">
+              Your session has expired
+            </h2>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              You&apos;ve been logged out for your security. Please sign in again to continue.
+              You were signed out for your security. This page is still here, so sign in again in a new tab and
+              you can carry on with anything you haven&apos;t saved.
             </p>
+            <a
+              href="/login?redirect=/hub"
+              target="_blank"
+              rel="noopener"
+              className="mt-5 block w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+            >
+              Sign in in a new tab
+            </a>
+            <button
+              onClick={resumeSession}
+              className="mt-2 w-full rounded-lg border border-border px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted"
+            >
+              I&apos;ve signed in — continue
+            </button>
+            {resumeError && <p role="alert" className="mt-2 text-xs text-destructive">{resumeError}</p>}
             <button
               onClick={handleSessionExpiredRedirect}
-              className="mt-5 w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+              className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
             >
-              Log in again
+              Sign in on this page instead (unsaved changes here will be lost)
             </button>
           </div>
         </div>

@@ -41,6 +41,9 @@ import {
   Pencil,
   Phone,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { motion } from "framer-motion";
 import { api, errorMessage } from "@/lib/api";
 
@@ -68,6 +71,7 @@ export default function TeamManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [formError, setFormError] = useState("");
   const [success, setSuccess] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -102,6 +106,21 @@ export default function TeamManagementPage() {
     }
   }, [user, router]);
 
+  const { dialog: addGuard, confirmDiscard: confirmDiscardAdd } = useUnsavedChanges({
+    dirty: useDirty(newStaff, isDialogOpen),
+    itemName: "the new staff member",
+  });
+  const { dialog: editGuard, confirmDiscard: confirmDiscardEdit } = useUnsavedChanges({
+    dirty: useDirty(editForm, isEditDialogOpen),
+    itemName: editForm.name ? `${editForm.name}'s details` : "this staff member",
+  });
+  const changeAddOpen = async (open: boolean) => {
+    if (open || (await confirmDiscardAdd())) setIsDialogOpen(open);
+  };
+  const changeEditOpen = async (open: boolean) => {
+    if (open || (await confirmDiscardEdit())) setIsEditDialogOpen(open);
+  };
+
   const fetchStaff = async () => {
     try {
       setIsLoading(true);
@@ -112,8 +131,9 @@ export default function TeamManagementPage() {
         setStaffList(data.staff || []);
         setPermissionCatalogue(data.permissionCatalogue || {});
       }
-    } catch {
-      setError("Could not load team members.");
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e);
     } finally {
       setIsLoading(false);
     }
@@ -251,7 +271,7 @@ export default function TeamManagementPage() {
             </div>
 
             {user.role === "admin" && (
-              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <Dialog open={isDialogOpen} onOpenChange={changeAddOpen}>
                 <DialogTrigger asChild>
                   <Button className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 gap-2">
                     <UserPlus className="h-4 w-4" />
@@ -314,7 +334,7 @@ export default function TeamManagementPage() {
                       <p className="text-xs text-muted-foreground">Ticket assignments and visit updates are also sent by SMS.</p>
                     </div>
                     <DialogFooter>
-                      <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                      <Button type="button" variant="outline" onClick={() => changeAddOpen(false)}>
                         Cancel
                       </Button>
                       <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
@@ -381,16 +401,26 @@ export default function TeamManagementPage() {
                     <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />
                   ))}
                 </div>
+              ) : loadError && staffList.length === 0 ? (
+                <ErrorState error={loadError} title="Team members couldn't be loaded" onRetry={fetchStaff} />
               ) : staffList.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  <Users className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                  <p className="font-medium">No staff members yet</p>
-                  <p className="text-sm mt-1">
-                    {user.role === "admin"
-                      ? "Click \"Add Staff Member\" to create the first account."
-                      : "An administrator will add staff members here."}
-                  </p>
-                </div>
+                <EmptyState
+                  icon={Users}
+                  title="No staff members yet"
+                  description={
+                    user.role === "admin"
+                      ? "Invite the people who handle warranty claims with you. Each gets their own login."
+                      : "An administrator will add staff members here."
+                  }
+                  action={
+                    user.role === "admin" && (
+                      <Button size="sm" onClick={() => setIsDialogOpen(true)}>
+                        <UserPlus className="size-4" />
+                        Add staff member
+                      </Button>
+                    )
+                  }
+                />
               ) : (
 
                 <div className="space-y-3">
@@ -474,9 +504,11 @@ export default function TeamManagementPage() {
               )}
             </CardContent>
           </Card>
+          {addGuard}
+          {editGuard}
           {/* Edit Staff Dialog */}
           {user.role === "admin" && (
-            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <Dialog open={isEditDialogOpen} onOpenChange={changeEditOpen}>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Edit Staff Member</DialogTitle>
@@ -604,7 +636,7 @@ export default function TeamManagementPage() {
                   )}
 
                   <DialogFooter>
-                    <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                    <Button type="button" variant="outline" onClick={() => changeEditOpen(false)}>
                       Cancel
                     </Button>
                     <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90" disabled={isUpdating}>

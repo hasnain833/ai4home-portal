@@ -6,6 +6,8 @@ import PortalLayout from "@/components/layout/PortalLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { Newspaper, ExternalLink, Calendar, Loader2, RefreshCcw, Megaphone, ChevronLeft, ChevronRight } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
@@ -31,6 +33,7 @@ export default function SalesNewsPage() {
   const router = useRouter();
   const [news, setNews] = useState<ScrapedNews[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [page, setPage] = useState(1);
   const [creatingId, setCreatingId] = useState<string | null>(null);
 
@@ -40,8 +43,9 @@ export default function SalesNewsPage() {
       const json = await api.get<{ data?: typeof news }>("/api/sales/news?limit=200");
       setNews(json?.data || []);
       setPage(1);
+      setLoadError(null);
     } catch (err) {
-      console.error("Failed to fetch news:", err);
+      setLoadError(err);
     } finally {
       setIsLoading(false);
     }
@@ -99,14 +103,20 @@ export default function SalesNewsPage() {
               <div className="flex items-center justify-center h-64">
                 <Loader2 className="h-8 w-8 animate-spin text-primary/50" />
               </div>
+            ) : loadError && news.length === 0 ? (
+              <ErrorState
+                className="rounded-xl border bg-card/50"
+                error={loadError}
+                title="News couldn't be loaded"
+                onRetry={fetchNews}
+              />
             ) : news.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-64 border border-dashed rounded-xl border-border bg-card/50">
-                <Newspaper className="h-10 w-10 text-muted-foreground mb-3 opacity-50" />
-                <p className="text-muted-foreground font-medium">No news articles found yet.</p>
-                <p className="text-xs text-muted-foreground/70 max-w-sm text-center mt-1">
-                  New market news appears here once the AI for Homebuilders team publishes it.
-                </p>
-              </div>
+              <EmptyState
+                className="rounded-xl border border-dashed bg-card/50"
+                icon={Newspaper}
+                title="No market news yet"
+                description="New market news appears here once the AI for Homebuilders team publishes it."
+              />
             ) : (
               <>
                 <div className="grid gap-3 md:grid-cols-2">

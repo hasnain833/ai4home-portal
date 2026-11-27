@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Clock, Eye, GraduationCap, Loader2, Send, Shuffle, Users } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -436,7 +437,13 @@ function History({ userId, scenarios, onOpen }: { userId?: string; scenarios: Sc
 
   if (!sessions) return spinner;
   if (!sessions.length) {
-    return <p className="py-10 text-center text-sm text-muted-foreground">No practice sessions yet. Start one from the library.</p>;
+    return (
+      <EmptyState
+        icon={GraduationCap}
+        title="No practice sessions yet"
+        description="Start a role-play from the scenario library. Scored sessions and skill averages appear here."
+      />
+    );
   }
 
   // FR-HI-03: average per skill over scored sessions, weakest highlighted.

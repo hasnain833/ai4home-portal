@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import KnowledgeBasePanel from "@/components/admin/prompt-lab/KnowledgeBasePanel";
 import { api, errorMessage } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type Placeholder = { token: string; description: string; required: boolean };
 type CoachPrompt = {
@@ -52,12 +53,23 @@ export default function SalesCoachLab() {
       await api.put(API, { prompts });
       toast.success("Saved — the next role-play message uses it");
       await load();
+      return true;
     } catch (e) {
       toast.error(errorMessage(e));
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty: dirtyKeys.length > 0,
+    itemName:
+      dirtyKeys.length === 1
+        ? `the "${saved?.find((p) => p.key === dirtyKeys[0])?.label ?? dirtyKeys[0]}" coach prompt`
+        : `${dirtyKeys.length} Sales Coach prompts`,
+    onSave: () => save(Object.fromEntries(dirtyKeys.map((k) => [k, drafts[k]]))),
+  });
 
   const tabClass = (on: boolean) =>
     `flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors ${
@@ -66,6 +78,7 @@ export default function SalesCoachLab() {
 
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {unsavedDialog}
       <CardHeader className="shrink-0 flex-row flex-wrap items-center justify-between gap-2 space-y-0 py-3">
         <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
           <button type="button" onClick={() => setTab("prompt")} className={tabClass(tab === "prompt")}>

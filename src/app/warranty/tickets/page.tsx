@@ -41,7 +41,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
-  AlertCircle,
   RotateCcw,
   Plus,
   X,
@@ -52,7 +51,12 @@ import {
   CalendarClock,
   UserCheck,
   ShieldAlert,
+  SearchX,
+  Inbox,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Types
@@ -210,6 +214,7 @@ function TicketsPageInner() {
   const propertyFilter = searchParams.get("propertyId") || "";
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("all");
@@ -253,8 +258,9 @@ function TicketsPageInner() {
       setTickets(data.tickets);
       setTotalTickets(data.total);
       setTotalPages(data.totalPages);
+      setLoadError(null);
     } catch (error) {
-      if (requestId === latestRequest.current) showToast("error", errorMessage(error));
+      if (requestId === latestRequest.current) setLoadError(error);
     } finally {
       setLoading(false);
     }
@@ -314,6 +320,14 @@ function TicketsPageInner() {
     setIsCreateOpen(false);
     setCreateForm(EMPTY_TICKET_FORM);
     setCreateError("");
+  };
+
+  const { dialog: createGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(createForm, isCreateOpen),
+    itemName: "the new ticket",
+  });
+  const cancelCreate = async () => {
+    if (await confirmDiscard()) closeCreateModal();
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
@@ -606,17 +620,31 @@ function TicketsPageInner() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                {tickets.length === 0 ? (
-                  <div className="text-center py-16 text-muted-foreground px-6">
-                    <AlertCircle className="h-10 w-10 mx-auto mb-3 text-muted-foreground/60" />
-                    <h3 className="font-semibold text-foreground text-sm">No tickets found</h3>
-                    <p className="text-xs mt-1 text-muted-foreground/80 max-w-xs mx-auto">Try adjusting your search keywords or clearing the active filters.</p>
-                    {(search || status !== "all" || priority !== "all" || dateRange !== "all") && (
-                      <Button variant="outline" size="sm" onClick={handleResetFilters} className="mt-4 text-xs h-8 border-border/80">
-                        Clear All Filters
-                      </Button>
-                    )}
-                  </div>
+                {loadError && tickets.length === 0 ? (
+                  <ErrorState error={loadError} title="Tickets couldn't be loaded" onRetry={fetchTickets} />
+                ) : tickets.length === 0 ? (
+                  search || status !== "all" || priority !== "all" || dateRange !== "all" ? (
+                    <EmptyState
+                      icon={SearchX}
+                      title="No tickets match these filters"
+                      description="Try different search words, or clear the filters to see every ticket."
+                      action={
+                        <Button variant="outline" size="sm" onClick={handleResetFilters}>
+                          Clear all filters
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <EmptyState
+                      icon={Inbox}
+                      title={isHomeowner ? "You haven't reported any issues" : "No warranty claims yet"}
+                      description={
+                        isHomeowner
+                          ? "When something in your home needs attention, report it through the warranty chat and it will show up here."
+                          : "Claims appear here as soon as homeowners report an issue through the warranty chat."
+                      }
+                    />
+                  )
                 ) : isMobile ? (
                   // Mobile card view
                   <AnimatePresence mode="popLayout">
@@ -813,6 +841,7 @@ function TicketsPageInner() {
             onDispatched={handleDispatched}
           />
 
+          {createGuard}
           {/* Create Ticket Modal */}
           <AnimatePresence>
             {isCreateOpen && (
@@ -825,7 +854,7 @@ function TicketsPageInner() {
                 >
                   <button
                     type="button"
-                    onClick={closeCreateModal}
+                    onClick={cancelCreate}
                     className="absolute right-4 top-4 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-400 hover:text-gray-600 transition"
                   >
                     <X className="h-5 w-5" />
@@ -1020,7 +1049,7 @@ function TicketsPageInner() {
                       <Button
                         type="button"
                         variant="ghost"
-                        onClick={closeCreateModal}
+                        onClick={cancelCreate}
                         className="text-gray-600"
                       >
                         Cancel

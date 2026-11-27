@@ -19,7 +19,7 @@ import { MailService } from "../services/mail-service.js";
 import { Templates, SmsTemplates } from "../services/templates.js";
 import { effectiveSalesPermissions } from "../lib/permissions.js";
 import { effectiveAdminPermissions } from "../lib/admin-permissions.js";
-import { passwordSetupLink, getSupabaseAdmin } from "../lib/homeowner-account.js";
+import { passwordSetupLink, getSupabaseAdmin, findSupabaseUserByEmail } from "../lib/homeowner-account.js";
 
 const safeEqual = (a, b) => {
   const ab = Buffer.from(String(a ?? ""), "utf8");
@@ -206,18 +206,6 @@ const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 const hashToken = (raw) => crypto.createHash("sha256").update(String(raw)).digest("hex");
 
-const findSupabaseUserByEmail = async (supabaseAdmin, email) => {
-  const target = String(email).toLowerCase();
-  for (let page = 1; page <= 20; page++) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error) throw new Error(error.message);
-    const users = data?.users || [];
-    const match = users.find((u) => String(u.email || "").toLowerCase() === target);
-    if (match) return match;
-    if (users.length < 200) return null;
-  }
-  return null;
-};
 
 export const requestEmailChange = async (req, res) => {
   if (!req.user) return res.status(401).json({ message: "Unauthorized" });

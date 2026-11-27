@@ -59,6 +59,7 @@ export async function chat({ companyId, system, user, messages, maxTokens = 700,
   }
 }
 
+// No temperature: current models (Sonnet 5+, Opus 4.7+) reject sampling params with a 400.
 async function anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, effort, source }) {
   const outputConfig =
     effort && supportsEffort(cfg.model) ? { output_config: { effort } } : {};
@@ -98,7 +99,6 @@ export async function toolCall({
   tool,
   maxTokens = 700,
   fast = false,
-  temperature,
   effort,
   source = null,
 }) {
@@ -109,7 +109,7 @@ export async function toolCall({
   }
   if (fast) cfg = toFastTier(cfg);
   try {
-    return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, temperature, effort, source });
+    return await anthropicToolCall({ cfg, companyId, system, messages, tool, maxTokens, effort, source });
   } catch (err) {
     console.error("[LLM] Anthropic tool exception:", err.message);
     return null;

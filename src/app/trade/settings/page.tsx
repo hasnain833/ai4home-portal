@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { SignInEmailField } from "@/components/auth/SignInEmailField";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, errorMessage } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 interface CalendlyStatus {
   available: boolean;
@@ -102,20 +103,31 @@ function ProfileCard() {
 
   const dirty = name.trim() !== (user?.name || "") || phone.trim() !== (user?.phone || "");
 
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return setMessage({ type: "error", text: "Name is required." });
+  const persist = async () => {
+    if (!name.trim()) {
+      setMessage({ type: "error", text: "Name is required." });
+      return false;
+    }
     setSaving(true);
     setMessage(null);
     try {
       await updateProfile({ name: name.trim(), phone: phone.trim() || null });
       setMessage({ type: "success", text: "Profile saved." });
+      return true;
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Could not save your profile." });
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  const save = (e: React.FormEvent) => {
+    e.preventDefault();
+    void persist();
+  };
+
+  const { dialog: unsavedDialog } = useUnsavedChanges({ dirty, itemName: "your profile", onSave: persist });
 
   const uploadAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -129,6 +141,7 @@ function ProfileCard() {
 
   return (
     <Card>
+      {unsavedDialog}
       <CardHeader>
         <CardTitle className="text-base">Profile</CardTitle>
         <CardDescription>Builders and homeowners see your name and phone on jobs.</CardDescription>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FlaskConical, History, Loader2, RotateCcw } from "lucide-react";
@@ -32,10 +33,15 @@ export default function WebsiteAgentLab() {
   }, []);
   const save = async () => {
     setBusy(true); setNotice("");
-    try { await apiFetch(endpoint, json({ prompt })); setNotice("Prompt saved. New replies use these instructions."); await load(true); }
-    catch (e) { setError(e instanceof Error ? e.message : "Save failed."); }
+    try { await apiFetch(endpoint, json({ prompt })); setNotice("Prompt saved. New replies use these instructions."); await load(true); return true; }
+    catch (e) { setError(e instanceof Error ? e.message : "Save failed."); return false; }
     finally { setBusy(false); }
   };
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty: !!data && prompt !== data.prompt,
+    itemName: "the Website agent prompt",
+    onSave: save,
+  });
   const retry = async (id: string) => {
     setBusy(true); setNotice("");
     try { const result = await apiFetch<{ failed?: boolean; skipped?: boolean }>(`${endpoint}/inquiries/${id}/retry`, json({}, "POST")); setNotice(result.skipped ? "Another attempt is running; refresh shortly." : result.failed ? "Attempt completed with errors. See the error below." : "Attempt completed. Provider acceptance statuses are shown below."); await load(); }
@@ -44,6 +50,7 @@ export default function WebsiteAgentLab() {
   };
   return (
     <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-2 xl:grid-rows-[minmax(0,1fr)]">
+      {unsavedDialog}
       {error && <p role="alert" className="text-sm text-red-600 xl:col-span-2">{error}</p>}
       {notice && <p role="status" className="text-sm xl:col-span-2">{notice}</p>}
       <Card className="flex min-h-0 min-w-0 flex-col overflow-hidden">

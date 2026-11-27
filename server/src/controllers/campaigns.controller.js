@@ -351,6 +351,10 @@ export const updateCampaignSteps = async (req, res) => {
         description: campaign.description,
         channel: campaign.channel,
         status: "Draft",
+        appointmentMode: campaign.appointmentMode,
+        agentMaxTurns: campaign.agentMaxTurns,
+        exitConditions: campaign.exitConditions ?? undefined,
+        versionPolicy: campaign.versionPolicy,
       },
     });
     targetCampaignId = newVersion.id;

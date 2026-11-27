@@ -46,14 +46,18 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  disabledReason,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    /** Why the button is disabled. Shown on hover, and read out to keyboard and screen-reader users. */
+    disabledReason?: string
   }) {
   const Comp = asChild ? Slot.Root : "button"
+  const reasonId = React.useId()
 
-  return (
+  const button = (
     <Comp
       data-slot="button"
       data-variant={variant}
@@ -61,6 +65,22 @@ function Button({
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />
+  )
+
+  if (!props.disabled || !disabledReason) return button
+  // A disabled button gets no pointer or focus events, so the explanation lives on a wrapper.
+  return (
+    <span
+      className={cn("inline-flex cursor-not-allowed", className?.includes("w-full") && "w-full")}
+      title={disabledReason}
+      tabIndex={0}
+      aria-describedby={reasonId}
+    >
+      {button}
+      <span id={reasonId} className="sr-only">
+        {disabledReason}
+      </span>
+    </span>
   )
 }
 

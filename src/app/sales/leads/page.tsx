@@ -57,7 +57,11 @@ import {
   CalendarClock,
   Loader2,
   UserRoundPlus,
+  SearchX,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import LeadFormEmbedDialog from "@/components/sales/LeadFormEmbedDialog";
 import { api, errorMessage } from "@/lib/api";
 
@@ -148,6 +152,7 @@ export default function LeadsPage() {
   const isHomeowner = user?.role === "homeowner";
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [search, setSearch] = useState("");
   // The search box drives a request; debounce it so one is sent per pause,
   // not per keystroke.
@@ -248,6 +253,13 @@ export default function LeadsPage() {
     emailOptIn: false,
     smsOptIn: false,
   });
+  const { dialog: manualGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(manualForm, manualModalOpen),
+    itemName: "the new lead",
+  });
+  const changeManualOpen = async (open: boolean) => {
+    if (open || (await confirmDiscard())) setManualModalOpen(open);
+  };
 
   const [csvModalOpen, setCsvModalOpen] = useState(false);
   const [csvStep, setCsvStep] = useState(1);
@@ -309,9 +321,10 @@ export default function LeadsPage() {
       if ((data.total || 0) > 0 && currentPage > (data.totalPages || 1)) {
         setCurrentPage(data.totalPages || 1);
       }
+      setLoadError(null);
     } catch (error) {
       if (isStale()) return;
-      toast.error(errorMessage(error));
+      setLoadError(error);
     } finally {
       if (!isStale()) setLoading(false);
     }
@@ -841,6 +854,8 @@ export default function LeadsPage() {
             <CardContent className="p-0 overflow-x-auto">
               {loading ? (
                 <div className="p-6 space-y-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-40 w-full" /></div>
+              ) : loadError && leads.length === 0 ? (
+                <ErrorState error={loadError} title="Leads couldn't be loaded" onRetry={fetchLeads} />
               ) : leads.length > 0 ? (
                 <>
                   <Table className="min-w-250">
@@ -974,19 +989,57 @@ export default function LeadsPage() {
                     </div>
                   )}
                 </>
+              ) : search || statusFilter !== "all" || tagFilter !== "all" ? (
+                <EmptyState
+                  icon={SearchX}
+                  title="No leads match these filters"
+                  description="Try a different search, or clear the filters to see every lead."
+                  action={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSearch("");
+                        setStatusFilter("all");
+                        setTagFilter("all");
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  }
+                />
               ) : (
-                <div className="text-center py-20 text-muted-foreground">
-                  <Users className="h-16 w-16 mx-auto opacity-20 text-[#b48c3c] mb-3" />
-                  <p className="font-semibold text-sm">No prospects found in this company.</p>
-                  <p className="text-xs mt-1 text-slate-400">Click &quot;Add Lead&quot;{canImportCsv ? ' or "Import CSV"' : ""} to populate your workspace.</p>
-                </div>
+                <EmptyState
+                  icon={Users}
+                  title="No leads yet"
+                  description={
+                    canImportCsv
+                      ? "Add your first lead by hand, or import a CSV of prospects. Leads from your website form land here too."
+                      : "Add your first lead by hand. Leads from your website form land here too."
+                  }
+                  action={
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <Button size="sm" onClick={() => setManualModalOpen(true)}>
+                        <Plus className="size-4" />
+                        Add lead
+                      </Button>
+                      {canImportCsv && (
+                        <Button size="sm" variant="outline" onClick={() => setCsvModalOpen(true)}>
+                          <Upload className="size-4" />
+                          Import CSV
+                        </Button>
+                      )}
+                    </div>
+                  }
+                />
               )}
             </CardContent>
           </Card>
         </div>
 
         {/* Manual Creation Modal */}
-        <Dialog open={manualModalOpen} onOpenChange={setManualModalOpen}>
+        {manualGuard}
+        <Dialog open={manualModalOpen} onOpenChange={changeManualOpen}>
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>Add Manual Lead</DialogTitle>
@@ -1111,7 +1164,7 @@ export default function LeadsPage() {
               </div>
 
               <DialogFooter className="pt-2">
-                <Button type="button" variant="ghost" onClick={() => setManualModalOpen(false)}>Cancel</Button>
+                <Button type="button" variant="ghost" onClick={() => changeManualOpen(false)}>Cancel</Button>
                 <Button type="submit" disabled={submittingManual} className="bg-[#0F3B3D] text-white">
                   {submittingManual ? "Saving..." : "Save Manual Lead"}
                 </Button>

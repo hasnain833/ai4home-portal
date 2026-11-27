@@ -84,7 +84,7 @@ export default function AIChatPage() {
                     // Unavailable until the company is known, so the snippet on
                     // the other side is never built from an empty id.
                     disabled={!companyId}
-                    title={companyId ? undefined : "Loading your company details…"}
+                    disabledReason="Loading your company details…"
                   >
                     <Code className="h-4 w-4" />
                     Embed Widget

@@ -44,7 +44,12 @@ import {
   CheckCircle2,
   ExternalLink,
   Send,
+  SearchX,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
+import { ErrorState } from "@/components/ui/error-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiFetch, errorMessage } from "@/lib/api";
@@ -113,6 +118,7 @@ export default function BlogDraftingPage() {
   const { user } = useAuth();
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [activeTab, setActiveTab] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -140,8 +146,9 @@ export default function BlogDraftingPage() {
     try {
       const data = await api("");
       setPosts(data);
+      setLoadError(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load posts");
+      setLoadError(e);
     } finally {
       setLoading(false);
     }
@@ -204,6 +211,18 @@ export default function BlogDraftingPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const editorDirty = useDirty(
+    [editorTitle, editorExcerpt, editorContent, editorCategory, editorTags, editorMetaTitle, editorMetaDesc],
+    editorOpen && !locked,
+  );
+  const { dialog: editorGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: editorDirty,
+    itemName: editorTitle.trim() ? `"${editorTitle.trim()}"` : "this post",
+  });
+  const changeEditorOpen = async (open: boolean) => {
+    if (open || (await confirmDiscard())) setEditorOpen(open);
   };
 
   const withBusy = async (id: string, fn: () => Promise<void>) => {
@@ -319,7 +338,11 @@ export default function BlogDraftingPage() {
               </CardHeader>
               <CardContent className="pt-4">
                 {loading ? (
-                  <div className="text-center py-16 text-muted-foreground text-sm">Loading posts…</div>
+                  <div className="space-y-3" aria-busy="true" aria-label="Loading posts">
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} className="h-24 w-full rounded-xl" />
+                    ))}
+                  </div>
                 ) : (
                   <AnimatePresence mode="popLayout">
                     {filtered.length > 0 ? (
@@ -418,12 +441,39 @@ export default function BlogDraftingPage() {
                           </motion.div>
                         ))}
                       </div>
+                    ) : loadError && posts.length === 0 ? (
+                      <ErrorState error={loadError} title="Blog posts couldn't be loaded" onRetry={fetchPosts} />
+                    ) : posts.length > 0 ? (
+                      <EmptyState
+                        icon={SearchX}
+                        title="No posts match"
+                        description="Try a different search, or show all posts."
+                        action={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSearchTerm("");
+                              setActiveTab("all");
+                            }}
+                          >
+                            Show all posts
+                          </Button>
+                        }
+                      />
                     ) : (
-                      <div className="text-center py-16 text-muted-foreground border-2 border-dashed rounded-xl p-8">
-                        <FileText className="h-12 w-12 mx-auto opacity-20 text-[#b48c3c] mb-2" />
-                        <p className="font-semibold text-sm">No blog posts yet.</p>
-                        <p className="text-xs mt-1 text-slate-400">Press &quot;From AI4Home&quot; to add an article approved by the AI for Homebuilders team.</p>
-                      </div>
+                      <EmptyState
+                        className="rounded-xl border-2 border-dashed"
+                        icon={FileText}
+                        title="No blog posts yet"
+                        description="Pick a ready-made article from the AI for Homebuilders library. Your company name is filled in for you."
+                        action={
+                          <Button size="sm" onClick={openLibrary}>
+                            <Plus className="size-4" />
+                            Browse articles
+                          </Button>
+                        }
+                      />
                     )}
                   </AnimatePresence>
                 )}
@@ -440,7 +490,12 @@ export default function BlogDraftingPage() {
               <DialogDescription>Written and approved by the AI for Homebuilders team. Your company name is filled in; the text can&apos;t be changed.</DialogDescription>
             </DialogHeader>
             {library?.length === 0 ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">No articles yet. New ones appear here when the AI for Homebuilders team publishes them.</p>
+              <EmptyState
+                size="sm"
+                icon={FileText}
+                title="No articles in the library yet"
+                description="New ones appear here when the AI for Homebuilders team publishes them."
+              />
             ) : (
               <div className="divide-y rounded-lg border">
                 {library?.map((a) => (
@@ -483,7 +538,8 @@ export default function BlogDraftingPage() {
         </Dialog>
 
         {/* Editor modal */}
-        <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
+        {editorGuard}
+        <Dialog open={editorOpen} onOpenChange={changeEditorOpen}>
           <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto pr-2">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -538,7 +594,7 @@ export default function BlogDraftingPage() {
               </div>
             </fieldset>
             <DialogFooter className="pt-2">
-              <Button type="button" variant="ghost" onClick={() => setEditorOpen(false)} disabled={saving}>{locked ? "Close" : "Cancel"}</Button>
+              <Button type="button" variant="ghost" onClick={() => changeEditorOpen(false)} disabled={saving}>{locked ? "Close" : "Cancel"}</Button>
               {!locked && (
                 <Button onClick={handleSave} disabled={saving} className="bg-[#0F3B3D] text-white gap-2">
                   <Check className="h-4 w-4" /> Save Changes

@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 const TIMEZONES = [
   { value: "America/New_York", label: "Eastern Time (ET)" },
@@ -119,6 +120,7 @@ export default function AppointmentsPage() {
     timezone: "America/New_York",
     appointmentMode: "AI",
   });
+  const [savedSettings, setSavedSettings] = useState<typeof settings | null>(null);
   const [canEdit, setCanEdit] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [slotPreview, setSlotPreview] = useState<{
@@ -157,7 +159,7 @@ export default function AppointmentsPage() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = await api.get<any>("/api/sales/scheduling/settings");
       const s = data.setting || {};
-      setSettings({
+      const loaded = {
         dayStart: s.dayStart || "09:00",
         dayEnd: s.dayEnd || "17:00",
         bufferMinutes: String(s.bufferMinutes ?? 15),
@@ -167,7 +169,9 @@ export default function AppointmentsPage() {
           .map((d: string) => d.trim()),
         timezone: s.timezone || "America/New_York",
         appointmentMode: data.appointmentMode || "AI",
-      });
+      };
+      setSettings(loaded);
+      setSavedSettings(loaded);
       setCanEdit(data.canEditAvailability !== false);
     } catch {
       /* ignore */
@@ -206,8 +210,12 @@ export default function AppointmentsPage() {
         : [...s.workingDays, day],
     }));
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
+  const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
+    void persistSettings();
+  };
+
+  const persistSettings = async () => {
     setSavingSettings(true);
     try {
       await api.put("/api/sales/scheduling/settings", {
@@ -222,14 +230,25 @@ export default function AppointmentsPage() {
         appointmentMode: settings.appointmentMode,
       });
       toast.success("Availability settings saved");
+      setSavedSettings(settings);
       // Reflect the new rules in the preview immediately.
       fetchSlotPreview();
+      return true;
     } catch (err) {
       toast.error(errorMessage(err));
+      return false;
     } finally {
       setSavingSettings(false);
     }
   };
+
+  // Working days can be ticked in any order; compare them as a set.
+  const norm = (s: typeof settings) => JSON.stringify({ ...s, workingDays: [...s.workingDays].sort() });
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty: canEdit && !!savedSettings && norm(settings) !== norm(savedSettings),
+    itemName: "your availability settings",
+    onSave: persistSettings,
+  });
 
   const openReschedule = async (appt: Appointment) => {
     setReschedule({ open: true, appt, slots: [], selected: "", loading: true });
@@ -297,6 +316,7 @@ export default function AppointmentsPage() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
       <PortalLayout workspace="sales">
+        {unsavedDialog}
         <div className="space-y-6 max-w-7xl mx-auto">
           <div className="flex justify-between items-center">
             <div>

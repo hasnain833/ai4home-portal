@@ -95,12 +95,9 @@ export function HomesCsvImport({
         variant="outline"
         onClick={() => fileRef.current?.click()}
         disabled={importing || disabled}
+        disabledReason={disabled ? "Add a community first — every imported home belongs to one." : undefined}
         className="gap-2 font-semibold self-start sm:self-auto"
-        title={
-          disabled
-            ? "Add a community first"
-            : "CSV columns: address, city, state, zipCode, coeDate, units, homeownerEmail, community"
-        }
+        title="CSV columns: address, city, state, zipCode, coeDate, units, homeownerEmail, community"
       >
         {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
         Upload homes CSV

@@ -21,6 +21,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle, Mail, Pencil, Phone, Plus, Send, Trash2, Wrench } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { TRADE_CATEGORIES } from "@/components/warranty/DispatchTicketDialog";
 import { api, errorMessage } from "@/lib/api";
 import { useQuery } from "@/lib/use-query";
@@ -73,6 +76,14 @@ export default function TradesPage() {
 
   const tradeTypes = useMemo(() => [...new Set(trades.map((t) => t.tradeType))].sort(), [trades]);
   const shown = filter === "all" ? trades : trades.filter((t) => t.tradeType === filter);
+
+  const { dialog: tradeGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(form, dialogOpen),
+    itemName: editing ? "this trade" : "the new trade",
+  });
+  const changeDialogOpen = async (open: boolean) => {
+    if (open || (await confirmDiscard())) setDialogOpen(open);
+  };
 
   const openAdd = () => {
     setEditing(null);
@@ -201,14 +212,39 @@ export default function TradesPage() {
               <div className="space-y-3">
                 {[1, 2, 3].map((i) => <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />)}
               </div>
+            ) : error && trades.length === 0 ? (
+              <ErrorState error={error} title="Trades couldn't be loaded" onRetry={load} />
             ) : shown.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Wrench className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p className="font-medium">No trades yet</p>
-                <p className="text-sm mt-1">
-                  {isAdmin ? "Add your first trade to start dispatching tickets to them." : "An administrator will add trades here."}
-                </p>
-              </div>
+              trades.length > 0 ? (
+                <EmptyState
+                  icon={Wrench}
+                  title={`No ${filter} trades`}
+                  description="None of your trades are listed under this type."
+                  action={
+                    <Button variant="outline" size="sm" onClick={() => setFilter("all")}>
+                      Show all trades
+                    </Button>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={Wrench}
+                  title="No trades yet"
+                  description={
+                    isAdmin
+                      ? "Add the plumbers, electricians and other trades you work with, so you can dispatch warranty tickets to them."
+                      : "An administrator will add trades here."
+                  }
+                  action={
+                    isAdmin && (
+                      <Button size="sm" onClick={openAdd}>
+                        <Plus className="size-4" />
+                        Add trade
+                      </Button>
+                    )
+                  }
+                />
+              )
             ) : (
               <div className="space-y-3">
                 {shown.map((t) => (
@@ -256,7 +292,8 @@ export default function TradesPage() {
           </CardContent>
         </Card>
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        {tradeGuard}
+        <Dialog open={dialogOpen} onOpenChange={changeDialogOpen}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{editing ? "Edit Trade" : "Add Trade"}</DialogTitle>
@@ -304,7 +341,7 @@ export default function TradesPage() {
                   onChange={(e) => setForm({ ...form, businessName: e.target.value })} />
               </div>
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+                <Button type="button" variant="outline" onClick={() => changeDialogOpen(false)}>Cancel</Button>
                 <Button type="submit" disabled={saving} className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
                   {saving ? "Saving..." : editing ? "Save" : "Send Invite"}
                 </Button>

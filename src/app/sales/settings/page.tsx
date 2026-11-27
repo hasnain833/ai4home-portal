@@ -51,6 +51,7 @@ import {
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 interface ConnectionStatus {
   connected: boolean;
@@ -160,6 +161,8 @@ function SettingsPageContent() {
   const [quietHoursEnd, setQuietHoursEnd] = useState(21);
   const [quietHoursTimezone, setQuietHoursTimezone] = useState("");
   const [savingOutreach, setSavingOutreach] = useState(false);
+  const [outreachLoaded, setOutreachLoaded] = useState(false);
+  const [outreachVersion, setOutreachVersion] = useState(0);
   const [suppressionList, setSuppressionList] = useState<{ id: string; value: string; reason: string; createdAt: string }[]>([]);
   const [loadingSuppression, setLoadingSuppression] = useState(false);
   const [newSuppressValue, setNewSuppressValue] = useState("");
@@ -230,6 +233,9 @@ function SettingsPageContent() {
       if (data.quietHoursStart !== undefined) setQuietHoursStart(data.quietHoursStart);
       if (data.quietHoursEnd !== undefined) setQuietHoursEnd(data.quietHoursEnd);
       if (data.quietHoursTimezone) setQuietHoursTimezone(data.quietHoursTimezone);
+      // Same render as the values above, so they become the "saved" baseline for unsaved-change checks.
+      setOutreachVersion((v) => v + 1);
+      setOutreachLoaded(true);
     } else if (companyResult.status === "rejected") {
       console.error("Failed to fetch company compliance settings:", companyResult.reason);
     }
@@ -257,6 +263,12 @@ function SettingsPageContent() {
     }
   }, []);
 
+  const outreachDirty = useDirty(
+    [defaultOwner, voiceProfile, complianceOptInRequired, smsQuietHoursEnabled, quietHoursStart, quietHoursEnd, quietHoursTimezone],
+    outreachLoaded,
+    outreachVersion,
+  );
+
   const handleSaveOutreachSettings = async () => {
     setSavingOutreach(true);
     try {
@@ -270,13 +282,22 @@ function SettingsPageContent() {
         quietHoursTimezone: quietHoursTimezone || null,
       });
       invalidate(QUERY_KEYS.company);
+      setOutreachVersion((v) => v + 1);
       showToast("Outreach and compliance settings saved successfully.");
+      return true;
     } catch (error) {
       showToast(errorMessage(error), "error");
+      return false;
     } finally {
       setSavingOutreach(false);
     }
   };
+
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty: outreachDirty,
+    itemName: "your outreach and compliance settings",
+    onSave: handleSaveOutreachSettings,
+  });
 
   const handleAddSuppression = async () => {
     if (!newSuppressValue.trim()) {
@@ -496,6 +517,7 @@ function SettingsPageContent() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]} requiredPermission={SALES_PERMISSION.settingsManage}>
       <PortalLayout workspace="sales">
+        {unsavedDialog}
         <motion.div
           variants={staggerContainer}
           initial="hidden"

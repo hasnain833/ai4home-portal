@@ -212,7 +212,6 @@ export const scoreSession = wrap("Score", async (req, res) => {
     messages: [{ role: "user", content: `Transcript:\n${lines.join("\n")}\n\nScore it.` }],
     tool: SCORE_TOOL,
     maxTokens: 2000,
-    temperature: 0,
     source: SOURCE,
   });
   if (!raw?.skills) return res.status(502).json({ message: "The scorecard couldn't be prepared. Your transcript is saved; try again." });

@@ -1,7 +1,7 @@
 import prisma from "../lib/prisma.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { ADMIN_PERMISSIONS, normalizeAdminPermissions } from "../lib/admin-permissions.js";
-import { createHomeownerAccount, getSupabaseAdmin, passwordSetupLink } from "../lib/homeowner-account.js";
+import { createHomeownerAccount, getSupabaseAdmin, passwordSetupLink, findSupabaseUserByEmail } from "../lib/homeowner-account.js";
 import { MailService } from "../services/mail-service.js";
 import { Templates } from "../services/templates.js";
 
@@ -94,10 +94,8 @@ export const removeSuperStaff = wrap("Remove", async (req, res) => {
   const member = await findStaff(req.params.id);
   if (!member) return res.status(404).json({ message: "Staff member not found." });
 
-  // ponytail: scans up to 1000 auth users; page through listUsers if the platform outgrows that.
   const supabaseAdmin = getSupabaseAdmin();
-  const { data } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-  const authUser = data?.users?.find((u) => u.email?.toLowerCase() === member.email);
+  const authUser = await findSupabaseUserByEmail(supabaseAdmin, member.email);
   if (authUser) await supabaseAdmin.auth.admin.deleteUser(authUser.id);
   await prisma.user.delete({ where: { id: member.id } });
 

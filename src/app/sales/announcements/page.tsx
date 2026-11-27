@@ -42,6 +42,7 @@ import RichTextEditor from "@/components/sales/RichTextEditor";
 import { describeSmsCost } from "@/lib/sms-segments";
 import { useAuth } from "@/contexts/AuthContext";
 import { api, errorMessage } from "@/lib/api";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 type Announcement = {
   id: string;
@@ -136,13 +137,22 @@ export default function AnnouncementsPage() {
     loadAnnouncements();
   }, [loadAnnouncements]);
 
+  // Bumped whenever the composer is cleared or loaded, which makes its contents the new "saved" baseline.
+  const [formVersion, setFormVersion] = useState(0);
+  const { dialog: composerGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(form, true, formVersion),
+    itemName: form.title.trim() ? `"${form.title.trim()}"` : "this announcement",
+  });
+
   const resetForm = () => {
     setForm({ title: "", subject: "", channel: "EMAIL", segment: "all", body: "", ctaLink: "", scheduleDate: "" });
     setEditingId(null);
+    setFormVersion((v) => v + 1);
   };
 
   /** Load an existing Draft/Scheduled announcement back into the composer. */
   const handleEdit = async (a: Announcement) => {
+    if (!(await confirmDiscard())) return;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const full = await api.get<any>(`/api/sales/announcements/${a.id}`);
@@ -158,6 +168,7 @@ export default function AnnouncementsPage() {
           : "",
       });
       setEditingId(a.id);
+      setFormVersion((v) => v + 1);
       setActiveTab("create");
     } catch (err) {
       toast.error(errorMessage(err));
@@ -308,6 +319,7 @@ export default function AnnouncementsPage() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]} requiredPermission={SALES_PERMISSION.announcementsPublish}>
       <PortalLayout workspace="sales">
+        {composerGuard}
         <div className="space-y-6 max-w-7xl mx-auto">
           {/* Header */}
           <div className="flex justify-between items-center">
@@ -481,7 +493,8 @@ export default function AnnouncementsPage() {
                       variant="ghost"
                       size="sm"
                       className="h-7 text-[11px] shrink-0"
-                      onClick={() => {
+                      onClick={async () => {
+                        if (!(await confirmDiscard())) return;
                         resetForm();
                         setActiveTab("past");
                       }}

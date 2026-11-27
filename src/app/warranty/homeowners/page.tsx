@@ -41,6 +41,9 @@ import {
   Loader2,
   Ticket,
 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { useDirty, useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { invalidate, QUERY_KEYS } from "@/lib/use-query";
@@ -92,6 +95,7 @@ export default function HomeownersManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [formError, setFormError] = useState("");
   const [success, setSuccess] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -132,12 +136,21 @@ export default function HomeownersManagementPage() {
     }
   }, [user, router]);
 
+  const { dialog: homeownerGuard, confirmDiscard } = useUnsavedChanges({
+    dirty: useDirty(newHomeowner, isDialogOpen),
+    itemName: "the new homeowner",
+  });
+  const changeDialogOpen = async (open: boolean) => {
+    if (open || (await confirmDiscard())) setIsDialogOpen(open);
+  };
+
   const fetchHomeowners = async () => {
     try {
       setIsLoading(true);
       setHomeowners(await api.get<Homeowner[]>("/api/homeowners"));
-    } catch {
-      setError("Could not load homeowners.");
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e);
     } finally {
       setIsLoading(false);
     }
@@ -275,7 +288,8 @@ export default function HomeownersManagementPage() {
             </p>
           </div>
 
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          {homeownerGuard}
+          <Dialog open={isDialogOpen} onOpenChange={changeDialogOpen}>
             <DialogTrigger asChild>
               <Button className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90 gap-2">
                 <UserPlus className="h-4 w-4" />
@@ -338,7 +352,7 @@ export default function HomeownersManagementPage() {
                   <p className="text-xs text-muted-foreground">Ticket and visit updates are also sent by SMS to this number.</p>
                 </div>
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+                  <Button type="button" variant="outline" onClick={() => changeDialogOpen(false)}>
                     Cancel
                   </Button>
                   <Button type="submit" className="bg-[#0F3B3D] hover:bg-[#0F3B3D]/90">
@@ -378,11 +392,19 @@ export default function HomeownersManagementPage() {
                   <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />
                 ))}
               </div>
+            ) : loadError && homeowners.length === 0 ? (
+              <ErrorState error={loadError} title="Homeowners couldn't be loaded" onRetry={fetchHomeowners} />
             ) : homeowners.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Users className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p className="font-medium">No homeowners found</p>
-              </div>
+              <EmptyState
+                icon={Users}
+                title="No homeowners yet"
+                description="Add a homeowner to give them access to the warranty chat and their home's claims."
+                action={
+                  <Button size="sm" onClick={() => setIsDialogOpen(true)}>
+                    Add homeowner
+                  </Button>
+                }
+              />
             ) : (
               <div className="space-y-3">
                 {homeowners.map((homeowner, index) => (

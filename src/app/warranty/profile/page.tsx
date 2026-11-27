@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Camera, Circle, Pencil, X, Check, CheckCircle2, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SignInEmailField } from "@/components/auth/SignInEmailField";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 
 export default function ProfilePage() {
   const { user, updateProfile, updateAvatar } = useAuth();
@@ -20,6 +21,27 @@ export default function ProfilePage() {
   const [editedName, setEditedName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const saveProfile = async () => {
+    setIsSaving(true);
+    try {
+      await updateProfile({ name: editedName });
+      setToastMessage({ type: "success", text: "Profile updated successfully!" });
+      setIsEditingProfile(false);
+      return true;
+    } catch (err) {
+      setToastMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to update profile." });
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty: isEditingProfile && editedName !== (user?.name || ""),
+    itemName: "your profile",
+    onSave: saveProfile,
+  });
 
   const getInitials = (name: string) =>
     name ? name.split(" ").map((n) => n[0]).join("").toUpperCase() : "U";
@@ -50,6 +72,7 @@ export default function ProfilePage() {
   return (
     <ProtectedRoute allowedRoles={["staff", "homeowner"]}>
       <PortalLayout>
+        {unsavedDialog}
         {/* Toast Notification */}
         <AnimatePresence>
           {toastMessage && (
@@ -112,18 +135,7 @@ export default function ProfilePage() {
                 <Button
                   className="gap-2"
                   disabled={isSaving}
-                  onClick={async () => {
-                    setIsSaving(true);
-                    try {
-                      await updateProfile({ name: editedName });
-                      setToastMessage({ type: "success", text: "Profile updated successfully!" });
-                      setIsEditingProfile(false);
-                    } catch (err) {
-                      setToastMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to update profile." });
-                    } finally {
-                      setIsSaving(false);
-                    }
-                  }}
+                  onClick={saveProfile}
                 >
                   {isSaving ? (
                     <span className="animate-spin mr-1 h-4 w-4 border-2 border-current border-t-transparent rounded-full" />

@@ -12,6 +12,23 @@ export function getSupabaseAdmin() {
   return createClient(url, key);
 }
 
+/** The Supabase auth user with this email, or null. Pages through every user: a bare
+ *  listUsers() returns only the first 50 across ALL tenants. */
+export async function findSupabaseUserByEmail(supabaseAdmin, email) {
+  const target = String(email || "").toLowerCase();
+  if (!target) return null;
+  const perPage = 1000;
+  // ponytail: linear scan over all auth users; store the Supabase user id on User if this gets slow.
+  for (let page = 1; ; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+    if (error) throw new Error(error.message);
+    const users = data?.users || [];
+    const match = users.find((u) => String(u.email || "").toLowerCase() === target);
+    if (match) return match;
+    if (users.length < perPage) return null;
+  }
+}
+
 export async function createHomeownerAccount({ name, email, phone = null, companyId, password = null, role = "HOMEOWNER" }) {
   const secret = password || randomBytes(24).toString("base64url");
   const supabaseAdmin = getSupabaseAdmin();

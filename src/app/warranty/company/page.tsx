@@ -25,6 +25,7 @@ import {
 import { motion } from "framer-motion";
 import { fetchKey, invalidate, QUERY_KEYS } from "@/lib/use-query";
 import { api, errorMessage } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import { SignInEmailField } from "@/components/auth/SignInEmailField";
 
 // Types
@@ -78,6 +79,8 @@ export default function CompanyPage() {
     warrantyPolicy: "",
   });
 
+  // What the server last confirmed; the form differs from it only by unsaved edits.
+  const [saved, setSaved] = useState<(CompanyData & { id?: string }) | null>(null);
   const [savingInfo, setSavingInfo] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -92,7 +95,7 @@ export default function CompanyPage() {
     fetchKey<Record<string, string>>(QUERY_KEYS.company)
       .then((data) => {
         if (cancelled || !data) return;
-        setCompany({
+        const loaded = {
           id: data.id,
           name: data.name || "",
           logo: data.logo || "",
@@ -100,7 +103,9 @@ export default function CompanyPage() {
           phone: data.phone || "",
           address: data.address || "",
           warrantyPolicy: data.warrantyPolicy || "",
-        });
+        };
+        setCompany(loaded);
+        setSaved(loaded);
       })
       .catch((error) => console.error("Failed to fetch company:", error));
     return () => {
@@ -127,7 +132,7 @@ export default function CompanyPage() {
 
   // Save company information
   const handleSaveInfo = async () => {
-    if (!validateCompanyInfo()) return;
+    if (!validateCompanyInfo()) return false;
     setSavingInfo(true);
     try {
       await api.put("/api/company", {
@@ -143,9 +148,12 @@ export default function CompanyPage() {
         updateProfile({ companyName: company.name });
       }
       invalidate(QUERY_KEYS.company);
+      setSaved((s) => s && { ...s, name: company.name, email: company.email, phone: company.phone, address: company.address });
       showToast("success", "Company information saved successfully");
+      return true;
     } catch (error) {
       showToast("error", errorMessage(error));
+      return false;
     } finally {
       setSavingInfo(false);
     }
@@ -157,13 +165,26 @@ export default function CompanyPage() {
     try {
       await api.put("/api/company", { id: company.id, warrantyPolicy: company.warrantyPolicy });
       invalidate(QUERY_KEYS.company);
+      setSaved((s) => s && { ...s, warrantyPolicy: company.warrantyPolicy });
       showToast("success", "Warranty policy saved successfully");
+      return true;
     } catch (error) {
       showToast("error", errorMessage(error));
+      return false;
     } finally {
       setSavingPolicy(false);
     }
   };
+
+  const infoDirty =
+    !!saved && (["name", "email", "phone", "address"] as const).some((k) => company[k] !== saved[k]);
+  const policyDirty = !!saved && company.warrantyPolicy !== saved.warrantyPolicy;
+  const { dialog: unsavedDialog } = useUnsavedChanges({
+    dirty: infoDirty || policyDirty,
+    itemName:
+      infoDirty && policyDirty ? "your company details and warranty policy" : infoDirty ? "your company details" : "your warranty policy",
+    onSave: async () => (infoDirty ? await handleSaveInfo() : true) && (policyDirty ? await handleSavePolicy() : true),
+  });
 
   // Handle logo upload
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -194,7 +215,7 @@ export default function CompanyPage() {
   return (
     <ProtectedRoute allowedRoles={["admin", "staff"]}>
       <PortalLayout>
-
+        {unsavedDialog}
         <motion.div
           variants={staggerContainer}
           initial="hidden"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch } from "./api";
+import { RECONNECTED_EVENT, apiFetch } from "./api";
 
 type CacheEntry = {
   data: unknown;
@@ -65,6 +65,15 @@ export function fetchKey<T = unknown>(
   });
   return promise;
 }
+// Once the connection is back, reload whatever failed while it was down, for the screens still showing it.
+if (typeof window !== "undefined") {
+  window.addEventListener(RECONNECTED_EVENT, () => {
+    for (const [key, entry] of cache) {
+      if (entry.error && subscribers.has(key)) fetchKey(key, { force: true }).catch(() => {});
+    }
+  });
+}
+
 export function invalidate(...keys: string[]) {
   for (const key of keys) {
     cache.delete(key);

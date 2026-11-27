@@ -25,7 +25,6 @@ import {
   Route,
   ArrowRightLeft,
   UserCog,
-  ShieldAlert,
   GraduationCap,
   PenSquare,
   Cloud,
@@ -35,6 +34,7 @@ import { canAdmin, isPlatformUser, type AdminPermission } from "@/lib/admin-perm
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { BrandLogo } from "@/components/BrandLogo";
+import { PermissionDenied } from "@/components/auth/PermissionDenied";
 
 // `perm`: the Super Staff areas that open the page (any one is enough);
 // null means Super Admin only. The server enforces the same areas.
@@ -385,11 +385,13 @@ export default function AdminLayout({
             {pageAllowed ? (
               children
             ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
-                <ShieldAlert className="h-8 w-8" />
-                <p className="font-medium text-foreground">You don&apos;t have access to this page.</p>
-                <p className="text-sm">Ask the Super Admin to give you access.</p>
-              </div>
+              <PermissionDenied
+                className="flex h-full items-center justify-center p-4"
+                needed={current ? `access to ${current.name}` : "Super Admin access"}
+                grantedBy="the Super Admin (Admin → Staff)"
+                exitHref={navItems[0]?.href ?? "/"}
+                exitLabel={navItems[0] ? `Go to ${navItems[0].name}` : "Go to the home page"}
+              />
             )}
           </div>
         </div>
